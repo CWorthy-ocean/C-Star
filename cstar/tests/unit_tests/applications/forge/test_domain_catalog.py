@@ -233,7 +233,7 @@ def test_register_domain_from_dict_round_trips(isolated_catalog):
     isolated_catalog.register_domain_from_dict("my-domain", ddata)
     assert "my-domain" in isolated_catalog.domain_names
     assert isolated_catalog.domain_data("my-domain") == ddata
-    domain_spec = isolated_catalog.catalog_root / "DomainSpec"
+    domain_spec = isolated_catalog.specs_dir / "DomainSpec"
     assert isolated_catalog.domain_path("my-domain") == domain_spec / "my-domain.yaml"
     assert not (domain_spec / "my-domain").exists()
 
@@ -325,11 +325,11 @@ def test_register_model_from_settings_applies_marbl_ref(isolated_catalog):
 
 
 def _write_domain(root: Path, name: str, **extra) -> None:
-    """Write a minimal ``DomainSpec/<name>.yaml`` by hand, bypassing
+    """Write a minimal ``specs/DomainSpec/<name>.yaml`` by hand, bypassing
     register_domain_from_dict so it can be written into a read-only-intended
     store before the store object exists.
     """
-    path = root / "DomainSpec" / f"{name}.yaml"
+    path = root / "specs" / "DomainSpec" / f"{name}.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"grid_name": name, **extra}
     with path.open("w") as f:
@@ -418,8 +418,10 @@ class TestLayeredCatalog:
         assert "brand-new-domain" in top.domain_names
         assert "brand-new-domain" not in bottom.domain_names
         # Written into the TOP store's on-disk tree, not just its in-memory registry.
-        assert (top_root / "DomainSpec" / "brand-new-domain.yaml").exists()
-        assert not (bottom_root / "DomainSpec" / "brand-new-domain.yaml").exists()
+        assert (top_root / "specs" / "DomainSpec" / "brand-new-domain.yaml").exists()
+        assert not (
+            bottom_root / "specs" / "DomainSpec" / "brand-new-domain.yaml"
+        ).exists()
 
     def test_register_collision_with_bottom_layer_raises_and_names_store(
         self, tmp_path
@@ -459,7 +461,7 @@ class TestLayeredCatalog:
         assert "brand-new-cdr" in layered.cdr_names
         assert "brand-new-cdr" in top.cdr_names
         assert "brand-new-cdr" not in bottom.cdr_names
-        assert (top_root / "CdrSpec" / "brand-new-cdr.yaml").exists()
+        assert (top_root / "specs" / "CdrSpec" / "brand-new-cdr.yaml").exists()
         assert layered.cdr_data("brand-new-cdr")["mode"] == "none"
 
     def test_register_cdr_collision_with_bottom_layer_raises_and_names_store(
@@ -469,8 +471,8 @@ class TestLayeredCatalog:
         bottom_root = tmp_path / "bottom"
         top_root.mkdir()
         shutil.copytree(_DEFAULT_CATALOG_ROOT, bottom_root)
-        (bottom_root / "CdrSpec").mkdir(parents=True)
-        with (bottom_root / "CdrSpec" / "shared-cdr.yaml").open("w") as f:
+        (bottom_root / "specs" / "CdrSpec").mkdir(parents=True)
+        with (bottom_root / "specs" / "CdrSpec" / "shared-cdr.yaml").open("w") as f:
             yaml.safe_dump({"mode": "none"}, f)
 
         top = DomainCatalog(
@@ -491,8 +493,8 @@ class TestLayeredCatalog:
         shutil.copytree(_DEFAULT_CATALOG_ROOT, bottom_root)
         # Hand-write a bottom-layer-only CdrSpec entry (mirrors _write_domain's
         # bypass-the-writer approach for a store not yet writable).
-        (bottom_root / "CdrSpec").mkdir(parents=True)
-        with (bottom_root / "CdrSpec" / "from-bundled.yaml").open("w") as f:
+        (bottom_root / "specs" / "CdrSpec").mkdir(parents=True)
+        with (bottom_root / "specs" / "CdrSpec" / "from-bundled.yaml").open("w") as f:
             yaml.safe_dump(
                 {
                     "description": "",
@@ -1242,15 +1244,15 @@ _BUNDLED_ARCHIVED_MODELS = [
 
 
 def _write_model(root: Path, name: str, text: str | None = None, **extra) -> Path:
-    """Write ``ModelSpec/<name>.yaml``: a copy of a bundled spec plus *extra*
-    top-level keys, or *text* verbatim.
+    """Write ``specs/ModelSpec/<name>.yaml``: a copy of a bundled spec plus
+    *extra* top-level keys, or *text* verbatim.
     """
-    path = root / "ModelSpec" / f"{name}.yaml"
+    path = root / "specs" / "ModelSpec" / f"{name}.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     if text is None:
         base = yaml.safe_load(
             (
-                _DEFAULT_CATALOG_ROOT / "ModelSpec/roms-marbl-0.9-default.yaml"
+                _DEFAULT_CATALOG_ROOT / "specs/ModelSpec/roms-marbl-0.9-default.yaml"
             ).read_text()
         )
         text = yaml.safe_dump({**base, **extra})
@@ -1377,10 +1379,10 @@ class TestSpecLayout:
     def test_flat_files_of_every_kind_are_scanned(self, tmp_path, caplog):
         root = tmp_path / "cat"
         files = {
-            kind: _write_spec(root / kind / f"{kind.lower()}-a.yaml")
+            kind: _write_spec(root / "specs" / kind / f"{kind.lower()}-a.yaml")
             for kind in _LEGACY_STEMS
         }
-        dotted = _write_spec(root / "DomainSpec" / "v0.1.x.yml")
+        dotted = _write_spec(root / "specs" / "DomainSpec" / "v0.1.x.yml")
 
         with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
             catalog = _no_deprecation_warning(lambda: _catalog(root))
@@ -1400,7 +1402,7 @@ class TestSpecLayout:
 
     def test_missing_kind_directories_are_silent(self, tmp_path, caplog):
         root = tmp_path / "cat"
-        _write_spec(root / "ModelSpec" / "m.yaml")
+        _write_spec(root / "specs" / "ModelSpec" / "m.yaml")
 
         with caplog.at_level(logging.DEBUG, logger="cstar.catalog.domain_catalog"):
             catalog = _catalog(root)
@@ -1411,8 +1413,8 @@ class TestSpecLayout:
 
     def test_yaml_wins_over_yml_for_the_same_name(self, tmp_path):
         root = tmp_path / "cat"
-        _write_spec(root / "OutputSpec" / "x.yml", {"description": "yml"})
-        _write_spec(root / "OutputSpec" / "x.yaml", {"description": "yaml"})
+        _write_spec(root / "specs" / "OutputSpec" / "x.yml", {"description": "yml"})
+        _write_spec(root / "specs" / "OutputSpec" / "x.yaml", {"description": "yaml"})
 
         catalog = _catalog(root)
 
@@ -1422,8 +1424,9 @@ class TestSpecLayout:
 
     def test_hidden_files_and_directories_are_skipped(self, tmp_path):
         root = tmp_path / "cat"
-        _write_spec(root / "ModelSpec" / ".hidden.yaml")
-        _write_spec(root / "ModelSpec" / "real.yaml")
+        _write_spec(root / "specs" / "ModelSpec" / ".hidden.yaml")
+        _write_spec(root / "specs" / "ModelSpec" / "real.yaml")
+        _write_spec(root / "OutputSpec" / ".hidden.yaml")
         _write_legacy(root, "DomainSpec", ".ipynb_checkpoints")
 
         catalog = _no_deprecation_warning(lambda: _catalog(root))
@@ -1439,7 +1442,7 @@ class TestSpecLayout:
         }
         yml = _write_legacy(root, "ForcingSpec", "old-yml", suffix=".yml")
         (root / "DomainSpec" / "old-DomainSpec" / "Assets").mkdir()
-        _write_spec(root / "DomainSpec" / "new.yaml")
+        _write_spec(root / "specs" / "DomainSpec" / "new.yaml")
 
         with pytest.warns(CstarDeprecationWarning) as record:
             catalog = _catalog(root)
@@ -1448,7 +1451,8 @@ class TestSpecLayout:
         message = str(record[0].message)
         assert f"catalog {catalog.catalog_root}" in message
         assert f"cstar admin migrate-catalog {catalog.catalog_root}" in message
-        assert "<Kind>/<name>.yaml" in message
+        assert f"The legacy spec layout in catalog {catalog.catalog_root} (" in message
+        assert "use specs/<Kind>/<name>.yaml (" in message
         assert "stops working in cstar-ocean 0.20.0" in message
         for kind in _LEGACY_STEMS:
             assert f"{kind}/old-{kind} (" in message
@@ -1473,10 +1477,10 @@ class TestSpecLayout:
         # the same catalog read again in this process does not warn again
         _no_deprecation_warning(lambda: _catalog(root))
 
-    def test_flat_file_wins_and_the_legacy_one_is_reported_ignored(self, tmp_path):
+    def test_specs_file_wins_and_the_legacy_one_is_reported_ignored(self, tmp_path):
         root = tmp_path / "cat"
         loser = _write_legacy(root, "ModelSpec", "dup")
-        flat = _write_spec(root / "ModelSpec" / "dup.yml")
+        flat = _write_spec(root / "specs" / "ModelSpec" / "dup.yml")
         winner = _write_legacy(root, "CdrSpec", "only-legacy")
 
         with pytest.warns(CstarDeprecationWarning) as record:
@@ -1496,7 +1500,90 @@ class TestSpecLayout:
         )
         assert f"CdrSpec/only-legacy ({catalog.legacy_specs[0][2]})" in message
 
+    def test_root_flat_files_are_legacy_and_rank_between_the_other_forms(
+        self, tmp_path
+    ):
+        root = tmp_path / "cat"
+        flat = {
+            kind: _write_spec(root / kind / f"flat-{kind}.yaml")
+            for kind in _LEGACY_STEMS
+        }
+        current = _write_spec(root / "specs" / "ForcingSpec" / "both.yaml")
+        shadowed = _write_spec(root / "ForcingSpec" / "both.yaml")
+        flat_winner = _write_spec(root / "OutputSpec" / "two-legacy.yml")
+        dir_loser = _write_legacy(root, "OutputSpec", "two-legacy")
+
+        with pytest.warns(CstarDeprecationWarning) as record:
+            catalog = _catalog(root)
+
+        assert len(record) == 1
+        message = str(record[0].message)
+        for kind in _LEGACY_STEMS:
+            assert f"{kind}/flat-{kind} (" in message
+            assert catalog.spec_paths(kind)[f"flat-{kind}"].samefile(flat[kind])
+        assert catalog.model_names == ["flat-ModelSpec"]
+        assert catalog.forcing_data("flat-ForcingSpec") == {
+            "description": "flat-ForcingSpec"
+        }
+        # specs/ beats a root flat file, which beats a per-entry directory
+        assert catalog.spec_paths("ForcingSpec")["both"].samefile(current)
+        assert catalog.output_names == ["flat-OutputSpec", "two-legacy"]
+        assert catalog.spec_paths("OutputSpec")["two-legacy"].samefile(flat_winner)
+        # read from a legacy form first, then the ignored ones
+        dups = [
+            (k, n, p) for k, n, p in catalog.legacy_specs if n in ("both", "two-legacy")
+        ]
+        assert [(k, n) for k, n, _ in dups] == [
+            ("OutputSpec", "two-legacy"),
+            ("ForcingSpec", "both"),
+            ("OutputSpec", "two-legacy"),
+        ]
+        assert dups[0][2].samefile(flat_winner)
+        assert dups[1][2].samefile(shadowed)
+        assert dups[2][2].samefile(dir_loser)
+        assert message.count("ignored: duplicate") == 2
+
+    def test_each_form_is_scanned_on_its_own(self, tmp_path, monkeypatch, caplog):
+        root = tmp_path / "cat"
+        legacy = _write_legacy(root, "ModelSpec", "old")
+        _write_spec(root / "specs" / "ModelSpec" / "new.yaml")
+        glob = DomainCatalog._fs_glob_dual
+
+        def failing_specs_glob(self, directory, stem_pattern):
+            if directory.parent.name == "specs":
+                raise OSError("no such directory")
+            return glob(self, directory, stem_pattern)
+
+        monkeypatch.setattr(DomainCatalog, "_fs_glob_dual", failing_specs_glob)
+        with (
+            caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"),
+            pytest.warns(CstarDeprecationWarning),
+        ):
+            catalog = _catalog(root)
+
+        assert catalog.model_names == ["old"]
+        assert catalog.model_path("old").samefile(legacy)
+        assert any("no such directory" in r.getMessage() for r in caplog.records)
+
+    def test_initialize_from_copies_the_specs_tree(self, tmp_path):
+        root = tmp_path / "cat"
+        catalog = _no_deprecation_warning(
+            lambda: DomainCatalog(catalog_root=root, initialize_catalog_from="local")
+        )
+
+        bundled = DomainCatalog(read_only=True)
+        assert catalog.model_names == bundled.model_names
+        assert catalog.domain_names == bundled.domain_names
+        assert {p.name for p in root.iterdir()} == {"specs"}
+        assert catalog.model_path(bundled.model_names[0]).parent == (
+            catalog.specs_dir / "ModelSpec"
+        )
+
     def test_spec_entry_name(self, tmp_path):
+        assert spec_entry_name(tmp_path / "specs" / "ModelSpec" / "m.yaml") == "m"
+        assert spec_entry_name(tmp_path / "specs" / "ModelSpec" / "model.yaml") == (
+            "model"
+        )
         assert spec_entry_name(tmp_path / "ModelSpec" / "m.yaml") == "m"
         assert spec_entry_name(tmp_path / "ModelSpec" / "m" / "model.yml") == "m"
         assert spec_entry_name(tmp_path / "DomainSpec" / "d" / "Domain.yaml") == "d"
@@ -1515,14 +1602,15 @@ class TestSpecLayout:
         catalog.register_domain_from_dict("d", {"grid_name": "d"})
 
         assert sorted(str(p.relative_to(root)) for p in root.rglob("*")) == [
-            "CdrSpec",
-            "CdrSpec/c.yaml",
-            "DomainSpec",
-            "DomainSpec/d.yaml",
-            "ForcingSpec",
-            "ForcingSpec/f.yaml",
-            "OutputSpec",
-            "OutputSpec/o.yaml",
+            "specs",
+            "specs/CdrSpec",
+            "specs/CdrSpec/c.yaml",
+            "specs/DomainSpec",
+            "specs/DomainSpec/d.yaml",
+            "specs/ForcingSpec",
+            "specs/ForcingSpec/f.yaml",
+            "specs/OutputSpec",
+            "specs/OutputSpec/o.yaml",
         ]
 
     def test_writers_refuse_a_name_held_by_a_legacy_entry(self, tmp_path):
@@ -1534,7 +1622,7 @@ class TestSpecLayout:
         with pytest.raises(FileExistsError, match="OutputSpec 'taken' already exists"):
             catalog.register_output("taken", {})
 
-        assert not (root / "OutputSpec" / "taken.yaml").exists()
+        assert not (root / "specs" / "OutputSpec" / "taken.yaml").exists()
         assert catalog.output_data("taken") == {}
         assert legacy.is_file()
 
@@ -1552,7 +1640,7 @@ class TestSpecLayout:
         assert catalog.model_names == ["from-flat", "from-legacy"]
         for name in catalog.model_names:
             assert catalog.model_path(name) == (
-                catalog.catalog_root / "ModelSpec" / f"{name}.yaml"
+                catalog.specs_dir / "ModelSpec" / f"{name}.yaml"
             )
         assert catalog.legacy_specs == []
         with pytest.raises(ValueError, match="model spec .yaml file"):
@@ -1570,11 +1658,11 @@ class TestSpecLayout:
         source.copy_model("m", target)
 
         assert target.domain_path("old-domain") == (
-            target.catalog_root / "DomainSpec" / "old-domain.yaml"
+            target.specs_dir / "DomainSpec" / "old-domain.yaml"
         )
-        assert target.model_path("m") == target.catalog_root / "ModelSpec" / "m.yaml"
+        assert target.model_path("m") == target.specs_dir / "ModelSpec" / "m.yaml"
         assert target.domain_data("old-domain") == {"description": "old-domain"}
-        assert not (target.catalog_root / "DomainSpec" / "old-domain").exists()
+        assert not (target.catalog_root / "DomainSpec").exists()
         assert target.legacy_specs == []
 
     def test_layered_legacy_specs_and_uniqueness_span_the_layers(self, tmp_path):
@@ -1606,4 +1694,4 @@ class TestSpecLayout:
         for name in ("bottom-new", "bottom-old"):
             with pytest.raises(FileExistsError, match="shared"):
                 layered.register_domain_from_dict(name, {"grid_name": name})
-        assert not (top_root / "DomainSpec").exists()
+        assert not (top_root / "specs" / "DomainSpec").exists()

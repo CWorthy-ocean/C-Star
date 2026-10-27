@@ -65,31 +65,49 @@ from cstar.roms.precheck import NamelistConsistencyError
 from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
-_MODEL_PATH = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
+_MODEL_PATH = _BUNDLED_CATALOG / "specs" / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
 # ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
-_MODEL_PATH_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default.yaml"
+_MODEL_PATH_ROMS050 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.5-default.yaml"
+)
 # ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
 # golden test below.
-_MODEL_PATH_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default.yaml"
+_MODEL_PATH_ROMS060 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.6-default.yaml"
+)
 # ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
-_MODEL_PATH_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default.yaml"
+_MODEL_PATH_ROMS070 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.7-default.yaml"
+)
 # ucla-roms >= 0.8.0 ModelSpec (adds the PARABOLIC_SPLINES/UPSTREAM_TS_LAND_CURV
 # advection cppdefs switches, PR #361) -- no namelist-schema change from 0.7.0, so
 # there is no versioned-namelist golden fixture for this tier (unlike 0.5.0-0.7.0
 # above).
-_MODEL_PATH_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default.yaml"
-_MODEL_PATH_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default.yaml"
-_MODEL_PATH_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default.yaml"
+_MODEL_PATH_ROMS080 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.8-default.yaml"
+)
+_MODEL_PATH_ROMS090 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.9-default.yaml"
+)
+_MODEL_PATH_ROMS0100 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.10-default.yaml"
+)
 # ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
 # &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
 # test below.
-_MODEL_PATH_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default.yaml"
-_MODEL_PATH_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default.yaml"
+_MODEL_PATH_ROMS0110 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.11-default.yaml"
+)
+_MODEL_PATH_ROMS0120 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.12-default.yaml"
+)
 # ucla-roms >= 0.13.0 ModelSpec (adds v_sponge.v_sponge_trc to &V_SPONGE_SETTINGS) --
 # used by the versioned-namelist golden test below.
-_MODEL_PATH_ROMS0130 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.13-default.yaml"
+_MODEL_PATH_ROMS0130 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.13-default.yaml"
+)
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -2691,7 +2709,8 @@ def test_shared_pio_dev_spec_passes_a_pre_0_13_0_pin():
     ref pinned over it drops the key without complaint.
     """
     cfg = _build(
-        model_path=_BUNDLED_CATALOG / "ModelSpec" / "pio-dev.yaml", roms_ref="0.12.0"
+        model_path=_BUNDLED_CATALOG / "specs" / "ModelSpec" / "pio-dev.yaml",
+        roms_ref="0.12.0",
     )
     assert cfg.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
     assert validate_run_time_sections(cfg.model_settings, roms_ref="0.12.0") == []
@@ -3904,7 +3923,9 @@ def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
     since a resolved blueprint combines the two.
     """
     model_settings = yaml.safe_load(
-        (_BUNDLED_CATALOG / "ModelSpec" / f"{model_spec_name}.yaml").read_text()
+        (
+            _BUNDLED_CATALOG / "specs" / "ModelSpec" / f"{model_spec_name}.yaml"
+        ).read_text()
     )["model_settings"]
     rst = _CATALOG.output_data(spec_name)["ocean_vars"]["output_period_rst"]
     _assert_streams_divide_rst(
@@ -5389,7 +5410,9 @@ def test_resolver_names_a_model_by_its_catalog_entry_in_either_layout(tmp_path):
     legacy = tmp_path / "ModelSpec" / "legacy-model" / "model.yaml"
     legacy.parent.mkdir(parents=True)
     shutil.copy2(_MODEL_PATH, legacy)
-    shutil.copy2(_MODEL_PATH, tmp_path / "ModelSpec" / "flat-model.yaml")
+    flat = tmp_path / "specs" / "ModelSpec" / "flat-model.yaml"
+    flat.parent.mkdir(parents=True)
+    shutil.copy2(_MODEL_PATH, flat)
     with pytest.warns(CstarDeprecationWarning):
         catalog = DomainCatalog(tmp_path, suppress_validation=True)
 
@@ -6135,7 +6158,9 @@ def test_bundled_modelspec_fast_path_eligibility_by_stage(
     )
 
     code = yaml.safe_load(
-        (_BUNDLED_CATALOG / "ModelSpec" / f"{model_spec_name}.yaml").read_text()
+        (
+            _BUNDLED_CATALOG / "specs" / "ModelSpec" / f"{model_spec_name}.yaml"
+        ).read_text()
     )["code"]
     expected = {
         "templates_compile_time": compile_time_fast_path,
@@ -8722,7 +8747,7 @@ class TestSaveModifiedSpecsToCatalog:
 
     def test_save_model_spec_persists_use_pio_and_roms_ref(self, isolated_catalog):
         # Name deliberately distinct from the bundled "pio-dev" ModelSpec
-        # (cstar/catalog/bundled/ModelSpec/pio-dev) -- register_model_from_settings
+        # (cstar/catalog/bundled/specs/ModelSpec/pio-dev) -- register_model_from_settings
         # refuses to overwrite an existing entry, and isolated_catalog copies the
         # bundled catalog verbatim, so reusing that name here would collide.
         spec_name = "pio-dev-test"
@@ -9236,7 +9261,7 @@ def _shipped_cppdefs_sources() -> list[tuple[str, dict]]:
         out.append(
             (str(path.relative_to(repo_root)), bp["model_settings"].get("cppdefs", {}))
         )
-    specs = sorted((bundled / "ModelSpec").glob("*.yaml"))
+    specs = sorted((bundled / "specs" / "ModelSpec").glob("*.yaml"))
     assert specs, "no bundled ModelSpec files found"
     for path in specs:
         spec = yaml.safe_load(path.read_text())

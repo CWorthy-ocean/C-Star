@@ -48,10 +48,13 @@ _legacy_catalog_hint_logged = False
 _FORGE = "forge"
 _UCLA_ROMS = canonical_application("roms_marbl")
 
-# Each spec kind (its directory under the catalog root) -> the file name, minus
-# its extension, an entry had in the legacy per-entry directory layout
-# ``<Kind>/<name>/<File>.yaml``, read until 0.20.0. The current layout is
-# ``<Kind>/<name>.yaml``.
+# The directory under the catalog root that holds one ``<Kind>/`` per spec kind.
+_SPECS_SUBDIR = "specs"
+
+# Each spec kind (its directory under ``specs/``) -> the file name, minus its
+# extension, an entry had in the legacy per-entry directory layout
+# ``<Kind>/<name>/<File>.yaml`` at the catalog root, read until 0.20.0. The
+# current layout is ``specs/<Kind>/<name>.yaml``.
 _SPEC_KINDS: dict[CatalogSpecKind, str] = {
     "ModelSpec": "model",
     "DomainSpec": "Domain",
@@ -234,14 +237,15 @@ class DomainCatalog:
     Catalog structure (one file per entry, named for the entry)::
 
         catalog/
-        ├── ModelSpec/
-        │   └── roms-marbl-0.13-default.yaml   (code + model_settings)
-        ├── DomainSpec/
-        │   ├── ccs-12km.yaml
-        │   └── PAC_2fth_deg.yaml
-        ├── ForcingSpec/<name>.yaml
-        ├── OutputSpec/<name>.yaml
-        ├── CdrSpec/<name>.yaml
+        ├── specs/
+        │   ├── ModelSpec/
+        │   │   └── roms-marbl-0.13-default.yaml   (code + model_settings)
+        │   ├── DomainSpec/
+        │   │   ├── ccs-12km.yaml
+        │   │   └── PAC_2fth_deg.yaml
+        │   ├── ForcingSpec/<name>.yaml
+        │   ├── OutputSpec/<name>.yaml
+        │   └── CdrSpec/<name>.yaml
         ├── Blueprints/  (alias: blueprints/)
         │   └── <application>/<blueprint-name>.yaml
         └── Observations/
@@ -249,7 +253,7 @@ class DomainCatalog:
     Parameters
     ----------
     catalog_root : str or Path or None
-        Root of the catalog (inner directory containing ModelSpec/, etc.).
+        Root of the catalog (inner directory containing specs/, blueprints/, etc.).
         Defaults to the package-bundled catalog at ``cstar/catalog/bundled``.
         Pass a github URL string for remote catalogs.
     read_only : bool
@@ -463,42 +467,52 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def _scan_specs(self, kind: CatalogSpecKind) -> None:
-        """Scan ``<kind>/`` for spec files.
+        """Scan ``specs/<kind>/`` for spec files.
 
-        An entry is ``<kind>/<name>.yaml`` (or ``.yml``; ``.yaml`` wins when a
-        name has both). The legacy per-entry directory
-        ``<kind>/<name>/<File>.yaml`` (``File`` from ``_SPEC_KINDS``) stays
-        readable until 0.20.0 and is recorded in ``_legacy_specs``; one whose
-        name a current-layout file already has is ignored, and recorded apart so
-        the deprecation warning and the migration report it. Hidden names
-        (``.ipynb_checkpoints``, dotfiles) are skipped.
+        An entry is ``specs/<kind>/<name>.yaml`` (or ``.yml``; ``.yaml`` wins
+        when a name has both). Two legacy forms at the catalog root stay
+        readable until 0.20.0 and are recorded in ``_legacy_specs``:
+        ``<kind>/<name>.yaml`` and the per-entry directory
+        ``<kind>/<name>/<File>.yaml`` (``File`` from ``_SPEC_KINDS``), in that
+        order of precedence. A legacy file whose name an earlier form already
+        has is ignored, and recorded apart so the deprecation warning and the
+        migration report it. Hidden names (``.ipynb_checkpoints``, dotfiles) are
+        skipped.
         """
         entries: dict[str, Path] = {}
         found: list[tuple[str, Path]] = []
         ignored: list[tuple[str, Path]] = []
-        kind_dir = self.catalog_root / kind
-        try:
-            for f in self._fs_glob_dual(kind_dir, "*"):
-                if not f.name.startswith("."):
-                    entries[f.stem] = f
-            for f in self._fs_glob_dual(kind_dir, f"*/{_SPEC_KINDS[kind]}"):
-                name = f.parent.name
+        legacy_dir = self.catalog_root / kind
+        forms = (
+            (self.specs_dir / kind, "*", False),
+            (legacy_dir, "*", True),
+            (legacy_dir, f"*/{_SPEC_KINDS[kind]}", True),
+        )
+        # Each form is read on its own, so one that cannot be listed (a remote
+        # catalog without the directory) does not hide the others.
+        for directory, pattern, legacy in forms:
+            try:
+                files = self._fs_glob_dual(directory, pattern)
+            except Exception as exc:
+                logger.warning("Failed to scan %s: %s", directory, exc)
+                continue
+            for f in files:
+                name = spec_entry_name(f)
                 if name.startswith("."):
                     continue
                 if name in entries:
                     ignored.append((name, f))
-                else:
-                    entries[name] = f
+                    continue
+                entries[name] = f
+                if legacy:
                     found.append((name, f))
-        except Exception as exc:
-            logger.warning("Failed to scan %s: %s", kind, exc)
         self._specs[kind] = entries
         self._legacy_specs[kind] = (found, ignored)
         if kind == "ModelSpec":
             self._archived_model_names = None
 
     def _warn_legacy_specs(self) -> None:
-        """Announce, in one warning, every spec the scan found in the legacy layout."""
+        """Announce, in one warning, every spec the scan found in a legacy layout."""
         ignored = {
             path for _, losers in self._legacy_specs.values() for _, path in losers
         }
@@ -511,9 +525,8 @@ class DomainCatalog:
         # On removal, keep this detection and raise an error naming
         # `cstar admin migrate-catalog`: a legacy file must never just vanish.
         deprecated(
-            f"The per-entry spec directory layout in catalog {self.catalog_root} "
-            f"({listing})",
-            "<Kind>/<name>.yaml (`cstar admin "
+            f"The legacy spec layout in catalog {self.catalog_root} ({listing})",
+            "specs/<Kind>/<name>.yaml (`cstar admin "
             f"migrate-catalog {self.catalog_root}` moves the files)",
             removal="0.20.0",
         )
@@ -674,7 +687,7 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def _initialize_from(self, source: str | Path, clobber: bool = False) -> None:
-        """Merge ModelSpec/ and DomainSpec/ from a source catalog into self.catalog_root.
+        """Merge the ``specs/`` tree of a source catalog into self.catalog_root.
 
         Files that do not already exist at the destination are always copied.
         Files that exist at both source and destination are "conflicts":
@@ -698,21 +711,16 @@ class DomainCatalog:
         self.catalog_root.mkdir(parents=True, exist_ok=True)
 
         # Collect all source files and map each to its destination path.
+        src_specs = src_root / _SPECS_SUBDIR
         pairs: list[tuple[Path, Path]] = []
-        for subdir in (
-            "ModelSpec",
-            "DomainSpec",
-            "ForcingSpec",
-            "OutputSpec",
-            "CdrSpec",
-        ):
-            src_sub = src_root / subdir
+        for kind in _SPEC_KINDS:
+            src_sub = src_specs / kind
             if not src_sub.exists():
                 continue
             for src_file in sorted(src_sub.rglob("*")):
                 if src_file.is_file():
-                    rel = src_file.relative_to(src_root)
-                    pairs.append((src_file, self.catalog_root / rel))
+                    rel = src_file.relative_to(src_specs)
+                    pairs.append((src_file, self.specs_dir / rel))
 
         # Detect conflicts before writing anything.
         if not clobber:
@@ -733,7 +741,7 @@ class DomainCatalog:
             shutil.copy2(src_file, dst_file)
 
     def _validate_catalog(self) -> None:
-        """Raise ValueError if ModelSpec/ is missing or empty.
+        """Raise ValueError if the catalog has no ModelSpec entry.
 
         Only called for non-default catalog roots that were not just initialized.
         Uses the already-populated registry so remote filesystems work.
@@ -741,7 +749,7 @@ class DomainCatalog:
         if not self._specs["ModelSpec"]:
             raise ValueError(
                 f"No valid catalog found at '{self.catalog_root}'. "
-                f"Missing: ModelSpec/ (with at least one <name>.yaml).\n"
+                f"Missing: specs/ModelSpec/ (with at least one <name>.yaml).\n"
                 f"To initialize from the built-in package catalog run:\n"
                 f"    DomainCatalog(catalog_root=..., initialize_catalog_from='local')\n"
                 f"Or pass initialize_catalog_from=<inner-catalog-path> to copy from "
@@ -816,9 +824,10 @@ class DomainCatalog:
 
     @property
     def legacy_specs(self) -> list[tuple[CatalogSpecKind, str, Path]]:
-        """Return ``(kind, name, path)`` for each spec found in the legacy
-        ``<Kind>/<name>/<File>.yaml`` layout: those read from it, then those
-        ignored because a ``<Kind>/<name>.yaml`` has the same name.
+        """Return ``(kind, name, path)`` for each spec found outside ``specs/``
+        (``<Kind>/<name>.yaml`` or ``<Kind>/<name>/<File>.yaml`` at the catalog
+        root): those read from there, then those ignored because a file in an
+        earlier form has the same name.
         """
         found = [
             (kind, name, path)
@@ -841,6 +850,11 @@ class DomainCatalog:
     def forge_blueprint_names(self) -> list[str]:
         """Return ``blueprint_names("forge")``."""
         return self.blueprint_names(_FORGE)
+
+    @property
+    def specs_dir(self) -> Path:
+        """Path to the specs directory (catalog_root/specs), one ``<Kind>/`` per kind."""
+        return self.catalog_root / _SPECS_SUBDIR
 
     @property
     def blueprints_dir(self) -> Path:
@@ -1036,7 +1050,7 @@ class DomainCatalog:
         Parameters
         ----------
         model_name : str
-            Name of the model (must exist in ModelSpec/).
+            Name of the model (must exist in specs/ModelSpec/).
 
         Returns
         -------
@@ -1066,12 +1080,12 @@ class DomainCatalog:
     def _write_spec(
         self, kind: CatalogSpecKind, name: str, data: dict[str, Any]
     ) -> None:
-        """Write a new *kind* entry *name* as ``<kind>/<name>.yaml`` and rescan *kind*.
+        """Write a new *kind* entry *name* as ``specs/<kind>/<name>.yaml``; rescan *kind*.
 
         The file opens with the kind's current ``schema_version``. Refuses a name
         this catalog already has, in either layout.
         """
-        path = self.catalog_root / kind / f"{name}.yaml"
+        path = self.specs_dir / kind / f"{name}.yaml"
         existing = self._specs[kind].get(name)
         if existing is not None or path.exists():
             raise FileExistsError(
@@ -1089,24 +1103,24 @@ class DomainCatalog:
         self._scan_specs(kind)
 
     def _put_spec_file(self, kind: CatalogSpecKind, name: str, src: Path) -> None:
-        """Copy the spec file *src* in as ``<kind>/<name>.yaml``, replacing the
-        file of that name, and rescan *kind*.
+        """Copy the spec file *src* in as ``specs/<kind>/<name>.yaml``, replacing
+        the file of that name, and rescan *kind*.
         """
         self._check_writable()
-        dest = self.catalog_root / kind / f"{name}.yaml"
+        dest = self.specs_dir / kind / f"{name}.yaml"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
         self._scan_specs(kind)
 
     def register_model(self, model_path: Path | str) -> None:
-        """Register a model by copying its spec file into ModelSpec/ and rescanning.
+        """Register a model by copying its spec file into specs/ModelSpec/ and rescanning.
 
         Parameters
         ----------
         model_path : str or Path
             The model's spec file (``.yaml`` or ``.yml``). The entry is named
             after the file (see ``spec_entry_name``) and written as
-            ``ModelSpec/<name>.yaml``, replacing a file of that name.
+            ``specs/ModelSpec/<name>.yaml``, replacing a file of that name.
         """
         self._check_writable()
         src = Path(model_path).expanduser()
@@ -1117,7 +1131,7 @@ class DomainCatalog:
     def register_domain(self, builder: Any) -> None:
         """Create a new DomainSpec entry from a ForgeExecutor instance.
 
-        Writes ``DomainSpec/<grid_name>.yaml``, the domain name taken from
+        Writes ``specs/DomainSpec/<grid_name>.yaml``, the domain name taken from
         builder.grid_name. Refuses to overwrite an existing entry.
 
         Parameters
@@ -1178,7 +1192,7 @@ class DomainCatalog:
     def register_domain_from_dict(self, name: str, domain_data: dict[str, Any]) -> None:
         """Create a new DomainSpec entry from a plain dict (the wizard's save path).
 
-        Writes ``domain_data`` verbatim as ``DomainSpec/<name>.yaml``, then
+        Writes ``domain_data`` verbatim as ``specs/DomainSpec/<name>.yaml``, then
         rescans. Refuses to overwrite an existing entry -- catalog entries are
         named, shared resources; pick a different name or delete the old one
         first.
@@ -1189,7 +1203,7 @@ class DomainCatalog:
     def register_output(
         self, name: str, output_settings: dict[str, Any], description: str = ""
     ) -> None:
-        """Create a new OutputSpec entry (``OutputSpec/<name>.yaml``).
+        """Create a new OutputSpec entry (``specs/OutputSpec/<name>.yaml``).
 
         ``output_settings`` is the output-owned subset of ``model_settings`` (see
         ``forge_blueprint_resolve.extract_output_settings``). Refuses to overwrite
@@ -1206,7 +1220,7 @@ class DomainCatalog:
         forcing_inputs: dict[str, Any],
         description: str = "",
     ) -> None:
-        """Create a new ForcingSpec entry (``ForcingSpec/<name>.yaml``).
+        """Create a new ForcingSpec entry (``specs/ForcingSpec/<name>.yaml``).
 
         ``forcing_inputs`` is the ``{initial_conditions, forcing}`` shape returned
         by the wizard's forcing editor ``gather()``. Refuses to overwrite an
@@ -1226,7 +1240,7 @@ class DomainCatalog:
         cdr_forcing: dict[str, Any] | None = None,
         cdr_forcing_file: dict[str, Any] | None = None,
     ) -> None:
-        """Create a new CdrSpec entry (``CdrSpec/<name>.yaml``).
+        """Create a new CdrSpec entry (``specs/CdrSpec/<name>.yaml``).
 
         ``mode`` selects how CDR forcing is configured for a domain that picks
         this spec:
@@ -1280,7 +1294,7 @@ class DomainCatalog:
         roms_ref: str | None = None,
         marbl_ref: str | None = None,
     ) -> None:
-        """Create a new ModelSpec entry (``ModelSpec/<name>.yaml``).
+        """Create a new ModelSpec entry (``specs/ModelSpec/<name>.yaml``).
 
         Clones ``code``/``templates_commit`` verbatim from the spec file
         ``base_model_path`` and swaps in ``model_settings`` (the model-owned subset --
@@ -1543,6 +1557,10 @@ class LayeredCatalog:
     @property
     def _is_local(self) -> bool:
         return self.top._is_local
+
+    @property
+    def specs_dir(self) -> Path:
+        return self.top.specs_dir
 
     @property
     def blueprints_dir(self) -> Path:

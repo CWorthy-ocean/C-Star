@@ -219,7 +219,9 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
 
 NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
 BUNDLED_MODEL_SPECS = sorted(
-    (Path(__file__).parents[3] / "catalog" / "bundled" / "ModelSpec").glob("*.yaml")
+    (Path(__file__).parents[3] / "catalog" / "bundled" / "specs" / "ModelSpec").glob(
+        "*.yaml"
+    )
 )
 
 

@@ -72,7 +72,7 @@ def _spec_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 def _write(
     catalog: DomainCatalog, kind: str, name: str, data: dict[str, t.Any]
 ) -> Path:
-    path = catalog.catalog_root / kind / f"{name}.yaml"
+    path = catalog.specs_dir / kind / f"{name}.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     catalog._scan_specs(t.cast("CatalogSpecKind", kind))
     return path
@@ -352,7 +352,7 @@ def test_commit_hash_parsed_as_an_int_is_a_string(
 
 
 def _first_key_is_version(catalog: DomainCatalog, kind: str, name: str) -> None:
-    path = catalog.catalog_root / kind / f"{name}.yaml"
+    path = catalog.specs_dir / kind / f"{name}.yaml"
     written = yaml.safe_load(path.read_text())
     assert next(iter(written)) == KEY_SV
     assert written[KEY_SV] == SPEC_SCHEMA_VERSIONS[kind]
@@ -398,7 +398,7 @@ def test_register_model_from_settings_migrates_an_old_base(
     catalog.register_model_from_settings("from-old", {"cppdefs": {}}, base)
 
     written = yaml.safe_load(
-        (catalog.catalog_root / "ModelSpec" / "from-old.yaml").read_text()
+        (catalog.specs_dir / "ModelSpec" / "from-old.yaml").read_text()
     )
     assert written[KEY_SV] == SPEC_SCHEMA_VERSIONS["ModelSpec"]
     assert written["code"] == catalog.model_data(_MODEL)["code"]

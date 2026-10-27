@@ -13,8 +13,8 @@ Usage (in a Jupyter notebook)::
     # ... pick a model + domain, tweak fields, review the live YAML, Save ...
     cfg = wiz.config            # the current resolved ForgeBlueprint (or None if invalid)
 
-The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
-``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
+The wizard discovers Models from ``catalog/specs/ModelSpec/`` and Domains from
+``catalog/specs/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
 boundaries, partitioning, and dates. The live preview re-resolves on every change
 (using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
 is plain arithmetic on the grid size and builds none either.
@@ -8700,7 +8700,7 @@ class ForgeBlueprintWizard:
             )
             return
         if self._grid_file is not None:
-            # DomainSpec (catalog/DomainSpec/*.yaml) has no grid_file field --
+            # DomainSpec (catalog/specs/DomainSpec/*.yaml) has no grid_file field --
             # saving now would silently produce a geometry-less entry (grid_kwargs
             # is {} while attached). Detach first.
             self.save_domain_status.value = (

@@ -93,29 +93,45 @@ requires_cstar_pio = pytest.mark.skipif(
 )
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
-_MODEL_PATH = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
+_MODEL_PATH = _BUNDLED_CATALOG / "specs" / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
 # ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
-_MODEL_PATH_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default.yaml"
+_MODEL_PATH_ROMS050 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.5-default.yaml"
+)
 # ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
 # golden test below.
-_MODEL_PATH_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default.yaml"
+_MODEL_PATH_ROMS060 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.6-default.yaml"
+)
 # ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
-_MODEL_PATH_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default.yaml"
+_MODEL_PATH_ROMS070 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.7-default.yaml"
+)
 # ucla-roms >= 0.9.0 ModelSpec (CDR_TRACER renamed CDR_LITE: &CDR_LITE_SETTINGS/
 # &CDR_LITE_OUTPUT_SETTINGS, PR #372) -- used by the versioned-namelist golden
 # test below.
-_MODEL_PATH_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default.yaml"
-_MODEL_PATH_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default.yaml"
+_MODEL_PATH_ROMS090 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.9-default.yaml"
+)
+_MODEL_PATH_ROMS0100 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.10-default.yaml"
+)
 # ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
 # &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
 # test below.
-_MODEL_PATH_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default.yaml"
-_MODEL_PATH_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default.yaml"
+_MODEL_PATH_ROMS0110 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.11-default.yaml"
+)
+_MODEL_PATH_ROMS0120 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.12-default.yaml"
+)
 # ucla-roms >= 0.13.0 ModelSpec (adds v_sponge.v_sponge_trc to &V_SPONGE_SETTINGS) --
 # used by the versioned-namelist golden test below.
-_MODEL_PATH_ROMS0130 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.13-default.yaml"
+_MODEL_PATH_ROMS0130 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.13-default.yaml"
+)
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")

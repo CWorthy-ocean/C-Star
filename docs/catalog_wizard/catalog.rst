@@ -11,14 +11,14 @@ ordinary tools and kept in git.
 What it contains
 ----------------
 
-Specs, one YAML file per entry, under a directory per kind:
+Specs, one YAML file per entry, under ``specs/`` in a directory per kind:
 
-- ``ModelSpec/<name>.yaml``: a model configuration (code pins, render
+- ``specs/ModelSpec/<name>.yaml``: a model configuration (code pins, render
   templates, default settings).
-- ``DomainSpec/<name>.yaml``: a grid.
-- ``ForcingSpec/<name>.yaml``: a selection of forcing datasets.
-- ``OutputSpec/<name>.yaml``: output streams and frequencies.
-- ``CdrSpec/<name>.yaml``: carbon dioxide removal forcing.
+- ``specs/DomainSpec/<name>.yaml``: a grid.
+- ``specs/ForcingSpec/<name>.yaml``: a selection of forcing datasets.
+- ``specs/OutputSpec/<name>.yaml``: output streams and frequencies.
+- ``specs/CdrSpec/<name>.yaml``: carbon dioxide removal forcing.
 
 Plus ``blueprints/<application>/<name>.yaml`` for blueprints -- the directory
 is the registered application name (``forge``, ``ucla_roms``, ...) -- and
@@ -89,7 +89,8 @@ Migrating an older catalog
 --------------------------
 
 Catalogs written by earlier versions of C-Star kept entries in other
-places: each spec in a directory of its own (``ModelSpec/<name>/model.yaml``,
+places: specs at the top of the catalog rather than under ``specs/``, each
+in a directory of its own (``ModelSpec/<name>/model.yaml``,
 ``DomainSpec/<name>/Domain.yaml`` with an ``Assets/`` directory beside it,
 ...), and blueprints as flat ``<name>.forge_blueprint.yaml`` and
 ``B_<name>.yaml`` files, per-machine ``blueprints/<machine>/<name>/``

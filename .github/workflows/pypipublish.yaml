@@ -72,7 +72,7 @@ jobs:
 
           root = files("cstar")
 
-          model_spec_dir = root / "catalog" / "bundled" / "ModelSpec"
+          model_spec_dir = root / "catalog" / "bundled" / "specs" / "ModelSpec"
           found_specs = {
               p.name.removesuffix(".yaml")
               for p in model_spec_dir.iterdir()

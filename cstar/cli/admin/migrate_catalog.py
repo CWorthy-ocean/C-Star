@@ -37,7 +37,7 @@ help: t.Final[str] = f"""\
 
 A catalog keeps each blueprint at `blueprints/<application>/<name>.yaml`,
 where the directory is the registered application name (`forge`,
-`ucla_roms`, ...), and each spec at `<Kind>/<name>.yaml`, where the
+`ucla_roms`, ...), and each spec at `specs/<Kind>/<name>.yaml`, where the
 directory is the spec kind (`ModelSpec`, `DomainSpec`, `ForcingSpec`,
 `OutputSpec`, `CdrSpec`). Older catalogs used other forms, which are still
 read (with a warning) until C-Star 0.20.0:
@@ -46,20 +46,25 @@ read (with a warning) until C-Star 0.20.0:
 - `blueprints/B_<name>.yaml` (a ucla_roms blueprint),
 - `blueprints/<machine>/<name>/B_*.yaml` (a ucla_roms blueprint),
 {_EARLIER_NAME_FORMS}
-- `<Kind>/<name>/<File>.yaml` (a spec in a directory of its own, such as
-  `ModelSpec/<name>/model.yaml` or `DomainSpec/<name>/Domain.yaml`).
+- `<Kind>/<name>/<File>.yaml` (a spec in a directory of its own at the
+  catalog root, such as `ModelSpec/<name>/model.yaml` or
+  `DomainSpec/<name>/Domain.yaml`),
+- `<Kind>/<name>.yaml` (a spec at the catalog root rather than under
+  `specs/`).
 
 Given a catalog root, this command moves every entry found in one of those
-forms to `blueprints/<application>/<name>.yaml` or `<Kind>/<name>.yaml`
-(always with a `.yaml` extension). An entry whose destination already exists
-is left where it is and reported, never overwritten. After a per-machine
+forms to `blueprints/<application>/<name>.yaml` or
+`specs/<Kind>/<name>.yaml` (always with a `.yaml` extension). An entry whose
+destination already exists, or that another entry of the same name is moving
+to, is left where it is and reported, never overwritten. After a per-machine
 blueprint is moved, its `<name>/` and `<machine>/` directories are removed if
 they are then empty; so is an application's earlier-name directory. After a
 spec is moved, its `Assets/` directory is removed if it holds nothing but a
-`.gitkeep` placeholder, and then its `<name>/` directory if that is empty.
-Anything else in them (a `Build/` directory, `_grid.yaml`,
-`settings_B_*.yaml`, an asset file, ...) is left in place and reported, as is
-a directory that is a symbolic link.
+`.gitkeep` placeholder, then its `<name>/` directory and the `<Kind>/`
+directory at the catalog root if they are empty. Anything else in them (a
+`Build/` directory, `_grid.yaml`, `settings_B_*.yaml`, an asset file, a
+`.bak` backup, ...) is left in place and reported, as is a directory that is
+a symbolic link.
 
 The command also brings spec files up to their kind's current
 `schema_version`. A spec written for an older schema is read as migrated (with
@@ -81,7 +86,7 @@ without touching anything on disk.
 class CatalogMigrationReport:
     """The result of planning (and, unless `dry_run`, performing) a migration
     of a catalog's entries to the current layout: blueprints at
-    `blueprints/<application>/<name>.yaml`, specs at `<Kind>/<name>.yaml`.
+    `blueprints/<application>/<name>.yaml`, specs at `specs/<Kind>/<name>.yaml`.
     """
 
     moved: list[tuple[Path, Path]] = field(default_factory=list[tuple[Path, Path]])
@@ -101,7 +106,8 @@ class CatalogMigrationReport:
     removed_dirs: list[Path] = field(default_factory=list[Path])
     """Now-empty legacy directories removed (or, in `dry_run` mode, that would
     be removed): a blueprint's `<name>/`, `<machine>/` and
-    earlier-application-name directories, a spec's `Assets/` and `<name>/`.
+    earlier-application-name directories, a spec's `Assets/` and `<name>/`,
+    and a `<Kind>/` at the catalog root.
     """
     left_in_place: list[Path] = field(default_factory=list[Path])
     """Legacy directories that still hold other files after the move, or are
@@ -149,8 +155,7 @@ def migrate_catalog_layout(
     Parameters
     ----------
     root : Path
-        The catalog root (the directory holding `blueprints/` and the spec
-        kind directories).
+        The catalog root (the directory holding `blueprints/` and `specs/`).
     dry_run : bool
         When `True`, compute and return the same report without making any
         changes on disk.
@@ -224,7 +229,7 @@ def migrate_catalog_layout(
         else:
             report.removed_dirs.append(directory)
 
-    _plan_spec_moves(root, catalog.legacy_specs, report)
+    _plan_spec_moves(root, catalog.specs_dir, catalog.legacy_specs, report)
 
     if not dry_run:
         for src, dst in report.moved:
@@ -336,27 +341,42 @@ def _migrate_spec_schemas(
 
 def _plan_spec_moves(
     root: Path,
+    specs_dir: Path,
     legacy: "Iterable[tuple[str, str, Path]]",
     report: CatalogMigrationReport,
 ) -> None:
-    """Add to `report` the moves of the legacy `<Kind>/<name>/<File>.yaml` specs
-    to `<Kind>/<name>.yaml` and the cleanup of their directories.
+    """Add to `report` the moves of the legacy specs at the catalog `root`
+    (`<Kind>/<name>.yaml` and `<Kind>/<name>/<File>.yaml`) to
+    `specs_dir/<Kind>/<name>.yaml` and the cleanup of their directories.
 
-    A spec whose name already has a `<Kind>/<name>.yaml` or `.yml` (the file the
-    catalog reads) is a collision. Each moved spec's `Assets/` goes when it
-    holds nothing but a `.gitkeep`, then its `<name>/` when nothing is left.
+    A spec whose name already has a `specs_dir/<Kind>/<name>.yaml` or `.yml`
+    (the file the catalog reads), or whose destination an earlier entry in
+    `legacy` takes, is a collision. Each moved per-entry spec's `Assets/` goes
+    when it holds nothing but a `.gitkeep`, then its `<name>/` when nothing is
+    left; last, each `<Kind>/` a spec moved out of goes when nothing is left.
     """
+    planned: set[Path] = set()
+    gone: set[Path] = set()
+    kept: set[Path] = set()
+    kind_dirs: set[Path] = set()
     for kind, name, src in legacy:
-        dst = root / kind / f"{name}.yaml"
+        dst = specs_dir / kind / f"{name}.yaml"
         taken = [
             p for p in (dst, dst.with_suffix(".yml")) if p.exists() or p.is_symlink()
         ]
+        if dst in planned:
+            taken.append(dst)
         if taken:
             report.skipped_collisions.append((src, taken[0]))
             continue
+        planned.add(dst)
         report.moved.append((src, dst))
+        gone.add(src)
+        kind_dir = root / kind
+        kind_dirs.add(kind_dir)
         directory = src.parent
-        gone = {src}
+        if directory == kind_dir:  # a `<Kind>/<name>.yaml`: no directory of its own
+            continue
         assets = directory / "Assets"
         # Nothing inside a symbolic link is cleaned up: its target may be shared.
         if not directory.is_symlink() and assets.is_dir() and not assets.is_symlink():
@@ -367,8 +387,17 @@ def _plan_spec_moves(
                 gone.add(assets)
         if _kept(directory, gone):
             report.left_in_place.append(directory)
+            kept.add(directory)
         else:
             report.removed_dirs.append(directory)
+            gone.add(directory)
+    # A `<Kind>/` holding nothing but a `<name>/` left in place is not
+    # reported again.
+    for kind_dir in sorted(kind_dirs):
+        if _kept(kind_dir, gone | kept):
+            report.left_in_place.append(kind_dir)
+        elif not any(d.parent == kind_dir for d in kept):
+            report.removed_dirs.append(kind_dir)
 
 
 @app.command(
@@ -386,7 +415,7 @@ def migrate_catalog(
             resolve_path=True,
             help=(
                 "The catalog root to migrate (the directory holding `blueprints/` "
-                "and `ModelSpec/`)."
+                "and `specs/`)."
             ),
         ),
     ],

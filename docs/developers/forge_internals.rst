@@ -83,10 +83,10 @@ Directory map
     |   +-- file_system.py             # RomsFileSystemManager: run-directory layout
     +-- catalog/                       # Bundled + layered spec catalog (see docs/catalog_wizard/catalog.rst)
     |   +-- bundled/
-    |   |   +-- ModelSpec/{model}.yaml          # Code repos, templates, settings, defaults
-    |   |   +-- DomainSpec/{grid}.yaml          # Grid definitions
-    |   |   +-- ForcingSpec/{name}.yaml         # Forcing source configurations
-    |   |   +-- OutputSpec/{name}.yaml          # Output configurations
+    |   |   +-- specs/ModelSpec/{model}.yaml    # Code repos, templates, settings, defaults
+    |   |   +-- specs/DomainSpec/{grid}.yaml    # Grid definitions
+    |   |   +-- specs/ForcingSpec/{name}.yaml   # Forcing source configurations
+    |   |   +-- specs/OutputSpec/{name}.yaml    # Output configurations
     |   |   +-- blueprints/forge/{name}.yaml    # Example blueprints (bundled, read-only layer;
     |   |                                        # user saves go to the user catalog layer instead)
     |   +-- domain_catalog.py          # DomainCatalog / LayeredCatalog

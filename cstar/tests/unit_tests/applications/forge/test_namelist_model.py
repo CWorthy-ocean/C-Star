@@ -113,6 +113,7 @@ def _section_classes(settings_cls):
 _MODEL_PATH = (
     Path(cstar.catalog.__file__).parent
     / "bundled"
+    / "specs"
     / "ModelSpec"
     / "cson_roms-marbl_v0.1.yaml"
 )
