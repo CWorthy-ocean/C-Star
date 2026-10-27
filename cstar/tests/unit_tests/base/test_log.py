@@ -154,6 +154,25 @@ def test_filehandler_no_dupes(
     assert len(matches) == 1
 
 
+@pytest.mark.parametrize("with_parent", [True, False])
+def test_stdout_no_dupes_under_parent_logger(
+    capsys: pytest.CaptureFixture[str],
+    with_parent: bool,
+) -> None:
+    """Verify a logger whose ancestor already prints to STDOUT (e.g. a LoggingMixin
+    class logger under its module's logger) writes each entry to STDOUT once.
+    """
+    parent_name = f"test_stdout_no_dupes_{uuid.uuid4().hex}"
+    if with_parent:
+        get_logger(parent_name, logging.INFO)
+    child = get_logger(f"{parent_name}.Child", logging.INFO)
+
+    msg = uuid.uuid4().hex
+    child.info(msg)
+
+    assert capsys.readouterr().out.count(msg) == 1
+
+
 def test_filehandler_keeps_local_time_when_converter_is_replaced(
     request: pytest.FixtureRequest,
     tmp_path: pathlib.Path,

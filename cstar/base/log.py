@@ -133,6 +133,27 @@ def register_file_handler(
     return existing_fh
 
 
+class _StdoutHandler(logging.StreamHandler[t.TextIO]):
+    """The STDOUT handler `get_logger` installs for records below WARNING."""
+
+
+def _reaches_stdout_handler(logger: logging.Logger) -> bool:
+    """Return whether records from the logger reach a C-Star STDOUT handler.
+
+    Walks the logger and its non-root ancestors along the propagation chain.
+    The logger's own `propagate` is ignored because `get_logger` disables it
+    temporarily while it sets up handlers.
+    """
+    node: logging.Logger | None = logger
+    while node is not None and node is not logging.root:
+        if any(isinstance(h, _StdoutHandler) for h in node.handlers):
+            return True
+        if node is not logger and not node.propagate:
+            return False
+        node = node.parent
+    return False
+
+
 def get_logger(
     name: str | None = None,
     level: int | None = None,
@@ -181,10 +202,12 @@ def get_logger(
     for handler in root.handlers:
         handler.setLevel(logging.WARNING)
 
-    # Create specific STDOUT handler for INFO and lower:
-    if not logger.hasHandlers():
+    # Create specific STDOUT handler for INFO and lower, unless an ancestor's
+    # handler already prints this logger's records (e.g. a LoggingMixin class
+    # logger under its module's logger):
+    if logger is not root and not _reaches_stdout_handler(logger):
         # Root logger defaults to STDERR, we want anything at INFO or lower in STDOUT
-        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler = _StdoutHandler(sys.stdout)
         stdout_handler.setLevel(logging.DEBUG)
 
         # Filter out any WARNING or higher (goes to STDERR):
