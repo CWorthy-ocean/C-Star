@@ -443,6 +443,10 @@ Bug Fixes
 - A ForcingSpec in the pre-v8 shape (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) failed with a validation error when passed to ``build_forge_blueprint`` outside the wizard; it is now migrated. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 - On a Linux cluster with Lmod that C-Star doesn't list, C-Star reset the user's loaded modules and then crashed looking for a module list that doesn't exist. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
 - Log lines from classes with their own logger (e.g. ``Launched step: …`` during ``cstar workplan submit`` / ``run``) were printed twice to STDOUT; they now print once. (`#860 <https://github.com/CWorthy-ocean/C-Star/pull/860>`_)
+- The wizard's carbonate-sensitivity time-interpolation switch and its note stayed hidden in ``cdr_lite`` mode until a CDR forcing was assigned and the blueprint became valid. (`#858 <https://github.com/CWorthy-ocean/C-Star/pull/858>`_)
+
+  - A choice made on the switch before the blueprint is valid carries into the blueprint once it resolves.
+
 
 
 Improvements
