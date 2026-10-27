@@ -714,5 +714,7 @@ Miscellaneous
 - The blueprint tutorial's wizard screenshot shows the current default model, and the UCLA-ROMS example page's roms-tools snippet uses ``Grid(filename=...)``. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - The prebuilt-case integration test now builds and runs ucla-roms 0.13.0 instead of 0.4.2. (`#869 <https://github.com/CWorthy-ocean/C-Star/pull/869>`_)
 - The run-check findings in the monitoring docs, "Verifying a transfer" and the promote page describe the informational findings and the verification line. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+- The nesting tutorial's alkalinity release moved into the current along the child's east boundary, so it crosses into the parent within the day and the run shows the transfer. (`#871 <https://github.com/CWorthy-ocean/C-Star/pull/871>`_)
+- The nesting tutorial now shows a map of the two domains, the combined CDR metrics plot and each domain's CO2 uptake, with reference values from ucla-roms 0.13.0 and roms-tools 5.3.0. (`#871 <https://github.com/CWorthy-ocean/C-Star/pull/871>`_)
 
 
