@@ -28,8 +28,9 @@ schema version.
 Rule C -- :func:`check_averages_end_on_marbl_step` mirrors ucla-roms >= 0.13.0's
 ``check_avg_ends_on_marbl_step`` (``src/precheck.F90``, PR #400): the averaged
 ``_cdr`` and ``_bgc_dia_avg`` streams must average over whole MARBL timesteps.
-0.13.0 changed no namelist key, so no schema class marks the boundary;
-:func:`averages_end_on_marbl_step_applies_to` gates it on the release instead.
+:func:`averages_end_on_marbl_step_applies_to` gates it on the pinned release
+rather than on the 0.13.0 schema, so that an unresolved commit hash, which
+selects the newest schema, is not checked.
 
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
@@ -57,13 +58,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from cstar.roms.namelist import (
+    UCLA_ROMS_0_13_0,
     RomsNamelist,
     RomsNamelistBase,
     is_commit_hash,
     roms_version_from_ref,
 )
 
-AVERAGES_END_ON_MARBL_STEP_MIN_ROMS: tuple[int, int, int] = (0, 13, 0)
+AVERAGES_END_ON_MARBL_STEP_MIN_ROMS: tuple[int, int, int] = UCLA_ROMS_0_13_0
 """ucla-roms release from which ROMS checks Rule C at startup (PR #400)."""
 
 
