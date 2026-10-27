@@ -109,8 +109,9 @@ def status(
             asyncio.run(refresh_disk_usage([run], {wp_path: workplan}))
 
         display_summary(run, lookup)
-    except FileNotFoundError:  # blueprint not found.
-        console.print_exception()
+    except FileNotFoundError as ex:  # blueprint not found.
+        log.debug("A file of the run was not found", exc_info=True)
+        typer.echo(f"Unable to show the status of run {run.run_id!r}: {ex}", err=True)
 
 
 if __name__ == "__main__":

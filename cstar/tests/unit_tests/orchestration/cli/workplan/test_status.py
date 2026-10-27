@@ -1,3 +1,4 @@
+import errno
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -343,6 +344,29 @@ def _status(run: WorkplanRun, observed: Status) -> tuple[Result, mock.MagicMock]
     ):
         result = CliRunner().invoke(app, [run.run_id], color=False)
     return result, display
+
+
+def test_workplan_status_of_a_run_missing_a_file_is_one_line(
+    tmp_path: Path, hello_world_bp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a file of the run that cannot be found is reported in one line that
+    names it, instead of a traceback.
+    """
+    run, trx_path = _tracked_run(tmp_path, hello_world_bp_path, mock_run_id)
+    missing = FileNotFoundError(
+        errno.ENOENT, f"Unable to read raw model from path: {trx_path}", trx_path
+    )
+
+    with (
+        mock.patch(LOOKUP, mock.AsyncMock(return_value=run)),
+        mock.patch("cstar.cli.workplan.status.LiveWorkplan.load", side_effect=missing),
+    ):
+        result = CliRunner().invoke(app, [run.run_id], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr.count(f"Unable to show the status of run {mock_run_id!r}") == 1
+    assert str(trx_path) in result.stderr
+    assert "Traceback" not in result.output
 
 
 def test_workplan_status_leaves_an_unchanged_manifest_byte_for_byte(
