@@ -59,7 +59,7 @@ from cstar.orchestration.run_check import (
 from cstar.orchestration.tracking import WorkplanRun, require_writable
 
 if t.TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Collection, Iterator
 
     from cstar.orchestration.run_check import DigestTally
 
@@ -364,25 +364,33 @@ def format_verification(tally: "DigestTally") -> str:
     return f"{line}."
 
 
-def summarize(report: RunCheckReport) -> str:
+def summarize(
+    report: RunCheckReport, *, inherited: "Collection[FindingKind]" = ()
+) -> str:
     """Summarize the report in one line.
 
     Parameters
     ----------
     report : RunCheckReport
         The report to summarize.
+    inherited : Collection[FindingKind]
+        The kinds of problem a copy inherits from its source: counted apart,
+        not as problems of the copy.
 
     Returns
     -------
     str
     """
+    problems = [p for p in report.problems if p.kind not in inherited]
+    from_source = len(report.problems) - len(problems)
     informational = len(report.findings) - len(report.problems)
     informational += len(report.orphans.step_dirs) + len(report.orphans.sentinels)
-    extra = f", {informational} informational" if informational else ""
+    extra = f", {from_source} inherited from the source" if from_source else ""
+    extra += f", {informational} informational" if informational else ""
 
-    if report.clean:
+    if not problems:
         return f"No problems found in {report.run_root}{extra}."
-    return f"{len(report.problems)} problem(s) found in {report.run_root}{extra}."
+    return f"{len(problems)} problem(s) found in {report.run_root}{extra}."
 
 
 def _load_manifest(

@@ -260,6 +260,9 @@ def test_promote_copies_the_run_into_the_project_runs_area(
     assert proc.returncode == 0, _output(proc)
     assert "Promoted run" in flat_output(proc.stdout), _output(proc)
     assert "products of second" in flat_output(proc.stdout), _output(proc)
+    # the source's paths into itself are informational in the copy, never problems
+    assert "No problems found in " in proc.stdout, _output(proc)
+    assert "problem(s) found" not in proc.stdout, _output(proc)
 
     copy = promote_run.runs_area(name) / RUN_ID
     _assert_complete_copy(promote_run, copy)

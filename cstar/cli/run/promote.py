@@ -142,8 +142,8 @@ computing and recording a digest in the copy first for each product that has
 none (the source is not written), and says in one line how many matched.
 Absolute paths found inside the copied files that name the source are
 informational, as `cstar run check` treats paths that name the run; any other
-absolute path is the source's as much as the copy's and does not count as a
-problem of the copy. A copy with problems exits with code 1, and `move` then
+absolute path is the source's as much as the copy's, and is counted as
+inherited from the source, not as a problem of the copy. A copy with problems exits with code 1, and `move` then
 keeps the source and its tracking record.
 
 {ARG_DRY_RUN} runs every refusal and prints what would be copied and where, then
@@ -695,7 +695,7 @@ def _check_copy(destination: Path, *, verify: bool) -> CopyCheck:
     )
     for line in format_findings(report):
         typer.echo(line)
-    typer.echo(summarize(report))
+    typer.echo(summarize(report, inherited=INHERITED_KINDS))
 
     own = tuple(p for p in report.problems if p.kind not in INHERITED_KINDS)
     return CopyCheck(report, own, manifest, workplan, workplan_path)

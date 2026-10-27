@@ -881,7 +881,10 @@ def check_run(
         findings.extend(find_missing_step_dirs(run_root, workplan))
         if run_id is None:
             orphans = Orphans(step_dirs=orphan_task_dirs(run_root, workplan))
-            skipped.append("orphaned sentinels: they are found by run-id")
+            skipped.append(
+                "orphaned sentinels: sentinel files live in the state home under "
+                "a tracked run's run-id, so a run checked by its directory has none"
+            )
         else:
             orphans = find_orphans(run_root, run_id, workplan)
 

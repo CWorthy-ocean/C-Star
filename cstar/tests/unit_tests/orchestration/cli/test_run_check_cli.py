@@ -289,7 +289,7 @@ def test_a_directory_is_checked_without_the_run_record(
         assert f"  {run.root}/tasks/run\n" in result.stdout
         assert f"  {run.root}/tasks/stale\n" in result.stdout
         assert "Sentinel files" not in result.stdout
-        assert "Skipped orphaned sentinels: they are found by run-id" in result.stdout
+        assert "Skipped orphaned sentinels: sentinel files live in" in result.stdout
     assert absolute.stdout == relative.stdout
 
 
@@ -947,7 +947,7 @@ def test_an_untracked_run_is_checked_as_its_directory(
     # the transformed workplan names the run's own directories: informational
     assert result.exit_code == EXIT_CLEAN, result.output
     assert f"No problems found in {built.root}, " in result.stdout
-    assert "Skipped orphaned sentinels: they are found by run-id" in result.stdout
+    assert "Skipped orphaned sentinels: sentinel files live in" in result.stdout
     refresh.status.assert_not_called()
     refresh.refresh.assert_not_called()
     assert built.manifest_bytes == before

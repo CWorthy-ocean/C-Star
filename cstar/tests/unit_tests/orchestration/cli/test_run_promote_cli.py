@@ -718,7 +718,10 @@ def test_absolute_paths_are_not_problems_of_the_copy(
     result = invoke("promote", str(built.root), "--mode", "move")
 
     assert result.exit_code == 0, result.output + result.stderr
-    assert "/old/root" in flatten_cli_output(result.output)
+    output = flatten_cli_output(result.output)
+    assert "/old/root" in output
+    assert "1 inherited from the source." in output
+    assert "problem(s) found" not in output
     assert not built.root.exists()
 
 
@@ -747,6 +750,7 @@ def test_paths_into_the_source_are_informational_in_the_copy(
     assert result.exit_code == 0, result.output + result.stderr
     assert heading in result.output
     assert f"No problems found in {project_runs / built.run_id}, " in result.output
+    assert "inherited from the source" not in result.output
 
 
 def test_gathered_output_is_rebuilt_in_the_copy(
