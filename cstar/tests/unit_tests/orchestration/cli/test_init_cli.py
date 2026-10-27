@@ -1114,6 +1114,53 @@ def test_rewrite_keeps_lines_it_does_not_apply(
     assert read_user_config(path) == {ENV_CSTAR_LOG_LEVEL: "DEBUG"}
 
 
+def test_rewrite_sets_apart_a_value_the_loader_skips(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+) -> None:
+    """A setting whose value the loader skips (a log level that is not one) is
+    kept apart under the loader's reason and not reported as set. It stays
+    active, as another version may accept the value, and a rerun keeps it as is.
+    """
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_LOG_LEVEL}=loud\n{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
+
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    text = path.read_text()
+    lines = text.splitlines()
+    reason = f"# {ENV_CSTAR_LOG_LEVEL}='loud' is not a log level"
+    assert f"{ENV_CSTAR_LOG_LEVEL}=loud" in lines
+    assert lines.index(f"{ENV_CSTAR_LOG_LEVEL}=loud") > next(
+        i for i, line in enumerate(lines) if line.startswith(reason)
+    )
+    assert f"{ENV_CSTAR_LOG_LEVEL}=loud" not in result.output
+    assert "(1 setting(s) set)" in result.output
+    assert read_user_config(path) == {ENV_CSTAR_SLURM_ACCOUNT: "m1234"}
+    assert run_init("--yes").exit_code == 0
+    assert path.read_text() == text
+
+
+def test_rewrite_carries_a_log_level_as_written(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+) -> None:
+    """A log level in lower case, which the loader accepts, is carried as the file
+    spells it.
+    """
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_LOG_LEVEL}=debug\n")
+
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert f"{ENV_CSTAR_LOG_LEVEL}=debug" in path.read_text().splitlines()
+    assert read_user_config(path) == {ENV_CSTAR_LOG_LEVEL: "DEBUG"}
+
+
 def test_rerun_keeps_lines_for_another_version_identically(
     run_init: Callable[..., Result],
     isolate_user_config: Path,

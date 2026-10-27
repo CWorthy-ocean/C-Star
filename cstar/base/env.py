@@ -825,20 +825,22 @@ def read_by_another_version(name: str) -> bool:
     )
 
 
-def render_unrecognised_block(name: str, value: str | None) -> str:
-    """Render a line this version will not apply, under a comment saying why.
+def render_unrecognised_block(name: str, value: str | None, problem: str) -> str:
+    """Render a line this version will not apply, under `problem`, the reason
+    `parse_user_config` skips it.
 
-    The line stays active when another version of C-Star may read it, so a file
-    shared between versions keeps working for both; otherwise it is commented out.
+    The line stays active when another version of C-Star may read it (a name this
+    version removed or does not know, or a value this version does not accept),
+    so a file shared between versions keeps working for both; otherwise it is
+    commented out.
     """
-    problems = user_config_problems([name])
-    problem = problems[0] if problems else missing_value_problem(name)
     reason = textwrap.fill(
         problem, width=78, initial_indent="# ", subsequent_indent="# "
     )
     if value is None:
         line = f"# {name}"
-    elif read_by_another_version(name):
+    # a name this version accepts was skipped for its value
+    elif read_by_another_version(name) or not user_config_problems([name]):
         line = f"{name}={format_user_config_value(value)}"
     else:
         line = f"# {name}={format_user_config_value(value)}"
@@ -854,7 +856,8 @@ UNRECOGNISED_SECTION_NOTE: t.Final[str] = """\
 
 
 def render_user_config(
-    values: Mapping[str, str], unrecognised: Mapping[str, str | None] | None = None
+    values: Mapping[str, str],
+    unrecognised: Mapping[str, tuple[str | None, str]] | None = None,
 ) -> str:
     """Render a whole configuration file from the registry.
 
@@ -867,9 +870,10 @@ def render_user_config(
     ----------
     values : Mapping[str, str]
         The settings to set, by name; each must pass `user_config_problems`.
-    unrecognised : Mapping[str, str | None] | None
+    unrecognised : Mapping[str, tuple[str | None, str]] | None
         Lines from an earlier file that this version will not apply, by name, with
-        their values as written (`None` for a name written without ``=``).
+        their values as written (`None` for a name written without ``=``) and the
+        reason `parse_user_config` skips each.
 
     Returns
     -------
@@ -900,8 +904,8 @@ def render_user_config(
         import cstar
 
         blocks = [
-            render_unrecognised_block(name, value)
-            for name, value in unrecognised.items()
+            render_unrecognised_block(name, value, problem)
+            for name, (value, problem) in unrecognised.items()
         ]
         title = f"Not applied by C-Star {cstar.__version__}"
         sections.append(
