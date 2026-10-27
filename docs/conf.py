@@ -235,6 +235,7 @@ napoleon_custom_sections = [
 html_theme = "sphinx_book_theme"
 # html_theme = 'alabaster'
 html_static_path = ["_static"]
+html_js_files = ["tutorials_caption_link.js"]
 
 
 html_theme_options = {
