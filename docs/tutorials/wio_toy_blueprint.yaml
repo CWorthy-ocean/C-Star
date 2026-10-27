@@ -10,7 +10,7 @@ valid_end_date: 2012-01-02
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    branch: 0.2.0
+    commit: 0.13.0
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
     branch: marbl0.45.0
@@ -19,7 +19,7 @@ code:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
     branch: main
     filter:
-      directory: wio-toy-domain-namelist
+      directory: wio-toy-domain-namelist-ucla-roms-0.13
       files:
         - namelist.nml
         - marbl_in
@@ -27,7 +27,7 @@ code:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
     branch: main
     filter:
-      directory: wio-toy-domain-namelist
+      directory: wio-toy-domain-namelist-ucla-roms-0.13
       files:
         - cppdefs.opt
 grid:
@@ -40,7 +40,7 @@ initial_conditions:
 forcing:
   tidal:
     data:
-      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_tidal.nc
+      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_tidal_ref2000.nc
   surface:
     data:
       - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_surface-physics_201112.nc
