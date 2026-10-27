@@ -7031,14 +7031,28 @@ class TestCdrLiteSavedModel:
         # The resolver zeroes ntrc_bio for a run without MARBL; the saved spec
         # keeps the base model's count so switching back to "marbl" still works.
         assert data["model_settings"]["param"]["ntrc_bio"] == 32
+        # The wizard's hold on the time interpolation is not the model's: the spec
+        # keeps the base value, so it still validates when bgc_mode is switched.
+        assert data["model_settings"]["cdr_lite"][_INTERP_KEY[1]] is True
         assert "✓" in wiz.save_model_status.value
+        assert "round-trip" not in wiz.save_model_status.value
         assert wiz.model_dd.value == "my-cdr-lite-model"
-        assert wiz.config.composition.model.modified is False
+        # The run keeps the hold, which deviates from the saved spec exactly as it
+        # does from the bundled one, so the status must not claim otherwise.
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
+        assert wiz.editor._widgets[_INTERP_KEY][0].value is False
+        assert wiz.config.composition.model.modified is True
+        assert "unmodified" not in wiz.save_model_status.value
 
         wiz2 = ForgeBlueprintWizard(catalog)
+        wiz2.start.value = date(2012, 1, 1)
+        wiz2.end.value = date(2012, 1, 2)
+        wiz2.use_pio_chk.value = False
         wiz2.model_dd.value = "my-cdr-lite-model"
         assert wiz2.bgc_dd.value == "cdr_lite"
         assert _display(wiz2.cs_group) == ""
+        wiz2.bgc_dd.value = "marbl"
+        assert wiz2.config is not None, wiz2.derived.value
 
 
 class TestCdrLiteCdrPanel:
