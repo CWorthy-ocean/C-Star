@@ -17,6 +17,14 @@ one alkalinity (ALK) release near its east boundary. If workplans,
 ``continue-from`` or the CDR metrics are new to you, :doc:`cdr_workplan`
 introduces them on a simpler workplan without nesting.
 
+.. figure:: ../images/nest-tiny-domains.png
+   :alt: Map of the seas north-west of Scotland, with the 400 km parent grid outlined in orange and the 100 km child grid outlined in blue inside it
+   :width: 60%
+
+   The parent grid (orange) and the child grid (blue). The workplan's last step
+   draws this map, ``cdr_domains.png``, labelling the parent by its
+   ``parent_up`` run.
+
 Before you start
 ----------------
 
@@ -155,7 +163,8 @@ What to look at afterwards
 The last step is the result. ``tasks/cdr_metrics/output/cdr_metrics.nc`` holds
 time series of the CO2 uptake in tonnes and of the CDR efficiency, each from
 the CO2 flux and from the DIC difference. ``cdr_metrics.png`` plots the
-combined efficiency and uptake, and ``cdr_domains.png`` maps the two domains.
+combined efficiency and uptake, and ``cdr_domains.png`` maps the two domains,
+as at the top of this page.
 
 The two domains are combined in a specific way:
 
@@ -203,6 +212,15 @@ and roms-tools 5.3.0 gave these combined values (rounded):
 uptake happens in the child: the release lasts four hours and little of it
 leaves the child within the day. Your numbers should be close to these but need
 not match them exactly.
+
+.. figure:: ../images/nest-tiny-metrics.png
+   :alt: Combined CDR efficiency and CO2 uptake against time. The flux and DIC-difference curves overlap; the child's uptake rises to about 5.5 tonnes and parent_up's stays near zero
+   :width: 90%
+
+   ``cdr_metrics.png`` from the reference run. Top: the combined efficiency,
+   from the CO2 flux and from the DIC difference. Bottom: the combined uptake
+   the same two ways, and the flux-based uptake of each domain. The flux and
+   DIC curves lie on top of each other.
 
 Where to go next
 ----------------
