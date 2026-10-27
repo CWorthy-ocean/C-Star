@@ -43,6 +43,7 @@ from cstar.orchestration.manifest import (
     RunManifest,
     StepEntry,
     StepRecord,
+    WorkplanIdentity,
     write_run_manifest,
     write_step_record,
 )
@@ -565,6 +566,13 @@ class TestManifestRecord:
 
         assert record.trx_workplan_path == tmp_path / "run" / "plan_transformed.yaml"
 
+    def test_yml_transformed_workplan_of_cstar_0_17(self, tmp_path: Path) -> None:
+        record = self.record(tmp_path / "run")
+        (tmp_path / "run" / "plan_transformed.yml").write_text("x")
+        (tmp_path / "run" / "plan_transformed.yml.1").write_text("x")
+
+        assert record.trx_workplan_path == tmp_path / "run" / "plan_transformed.yml"
+
     def test_blueprint_run_has_no_workplan(self, tmp_path: Path) -> None:
         record = self.record(tmp_path / "run", run_id="solo", kind="blueprint")
 
@@ -589,6 +597,23 @@ class TestManifestRecord:
             _ = record.trx_workplan_path
 
         assert "a_transformed.yaml, b_transformed.yaml" in str(raised.value)
+
+    def test_several_transformed_workplans_named_by_the_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "run"
+        manifest = make_run(root, "run")
+        manifest.workplan = WorkplanIdentity(
+            name="plan", content_hash="x", path="/elsewhere/plan.yml"
+        )
+        write_run_manifest(root, manifest)
+        (location,) = RunIndex([IndexRoot(root.parent, Origin.local, 1)]).locations()
+        for name in ("old_transformed.yml", "plan_transformed.yaml"):
+            (root / name).write_text("x")
+
+        assert ManifestRecord(location).trx_workplan_path == (
+            root / "plan_transformed.yaml"
+        )
 
     @pytest.mark.parametrize(
         ("outcome", "status"),

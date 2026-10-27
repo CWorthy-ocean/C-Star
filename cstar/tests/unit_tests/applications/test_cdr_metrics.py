@@ -105,16 +105,17 @@ def _cdr_output_ds(
     lon_range: tuple[float, float] = (0.0, 0.0),
     lat_range: tuple[float, float] = (0.0, 0.0),
     transfer: bool = False,
+    ny: int = 3,
 ) -> xr.Dataset:
     """Build a dask-backed CDR output with `n` contiguous records, as `ROMSOutput` yields.
 
     One cell releases alkalinity (and removes DIC), and the air-sea flux and DIC
     inventory differ from the control (`*_ALT_CO2`) by an amount growing in time.
     With `transfer`, that cell's sources have the opposite signs, as a parent's
-    signed perturbation can. The cells span the given longitude and latitude
-    ranges.
+    signed perturbation can. The `ny` x 4 cells span the given longitude and
+    latitude ranges.
     """
-    nz, ny, nx = 2, 3, 4
+    nz, nx = 2, 4
     begin = WINDOW * np.arange(n)
     growth = np.arange(1, n + 1, dtype=float)
 
@@ -151,9 +152,9 @@ def _cdr_output_ds(
     return ds.chunk({"time": 1})
 
 
-def _grid_ds() -> xr.Dataset:
-    """Build the grid dataset: 1 km square cells."""
-    shape = (3, 4)
+def _grid_ds(ny: int = 3) -> xr.Dataset:
+    """Build the grid dataset: `ny` x 4 cells, 1 km square."""
+    shape = (ny, 4)
     return xr.Dataset(
         {
             "pm": (("eta_rho", "xi_rho"), np.full(shape, 1e-3)),
@@ -1346,15 +1347,21 @@ class TestNestedCdrMetricsRunner:
         monkeypatch.setattr(
             cdr_metrics.roms_tools.UpscaledCDR, "plot_domains", _save_blank_figure
         )
+        # four rows, so the child's interior (its cells without the outermost rows
+        # and columns) is an area rather than a line
+        fake_roms_tools.grid_ds = _grid_ds(ny=4)
         parent_dir = tmp_path / "parent" / "output"
         for name in ("x_cdr.20120101000000.nc", "x_cdr.20120101020000.nc"):
             _write_cdr_file(parent_dir / name)
         child_grid, parent_grid = tmp_path / "child.nc", tmp_path / "parent.nc"
         fake_roms_tools.ds_by_grid = {
-            # the parent's cells 10 and 11 degrees east, 20.5 north, are in the child
-            child_grid: _cdr_output_ds(lon_range=(10.0, 11.0), lat_range=(20.0, 21.0)),
+            # the parent's cells 10 and 11 degrees east, 20 and 21 north, are in
+            # the child's interior
+            child_grid: _cdr_output_ds(
+                lon_range=(9.4, 11.6), lat_range=(19.4, 21.6), ny=4
+            ),
             parent_grid: _cdr_output_ds(
-                lon_range=(9.0, 12.0), lat_range=(19.0, 22.0), transfer=True
+                lon_range=(9.0, 12.0), lat_range=(19.0, 22.0), transfer=True, ny=4
             ),
         }
         return CdrMetricsBlueprint(
@@ -1446,7 +1453,7 @@ class TestNestedCdrMetricsRunner:
         stops the run before anything is written.
         """
         parent_grid = nested_bp.domains["parent"].grid.location
-        fake_roms_tools.ds_by_grid[parent_grid] = _cdr_output_ds(n=4).isel(
+        fake_roms_tools.ds_by_grid[parent_grid] = _cdr_output_ds(n=4, ny=4).isel(
             time=[0, 1, 3]
         )
         runner = _make_runner(nested_bp)

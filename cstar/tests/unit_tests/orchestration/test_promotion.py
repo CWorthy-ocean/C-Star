@@ -171,6 +171,30 @@ def test_artifacts_hold_the_small_files_that_describe_the_run(
     assert f"{first}/work/notes.txt" not in artifacts
 
 
+def test_artifacts_hold_the_yml_transformed_workplan_of_cstar_0_17(
+    planned: Planned,
+) -> None:
+    """A run of 0.17 whose plan is `.yml` copies it and its rotated copies, and
+    keeps copying it once this release has written the `.yaml` beside it.
+    """
+    root = planned.root
+    (root / f"{RUN_ID}_transformed.yaml").rename(root / f"{RUN_ID}_transformed.yml")
+    for name in (f"{RUN_ID}_transformed.yml.1", f"{RUN_ID}_transformed.yaml.2"):
+        write(root / name)
+
+    names = [entry.relative.name for entry in planned.plan().groups[GROUP_ARTIFACTS]]
+
+    assert {
+        f"{RUN_ID}_transformed.yml",
+        f"{RUN_ID}_transformed.yml.1",
+        f"{RUN_ID}_transformed.yaml.2",
+    } <= set(names)
+    write(root / f"{RUN_ID}_transformed.yaml")
+    names = [entry.relative.name for entry in planned.plan().groups[GROUP_ARTIFACTS]]
+    assert names.count(f"{RUN_ID}_transformed.yaml") == 1
+    assert names.count(f"{RUN_ID}_transformed.yml") == 1
+
+
 def test_artifacts_lead_with_the_manifest(planned: Planned) -> None:
     """The manifest comes first, so a copy stopped early still names the run."""
     assert planned.plan().groups[GROUP_ARTIFACTS][0].relative == Path(RUN_MANIFEST_NAME)

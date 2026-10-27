@@ -31,10 +31,10 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     DOCUMENT_READ_ERRORS,
     RunManifest,
+    find_transformed_workplan,
     read_run_manifest,
     recorded_step_status,
 )
-from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
     TrackingRepository,
@@ -670,18 +670,11 @@ class ManifestRecord:
             )
             raise CstarError(msg)
 
-        found = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
-        if len(found) == 1:
-            return found[0]
-        if not found:
+        found = find_transformed_workplan(root, self.manifest.workplan_path)
+        if found is None:
             msg = f"Run {self.run_id!r} at {root} holds no transformed workplan"
-        else:
-            names = ", ".join(path.name for path in found)
-            msg = (
-                f"Run {self.run_id!r} at {root} holds more than one transformed "
-                f"workplan ({names})"
-            )
-        raise CstarError(msg)
+            raise CstarError(msg)
+        return found
 
     @functools.cached_property
     def _statuses(self) -> dict[str, str]:

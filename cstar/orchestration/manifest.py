@@ -118,8 +118,15 @@ ATTEMPT_TRANSFORMED_NAME: t.Final[str] = "workplan_transformed.yaml"
 TRANSFORMED_WORKPLAN_SUFFIX: t.Final[str] = "_transformed"
 """What the transformed workplan's file stem adds to the authored workplan's."""
 
-TRANSFORMED_WORKPLAN_GLOB: t.Final[str] = f"*{TRANSFORMED_WORKPLAN_SUFFIX}.yaml"
-"""The transformed workplan a run directory holds, by name; one per run."""
+TRANSFORMED_WORKPLAN_GLOBS: t.Final[tuple[str, ...]] = (
+    f"*{TRANSFORMED_WORKPLAN_SUFFIX}.yaml",
+    f"*{TRANSFORMED_WORKPLAN_SUFFIX}.yml",
+)
+"""The transformed workplans a run directory holds, by name; one per run.
+
+Release 0.17 named the plan with the authored workplan's suffix, so a run of
+that release whose plan was `.yml` holds a `.yml` one.
+"""
 
 
 def transformed_workplan_path(root: Path, authored: Path) -> Path:
@@ -139,6 +146,66 @@ def transformed_workplan_path(root: Path, authored: Path) -> Path:
     Path
     """
     return root / f"{authored.stem}{TRANSFORMED_WORKPLAN_SUFFIX}.yaml"
+
+
+def transformed_workplans(root: Path) -> list[Path]:
+    """The transformed workplans in a run root, one per stem, sorted by name.
+
+    A stem held under both suffixes counts once, as the `.yaml` (the first of
+    `TRANSFORMED_WORKPLAN_GLOBS`): it is the one this release rewrote when it
+    re-entered a run of release 0.17.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+
+    Returns
+    -------
+    list[Path]
+    """
+    by_stem: dict[str, Path] = {}
+    for pattern in TRANSFORMED_WORKPLAN_GLOBS:
+        for path in root.glob(pattern):
+            by_stem.setdefault(path.stem, path)
+    return sorted(by_stem.values())
+
+
+def find_transformed_workplan(root: Path, authored: Path | None = None) -> Path | None:
+    """The transformed workplan a run root holds.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    authored : Path | None
+        The authored workplan, as given when the run was scheduled. It says which
+        of several plans is the run's, by stem.
+
+    Returns
+    -------
+    Path | None
+        The plan, or `None` when the root holds none.
+
+    Raises
+    ------
+    CstarError
+        If the root holds more than one and `authored` does not name one of them.
+    """
+    found = transformed_workplans(root)
+    if len(found) <= 1:
+        return next(iter(found), None)
+    if authored is not None:
+        stem = f"{authored.stem}{TRANSFORMED_WORKPLAN_SUFFIX}"
+        for path in found:
+            if path.stem == stem:
+                return path
+    names = ", ".join(path.name for path in found)
+    msg = (
+        f"{str(root)!r} holds more than one transformed workplan ({names}); "
+        "remove the stale ones."
+    )
+    raise CstarError(msg)
 
 
 ATTEMPT_BLUEPRINTS_DIR_NAME: t.Final[str] = "blueprints"
@@ -629,6 +696,11 @@ class RunManifest(ConfiguredBaseModel, VersionedDocument):
 
     observed_at: Moment | None = Field(default=None)
     """When the statuses and records were last folded in."""
+
+    @property
+    def workplan_path(self) -> Path | None:
+        """The workplan file the run was scheduled from; `None` for a standalone blueprint."""
+        return Path(self.workplan.path) if self.workplan is not None else None
 
     def step(self, name: str) -> StepEntry | None:
         """Find a step entry by name.

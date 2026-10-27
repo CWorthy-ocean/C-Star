@@ -11,6 +11,7 @@ from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    exit_on_failure,
     get_from_ctxmap,
     refuse_workplan_file,
     set_ctxmap,
@@ -31,7 +32,6 @@ from cstar.entrypoint.utils import (
     ARG_VERIFY,
     ARG_VERIFY_HELP,
 )
-from cstar.execution.file_system import LockTimeoutError, LockUnsupportedError
 from cstar.orchestration.dag_runner import (
     get_launcher,
     load_run_state,
@@ -41,6 +41,7 @@ from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     RunManifest,
     compute_product_digests,
+    find_transformed_workplan,
     fold_step_records,
     manifest_lock,
     read_run_manifest,
@@ -48,7 +49,6 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     FindingKind,
     RunCheckReport,
     check_run,
@@ -115,7 +115,8 @@ pass its directory. A run attached read-only takes neither.
 
 To validate a workplan file, use `cstar workplan check <file>` instead.
 
-Exit code 0: nothing to fix. 1: findings remain. 2: bad arguments.
+Exit code 0: nothing to fix. 1: findings remain, or a repair or digest write
+failed. 2: bad arguments.
 """
 
 _HEADINGS: t.Final[dict[FindingKind, str]] = {
@@ -178,16 +179,12 @@ def _directory_target(target: str) -> CheckTarget:
         )
         raise typer.BadParameter(msg)
 
-    workplans = sorted(run_root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(workplans) > 1:
-        names = ", ".join(p.name for p in workplans)
-        msg = (
-            f"{str(run_root)!r} holds more than one transformed workplan ({names}); "
-            "remove the stale ones."
-        )
-        raise typer.BadParameter(msg)
+    try:
+        workplan = find_transformed_workplan(run_root)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
-    return CheckTarget(run_root, None, next(iter(workplans), None))
+    return CheckTarget(run_root, None, workplan)
 
 
 def _tracked_target(run: WorkplanRun) -> CheckTarget:
@@ -447,7 +444,9 @@ def _record_digests(resolved: CheckTarget, manifest: RunManifest | None) -> None
     Raises
     ------
     typer.Exit
-        With code 1 when the run has no manifest, or the lock cannot be taken.
+        With code 1 when the run has no manifest.
+    OSError
+        If the lock cannot be taken, or a record cannot be written.
     """
     if manifest is None:
         typer.echo(
@@ -457,15 +456,11 @@ def _record_digests(resolved: CheckTarget, manifest: RunManifest | None) -> None
         raise typer.Exit(1)
 
     digests = compute_product_digests(resolved.run_root, manifest)
-    try:
-        if resolved.run_id is None:
+    if resolved.run_id is None:
+        recorded = record_product_digests(resolved.run_root, digests)
+    else:
+        with manifest_lock(resolved.run_id):
             recorded = record_product_digests(resolved.run_root, digests)
-        else:
-            with manifest_lock(resolved.run_id):
-                recorded = record_product_digests(resolved.run_root, digests)
-    except (LockTimeoutError, LockUnsupportedError) as ex:
-        typer.echo(f"No digest recorded: {ex}", err=True)
-        raise typer.Exit(1) from ex
 
     typer.echo(f"Recorded {recorded} digest(s).")
 
@@ -556,7 +551,8 @@ def check(
     manifest = _load_manifest(resolved, workplan, no_refresh, tolerant=tolerant)
     if record_digests:
         # before the checks, so one `--verify` pass sees the digests just recorded
-        _record_digests(resolved, manifest)
+        with exit_on_failure("No digest recorded"):
+            _record_digests(resolved, manifest)
         manifest = _load_manifest(
             resolved, workplan, no_refresh=True, tolerant=tolerant
         )
@@ -573,7 +569,8 @@ def check(
 
     report = run_checks()
     if repair:
-        repaired = repair_symlinks(run_root)
+        with exit_on_failure("Symlink repair stopped"):
+            repaired = repair_symlinks(run_root)
         if repaired:
             typer.echo(f"Rewrote {len(repaired)} symlink(s) as relative:")
             for link in repaired:
@@ -587,7 +584,11 @@ def check(
     typer.echo(summarize(report))
 
     if repair:
-        _regather(run_root, workplan)
+        with exit_on_failure(
+            f"`gathered_output` was not rebuilt (once the cause is fixed, rerun "
+            f"`cstar run {COMMAND_CHECK} {shlex.quote(target)} {ARG_REPAIR}`)"
+        ):
+            _regather(run_root, workplan)
 
     if not report.clean:
         raise typer.Exit(1)
