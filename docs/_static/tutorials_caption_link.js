@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const link = document.createElement("a");
     link.href = href;
     link.style.color = "inherit";
+    link.style.textDecoration = "none";
     link.textContent = caption.textContent;
     caption.replaceChildren(link);
   }
