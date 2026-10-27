@@ -35,9 +35,9 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
-    TRANSFORMED_WORKPLAN_GLOB,
     carried_digest,
     product_digest,
+    transformed_workplans,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, Status
 from cstar.orchestration.serialization import read_document
@@ -315,7 +315,7 @@ def recorded_run_root(run_root: Path) -> Path | None:
         `None` when the run has no readable transformed workplan, or one written
         before the root was recorded.
     """
-    for path in sorted(run_root.glob(TRANSFORMED_WORKPLAN_GLOB)):
+    for path in transformed_workplans(run_root):
         try:
             recorded = read_document(path).get(LiveWorkplan.ROOT_FIELD)
         except Exception as ex:  # an unreadable workplan is reported by the caller
@@ -388,7 +388,7 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
 
     Only the emitted files that refer to other files are scanned: each step's
     `output/*.yaml`, `blueprints/B_*.yaml` and `work/cstar_generated_roms.nml`,
-    and the run's `*_transformed.yaml`. With `all_files`, the launch artifacts
+    and the run's transformed workplans. With `all_files`, the launch artifacts
     that launchers regenerate are scanned too. A path that names the run itself
     (see `is_run_path`) is a `RUN_PATH` finding, any other an `ABSOLUTE_PATH` one.
 
@@ -410,7 +410,7 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
     recorded = recorded_run_root(root)
     globs = (*REFERENCE_FILES, *(LAUNCH_FILES if all_files else ()))
 
-    candidates = [*root.glob(TRANSFORMED_WORKPLAN_GLOB)]
+    candidates = transformed_workplans(root)
     for step_dir in _step_dirs(root):
         candidates.extend(p for g in globs for p in step_dir.glob(g))
 

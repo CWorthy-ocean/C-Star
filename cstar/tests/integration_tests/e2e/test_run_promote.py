@@ -27,9 +27,9 @@ from cstar.orchestration.manifest import (
     Product,
     read_run_manifest,
     read_step_record,
+    transformed_workplans,
     write_step_record,
 )
-from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
     flat_output,
@@ -238,7 +238,7 @@ def _assert_complete_copy(promote_run: PromoteRun, copy: Path) -> None:
     manifest = read_run_manifest(copy)
     assert manifest is not None, f"no {RUN_MANIFEST_NAME} in {copy}"
     assert manifest.id == promote_run.uuid
-    assert [path.name for path in copy.glob(TRANSFORMED_WORKPLAN_GLOB)] == [
+    assert [path.name for path in transformed_workplans(copy)] == [
         TRANSFORMED_WORKPLAN_NAME
     ]
     for step in SHAPE:

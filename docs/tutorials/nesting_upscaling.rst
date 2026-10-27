@@ -175,12 +175,34 @@ The two domains are combined in a specific way:
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
 It holds one diagnostic as well, ``parent_up_DIC_difference_inside_child``: the
-DIC perturbation that ``parent_up`` carries inside the child's footprint. In a
-one-way nested run it is normally not zero. The upscaled source is injected on
-the child's boundary, and anomaly that the child exported can recirculate into
-the footprint. A nonzero value is expected here; ``closure_residual`` is the
+DIC perturbation that ``parent_up`` carries inside the child's footprint. It is
+small but normally not zero, because anomaly that enters ``parent_up`` along
+the child's boundary can spread into the footprint; ``closure_residual`` is the
 consistency check.
 :ref:`blueprints-cdr-metrics-nested` explains the diagnostic.
+
+At the child's end (2012-01-03 06:00), a reference run with ucla-roms 0.13.0
+and roms-tools 5.3.0 gave these combined values (rounded):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 60 20 20
+
+   * - Quantity
+     - From the flux
+     - From the DIC difference
+   * - CO2 uptake (tonnes)
+     - 5.51
+     - 5.51
+   * - CDR efficiency
+     - 0.0043
+     - 0.0043
+
+``closure_residual`` was below 0.001 tonnes, and
+``parent_up_DIC_difference_inside_child`` was -0.006 tonnes. Nearly all of the
+uptake happens in the child: the release lasts four hours and little of it
+leaves the child within the day. Your numbers should be close to these but need
+not match them exactly.
 
 Where to go next
 ----------------

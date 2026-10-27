@@ -2563,7 +2563,7 @@ def test_transformed_workplan_path_is_named_yaml_after_the_authored_stem(
     authored: str, expected: str
 ) -> None:
     """Verify the transformed workplan sits in the run root as `<stem>_transformed.yaml`
-    whatever the authored suffix, and matches the glob that finds it.
+    whatever the authored suffix, and is one of the plans that finds it.
 
     Parameters
     ----------
@@ -2575,4 +2575,148 @@ def test_transformed_workplan_path_is_named_yaml_after_the_authored_stem(
     named = manifest_module.transformed_workplan_path(Path("/r"), Path(authored))
 
     assert named == Path("/r") / expected
-    assert fnmatch.fnmatch(named.name, manifest_module.TRANSFORMED_WORKPLAN_GLOB)
+    assert any(
+        fnmatch.fnmatch(named.name, glob)
+        for glob in manifest_module.TRANSFORMED_WORKPLAN_GLOBS
+    )
+
+
+def _touch(root: Path, *names: str) -> None:
+    """Create empty files named `names` in `root`."""
+    root.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (root / name).touch()
+
+
+@pytest.mark.parametrize(
+    ("held", "expected"),
+    [
+        pytest.param([], [], id="none"),
+        pytest.param(["plan_transformed.yaml"], ["plan_transformed.yaml"], id="yaml"),
+        pytest.param(["plan_transformed.yml"], ["plan_transformed.yml"], id="yml"),
+        pytest.param(
+            ["plan_transformed.yml", "plan_transformed.yaml"],
+            ["plan_transformed.yaml"],
+            id="same-stem-pair-counts-once-as-yaml",
+        ),
+        pytest.param(
+            ["b_transformed.yml", "a_transformed.yaml", "c_transformed.yml"],
+            ["a_transformed.yaml", "b_transformed.yml", "c_transformed.yml"],
+            id="one-per-stem-sorted",
+        ),
+        pytest.param(
+            [
+                "x_transformed.yxml",
+                "x_transformed.json",
+                "plan_transformed.yml.1",
+                "plan_transformed.yaml.2",
+                "plan.yaml",
+            ],
+            [],
+            id="other-names-not-matched",
+        ),
+    ],
+)
+def test_transformed_workplans_lists_one_plan_per_stem(
+    tmp_path: Path, held: list[str], expected: list[str]
+) -> None:
+    """Verify the run root's transformed workplans are found under either suffix,
+    once per stem with the `.yaml` winning, and rotated or foreign names are not.
+
+    Parameters
+    ----------
+    held : list[str]
+        The files in the run root.
+    expected : list[str]
+        The names of the plans found, in order.
+    """
+    _touch(tmp_path, *held)
+
+    found = manifest_module.transformed_workplans(tmp_path)
+
+    assert found == [tmp_path / name for name in expected]
+
+
+def test_transformed_workplans_does_not_descend_into_the_run_root(
+    tmp_path: Path,
+) -> None:
+    """Verify a plan inside a subdirectory (an attempt's copy) is not the run's."""
+    _touch(tmp_path / "attempts" / "20260101T000000", "workplan_transformed.yaml")
+
+    assert manifest_module.transformed_workplans(tmp_path) == []
+
+
+def test_find_transformed_workplan_answers_none_for_none_and_the_one_there_is(
+    tmp_path: Path,
+) -> None:
+    """Verify an empty run root has no plan, and a sole plan is the answer
+    whether or not an authored workplan is given, whatever its stem.
+    """
+    assert manifest_module.find_transformed_workplan(tmp_path) is None
+
+    _touch(tmp_path, "plan_transformed.yml")
+
+    found = tmp_path / "plan_transformed.yml"
+    assert manifest_module.find_transformed_workplan(tmp_path) == found
+    assert manifest_module.find_transformed_workplan(tmp_path, Path("x.yaml")) == found
+
+
+def test_find_transformed_workplan_refuses_several_it_cannot_choose_between(
+    tmp_path: Path,
+) -> None:
+    """Verify two plans of different stems are refused, naming both, when no
+    authored workplan is given or none of them is its plan; the newer is not taken.
+    """
+    _touch(tmp_path, "a_transformed.yaml", "b_transformed.yml")
+
+    for authored in (None, Path("c.yaml")):
+        with pytest.raises(CstarError, match="more than one transformed workplan") as e:
+            manifest_module.find_transformed_workplan(tmp_path, authored)
+
+        assert "a_transformed.yaml, b_transformed.yml" in str(e.value)
+        assert repr(str(tmp_path)) in str(e.value)
+
+
+@pytest.mark.parametrize(
+    ("held", "authored", "expected"),
+    [
+        pytest.param(
+            ["plan_transformed.yaml", "other_transformed.yaml"],
+            "plan.yaml",
+            "plan_transformed.yaml",
+            id="yaml",
+        ),
+        pytest.param(
+            ["plan_transformed.yml", "other_transformed.yml"],
+            "plan.yml",
+            "plan_transformed.yml",
+            id="yml-authored-matches-yml-plan-by-stem",
+        ),
+        pytest.param(
+            ["plan_transformed.yml", "plan_transformed.yaml", "other_transformed.yml"],
+            "plan.yml",
+            "plan_transformed.yaml",
+            id="pair-of-the-authored-stem",
+        ),
+    ],
+)
+def test_find_transformed_workplan_chooses_the_authored_workplans_by_stem(
+    tmp_path: Path, held: list[str], authored: str, expected: str
+) -> None:
+    """Verify, among several plans, the one named for the authored stem is the
+    run's, whatever suffix either carries.
+
+    Parameters
+    ----------
+    held : list[str]
+        The files in the run root.
+    authored : str
+        The authored workplan's file name.
+    expected : str
+        The name of the plan found.
+    """
+    _touch(tmp_path, *held)
+
+    found = manifest_module.find_transformed_workplan(tmp_path, Path(authored))
+
+    assert found == tmp_path / expected

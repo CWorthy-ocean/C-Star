@@ -25,9 +25,9 @@ from cstar.orchestration.manifest import (
     ATTEMPTS_DIR_NAME,
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
+    TRANSFORMED_WORKPLAN_GLOBS,
     read_run_manifest,
 )
-from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.roms.file_system import RomsFileSystemManager
 
 if t.TYPE_CHECKING:
@@ -44,7 +44,7 @@ GROUP_EXTRAS: t.Final[str] = "extras"
 """The group of the large extras a plan includes when asked."""
 
 _LEGACY_GLOBS: t.Final[tuple[str, ...]] = (
-    f"{TRANSFORMED_WORKPLAN_GLOB}.*",
+    *(f"{glob}.*" for glob in TRANSFORMED_WORKPLAN_GLOBS),
     "*_original.bak*",
     "*.vars*",
 )
@@ -306,8 +306,8 @@ def _artifacts(root: Path, manifest: "RunManifest") -> "Iterator[Entry]":
     Entry
     """
     names = [RUN_MANIFEST_NAME]
-    names += sorted(p.name for p in root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    for pattern in _LEGACY_GLOBS:
+    # every plan, a 0.17 `.yml` the `.yaml` replaced included: a copy leaves none behind
+    for pattern in (*TRANSFORMED_WORKPLAN_GLOBS, *_LEGACY_GLOBS):
         names += sorted(p.name for p in root.glob(pattern))
     for relative in (Path(name) for name in names):
         if (entry := _entry(root, relative)) is not None:

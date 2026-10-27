@@ -11,6 +11,7 @@ from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    exit_on_failure,
     get_from_ctxmap,
     refuse_workplan_file,
     set_ctxmap,
@@ -49,6 +50,7 @@ from cstar.orchestration.index import RunLocation, read_run_location, run_uri
 from cstar.orchestration.manifest import (
     RunManifest,
     compute_product_digests,
+    find_transformed_workplan,
     fold_step_records,
     read_run_manifest,
     record_product_digests,
@@ -66,7 +68,6 @@ from cstar.orchestration.promotion import (
     remove_run,
 )
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     Finding,
     FindingKind,
     RunCheckReport,
@@ -149,9 +150,11 @@ keeps the source and its tracking record.
 {ARG_DRY_RUN} runs every refusal and prints what would be copied and where, then
 stops: nothing is written.
 
-Exit code 0: promoted. 1: promoted with problems found in the copy, or nothing
-copied because the source is missing products. 2: bad arguments, no project's
-runs area and no {ARG_TO}, or a destination that is refused.
+Exit code 0: promoted. 1: promoted with problems found in the copy, nothing
+copied because the source is missing products, the copy failed (nothing is left
+at the destination), or the work after the copy failed (the message says where
+the copy is). 2: bad arguments, no project's runs area and no {ARG_TO}, or a
+destination that is refused.
 """
 
 _NO_PROJECT_HELP: t.Final[str] = (
@@ -337,15 +340,10 @@ def _transformed_workplan(root: Path) -> Path | None:
     typer.BadParameter
         Raised when the directory holds more than one.
     """
-    found = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(found) > 1:
-        names = ", ".join(path.name for path in found)
-        msg = (
-            f"{str(root)!r} holds more than one transformed workplan ({names}); "
-            "remove the stale ones."
-        )
-        raise typer.BadParameter(msg)
-    return next(iter(found), None)
+    try:
+        return find_transformed_workplan(root)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
 
 def _load_workplan(path: Path | None) -> LiveWorkplan | None:
@@ -390,7 +388,7 @@ def _read_run(source: PromoteSource, workplan: LiveWorkplan | None) -> RunManife
             status = asyncio.run(load_run_state(source.record.run_id, launcher))
             refresh_run_manifest(root, source.record.run_id, status)
             refreshed = True
-        except (CstarError, CstarExpectationFailed) as ex:
+        except (CstarError, CstarExpectationFailed, OSError) as ex:
             typer.echo(f"Warning: the manifest was not refreshed: {ex}", err=True)
 
     manifest = _read_manifest(root)
@@ -719,11 +717,8 @@ def _finish_move(source: PromoteSource, copy: CopyCheck, destination: Path) -> N
         With code 1 when the record cannot be written (the source is then still
         in place) or the source cannot be removed (the copy is then tracked).
     """
-    try:
+    with exit_on_failure("Promoted, but the move did not finish"):
         _track_move(source, copy.manifest, destination, copy.workplan_path)
-    except CstarError as ex:
-        typer.echo(f"Promoted, but the move did not finish: {ex}", err=True)
-        raise typer.Exit(1) from ex
 
     try:
         remove_run(source.root)
@@ -793,58 +788,63 @@ def promote(
         if dry_run:
             typer.echo(f"Would link {handle} as {destination} -> {root}")
             return
-        try:
-            link_run(destination, root)
-        except CstarError as ex:
-            raise typer.BadParameter(str(ex)) from ex
+        with exit_on_failure():
+            try:
+                link_run(destination, root)
+            except CstarError as ex:
+                raise typer.BadParameter(str(ex)) from ex
         typer.echo(f"Linked {handle} as {destination} -> {root}")
         return
 
     # a move removes the source, so it copies all of it
     extras = {Include.all} if mode is Mode.move else set(include)
-    plan = plan_promotion(root, manifest, include=extras)
-    if plan.missing_products:
-        typer.echo(
-            f"Products the step records list that are missing from the source "
-            f"({len(plan.missing_products)}):"
-        )
-        for missing in plan.missing_products:
-            typer.echo(f"  {root / missing}")
-        typer.echo(
-            f"Not promoted: {len(plan.missing_products)} product(s) the step "
-            f"records list are missing from the source; `cstar run check "
-            f"{target}` it first.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    with exit_on_failure():
+        plan = plan_promotion(root, manifest, include=extras)
+        if plan.missing_products:
+            typer.echo(
+                f"Products the step records list that are missing from the source "
+                f"({len(plan.missing_products)}):"
+            )
+            for missing in plan.missing_products:
+                typer.echo(f"  {root / missing}")
+            typer.echo(
+                f"Not promoted: {len(plan.missing_products)} product(s) the step "
+                f"records list are missing from the source; `cstar run check "
+                f"{target}` it first.",
+                err=True,
+            )
+            raise typer.Exit(1)
 
-    _echo_plan(plan)
-    if dry_run:
-        typer.echo(f"Would {mode.value} {handle} to {destination}")
-        return
+        _echo_plan(plan)
+        if dry_run:
+            typer.echo(f"Would {mode.value} {handle} to {destination}")
+            return
 
-    # before the copy: the digests are those of the source
-    digests = compute_product_digests(root, manifest) if verify else {}
-    try:
-        execute_plan(plan, destination, replace_link=mode is Mode.materialize)
-    except CstarError as ex:
-        raise typer.BadParameter(str(ex)) from ex
-    if verify:
-        recorded = record_product_digests(destination, digests)
-        typer.echo(f"Recorded {recorded} digest(s) in the copy.")
+        # before the copy: the digests are those of the source
+        digests = compute_product_digests(root, manifest) if verify else {}
+        try:
+            execute_plan(plan, destination, replace_link=mode is Mode.materialize)
+        except CstarError as ex:
+            raise typer.BadParameter(str(ex)) from ex
 
-    copy = _check_copy(destination, verify=verify)
-    if copy.own_problems:
-        kept = f"; the source was kept at {root}" if mode is Mode.move else ""
-        typer.echo(
-            f"Promoted with problems: {len(copy.own_problems)} problem(s) in the "
-            f"copy at {destination}{kept}.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    # the copy is complete: a failure from here on says where it is
+    with exit_on_failure(f"Copied to {destination}, but the promotion did not finish"):
+        if verify:
+            recorded = record_product_digests(destination, digests)
+            typer.echo(f"Recorded {recorded} digest(s) in the copy.")
 
-    if gathered_output_dir(root).is_dir():
-        _regather(destination, copy.workplan)
+        copy = _check_copy(destination, verify=verify)
+        if copy.own_problems:
+            kept = f"; the source was kept at {root}" if mode is Mode.move else ""
+            typer.echo(
+                f"Promoted with problems: {len(copy.own_problems)} problem(s) in the "
+                f"copy at {destination}{kept}.",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        if gathered_output_dir(root).is_dir():
+            _regather(destination, copy.workplan)
 
     if mode is Mode.move:
         _finish_move(source, copy, destination)

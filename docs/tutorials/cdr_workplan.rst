@@ -201,7 +201,7 @@ while the alkalinity already in the water catches up with the air, and then
 levels off, once the extra uptake grows as fast as the release. The
 DIC-difference curves count the same perturbation from the water column
 instead of the surface, and lie on top of the flux curves here. At the end of the run (2012-01-06 00:00), a
-reference run with ucla-roms 0.11.0 and roms-tools 5.2.1 gave these values
+reference run with ucla-roms 0.13.0 and roms-tools 5.3.0 gave these values
 (rounded):
 
 .. list-table::
