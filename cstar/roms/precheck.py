@@ -141,10 +141,11 @@ def averages_end_on_marbl_step_applies_to_schema(
 
     The ``ucla_roms`` path gates on the schema where Forge gates on the ref
     (:func:`averages_end_on_marbl_step_applies_to`): by the time it reads the
-    namelist it has resolved a commit-hash pin to a schema, through the clone or
+    namelist it has resolved a commit-hash pin to a schema through the clone or
     the build record, so a hash from before 0.13.0 is not refused for a rule its
-    release does not have. Every schema from ``RomsNamelistV0_13_0`` on subclasses
-    it.
+    release does not have. (Without either, a hash falls back to the newest schema
+    with a warning, as it does for Rule A.) Every schema from
+    ``RomsNamelistV0_13_0`` on subclasses it.
     """
     return issubclass(schema, RomsNamelistV0_13_0)
 
