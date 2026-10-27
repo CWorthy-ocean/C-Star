@@ -10,7 +10,6 @@ import pytest
 from cstar.applications.ucla_roms.transforms import RomsTimeSplitter
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import (
@@ -18,6 +17,7 @@ from cstar.orchestration.transforms import (
     get_time_slices,
     get_transforms,
 )
+from cstar.roms.outputs import OUTPUT_ROOT_NAME
 
 N_MONTHS: t.Final[int] = 12
 
@@ -155,9 +155,7 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                 # segment, since post_run always leaves a whole restart file
                 # in `output`.
                 output_dir = step.fsm.output_dir
-                expected = (
-                    f"{output_dir}/{DEFAULT_OUTPUT_ROOT_NAME}_rst.{compact_sd}.nc"
-                )
+                expected = f"{output_dir}/{OUTPUT_ROOT_NAME}_rst.{compact_sd}.nc"
 
                 assert expected in str(ic_loc_successor)
 

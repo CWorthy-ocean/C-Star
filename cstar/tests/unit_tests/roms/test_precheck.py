@@ -7,8 +7,8 @@ are on (`wrt_file_rst`). Six stream groups are additionally gated on a
 compile-time cppdef. Also covers `check_restart_period_divisible_by_dt` (a
 C-Star reproducibility convention, not a ucla-roms abort), `applies_to`
 (the >= 0.5.0 schema gate for the output-streams rule), and
-`check_averages_end_on_marbl_step` with its release gate (ucla-roms >= 0.13.0's
-`check_avg_ends_on_marbl_step`).
+`check_averages_end_on_marbl_step` with its release and schema gates (ucla-roms >=
+0.13.0's `check_avg_ends_on_marbl_step`).
 
 Operates on C-Star's canonical namelist vocabulary (RomsNamelistBase group
 field names + real Fortran namelist keys), NOT forge's settings-dict
@@ -37,6 +37,7 @@ from cstar.roms.precheck import (
     NamelistConsistencyError,
     applies_to,
     averages_end_on_marbl_step_applies_to,
+    averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
     check_output_streams_divide_rst,
     check_restart_period_divisible_by_dt,
@@ -848,3 +849,36 @@ def test_averages_check_applies_from_0_13_0(roms_ref, applies):
     and an unresolved commit hash is left to the callers that resolve it.
     """
     assert averages_end_on_marbl_step_applies_to(roms_ref) is applies
+
+
+@pytest.mark.parametrize(
+    ("schema", "applies"),
+    [
+        (RomsNamelist, False),
+        (RomsNamelistV0_9_0, False),
+        (RomsNamelistV0_12_0, False),
+        (RomsNamelistV0_13_0, True),
+    ],
+)
+def test_averages_check_schema_gate_applies_from_0_13_0(schema, applies):
+    """The ``ucla_roms`` path, which has resolved its schema, gates on it."""
+    assert averages_end_on_marbl_step_applies_to_schema(schema) is applies
+
+
+@pytest.mark.parametrize(
+    ("lower", "schema"),
+    [
+        (lower, schema)
+        for lower, _, schema in NAMELIST_SCHEMA_REGISTRY
+        if lower is not None
+    ],
+)
+def test_averages_check_schema_gate_agrees_with_the_release_gate(lower, schema):
+    """Each registered tier is on the same side of the boundary gated by its schema
+    as by the release tag that starts it, so a later tier, which subclasses the
+    last, stays in step with the release gate.
+    """
+    tag = ".".join(str(part) for part in lower)
+    assert averages_end_on_marbl_step_applies_to_schema(
+        schema
+    ) is averages_end_on_marbl_step_applies_to(tag)

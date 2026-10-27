@@ -404,8 +404,9 @@ by the resolver, ``validate_run_time_sections`` and ``configure_build``.
 ``marbl``/``cdr_lite`` cppdefs and read back with ``bgc_mode_from_cppdefs``. In
 ``cdr_lite`` mode the CDR tracer counts are read from the generated CDR forcing
 during input generation, not at resolve time. The output-period checks ucla-roms
-runs at start-up live once, in ``cstar.roms.precheck``, and both C-Star and Forge
-call them.
+runs at start-up live once, in ``cstar.roms.precheck``. Forge runs them as it
+resolves and generates a blueprint; the ``ucla_roms`` path runs the output-stream
+and the MARBL-step average rules in ``roms_runtime_settings``, just before launch.
 
 A namelist key from a new ucla-roms release therefore means a new tier on both
 sides, not an edit to an existing one, plus a golden namelist for it (see below).

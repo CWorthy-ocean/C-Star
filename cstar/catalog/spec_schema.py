@@ -53,6 +53,8 @@ DOMAIN_SPEC_KEYS: t.Final[frozenset[str]] = frozenset(
         "grid_kwargs",
         "grid_kwargs_parent",
         "grid_kwargs_child",
+        "metadata_child",
+        "nesting_include_pressure_fluxes",
         "open_boundaries",
         "partitioning",
         "v_sponge",

@@ -180,6 +180,18 @@ def test_newer_minor_with_known_keys_loads() -> None:
     assert read_spec("DomainSpec", data, "f.yaml") == {"grid_name": "g"}
 
 
+def test_newer_minor_with_a_nested_domain_loads() -> None:
+    major = version_key(SPEC_SCHEMA_VERSIONS["DomainSpec"])[0]
+    content = {
+        "grid_name": "g",
+        "grid_kwargs_child": _GRID_KWARGS,
+        "metadata_child": {"period": 1800.0},
+        "nesting_include_pressure_fluxes": True,
+    }
+    data = {KEY_SV: f"{major}.9.0", **content}
+    assert read_spec("DomainSpec", data, "f.yaml") == content
+
+
 def test_newer_minor_with_an_unknown_key_is_refused() -> None:
     major = version_key(SPEC_SCHEMA_VERSIONS["DomainSpec"])[0]
     data = {KEY_SV: f"{major}.9.0", "grid_name": "g", "brand_new_key": 1}

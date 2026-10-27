@@ -16,7 +16,6 @@ from cstar.base.feature import (
 )
 from cstar.base.log import get_logger
 from cstar.base.utils import (
-    DEFAULT_OUTPUT_ROOT_NAME,
     coerce_datetime,
     deep_merge,
     min_padded_index,
@@ -39,6 +38,7 @@ from cstar.orchestration.transforms import (
 from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.outputs import (
     EXTRACT_ROLE,
+    OUTPUT_ROOT_NAME,
     BoundaryFile,
     CarbonateSensitivityFile,
     RestartFile,
@@ -128,7 +128,6 @@ class RomsTimeSplitter(Transform[LiveStep]):
 
         depends_on = step.depends_on
         last_restart_file: RestartFile | None = None
-        output_root_name = DEFAULT_OUTPUT_ROOT_NAME
 
         results: list[LiveStep] = []
         for i, (sd, ed) in enumerate(time_slices):
@@ -185,7 +184,7 @@ class RomsTimeSplitter(Transform[LiveStep]):
             # predicted name for the follow-up step's initial conditions never
             # carries a partition segment.
             restart_file = RestartFile.from_parts(
-                output_root_name, ed, None, child_fs.output_dir
+                OUTPUT_ROOT_NAME, ed, None, child_fs.output_dir
             )
 
             # use output dir of the last step as the input for the next step

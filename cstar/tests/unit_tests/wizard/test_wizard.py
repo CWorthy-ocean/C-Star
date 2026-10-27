@@ -35,6 +35,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_13_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
+from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
@@ -6396,6 +6397,26 @@ def test_extract_data_nesting_fields_never_become_overrides():
     assert wiz2._overrides[("extract_data", "nrpf")] == 48
 
 
+def test_the_specs_the_wizard_saves_have_only_known_keys():
+    """A spec at a newer minor with a key this build does not know is refused, so
+    every key a writer saves must be in ``known_spec_keys`` -- here for a nested
+    domain with every optional key, and for the forcing the editor holds.
+    """
+    wiz = _new_wizard()
+    wiz.nest_enable.value = True
+    wiz.nest_pressure_fluxes.value = True
+    wiz.parent_enable.value = True
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+
+    domain = wiz._domain_spec_data()
+    assert {"grid_kwargs_parent", "grid_kwargs_child", "metadata_child"} <= set(domain)
+    assert domain["nesting_include_pressure_fluxes"] is True
+    assert set(domain) <= known_spec_keys("DomainSpec")
+    forcing = {"description", *wiz._forcing_editor.gather()}
+    assert forcing <= known_spec_keys("ForcingSpec")
+
+
 # ---------------------------------------------------------------------------
 # Provenance: the wizard stamps a blueprint when it writes one, and re-stamps it
 # only when the content changed (see ForgeBlueprint.stamp_provenance).
@@ -7085,14 +7106,54 @@ class TestCdrLiteSavedModel:
         # The resolver zeroes ntrc_bio for a run without MARBL; the saved spec
         # keeps the base model's count so switching back to "marbl" still works.
         assert data["model_settings"]["param"]["ntrc_bio"] == 32
+        # The wizard's hold on the time interpolation is not the model's: the spec
+        # keeps the base value, so it still validates when bgc_mode is switched.
+        assert data["model_settings"]["cdr_lite"][_INTERP_KEY[1]] is True
         assert "✓" in wiz.save_model_status.value
+        assert "round-trip" not in wiz.save_model_status.value
         assert wiz.model_dd.value == "my-cdr-lite-model"
-        assert wiz.config.composition.model.modified is False
+        # The run keeps the hold, which deviates from the saved spec exactly as it
+        # does from the bundled one, so the status must not claim otherwise.
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
+        assert wiz.editor._widgets[_INTERP_KEY][0].value is False
+        assert wiz.config.composition.model.modified is True
+        assert "unmodified" not in wiz.save_model_status.value
 
         wiz2 = ForgeBlueprintWizard(catalog)
+        wiz2.start.value = date(2012, 1, 1)
+        wiz2.end.value = date(2012, 1, 2)
+        wiz2.use_pio_chk.value = False
         wiz2.model_dd.value = "my-cdr-lite-model"
         assert wiz2.bgc_dd.value == "cdr_lite"
         assert _display(wiz2.cs_group) == ""
+        wiz2.bgc_dd.value = "marbl"
+        assert wiz2.config is not None, wiz2.derived.value
+
+    def test_a_hold_the_user_set_stays_out_of_the_saved_spec(self, tmp_path):
+        """A hold the user chose (here toggled off and on again, so the wizard no
+        longer owns it) is saved as the base value too, and the session keeps it.
+        """
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        catalog = DomainCatalog(catalog_root=root)
+        wiz = _cdr_lite_wizard(catalog)
+        checkbox = wiz.editor._widgets[_INTERP_KEY][0]
+        checkbox.value = True
+        checkbox.value = False
+        assert _INTERP_KEY not in wiz._wizard_default_keys
+
+        wiz.save_model_name.value = "my-cdr-lite-model"
+        wiz._on_save_model(None)
+
+        data = catalog.model_data("my-cdr-lite-model")
+        assert data["model_settings"]["cdr_lite"][_INTERP_KEY[1]] is True
+        assert "round-trip" not in wiz.save_model_status.value
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
+        assert wiz.editor._widgets[_INTERP_KEY][0].value is False
 
 
 class TestCdrLiteCdrPanel:

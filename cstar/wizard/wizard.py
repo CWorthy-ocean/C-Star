@@ -6151,7 +6151,13 @@ class ForgeBlueprintWizard:
                 # dropped them.
                 for k in ("use_pio", "bgc_mode", "roms_ref", "marbl_ref"):
                     kw.pop(k, None)
-                overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
+                # The wizard-only settings are not saved into the spec but stay on
+                # the live config, so they stay on both sides too.
+                overrides2 = {
+                    k: v
+                    for k, v in overrides2.items()
+                    if _is_output_key(*k) or k in _WIZARD_SETTING_DEFAULTS
+                }
             elif spec == "forcing":
                 # CDR is its own independently composable spec (CdrSpec, see
                 # self.cdr_mode_dd) -- picking a ForcingSpec never touches it, so
@@ -8672,16 +8678,24 @@ class ForgeBlueprintWizard:
         try:
             base_path = self.catalog.model_path(self.model_dd.value)
             owned = _model_owned_settings(self.config.model_settings)
+            base_settings = load_model_spec_data(base_path)["model"].get(
+                "model_settings", {}
+            )
             if not self.config.model_settings["cppdefs"].get("marbl", False):
                 # The resolver zeroes ntrc_bio for a run without MARBL; keep the
                 # base model's MARBL tracer count so the saved spec still works
                 # when bgc_mode is switched back to "marbl".
-                base_settings = load_model_spec_data(base_path)["model"].get(
-                    "model_settings", {}
-                )
                 base_param = base_settings.get("param") or {}
                 if "ntrc_bio" in base_param:
                     owned.setdefault("param", {})["ntrc_bio"] = base_param["ntrc_bio"]
+            # The spec cannot carry a wizard-only setting (_WIZARD_SETTING_DEFAULTS),
+            # whoever set it: save the base value, which validates in every BGC
+            # mode, and keep the session's value as an override (below).
+            for section, field in _WIZARD_SETTING_DEFAULTS:
+                if field in (base_section := base_settings.get(section) or {}):
+                    owned.setdefault(section, {})[field] = base_section[field]
+                else:
+                    owned.get(section, {}).pop(field, None)
             self.catalog.register_model_from_settings(
                 name,
                 owned,
@@ -8714,12 +8728,17 @@ class ForgeBlueprintWizard:
                 self._overrides = {
                     k: v
                     for k, v in self._overrides.items()
-                    if k not in active or _is_output_key(*k)
+                    if k not in active
+                    or _is_output_key(*k)
+                    or k in _WIZARD_SETTING_DEFAULTS
                 }
         if ok:
             self._rebuild()
+            # A wizard-only setting held over the saved spec leaves it modified.
+            modified = self.config is None or self.config.composition.model.modified
+            note = "" if modified else " (now unmodified)"
             self.save_model_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+                f"<span style='color:#080'>Saved '{name}' ✓{note}.</span>"
             )
         else:
             self.save_model_status.value = (
