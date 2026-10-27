@@ -696,4 +696,6 @@ Miscellaneous
   - Clicking the "Guided tutorials" heading in the sidebar opens it; the page itself is not listed in the sidebar.
   - Setup steps: install C-Star, run ``cstar init``, and register for Copernicus Marine and run ``copernicusmarine login`` (TPXO is not needed for the tutorials).
 
+- The wizard's carbonate-sensitivity test reads the default model from the wizard module instead of naming it, which repairs the unit-test job on ``main``. (`#857 <https://github.com/CWorthy-ocean/C-Star/pull/857>`_)
+
 
