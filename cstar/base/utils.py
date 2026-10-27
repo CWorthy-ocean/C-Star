@@ -25,10 +25,6 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
-"""A fixed `output_root_name` to be used when generating outputs with ROMS."""
-
-
 MAX_CONCURRENCY: t.Final[int] = 10
 """The maximum number of concurrent disk IO operations."""
 
