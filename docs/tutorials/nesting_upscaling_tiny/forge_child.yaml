@@ -288,6 +288,8 @@ model_settings:
     - CO3_ALT_CO2
     - co3_sat_arag
     - co3_sat_calc
+  cdr_lite:
+    cdr_carbonate_sensitivity_time_interpolation: true
   time_stepping:
     ntimes: 2880
     dt: 30.0
@@ -295,6 +297,8 @@ model_settings:
     ninfo: 1
   v_sponge:
     v_sponge: 416.6666666666667
+    # The child is upscaled, and tracer diffusion in the sponge band changes the plume handed to parent_up, so the child's sponge is on currents only.
+    v_sponge_trc: 0.0
   river_frc:
     river_source: false
     analytical: false
@@ -454,7 +458,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.11.0
+    commit: 0.13.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -484,7 +488,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.11-default
+    name: roms-marbl-0.13-default
     origin: catalog
     modified: true
   domain:
@@ -503,7 +507,9 @@ composition:
     name: daily-restarts
     origin: catalog
     modified: true
-  overrides: {}
+  overrides:
+    v_sponge:
+      v_sponge_trc: 0.0
 provenance:
   generated_at: null
   generated_by: null
@@ -511,5 +517,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:d65381d5fe945f4595b1dcda7f43611f74db41f3a9ecc3b8a6045ca54066e869
+  content_hash: bp-v2:aea867026b9d0199d380ed2dd045cebf9a12342753f8a39cb9773669f8746a44
   notes: null

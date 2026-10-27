@@ -37,8 +37,8 @@
 # and lower time limits: see "Running a shorter window" in
 # docs/developers/nesting_upscaling_ccs.rst.
 #
-# Model and tools: the blueprints use the roms-marbl-0.11-default ModelSpec, i.e. the
-# ucla-roms 0.11.0 release, with no commit override. The child's boundary needs roms-tools
+# Model and tools: the blueprints use the roms-marbl-0.13-default ModelSpec, i.e. the
+# ucla-roms 0.13.0 release, with no commit override. The child's boundary needs roms-tools
 # main at or after f9b07d42 until a roms-tools release carries it.
 #
 # Where it runs: `compute_environment` names no launcher, so C-Star picks the one for the

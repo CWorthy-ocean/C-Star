@@ -231,7 +231,7 @@ class TestNamelistOverrides:
     ):
         """Test that a `pio_settings` override validates silently for an
         unpinned `code.roms` ref: the fallback schema for an unpinned ref is
-        the latest (`RomsNamelistV0_12_0`), which inherits `&pio_settings`
+        the latest (`RomsNamelistV0_13_0`), which inherits `&pio_settings`
         from `RomsNamelistV0_6_0`.
         """
         complete_blueprint_dict["namelist_overrides"] = {
@@ -260,7 +260,7 @@ class TestNamelistOverrides:
     ):
         """Test that a `cdr_lite_output_settings` override validates silently
         for an unpinned `code.roms` ref: the fallback schema for an unpinned
-        ref is the latest (`RomsNamelistV0_12_0`), which has
+        ref is the latest (`RomsNamelistV0_13_0`), which has
         `&cdr_lite_output_settings`.
         """
         complete_blueprint_dict["namelist_overrides"] = {
@@ -275,7 +275,7 @@ class TestNamelistOverrides:
         self, complete_blueprint_dict
     ):
         """Test that a `cdr_tracer_output_settings` override only warns for an
-        unpinned `code.roms` ref: the latest schema (`RomsNamelistV0_12_0`)
+        unpinned `code.roms` ref: the latest schema (`RomsNamelistV0_13_0`)
         renamed it to `&cdr_lite_output_settings`.
         """
         complete_blueprint_dict["namelist_overrides"] = {

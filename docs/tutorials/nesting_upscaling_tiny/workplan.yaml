@@ -22,15 +22,15 @@
 #                                 child's and parent_up's _cdr output, each on its own grid,
 #                                 combined into cdr_metrics.nc and two figures
 #
-# The three forge blueprints are built from the bundled roms-marbl-0.11-default ModelSpec
-# (ucla-roms 0.11.0, MARBL, ParallelIO). Forge downloads their source data (GLORYS,
+# The three forge blueprints are built from the bundled roms-marbl-0.13-default ModelSpec
+# (ucla-roms 0.13.0, MARBL, ParallelIO). Forge downloads their source data (GLORYS,
 # UNIFIED) into its source-data cache and streams ERA5. Run from the directory that holds
 # this file and the three forge blueprints:
 #   cstar workplan check  workplan.yaml
 #   cstar workplan submit workplan.yaml
 #   cstar run status nest-tiny
 name: nest-tiny
-description: Tiny 2-level nested UCLA-ROMS run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.11.0, PIO)
+description: Tiny 2-level nested UCLA-ROMS run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.13.0, PIO)
 state: draft
 
 compute_environment:

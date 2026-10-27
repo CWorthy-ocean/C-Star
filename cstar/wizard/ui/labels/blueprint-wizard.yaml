@@ -124,6 +124,9 @@ sections:
   settings.bottom_drag:
     title: Bottom drag
     required: false
+  settings.v_sponge:
+    title: Sponge layer
+    required: false
   settings.sponge_tune:
     title: Sponge tuning
     required: false
@@ -785,6 +788,10 @@ fields:
   settings.bgc.wrt_avg_dia:
     label: Write BGC diagnostics averages
     symbol: wrt_avg_dia
+  settings.v_sponge.v_sponge_trc:
+    label: Sponge tracer diffusivity
+    symbol: v_sponge_trc
+    unit: m²/s
   settings.marbl_bgc.marbl_config_file:
     label: MARBL settings file
     symbol: marbl_config_file

@@ -148,7 +148,9 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.12-default`` (ucla-roms 0.12.0) is the wizard's default. Older
+``roms-marbl-0.12-default`` (ucla-roms 0.12.0) is the wizard's default.
+``roms-marbl-0.13-default`` pins ucla-roms 0.13.0, which adds the sponge's tracer
+diffusivity ``v_sponge.v_sponge_trc``. Older
 ``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.11-default``
 stays for ucla-roms 0.11.0, which predates the
 ``cdr_lite.cdr_carbonate_sensitivity_time_interpolation`` switch;

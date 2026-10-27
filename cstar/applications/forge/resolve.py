@@ -982,7 +982,10 @@ def build_forge_blueprint(
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
-    settings["v_sponge"] = {"v_sponge": v_sponge}
+    # v_sponge is domain-owned (grid-derived or the caller's explicit value), so it
+    # replaces whatever the ModelSpec carries; the section's other keys
+    # (v_sponge_trc) are the ModelSpec's, kept for the overrides below.
+    settings["v_sponge"] = {**(settings.get("v_sponge") or {}), "v_sponge": v_sponge}
 
     # ----- schema selection inputs -------------------------------------------
     # The pinned ucla-roms ref decides which run-time settings tier applies (it

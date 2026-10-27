@@ -34,8 +34,15 @@ The case
   ``parent_up`` wait for ``parent`` (the restart each of them reads), and
   ``child`` wait for ``forge_child`` (its inputs).
 
-The three forge blueprints use the bundled ``roms-marbl-0.11-default`` model
-(ucla-roms 0.11.0 with MARBL and ParallelIO) and write daily restarts.
+The three forge blueprints use the bundled ``roms-marbl-0.13-default`` model
+(ucla-roms 0.13.0 with MARBL and ParallelIO) and write daily restarts.
+
+The sponge layer along the open boundaries damps currents and diffuses tracers.
+The parents keep both. The child's sponge acts on currents only: ``forge_child.yaml``
+sets ``v_sponge_trc: 0.0`` under ``v_sponge`` and keeps its ``v_sponge`` of 400 m²/s.
+The child is upscaled, and tracer diffusion in its sponge band would change the plume
+handed to ``parent_up``: it smooths the ALK in the band and lowers the CO2 uptake that
+``cdr_metrics`` reports.
 
 The release values are placeholders, to be confirmed. The release is 1e4 mol/s
 of ALK (1e7 meq/s) at 35.52 N, 121.22 W and 2 m depth, constant for 30 days from
@@ -254,6 +261,8 @@ uses the ``local`` limits, which are generous upper bounds.
 
 Resources
 ---------
+
+.. TODO: refresh the resource and CDR numbers on this page after the final rerun with ucla-roms 0.13.0.
 
 The numbers in this section were measured on 2026-10-15 on one cluster, with
 earlier versions than these files use: a ucla-roms commit before 0.11.0 and

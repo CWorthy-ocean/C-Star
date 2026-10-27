@@ -506,6 +506,8 @@ model_settings:
     - CO3_ALT_CO2
     - co3_sat_arag
     - co3_sat_calc
+  cdr_lite:
+    cdr_carbonate_sensitivity_time_interpolation: true
   time_stepping:
     ntimes: 192
     dt: 900.0
@@ -513,6 +515,7 @@ model_settings:
     ninfo: 1
   v_sponge:
     v_sponge: 1600.0
+    v_sponge_trc: -1.0
   river_frc:
     river_source: false
     analytical: false
@@ -672,7 +675,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.11.0
+    commit: 0.13.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -702,7 +705,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.11-default
+    name: roms-marbl-0.13-default
     origin: catalog
     modified: false
   domain:
@@ -742,5 +745,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:89a61638e77e4c017783a86f6ad7768bbe1cd258f5217f6122efa6f172cf0d94
+  content_hash: bp-v2:cd0a40654221f14eb834a5a61da7b2dea05acc570596a321cc8ec5130d9da32c
   notes: null

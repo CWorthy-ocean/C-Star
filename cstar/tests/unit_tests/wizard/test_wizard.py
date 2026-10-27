@@ -32,6 +32,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
+    RunTimeSettingsV0_13_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
@@ -3217,7 +3218,7 @@ def test_output_spec_defaults_to_daily_restarts():
 
 def test_default_model_uses_latest_settings_schema():
     """The default catalog model (``roms-marbl-0.12-default``) is pinned to
-    ucla-roms ``0.12.0`` -- the newest registered schema boundary, which both
+    ucla-roms ``0.12.0`` -- a registered schema boundary, which both
     the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
     (currently ``RunTimeSettingsV0_12_0``), not the legacy one. This is an
@@ -3246,6 +3247,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_9_0,
         RunTimeSettingsV0_11_0,
         RunTimeSettingsV0_12_0,
+        RunTimeSettingsV0_13_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
@@ -3697,6 +3699,10 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
             "roms-marbl-0.12-default",
             {"cdr_carbonate_sensitivity_time_interpolation": True},
         ),
+        (
+            "roms-marbl-0.13-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
@@ -3911,6 +3917,93 @@ def test_constant_fe_widgets_absent_for_the_0_10_model():
     assert "use_constant_fe" not in wiz.config.model_settings["marbl_bgc"]
     assert ("marbl_bgc", "use_constant_fe") not in wiz.editor._widgets
     assert ("marbl_bgc", "constant_fe_value") not in wiz.editor._widgets
+
+
+_V_SPONGE_TRC_KEY = ("v_sponge", "v_sponge_trc")
+
+
+def test_v_sponge_trc_widget_built_for_the_0_13_model():
+    """``v_sponge.v_sponge_trc`` (ucla-roms >= 0.13.0) gets an Advanced-settings
+    widget in the Physics pane for ``roms-marbl-0.13-default``, which declares it:
+    the label comes from the labels file (symbol + unit appended), the tooltip from
+    the C-Star field docstring. ``v_sponge`` itself keeps its dedicated widget and
+    gets no accordion one.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
+    assert wiz.config.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
+
+    widget, _ = wiz.editor._widgets[_V_SPONGE_TRC_KEY]
+    assert widget.value == -1.0
+    assert widget.description == "Sponge tracer diffusivity (m²/s)"
+    assert widget.tooltip.startswith("v_sponge_trc")
+    assert "0 for a sponge on currents only" in widget.tooltip
+    assert ("v_sponge", "v_sponge") not in wiz.editor._widgets
+    assert "v_sponge" in wiz.editor._pane_sections["Physics & subgrid tuning"]
+
+
+def test_v_sponge_trc_widget_absent_for_the_0_12_model():
+    """``roms-marbl-0.12-default`` pins a ucla-roms that stops on the unknown key:
+    its ModelSpec does not declare it, so the editor builds no widget (and the
+    section, whose ``v_sponge`` has its own widget, no pane entry).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "v_sponge_trc" not in wiz.config.model_settings["v_sponge"]
+    assert _V_SPONGE_TRC_KEY not in wiz.editor._widgets
+    assert "v_sponge" not in wiz.editor._pane_sections["Physics & subgrid tuning"]
+
+
+def test_v_sponge_trc_edit_reaches_the_blueprint_beside_the_domain_v_sponge():
+    """Editing the widget records an override that lands in ``model_settings`` next
+    to the grid-derived ``v_sponge`` (which it neither replaces nor reads), and
+    loading the saved blueprint rebuilds the same override.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    v_sponge = wiz.config.model_settings["v_sponge"]["v_sponge"]
+
+    widget, _ = wiz.editor._widgets[_V_SPONGE_TRC_KEY]
+    widget.value = 0.0
+    assert wiz._overrides[_V_SPONGE_TRC_KEY] == 0.0
+    assert wiz.config is not None
+    assert wiz.config.model_settings["v_sponge"] == {
+        "v_sponge": v_sponge,
+        "v_sponge_trc": 0.0,
+    }
+
+    from cstar.wizard.wizard import _diff_overrides
+
+    composed = wiz.config.model_settings
+    spec_default = {
+        **composed,
+        "v_sponge": {"v_sponge": v_sponge, "v_sponge_trc": -1.0},
+    }
+    assert _diff_overrides(composed, spec_default) == {_V_SPONGE_TRC_KEY: 0.0}
+
+
+def test_saving_a_model_spec_keeps_v_sponge_trc_and_drops_the_derived_v_sponge():
+    from cstar.wizard.wizard import _model_owned_settings
+
+    owned = _model_owned_settings(
+        {"v_sponge": {"v_sponge": 4000.0, "v_sponge_trc": 0.0}}
+    )
+    assert owned["v_sponge"] == {"v_sponge_trc": 0.0}
+    # a spec without the key (ucla-roms < 0.13.0) keeps no section at all
+    assert "v_sponge" not in _model_owned_settings({"v_sponge": {"v_sponge": 4000.0}})
 
 
 def test_constant_fe_value_hidden_until_use_constant_fe_is_on():

@@ -40,6 +40,9 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
+    RunTimeSettingsV0_13_0,
+    VSpongeCfg,
+    VSpongeCfgV0_13_0,
     _settings_spellings,
     bgc_mode_from_cppdefs,
     build_namelist,
@@ -77,6 +80,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
     format_roms_version,
     release_ref_for_remote,
 )
@@ -91,6 +95,7 @@ _ALL_SETTINGS_TIERS = (
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
+    RunTimeSettingsV0_13_0,
 )
 
 
@@ -1114,9 +1119,15 @@ def test_run_time_settings_for_ref_0_11_0_up_to_0_12_0_selects_v0_11_0():
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_11_0
 
 
-def test_run_time_settings_for_ref_0_12_0_and_later_selects_v0_12_0(recwarn):
-    for ref in ("0.12.0", "v0.12.0"):
+def test_run_time_settings_for_ref_0_12_0_up_to_0_13_0_selects_v0_12_0(recwarn):
+    for ref in ("0.12.0", "v0.12.0", "0.12.3"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_12_0
+    assert len(recwarn) == 0
+
+
+def test_run_time_settings_for_ref_0_13_0_and_later_selects_v0_13_0(recwarn):
+    for ref in ("0.13.0", "v0.13.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_13_0
     assert len(recwarn) == 0
 
 
@@ -1139,12 +1150,12 @@ def test_run_time_settings_for_ref_newer_than_known_release_warns(ref):
     """
     with pytest.warns(UserWarning) as record:
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_12_0
+    assert cls is RunTimeSettingsV0_13_0
     assert len(record) == 1
     message = str(record[0].message)
     assert f"ucla-roms release {ref} is {_NEWER_THAN_KNOWN}" in message
     assert f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)})" in message
-    assert RomsNamelistV0_12_0.__name__ in message
+    assert RomsNamelistV0_13_0.__name__ in message
 
 
 def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
@@ -1160,7 +1171,7 @@ def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
         UserWarning, match=f"release {_NEWER_TAG} is {_NEWER_THAN_KNOWN}"
     ):
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_12_0
+    assert cls is RunTimeSettingsV0_13_0
 
 
 def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
@@ -1172,13 +1183,13 @@ def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
         write_roms_namelist(
             _populated_rt_dict(), tmp_path, n_tracers=34, roms_ref=_NEWER_TAG
         )
-    RomsNamelistV0_12_0.read(tmp_path / "namelist.nml")
+    RomsNamelistV0_13_0.read(tmp_path / "namelist.nml")
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_12_0
+    assert cls is RunTimeSettingsV0_13_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -1187,7 +1198,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_12_0
+    assert cls is RunTimeSettingsV0_13_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -1340,6 +1351,7 @@ def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
         RunTimeSettingsV0_9_0,
         RunTimeSettingsV0_11_0,
         RunTimeSettingsV0_12_0,
+        RunTimeSettingsV0_13_0,
     ],
 )
 def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
@@ -1622,6 +1634,117 @@ def test_forge_writes_time_interpolation_cstar_reads_it(tmp_path):
     write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.12.0")
     back = RomsNamelistV0_12_0.read(tmp_path / "namelist.nml")
     assert getattr(back.cdr_lite_settings, _INTERP) is False
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.13.0: RunTimeSettingsV0_13_0 (tracer diffusivity of the sponge)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("requested", [0.0, 400.0, "0", "not-a-number", float("nan")])
+def test_pre_0_13_0_tiers_reject_a_requested_v_sponge_trc(settings_cls, requested):
+    """ucla-roms < 0.13.0 gives tracers ``v_sponge``: ``extra="ignore"`` would
+    drop a request for a sponge of their own (0 = currents only, or a positive
+    strength), so it is refused, naming the release that reads it. An
+    unparseable value is not "same as v_sponge" either.
+    """
+    d = _populated_rt_dict()
+    d["v_sponge"]["v_sponge_trc"] = requested
+    with pytest.raises(
+        ValidationError,
+        match=r"v_sponge\.v_sponge_trc=.* requires ucla-roms >= 0\.13\.0",
+    ):
+        settings_cls.model_validate(d)
+
+
+@pytest.mark.parametrize("absent", [-1.0, -0.5, "-1", None, "missing"])
+def test_pre_0_13_0_tiers_drop_a_v_sponge_trc_meaning_same_as_v_sponge(absent):
+    """Unset, or any negative value, means "same as v_sponge", which is what
+    these releases do: it passes (a shared spec may carry it) and is dropped, so
+    the built namelist has no such key.
+    """
+    d = _populated_rt_dict()
+    if absent != "missing":
+        d["v_sponge"]["v_sponge_trc"] = absent
+    rt = RunTimeSettingsV0_12_0.model_validate(d)
+    assert "v_sponge_trc" not in rt.v_sponge.model_dump()
+    assert isinstance(rt.v_sponge, VSpongeCfg)
+
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_12_0
+    assert "v_sponge_trc" not in nml.to_f90nml_dict()["v_sponge_settings"]
+
+
+def test_v_sponge_trc_rejection_names_the_version_from_the_constant():
+    """The message formats ``UCLA_ROMS_0_13_0``, never a literal."""
+    from cstar.roms.namelist import UCLA_ROMS_0_13_0
+
+    version = ".".join(map(str, UCLA_ROMS_0_13_0))
+    with pytest.raises(ValidationError, match=rf"requires ucla-roms >= {version}"):
+        VSpongeCfg.model_validate({"v_sponge": 1.0, "v_sponge_trc": 0.0})
+
+
+@pytest.mark.parametrize("value", [0.0, 400.0, -1.0, -5.0])
+def test_build_namelist_v0_13_0_writes_v_sponge_trc(tmp_path, value):
+    """RunTimeSettingsV0_13_0 builds ``RomsNamelistV0_13_0`` and writes the key
+    into ``&v_sponge_settings``; negative values are valid (no bound).
+    """
+    d = _populated_rt_dict()
+    d["v_sponge"]["v_sponge_trc"] = value
+    rt = RunTimeSettingsV0_13_0.model_validate(d)
+    assert isinstance(rt, RunTimeSettingsV0_12_0)
+    assert isinstance(rt.v_sponge, VSpongeCfgV0_13_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_13_0
+    assert nml.v_sponge_settings.v_sponge_trc == value
+    assert nml.v_sponge_settings.v_sponge == 8333.33
+
+    nml.write(tmp_path / "namelist.nml")
+    assert f"v_sponge_trc = {value}" in (tmp_path / "namelist.nml").read_text()
+
+
+def test_run_time_settings_v0_13_0_defaults_v_sponge_trc_when_omitted():
+    """A settings dict without the key validates to -1 (tracers get ``v_sponge``),
+    the ucla-roms default and what earlier releases did, and the namelist
+    carries it.
+    """
+    d = _populated_rt_dict()
+    d["v_sponge"].pop("v_sponge_trc", None)
+    rt = RunTimeSettingsV0_13_0.model_validate(d)
+    assert rt.v_sponge.v_sponge_trc == -1.0
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.to_f90nml_dict()["v_sponge_settings"]["v_sponge_trc"] == -1.0
+
+
+def test_v_sponge_cfg_tiers_differ_by_the_tracer_diffusivity_key():
+    old = set(VSpongeCfg.model_fields)
+    assert set(VSpongeCfgV0_13_0.model_fields) - old == {"v_sponge_trc"}
+    assert old <= set(VSpongeCfgV0_13_0.model_fields)
+
+
+@pytest.mark.parametrize(
+    "settings_cls", [RunTimeSettingsV0_12_0, RunTimeSettingsV0_13_0]
+)
+def test_misspelled_v_sponge_trc_is_rejected_on_every_tier(settings_cls):
+    """Settings keys are lowercase; a case variant would be dropped by
+    ``extra="ignore"`` on the old tier, so it fails there like a field's own.
+    """
+    d = _populated_rt_dict()
+    d["v_sponge"]["V_Sponge_Trc"] = 0.0
+    with pytest.raises(
+        ValidationError, match=r"V_Sponge_Trc \(did you mean v_sponge_trc\?\)"
+    ):
+        settings_cls.model_validate(d)
+
+
+def test_forge_writes_v_sponge_trc_cstar_reads_it(tmp_path):
+    """``write_roms_namelist`` for a 0.13.0 pin writes a namelist the C-Star
+    schema for that release reads back, key included.
+    """
+    d = _populated_rt_dict()
+    d["v_sponge"]["v_sponge_trc"] = 0.0
+    write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.13.0")
+    back = RomsNamelistV0_13_0.read(tmp_path / "namelist.nml")
+    assert back.v_sponge_settings.v_sponge_trc == 0.0
 
 
 # ---------------------------------------------------------------------------

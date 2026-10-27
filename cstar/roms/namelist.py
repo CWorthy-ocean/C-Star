@@ -29,10 +29,13 @@ subclasses:
 - :class:`RomsNamelistV0_11_0` — the schema for ucla-roms **>= 0.11.0, < 0.12.0**.
   Adds ``use_constant_Fe``/``constant_Fe_value`` to
   ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` (ucla-roms PR #391) on top of 0.9.0.
-- :class:`RomsNamelistV0_12_0` — the schema for ucla-roms **>= 0.12.0**. Adds
-  ``cdr_carbonate_sensitivity_time_interpolation`` to ``&CDR_LITE_SETTINGS``
+- :class:`RomsNamelistV0_12_0` — the schema for ucla-roms **>= 0.12.0, < 0.13.0**.
+  Adds ``cdr_carbonate_sensitivity_time_interpolation`` to ``&CDR_LITE_SETTINGS``
   (ucla-roms PR #396) and lets the ``&EXTRACT_DATA_SETTINGS`` per-child keys
   take one entry per child, up to 8 (PR #395), on top of 0.11.0.
+- :class:`RomsNamelistV0_13_0` — the schema for ucla-roms **>= 0.13.0**. Adds
+  ``v_sponge_trc`` to ``&V_SPONGE_SETTINGS`` (the sponge's tracer diffusivity),
+  on top of 0.12.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -856,6 +859,17 @@ class VSpongeSettings(_NmlGroup):
     """Maximum viscosity in sponge layer (m2/s)"""
 
 
+class VSpongeSettingsV0_13_0(VSpongeSettings):
+    """``&V_SPONGE_SETTINGS`` for ucla-roms >= 0.13.0: adds the sponge's tracer
+    diffusivity. A negative value, its default, gives tracers ``v_sponge`` (what
+    earlier releases always did). Read only with the SPONGE cppkey, like
+    ``v_sponge``. Negative values are valid, so there is no bound.
+    """
+
+    v_sponge_trc: float = Field(default=-1.0)
+    """Maximum tracer diffusivity in sponge layer (m2/s); 0 for a sponge on currents only, negative for the same as v_sponge"""
+
+
 class SssCorrection(_NmlGroup):
     dsssdt: float
     """SSS correction co-efficient as piston velocity (cm/day)"""
@@ -989,9 +1003,11 @@ class RomsNamelistBase(BaseModel):
     for ucla-roms >= 0.9.0, < 0.11.0, which renames the CDR tracer output group
     to ``&CDR_LITE_OUTPUT_SETTINGS``, :class:`RomsNamelistV0_11_0` for
     ucla-roms >= 0.11.0, < 0.12.0, which adds the constant-iron keys to
-    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, or :class:`RomsNamelistV0_12_0` for
-    ucla-roms >= 0.12.0, which adds the carbonate-sensitivity time-interpolation
-    key and per-child extraction keys) or select one automatically with
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, :class:`RomsNamelistV0_12_0` for
+    ucla-roms >= 0.12.0, < 0.13.0, which adds the carbonate-sensitivity
+    time-interpolation key and per-child extraction keys, or
+    :class:`RomsNamelistV0_13_0` for ucla-roms >= 0.13.0, which adds the sponge
+    tracer diffusivity ``v_sponge_trc``) or select one automatically with
     :func:`namelist_schema_for_ref`.
     """
 
@@ -1260,7 +1276,7 @@ class RomsNamelistV0_11_0(RomsNamelistV0_9_0):
 
 
 class RomsNamelistV0_12_0(RomsNamelistV0_11_0):
-    """The ROMS namelist schema for ucla-roms >= 0.12.0.
+    """The ROMS namelist schema for ucla-roms >= 0.12.0, < 0.13.0.
 
     On top of the 0.11.0 schema: `&CDR_LITE_SETTINGS` gains
     `cdr_carbonate_sensitivity_time_interpolation` (ucla-roms PR #396, see
@@ -1277,6 +1293,18 @@ class RomsNamelistV0_12_0(RomsNamelistV0_11_0):
     )
 
 
+class RomsNamelistV0_13_0(RomsNamelistV0_12_0):
+    """The ROMS namelist schema for ucla-roms >= 0.13.0.
+
+    Adds `v_sponge_trc` to `&V_SPONGE_SETTINGS` (see
+    :class:`VSpongeSettingsV0_13_0`) on top of the 0.12.0 schema. It is always
+    written, which is why earlier releases (which stop on unknown namelist keys)
+    keep the 0.12.0 schema.
+    """
+
+    v_sponge_settings: VSpongeSettingsV0_13_0
+
+
 # ---- Schema version selection ----
 
 # ucla-roms releases with breaking namelist changes, as comparable version
@@ -1288,19 +1316,20 @@ UCLA_ROMS_0_7_0: Final[tuple[int, int, int]] = (0, 7, 0)
 UCLA_ROMS_0_9_0: Final[tuple[int, int, int]] = (0, 9, 0)
 UCLA_ROMS_0_11_0: Final[tuple[int, int, int]] = (0, 11, 0)
 UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
+UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.13.0):
+# Recipe for the next breaking namelist release (e.g. 0.14.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
+#        UCLA_ROMS_0_14_0: Final[tuple[int, int, int]] = (0, 14, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
+#        (UCLA_ROMS_0_13_0, UCLA_ROMS_0_14_0, RomsNamelistV0_13_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_13_0, None, RomsNamelistV0_13_0),
+#        (UCLA_ROMS_0_14_0, None, RomsNamelistV0_14_0),
 #   4. Bump NEWEST_KNOWN_UCLA_ROMS (below) to the new release.
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
@@ -1315,7 +1344,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_7_0, UCLA_ROMS_0_9_0, RomsNamelistV0_7_0),
     (UCLA_ROMS_0_9_0, UCLA_ROMS_0_11_0, RomsNamelistV0_9_0),
     (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
-    (UCLA_ROMS_0_12_0, None, RomsNamelistV0_12_0),
+    (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
+    (UCLA_ROMS_0_13_0, None, RomsNamelistV0_13_0),
 )
 
 # The newest ucla-roms release whose namelist C-Star has been checked against.
@@ -1324,7 +1354,7 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
 # with every new tier (recipe step 4 above) and also for a release that changes
 # no namelist key (a patch release such as 0.12.1), once checked. Never below the last entry's
 # lower bound.
-NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_12_0
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_13_0
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:
@@ -1402,7 +1432,7 @@ def _warn_newer_than_known(
 
     Emitted as a `UserWarning` on every call (reported at the caller of
     :func:`namelist_schema_for_ref`) and logged once per release `version`
-    (``0.13.0``, ``v0.13.0`` and a hash on that tag log once between them).
+    (``0.14.0``, ``v0.14.0`` and a hash on that tag log once between them).
     `release_tag` is the tag a commit-hash `checkout_target` resolved to, or
     `None` when `checkout_target` is itself the tag.
     """

@@ -116,12 +116,16 @@ This is the workplan you ran. The header comments explain each step.
    :language: yaml
    :caption: workplan.yaml
 
-The ROMS steps use ucla-roms 0.11.0 with MARBL and ParallelIO, and each runs
+The ROMS steps use ucla-roms 0.13.0 with MARBL and ParallelIO, and each runs
 on 4 MPI ranks (a 2 by 2 tiling). Each ROMS step builds its own ROMS
 executable: the three ROMS steps are three different builds. On a 10-core
 laptop that was also busy with other work, with the source data already
 downloaded, the whole workplan took about 20 minutes; it takes less on an
 idle machine.
+
+The child's sponge layer acts on currents only (``v_sponge_trc: 0.0`` in
+``forge_child.yaml``): the child is upscaled, and tracer diffusion in its sponge
+band would change the plume handed to ``parent_up``.
 
 The release is alkalinity at 2e6 meq/s for four hours, from the child's
 start. The workplan's three forge steps share nothing, but

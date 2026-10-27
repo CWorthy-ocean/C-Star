@@ -45,6 +45,7 @@ from pydantic import (
 from cstar.roms.namelist import (
     UCLA_ROMS_0_11_0,
     UCLA_ROMS_0_12_0,
+    UCLA_ROMS_0_13_0,
     ForcingFiles,
     Gamma2Settings,
     LateralViscSettings,
@@ -58,6 +59,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -1534,8 +1536,70 @@ class BottomDragCfg(_SettingsSection):
     zob: float
 
 
-class VSpongeCfg(_SettingsSection):
+class _VSpongeCfgCommon(_SettingsSection):
     v_sponge: float
+
+
+def _v_sponge_trc_requested(value: Any) -> bool:
+    """Whether a ``v_sponge.v_sponge_trc`` value asks for a tracer sponge of its
+    own, which only ucla-roms >= 0.13.0 reads.
+
+    ``None`` (unset) and any negative value mean "the same as ``v_sponge``",
+    what every earlier release does. A value >= 0 is requested, and so is one
+    that does not parse as a number (including NaN): it is not a "same as
+    ``v_sponge``" value.
+    """
+    if value is None:
+        return False
+    try:
+        return not float(value) < 0
+    except (TypeError, ValueError):
+        return True
+
+
+class VSpongeCfg(_VSpongeCfgCommon):
+    """``v_sponge`` settings for ucla-roms < 0.13.0, whose sponge gives tracers
+    the same diffusivity as momentum (``v_sponge``).
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # VSpongeCfgV0_13_0's tracer diffusivity: _reject_v_sponge_trc is its gate.
+        return ("v_sponge_trc",)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_v_sponge_trc(cls, data: Any) -> Any:
+        """Fail loudly on a requested ``v_sponge_trc`` rather than letting
+        ``extra="ignore"`` drop it: the tracers would get ``v_sponge`` anyway. An
+        unset or negative value means "same as ``v_sponge``", which is what this
+        release does, so it passes (a shared spec may carry it) and is dropped.
+        """
+        if isinstance(data, dict) and _v_sponge_trc_requested(data.get("v_sponge_trc")):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_13_0)
+            raise ValueError(
+                f"v_sponge.v_sponge_trc={data['v_sponge_trc']!r} requires "
+                f"ucla-roms >= {version}; the pinned ucla-roms release gives "
+                "tracers the same sponge diffusivity as momentum (v_sponge). "
+                "Use a negative value for that, or pin a newer release."
+            )
+        return data
+
+
+class VSpongeCfgV0_13_0(_VSpongeCfgCommon):
+    """``v_sponge`` settings for ucla-roms >= 0.13.0: adds ``v_sponge_trc``, the
+    sponge's maximum tracer diffusivity (m2/s). 0 gives a sponge on currents
+    only, a negative value the same as ``v_sponge``, a positive one its own
+    strength. Momentum always uses ``v_sponge``; ``v_sponge_trc`` is inert
+    exactly when ``v_sponge`` is (both are read only with the SPONGE cppkey).
+
+    Deliberate default (like :class:`MarblBgcCfgV0_11_0`): blueprints and
+    ModelSpecs written before the key existed bypass the resolver and hit
+    ``model_validate`` directly; the value is the ucla-roms reference one. No
+    bound: ROMS reads any value.
+    """
+
+    v_sponge_trc: float = Field(default=-1.0)
 
 
 def _constant_fe_requested(value: Any) -> bool:
@@ -1636,7 +1700,8 @@ class _RunTimeSettingsCommon(_SettingsSection):
     Not meant to be used directly: the version-varying sections (``param``,
     ``ocean_vars``, ``particles``) are typed as the loose common models here,
     ``marbl_bgc`` as the pre-0.11.0 :class:`MarblBgcCfg` (retyped by
-    :class:`RunTimeSettingsV0_11_0`), and version-varying
+    :class:`RunTimeSettingsV0_11_0`), ``v_sponge`` as the pre-0.13.0
+    :class:`VSpongeCfg` (retyped by :class:`RunTimeSettingsV0_13_0`), and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
@@ -1648,8 +1713,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
     (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
     (0.9.0 <= ucla-roms < 0.11.0), :class:`RunTimeSettingsV0_11_0`
-    (0.11.0 <= ucla-roms < 0.12.0), or :class:`RunTimeSettingsV0_12_0`
-    (>= 0.12.0), or select one with :func:`run_time_settings_for_ref`.
+    (0.11.0 <= ucla-roms < 0.12.0), :class:`RunTimeSettingsV0_12_0`
+    (0.12.0 <= ucla-roms < 0.13.0), or :class:`RunTimeSettingsV0_13_0`
+    (>= 0.13.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -1808,7 +1874,8 @@ class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
 
 
 class RunTimeSettingsV0_12_0(RunTimeSettingsV0_11_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.12.0, typed + validated.
+    """Forge's run-time settings dict for 0.12.0 <= ucla-roms < 0.13.0, typed +
+    validated.
 
     Mirrors C-Star's ``RomsNamelistV0_12_0(RomsNamelistV0_11_0)``. Types
     ``cdr_lite`` as :class:`CdrLiteCfgV0_12_0`, which adds
@@ -1820,6 +1887,18 @@ class RunTimeSettingsV0_12_0(RunTimeSettingsV0_11_0):
     """
 
     cdr_lite: CdrLiteCfgV0_12_0 = Field(default_factory=CdrLiteCfgV0_12_0)
+
+
+class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.13.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_13_0(RomsNamelistV0_12_0)``. Types
+    ``v_sponge`` as :class:`VSpongeCfgV0_13_0`, which adds ``v_sponge_trc``
+    (``&V_SPONGE_SETTINGS``) with its default, so a blueprint saved before it
+    existed still validates.
+    """
+
+    v_sponge: VSpongeCfgV0_13_0
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -1835,6 +1914,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
     RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
     RomsNamelistV0_12_0: RunTimeSettingsV0_12_0,
+    RomsNamelistV0_13_0: RunTimeSettingsV0_13_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -2029,7 +2109,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
         :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
         :class:`RunTimeSettingsV0_11_0` for 0.11.0 <= ucla-roms < 0.12.0;
-        :class:`RunTimeSettingsV0_12_0` for ucla-roms >= 0.12.0.
+        :class:`RunTimeSettingsV0_12_0` for 0.12.0 <= ucla-roms < 0.13.0;
+        :class:`RunTimeSettingsV0_13_0` for ucla-roms >= 0.13.0.
 
     Warns
     -----
