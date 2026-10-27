@@ -471,6 +471,13 @@ Bug Fixes
 - ``nest_ic`` fills child levels below the parent's bottom from the nearest deep-enough parent column instead of repeating the parent's deepest water. (`#863 <https://github.com/CWorthy-ocean/C-Star/pull/863>`_)
 - ``cstar run attach`` no longer lists every step directory of a copied or moved run under "Step directories no step accounts for". (`#868 <https://github.com/CWorthy-ocean/C-Star/pull/868>`_)
 - ``environment-laptop.yml`` now installs ``pkg-config``, which ParallelIO's configure requires; without it a laptop or workstation environment with no system ``pkg-config`` could not compile ROMS. (`#867 <https://github.com/CWorthy-ocean/C-Star/pull/867>`_)
+- ``cstar run check`` no longer reports a healthy run's own absolute paths (each step's directory in the transformed workplan, Forge's blueprint provenance) as problems; they are listed as informational. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+
+  - An absolute path to somewhere else in the data home, such as another run's output, is still a problem.
+  - A path spelled through a symlinked data home counts as the run's own too.
+
+- ``cstar run promote`` no longer prints "N problem(s) found" for a healthy copy: the source's paths into itself are informational, and any other absolute path the copy inherited is counted as "inherited from the source", matching the exit code. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+- ``cstar run check`` no longer counts the dangling link a cloned ucla-roms holds (``NHMG/src/.libs/libnhmg.la``) as a problem: dangling links inside a step's cloned codebases are informational. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 
 
 
@@ -580,6 +587,10 @@ Improvements
 - The ``wio_toy`` example and the bundled ``wales-toy`` blueprint now run on ucla-roms 0.13.0. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 
   - ``wales-toy`` builds ParallelIO from CWorthy's ``2.7.1-fork``, which ucla-roms 0.13 needs.
+
+- ``--verify`` on ``cstar run check``, ``cstar run attach`` and ``cstar run promote`` prints one line saying how many products were compared, matched and differed, and how many were skipped and why. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+- ``cstar run promote`` classifies the copy's absolute paths by the same rule as ``cstar run check``: paths into the source are informational in the copy. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+- The note about sentinel files that ``check``, ``attach`` and ``promote`` print for a run checked by its directory now says why there are none to check. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 
 
 
@@ -702,5 +713,6 @@ Miscellaneous
 - The CDR metrics page explains that, from roms-tools 5.3.0, uptake leaves out each domain's outermost cells, so a nested child's exported perturbation is counted once. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - The blueprint tutorial's wizard screenshot shows the current default model, and the UCLA-ROMS example page's roms-tools snippet uses ``Grid(filename=...)``. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - The prebuilt-case integration test now builds and runs ucla-roms 0.13.0 instead of 0.4.2. (`#869 <https://github.com/CWorthy-ocean/C-Star/pull/869>`_)
+- The run-check findings in the monitoring docs, "Verifying a transfer" and the promote page describe the informational findings and the verification line. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 
 
