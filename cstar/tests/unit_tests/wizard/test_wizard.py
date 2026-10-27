@@ -7075,6 +7075,32 @@ class TestCdrLiteSavedModel:
         wiz2.bgc_dd.value = "marbl"
         assert wiz2.config is not None, wiz2.derived.value
 
+    def test_a_hold_the_user_set_stays_out_of_the_saved_spec(self, tmp_path):
+        """A hold the user chose (here toggled off and on again, so the wizard no
+        longer owns it) is saved as the base value too, and the session keeps it.
+        """
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        catalog = DomainCatalog(catalog_root=root)
+        wiz = _cdr_lite_wizard(catalog)
+        checkbox = wiz.editor._widgets[_INTERP_KEY][0]
+        checkbox.value = True
+        checkbox.value = False
+        assert _INTERP_KEY not in wiz._wizard_default_keys
+
+        wiz.save_model_name.value = "my-cdr-lite-model"
+        wiz._on_save_model(None)
+
+        data = catalog.model_data("my-cdr-lite-model")
+        assert data["model_settings"]["cdr_lite"][_INTERP_KEY[1]] is True
+        assert "round-trip" not in wiz.save_model_status.value
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
+        assert wiz.editor._widgets[_INTERP_KEY][0].value is False
+
 
 class TestCdrLiteCdrPanel:
     def test_hint_lives_in_the_run_card_and_shows_only_for_cdr_lite(self):
