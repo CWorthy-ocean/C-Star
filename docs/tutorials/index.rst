@@ -33,7 +33,8 @@ The tutorials
 :doc:`blueprint_tutorial`
    Build a forge blueprint with the wizard, run Forge to generate the inputs
    of a tiny Western Indian Ocean domain, then run the UCLA-ROMS simulation
-   Forge produced. Introduces the three steps every C-Star project follows.
+   Forge produced. Introduces blueprints and the basic building blocks of
+   running an ocean model with C-Star.
 
 :doc:`workplan`
    Run the same two steps as one **workplan**: a YAML file that lists the
