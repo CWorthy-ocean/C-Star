@@ -472,7 +472,8 @@ def attach(
     tracked = TrackingRepository().get_workplan_run_sync(run_id)
     plan = _plan(tracked, manifest, root, mode=mode, explicit=own or read_only)
 
-    workplan = try_deserialize(trx, LiveWorkplan)
+    # rebased onto the copy, so its steps are found in this directory
+    workplan = LiveWorkplan.try_load(trx, tolerant=True)
     if workplan is None:
         typer.echo(f"Warning: unable to load the transformed workplan {trx}", err=True)
 
