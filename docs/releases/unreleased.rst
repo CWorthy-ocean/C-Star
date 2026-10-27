@@ -615,4 +615,5 @@ Miscellaneous
 - Every bundled model spec now pins its Forge templates to the commit that drops them; builds are unchanged for every ucla-roms release the specs pin. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
 - The wizard pages point to the nesting and upscaling tutorial for building an upscaled rerun by hand. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 - The nesting and upscaling tutorial says that closing the terminal does not stop a submitted run. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
+- The Tier 3 nesting test requires the CDR closure residual to be under 0.1 % of the uptake (was 10 %), or under 15 % for ucla-roms 0.11.0 and 0.12.0, whose upscaling export leaves out the mixing flux. (`#843 <https://github.com/CWorthy-ocean/C-Star/pull/843>`_)
 
