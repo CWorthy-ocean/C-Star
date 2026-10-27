@@ -447,6 +447,8 @@ Bug Fixes
 
   - A choice made on the switch before the blueprint is valid carries into the blueprint once it resolves.
 
+- Forge runs no longer print six ``PydanticSerializationUnexpectedValue`` warnings when writing the emitted blueprint; the blueprint itself was always correct. (`#861 <https://github.com/CWorthy-ocean/C-Star/pull/861>`_)
+
 
 
 Improvements
