@@ -1714,7 +1714,7 @@ class TestBgcModeSettings:
         assert ("bgc", "wrt_his") in wiz._overrides
         wiz._rebuild()  # (resolve fails: a load would also have set the forcing)
         assert ("bgc", "wrt_his") in wiz._overrides
-        assert wiz._active_overrides == {}
+        assert wiz._active_overrides == {_INTERP_KEY: False}  # the wizard's own
 
     def test_a_failed_mode_switch_swaps_the_stale_editor_for_a_placeholder(self):
         """cdr_lite with no CDR forcing yet does not resolve; the MARBL-mode editor
@@ -1731,7 +1731,7 @@ class TestBgcModeSettings:
         wiz.bgc_dd.value = "cdr_lite"
 
         assert wiz.config is None
-        assert wiz.editor is None and wiz._editor_key is None
+        assert wiz.editor is not marbl_editor and not wiz._editor_key.resolved
         (placeholder,) = wiz.editor_box.children
         assert wiz.output_editor_box.children == (placeholder,)
         assert "once the blueprint is valid" in placeholder.value
@@ -1742,7 +1742,7 @@ class TestBgcModeSettings:
             )
         # nothing is lost: kept for its mode, inactive under this one
         assert ("bgc", "wrt_his") in wiz._overrides
-        assert wiz._active_overrides == {}
+        assert wiz._active_overrides == {_INTERP_KEY: False}  # the wizard's own
 
         wiz.cdr_mode_dd.value = "simple"  # a CDR forcing: the config resolves again
         assert wiz.config is not None, wiz.derived.value
@@ -1774,7 +1774,7 @@ class TestBgcModeSettings:
 
         wiz.nest_enable.value = True
 
-        assert wiz.editor is None
+        assert wiz.editor is not stale and not wiz._editor_key.resolved
         (placeholder,) = wiz.output_editor_box.children
         assert "once the blueprint is valid" in placeholder.value
 
@@ -3642,6 +3642,60 @@ class TestCarbonateSensitivityTimeInterpolation:
         wiz.roms_ref.value = ""
         assert wiz.config is not None, wiz.derived.value
         assert self._checkbox(wiz).value is False
+
+    def test_the_switch_shows_before_the_blueprint_is_valid(self):
+        """cdr_lite does not resolve until a CDR forcing is picked; the switch
+        shows, at the wizard's default, as soon as the mode is picked, and a choice
+        made then reaches the blueprint once it resolves. Advanced and Output wait
+        for the valid blueprint.
+        """
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is None
+
+        checkbox = self._checkbox(wiz)
+        assert checkbox.value is False
+        assert wiz.cs_interp_box.children == (wiz.editor.model_box, wiz.cs_interp_note)
+        assert checkbox in _descendants(wiz.cs_group)
+        for box in (wiz.editor_box, wiz.output_editor_box):
+            (placeholder,) = box.children
+            assert "once the blueprint is valid" in placeholder.value
+
+        checkbox.value = True
+        assert wiz.config is None
+        assert self._checkbox(wiz) is checkbox  # same selection: not rebuilt
+        assert wiz._overrides[_INTERP_KEY] is True
+
+        wiz.cdr_mode_dd.value = "simple"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz._editor_key.resolved
+        assert wiz.editor_box.children == (wiz.editor.accordion,)
+        assert self._checkbox(wiz).value is True
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
+        assert wiz.config.composition.overrides == {"cdr_lite": {_INTERP_KEY[1]: True}}
+
+    @pytest.mark.parametrize("pick", ["model", "roms_ref"])
+    def test_an_older_release_drops_the_switch_on_an_invalid_blueprint(self, pick):
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is None
+        assert wiz.cs_interp_box.children
+
+        if pick == "model":
+            wiz.model_dd.value = "roms-marbl-0.11-default"
+            wiz.bgc_dd.value = "cdr_lite"
+        else:
+            wiz.roms_ref.value = "0.11.0"
+
+        assert wiz.config is None
+        assert wiz.cs_interp_box.children == ()
+        assert _INTERP_KEY not in wiz._overrides
 
     def test_a_loaded_blueprint_keeps_its_own_value(self):
         wiz = self._wizard()
