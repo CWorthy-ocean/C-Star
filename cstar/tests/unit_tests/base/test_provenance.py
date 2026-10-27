@@ -5,6 +5,7 @@ from unittest import mock
 import pytest
 
 from cstar.base import provenance
+from cstar.base.env import ENV_CSTAR_SYSTEM
 from cstar.base.provenance import (
     DEFAULT_PACKAGES,
     canonical_hash,
@@ -37,17 +38,23 @@ def test_package_versions_skips_missing_packages() -> None:
         assert package_versions() == dict.fromkeys(DEFAULT_PACKAGES, "1.2.3")
 
 
-def test_system_name_is_the_hosts_name() -> None:
-    """Verify the host's name is returned."""
-    with mock.patch("cstar.system.manager.HostNameEvaluator") as evaluator:
-        evaluator.return_value.name = "anvil"
-        assert system_name() == "anvil"
+def test_system_name_is_the_selected_system(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the system C-Star selected is returned, `CSTAR_SYSTEM` included."""
+    monkeypatch.setenv(ENV_CSTAR_SYSTEM, "anvil")
+    assert system_name() == "anvil"
+
+
+def test_system_name_is_empty_for_an_unknown_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a `CSTAR_SYSTEM` naming no system yields an empty name, not an error."""
+    monkeypatch.setenv(ENV_CSTAR_SYSTEM, "not-a-system")
+    assert system_name() == ""
 
 
 def test_system_name_is_empty_when_the_host_cannot_be_named() -> None:
     """Verify an unidentifiable host yields an empty name."""
-    with mock.patch("cstar.system.manager.HostNameEvaluator") as evaluator:
-        type(evaluator.return_value).name = mock.PropertyMock(side_effect=OSError)
+    with mock.patch("cstar.system.manager.select_system", side_effect=OSError):
         assert system_name() == ""
 
 

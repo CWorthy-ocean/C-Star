@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, ClassVar, Final, Protocol, override
 
 from pydantic import Field
 
-from cstar.base.env import ENV_CSTAR_SYSTEM, get_env_item, load_user_config
+from cstar.base.env import (
+    ENV_CSTAR_SYSTEM,
+    get_env_item,
+    load_user_config,
+    load_user_config_for_repair,
+)
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.system.environment import (
@@ -43,8 +48,12 @@ DOCS_MACHINES_URL: Final[str] = (
 
 
 class HostNameEvaluator:
-    """Container of host-specific names used to determine the system name that will be
-    used by C-Star.
+    """The system detector: names the machine from what it reports (Lmod, a
+    registered context's own test, the platform), ignoring `CSTAR_SYSTEM`.
+
+    Only `detect_system` reads it. Everything else that names the system C-Star
+    runs on asks `selected_system_name` (or `select_system`, for how it was
+    chosen), so the setting and the generic fallback apply there too.
     """
 
     lmod_settings: Final[LmodEnvSettings]
@@ -91,7 +100,8 @@ class HostNameEvaluator:
 
     @property
     def name(self) -> str:
-        """Determine the system name that will be used by C-Star.
+        """Determine the detected system name (not necessarily the one C-Star uses;
+        see `selected_system_name`).
 
         Prioritizes the LMOD-based system name. When LMOD-specific environment
         variables are not present, the name is determiend by the OS.
@@ -345,6 +355,27 @@ def select_system() -> SystemSelection:
     return detect_system()
 
 
+def selected_system_name() -> str:
+    """Return the name of the system C-Star uses on this machine.
+
+    The one way to ask "which system is this": `CSTAR_SYSTEM` (exported, or saved
+    in the configuration file), else detection, else the platform's generic context
+    (see `select_system`). The configuration file is loaded first, so library and
+    notebook use sees a saved setting as the CLI does.
+
+    Raises
+    ------
+    CstarError
+        If the configuration file is refused, `CSTAR_SYSTEM` names an
+        unregistered system, or detection finds an unregistered system on a
+        platform with no generic context.
+    OSError
+        If no system name can be determined at all.
+    """
+    load_user_config()
+    return select_system().context.name
+
+
 def get_system_context() -> SystemContext:
     """Return the system context C-Star uses on this machine (see `select_system`).
 
@@ -363,8 +394,10 @@ def system_label() -> str:
     """Name the system context in use for display (see `SystemSelection.describe`).
 
     Never raises: a display must not fail on a misconfigured system, so it shows
-    why the system could not be determined instead.
+    why the system could not be determined instead. A configuration file the
+    loader refuses is skipped, as `cstar env` skips it.
     """
+    load_user_config_for_repair()
     try:
         return select_system().describe()
     except (CstarError, OSError) as ex:

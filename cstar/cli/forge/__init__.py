@@ -190,7 +190,13 @@ def run(
 ) -> None:
     """Process a forge blueprint with the full executor option set."""
     from cstar.applications.forge.runtime import run_blueprint
+    from cstar.cli.common import exit_on_failure
+    from cstar.system.manager import selected_system_name
 
+    # refuse a system C-Star cannot use (an unknown CSTAR_SYSTEM) in one line, as
+    # the other commands do, before any work; later failures keep their traceback
+    with exit_on_failure():
+        selected_system_name()
     code = run_blueprint(
         forge_blueprint=forge_blueprint,
         no_data=no_data,
@@ -321,13 +327,16 @@ def show_paths(
         help="Output paths as JSON instead of human-readable text.",
     ),
 ) -> None:
-    """Show the detected compute system and configured data paths.
+    """Show the system C-Star uses and the configured data paths.
 
     A warning-free replacement for ``python -m cstar.applications.forge.config show-paths``.
     """
     from cstar.applications.forge.config import format_paths
+    from cstar.cli.common import exit_on_failure
 
-    typer.echo(format_paths(as_json=json_output))
+    with exit_on_failure():
+        text = format_paths(as_json=json_output)
+    typer.echo(text)
 
 
 def _exec_voila(argv: list[str]) -> None:

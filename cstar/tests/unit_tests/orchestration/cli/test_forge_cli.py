@@ -58,6 +58,16 @@ class TestRun:
         # The dropped experiment flag must not resurface.
         assert "--stage-ic-sources" not in output
 
+    def test_unknown_system_setting_is_refused_before_any_work(self, monkeypatch):
+        monkeypatch.setenv("CSTAR_SYSTEM", "not-a-system")
+        with patch("cstar.applications.forge.runtime.run_blueprint") as mock_run:
+            result = runner.invoke(cli.app, ["run", "bp.yaml"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "'not-a-system' is not a registered system" in result.output
+        mock_run.assert_not_called()
+
     def test_options_map_to_run_blueprint_kwargs(self):
         with patch(
             "cstar.applications.forge.runtime.run_blueprint", return_value=0
@@ -290,6 +300,26 @@ class TestShowPaths:
         assert result.exit_code == 0
         assert "SENTINEL" in result.output
         mock_fmt.assert_called_once_with(as_json=False)
+
+    @pytest.mark.parametrize("args", [["show-paths"], ["show-paths", "--json"]])
+    def test_unknown_system_setting_is_refused(self, monkeypatch, args):
+        monkeypatch.setenv("CSTAR_SYSTEM", "not-a-system")
+
+        result = runner.invoke(cli.app, args)
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "'not-a-system' is not a registered system" in result.output
+        assert "linux_x86_64" in result.output
+        assert "System tag" not in result.output
+
+    def test_names_the_system_the_setting_selects(self, monkeypatch):
+        monkeypatch.setenv("CSTAR_SYSTEM", "linux_x86_64")
+
+        result = runner.invoke(cli.app, ["show-paths"])
+
+        assert result.exit_code == 0
+        assert "System tag : linux_x86_64 (set by CSTAR_SYSTEM)" in result.output
 
 
 class TestImportCost:
