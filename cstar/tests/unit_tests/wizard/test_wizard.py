@@ -3584,8 +3584,10 @@ class TestCarbonateSensitivityTimeInterpolation:
         return wiz.editor._widgets[_INTERP_KEY][0]
 
     def test_cdr_lite_starts_with_the_hold_in_the_model_card(self):
+        from cstar.wizard.wizard import _DEFAULT_MODEL
+
         wiz = self._wizard()
-        assert wiz.model_dd.value == "roms-marbl-0.12-default"
+        assert wiz.model_dd.value == _DEFAULT_MODEL
         checkbox = self._checkbox(wiz)
         assert checkbox.value is False
         assert wiz.cs_interp_box.children == (wiz.editor.model_box, wiz.cs_interp_note)
