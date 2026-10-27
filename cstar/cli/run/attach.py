@@ -40,12 +40,12 @@ from cstar.orchestration.index import (
 )
 from cstar.orchestration.manifest import (
     RunManifest,
+    find_transformed_workplan,
     fold_step_records,
     read_run_manifest,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle, Status
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     FindingKind,
     check_run,
 )
@@ -250,18 +250,14 @@ def _read_run(root: Path) -> tuple[RunManifest, Path]:
 
     fold_step_records(manifest, root, tolerant=True)
 
-    found = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(found) == 1:
-        return manifest, found[0]
-    if not found:
+    try:
+        found = find_transformed_workplan(root, manifest.workplan_path)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
+    if found is None:
         msg = f"Run {manifest.run_id!r} at {root} holds no transformed workplan"
-    else:
-        names = ", ".join(path.name for path in found)
-        msg = (
-            f"Run {manifest.run_id!r} at {root} holds more than one transformed "
-            f"workplan ({names}); remove the stale ones."
-        )
-    raise typer.BadParameter(msg)
+        raise typer.BadParameter(msg)
+    return manifest, found
 
 
 def _tracked_as(tracked: WorkplanRun) -> str:

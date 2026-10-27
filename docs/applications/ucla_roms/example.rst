@@ -34,7 +34,7 @@ The blueprint
 Reading it top to bottom:
 
 ``code``
-   ``roms`` and ``marbl`` pin the model code to a commit and a tag. The
+   ``roms`` and ``marbl`` pin the model code to a release tag of each. The
    ``run_time`` and ``compile_time`` sections point at the examples
    repository and list the files to take from it. ``namelist.nml`` under
    ``run_time`` is the namelist template: C-Star keeps its scientific
@@ -88,7 +88,7 @@ input is partitioned into 2 by 5 tiles, and the model is launched:
    [INFO] - 📦 Fetching input datasets...
    [INFO] - Partitioning .../input/input_datasets/cson_roms-marbl_v0.1_wio-toy_10procs_grid.nc into (2,5)
    ...
-   [INFO] - Running mpirun -n 10 .../input/compile_time_code/roms .../work/cstar_generated_roms.nml
+   [INFO] - Running mpirun -n 10 ./roms cstar_generated_roms.nml
 
 The first run compiles ucla-roms and MARBL, which takes a few minutes; the
 model itself runs in well under a minute. To run the blueprint again in the
@@ -110,8 +110,9 @@ Under the working directory:
 ``logs/``
    The model's own log. An error from ROMS or MARBL shows up here.
 ``output/``
-   The joined output files, one per stream and time: ``output_his.*.nc``,
-   ``output_rst.*.nc``, ``output_bgc.*.nc`` and so on.
+   The joined output files, one per stream and time. This short run writes
+   ``output_his.*.nc``, ``output_bgc.*.nc`` and ``output_bgc_dia.*.nc``; a
+   run of a day or more also writes restarts, ``output_rst.*.nc``.
 ``cstar-step.yaml``
    The :term:`step record`: when the run started and finished, on what, and
    the output files it left.
@@ -124,8 +125,8 @@ The output files open with `ROMS-Tools
 
    from roms_tools import Grid, ROMSOutput
 
-   grid = Grid.from_file(
-       "~/cstar/wio_toy_blueprint/input/input_datasets/cson_roms-marbl_v0.1_wio-toy_10procs_grid.nc"
+   grid = Grid(
+       filename="~/cstar/wio_toy_blueprint/input/input_datasets/cson_roms-marbl_v0.1_wio-toy_10procs_grid.nc"
    )
    roms_output = ROMSOutput(
        grid=grid,

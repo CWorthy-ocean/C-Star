@@ -29,7 +29,7 @@ from pydantic import (
     model_validator,
 )
 
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import MAX_CONCURRENCY, slugify, utc_now
 from cstar.execution.file_system import (
@@ -41,11 +41,10 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.manifest import (
     DOCUMENT_READ_ERRORS,
-    TRANSFORMED_WORKPLAN_GLOB,
     RunManifest,
+    find_transformed_workplan,
     read_run_manifest,
     recorded_step_status,
-    transformed_workplan_path,
 )
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.orchestration import (
@@ -363,9 +362,7 @@ class WorkplanRun(VersionedDocument):
             self._identity = _Identity(
                 name=manifest.name,
                 start_at=aware_utc(started),
-                workplan_path=(
-                    Path(manifest.workplan.path) if manifest.workplan else None
-                ),
+                workplan_path=manifest.workplan_path,
             )
         return self._identity
 
@@ -405,10 +402,11 @@ class WorkplanRun(VersionedDocument):
         """The transformed workplan in the run directory.
 
         The scheduler writes it next to the manifest as `<stem>_transformed.yaml`,
-        the stem being the authored workplan's. A run directory that holds one
-        transformed workplan under another name (an earlier release's naming)
-        answers with it, and a record of an older release with the path it
-        held.
+        the stem being the authored workplan's. A run directory of an earlier
+        release holds it under that release's naming (`.yml` for a `.yml`
+        workplan). A record of an older release holds the path it was found at,
+        which answers when the directory holds none, or more than one and the
+        manifest names none of them.
 
         Returns
         -------
@@ -422,27 +420,20 @@ class WorkplanRun(VersionedDocument):
         """
         root = self.output_path
         found = self._from_manifest()
-        if found is not None and found.workplan_path is not None:
-            named = transformed_workplan_path(root, found.workplan_path)
-            if named.exists():
-                return named
-
+        authored = found.workplan_path if found is not None else None
         try:
-            candidates = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
+            plan = find_transformed_workplan(root, authored)
+        except CstarError:
+            if self.legacy.trx_workplan_path is not None:
+                return self.legacy.trx_workplan_path
+            raise
         except OSError as ex:
             log.debug(f"Unable to list the run directory {root}: {ex}")
-            candidates = []
-        if len(candidates) == 1:
-            return candidates[0]
+            plan = None
+        if plan is not None:
+            return plan
         if self.legacy.trx_workplan_path is not None:
             return self.legacy.trx_workplan_path
-        if candidates:
-            names = ", ".join(path.name for path in candidates)
-            msg = (
-                f"Run {self.run_id!r} at {root} holds more than one transformed "
-                f"workplan ({names}); remove the stale ones."
-            )
-            raise CstarError(msg)
         msg = f"Run {self.run_id!r} at {root} holds no transformed workplan"
         raise CstarError(msg)
 
@@ -653,6 +644,33 @@ def require_writable(run: WorkplanRun, *, action: str) -> None:
             "ownership of it."
         )
         raise CstarError(msg)
+
+
+def require_relaunchable(run: WorkplanRun) -> None:
+    """Refuse to relaunch a run that was attached from elsewhere.
+
+    The one chokepoint every route that launches a run calls: an attached run
+    has no sentinels on this machine, and relaunching it would displace the
+    tracking of the run it stands for.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The tracked run, as its latest record has it.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the run was attached from elsewhere.
+    """
+    if run.attached:
+        msg = (
+            f"Run {run.run_id!r} was attached from {run.output_path}: attached runs "
+            "can be inspected and referenced, and relaunching after a move is not "
+            "supported. Start a new run with `--run-id <new>` that references it "
+            "(see 'Extending a finished run' in the workplan docs)."
+        )
+        raise CstarExpectationFailed(msg)
 
 
 def read_run_record(path: Path, *, tolerant: bool = False) -> WorkplanRun:

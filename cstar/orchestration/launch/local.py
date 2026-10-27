@@ -43,6 +43,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
+from cstar.orchestration.serialization import try_deserialize
 from cstar.orchestration.state import StateRepository
 from cstar.system.scheduler import parse_walltime
 
@@ -628,6 +629,41 @@ class LocalLauncher(Launcher[LocalHandle]):
         return not alive
 
     @staticmethod
+    def _terminal_status(status: Status) -> str:
+        """Map a terminal status to the name used by `_status`."""
+        if status == Status.Failed:
+            return "FAILED"
+        if status == Status.Cancelled:
+            return "CANCELLED"
+        return "COMPLETED"
+
+    @staticmethod
+    async def _finalized_status(handle: LocalHandle) -> Status | None:
+        """Read the terminal status the step's proxy recorded for this attempt.
+
+        Parameters
+        ----------
+        handle : LocalHandle
+            A handle read from an earlier attempt's sentinel.
+
+        Returns
+        -------
+        Status | None
+            The status of the sentinel on disk when it is terminal and was written
+            for the same process (same pid and start time); `None` when it is
+            missing, unreadable, not terminal, or belongs to another attempt.
+        """
+        path = StateRepository.sentinel_path(handle, run_id=handle.run_id)
+        on_disk = await asyncio.to_thread(try_deserialize, path, LocalHandle)
+        if (
+            on_disk is not None
+            and (on_disk.pid, on_disk.start_at) == (handle.pid, handle.start_at)
+            and Status.is_terminal(on_disk.status)
+        ):
+            return on_disk.status
+        return None
+
+    @staticmethod
     async def _status(handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
@@ -646,15 +682,16 @@ class LocalLauncher(Launcher[LocalHandle]):
             # Popen: report its persisted terminal outcome, and treat a
             # non-terminal status whose process is gone as a failure so a
             # step killed before finalizing its sentinel is re-run, not adopted
-            if handle.status == Status.Failed:
-                return "FAILED"
-            if handle.status == Status.Cancelled:
-                return "CANCELLED"
             if Status.is_terminal(handle.status):
-                return "COMPLETED"
+                return LocalLauncher._terminal_status(handle.status)
             if LocalLauncher._is_alive(handle):
                 # the proxy records Running once its dependencies are done
                 return "RUNNING" if Status.is_running(handle.status) else "PENDING"
+            # the proxy writes its final status before it exits, so a handle read
+            # while the step ran can outlive it: re-read the sentinel, or the
+            # stale status would be persisted over the finished step's
+            if (final := await LocalLauncher._finalized_status(handle)) is not None:
+                return LocalLauncher._terminal_status(final)
             msg = (
                 f"Process {handle.pid} for step {handle.name!r} is gone but its "
                 f"status was never finalized ({handle.status.name}); treating as failed."

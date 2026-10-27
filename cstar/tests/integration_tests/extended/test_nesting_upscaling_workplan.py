@@ -107,7 +107,7 @@ MAX_CLOSURE_FRACTION = 1e-3
 
 The two uptakes are two sums over one carbon budget once the child's ``_uscl`` export
 holds the mixing flux (ucla-roms #399) and each domain's metrics leave out its boundary
-rows and columns (roms-tools after 5.2.2), so the residual is round-off: 7e-6 on this example.
+rows and columns (roms-tools 5.3.0), so the residual is round-off: 7e-6 on this example.
 """
 NO_MIXING_EXPORT_REFS = ("0.11.0", "0.12.0")
 """ucla-roms releases whose ``_uscl`` export leaves out the mixing flux (before #399)."""

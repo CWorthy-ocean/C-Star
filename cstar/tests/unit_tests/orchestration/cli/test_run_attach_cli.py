@@ -616,6 +616,24 @@ def test_the_authored_workplan_is_the_manifests(
     assert "workplan_path" not in stored
 
 
+def test_a_yml_transformed_workplan_of_cstar_0_17_is_found(
+    elsewhere: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify a run whose plan 0.17 named `<stem>_transformed.yml` attaches, and
+    its record answers with that plan.
+    """
+    built = elsewhere()
+    plan = built.root / f"{built.run_id}_transformed.yaml"
+    yml = plan.rename(plan.with_suffix(".yml"))
+
+    result = invoke("attach", str(built.root))
+
+    assert result.exit_code == 0, result.output
+    record = tracked(built.run_id)
+    assert record is not None
+    assert record.trx_workplan_path == yml
+
+
 def test_attached_runs_are_known_by_their_run_id(
     elsewhere: t.Callable[..., BuiltRun],
 ) -> None:
