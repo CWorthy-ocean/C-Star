@@ -4077,6 +4077,26 @@ class TestGoldenNamelist:
                 compile_time_settings=compile_ov, run_time_settings=run_ov
             )
 
+    def test_configure_build_emits_no_pydantic_serializer_warnings(
+        self, mock_grid, tmp_path, recwarn
+    ):
+        """After ``generate_inputs()`` the in-memory blueprint is built with
+        ``model_construct`` from plain dicts, and ``configure_build`` dumps it
+        before re-validating. The ``Blueprint`` wrap serializer attributes the
+        resulting Pydantic serializer warnings to ``cstar.orchestration.models``,
+        so a filter keyed on ``module="pydantic"`` let every one reach the user.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0110
+        )
+        recwarn.clear()
+
+        self._configure_build_for(cfg, builder)
+
+        assert not [
+            w for w in recwarn if "Pydantic serializer warnings" in str(w.message)
+        ]
+
     def test_configure_build_cdr_lite_output_forces_cdr_forcing_end_to_end(
         self, mock_grid, tmp_path
     ):
