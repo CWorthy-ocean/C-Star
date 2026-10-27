@@ -442,6 +442,7 @@ Bug Fixes
 - ``cstar run status`` no longer records a step that is still waiting on its dependencies as Running, and no longer rewrites a step's start time in a different format. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - A ForcingSpec in the pre-v8 shape (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) failed with a validation error when passed to ``build_forge_blueprint`` outside the wizard; it is now migrated. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 - On a Linux cluster with Lmod that C-Star doesn't list, C-Star reset the user's loaded modules and then crashed looking for a module list that doesn't exist. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
+- Log lines from classes with their own logger (e.g. ``Launched step: …`` during ``cstar workplan submit`` / ``run``) were printed twice to STDOUT; they now print once. (`#860 <https://github.com/CWorthy-ocean/C-Star/pull/860>`_)
 
 
 Improvements
