@@ -37,6 +37,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
+    Access,
     TrackingRepository,
     WorkplanRun,
     aware_utc,
@@ -258,6 +259,27 @@ def where_kept(location: RunLocation) -> str:
     if location.origin is Origin.local:
         return WHERE_UNTRACKED
     return WHERE_LINKED if location.durability is Durability.linked else WHERE_PROJECT
+
+
+def where_tracked(run: WorkplanRun) -> str:
+    """Say where a run that tracking holds is kept, as its record says.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The tracking record.
+
+    Returns
+    -------
+    str
+        `WHERE_TRACKED` for a run started here, else `WHERE_ATTACHED` or
+        `WHERE_ATTACHED_READ_ONLY`.
+    """
+    if not run.attached:
+        return WHERE_TRACKED
+    if run.access is Access.read_only:
+        return WHERE_ATTACHED_READ_ONLY
+    return WHERE_ATTACHED
 
 
 def untracked_locations(
@@ -719,8 +741,8 @@ class ManifestRecord:
         return recorded_step_status(self.output_path, manifest, name)
 
 
-def tracked_by_uuid(uuid: str) -> WorkplanRun | None:
-    """The tracking record of the run with a uuid, wherever its directory is.
+def _tracked_copies(uuid: str) -> list[WorkplanRun]:
+    """The tracking records of the run with a uuid whose run directory exists.
 
     Only the uuid cached in each record's metadata is compared, so no manifest
     is read; a record that does not cache its uuid is not found this way. Tracking
@@ -733,20 +755,15 @@ def tracked_by_uuid(uuid: str) -> WorkplanRun | None:
 
     Returns
     -------
-    WorkplanRun | None
-        The record whose run directory exists, or `None` when tracking holds
-        none, or the records cannot be read.
-
-    Raises
-    ------
-    CstarError
-        If more than one record with a run directory has the uuid.
+    list[WorkplanRun]
+        Every such record: copies of one run, which the uuid names. Empty when
+        tracking holds none, or the records cannot be read.
     """
     try:
         records = TrackingRepository().list_latest_runs_sync()
     except (ValueError, OSError) as ex:
         log.debug(f"Unable to read the tracking records for {run_uri(uuid)}: {ex}")
-        return None
+        return []
 
     found = [
         run
@@ -757,13 +774,59 @@ def tracked_by_uuid(uuid: str) -> WorkplanRun | None:
         f"Read {len(records)} tracking record(s) looking for {run_uri(uuid)}: "
         f"{len(found)} found"
     )
+    return found
+
+
+def _copy_rank(run: WorkplanRun) -> tuple[int, float, str]:
+    """Rank a copy of a run: lower is preferred, as `tracked_by_uuid` says.
+
+    The run-id settles a tie, so the choice never depends on the order the
+    records are listed in.
+    """
+    if not run.attached:
+        kind = 0
+    elif run.access is Access.owned:
+        kind = 1
+    else:
+        kind = 2
+    # the latest recorded first, among copies of one kind
+    return kind, -aware_utc(run.recorded_at).timestamp(), run.run_id
+
+
+def tracked_by_uuid(uuid: str) -> WorkplanRun | None:
+    """The tracking record of the run with a uuid, wherever its directory is.
+
+    Only the uuid cached in each record's metadata is compared, so no manifest
+    is read. Several records hold one uuid when copies of the run are tracked
+    under several run-ids (a run attached `--as` another run-id, a promoted or
+    copied run attached alongside it). They are one run, so one is chosen: the
+    run started here, else an owned attached copy, else a read-only one; the
+    most recently recorded among copies of one kind. A warning names the one
+    chosen and the copies passed over.
+
+    Parameters
+    ----------
+    uuid : str
+        The canonical lowercase uuid.
+
+    Returns
+    -------
+    WorkplanRun | None
+        The chosen record whose run directory exists, or `None` when tracking
+        holds none, or the records cannot be read.
+    """
+    found = sorted(_tracked_copies(uuid), key=_copy_rank)
     if len(found) > 1:
-        listed = ", ".join(f"{run.run_id!r} at {run.output_path}" for run in found)
-        msg = (
-            f"More than one tracked run has the uuid {uuid}: {listed}. "
-            "Pass the run-id to say which."
+        chosen, *others = found
+        passed = ", ".join(
+            f"{run.run_id!r} at {run.output_path} ({where_tracked(run)})"
+            for run in others
         )
-        raise CstarError(msg)
+        log.warning(
+            f"{len(found)} tracked runs are copies of {run_uri(uuid)}; using "
+            f"{chosen.run_id!r} at {chosen.output_path} ({where_tracked(chosen)}). "
+            f"Passed over: {passed}. Pass a run-id or a directory to use another."
+        )
     return found[0] if found else None
 
 
@@ -782,31 +845,39 @@ def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | Non
     -------
     WorkplanRun | None
         The record, when tracking holds one for the run-id under the run's uuid
-        and its run directory exists; failing that, the record that has the
-        run's uuid under another run-id, as a run attached `--as` has;
-        otherwise `None`. Records that cannot be told apart (several share the
-        run's uuid) count as none: the location is the run the user found.
+        and its run directory exists (the location's own, when `same_root`);
+        failing that, a record that has the run's uuid under another run-id, as
+        a run attached `--as` has: the one of the location's own directory when
+        `same_root`, else the one `tracked_by_uuid` chooses; otherwise `None`.
     """
     if location.kind != "workplan":
         return None
+    root = location.root.resolve()
     try:
         tracked = TrackingRepository().get_workplan_run_sync(
             location.run_id, tolerant=True
         )
         if (
-            tracked is None
-            or not tracked.output_path.is_dir()
-            or tracked.uuid != location.uuid
+            tracked is not None
+            and tracked.output_path.is_dir()
+            and tracked.uuid == location.uuid
+            and (not same_root or tracked.output_path.resolve() == root)
         ):
-            tracked = tracked_by_uuid(location.uuid)
-        if tracked is None:
-            return None
-        if same_root and tracked.output_path.resolve() != location.root.resolve():
-            return None
+            return tracked
+        if not same_root:
+            return tracked_by_uuid(location.uuid)
+        # the user named the directory: its own record, and no copy is chosen
+        return next(
+            (
+                run
+                for run in _tracked_copies(location.uuid)
+                if run.output_path.resolve() == root
+            ),
+            None,
+        )
     except (ValueError, OSError, CstarError) as ex:
         log.debug(f"Unable to use the tracking record of {location.run_id!r}: {ex}")
         return None
-    return tracked
 
 
 def _prefer_tracked(
@@ -1039,7 +1110,9 @@ def resolve_run(
 
     - A directory handle reads the manifest in that directory.
     - A uuid handle finds the manifests holding that uuid, preferring one that
-      tracking also holds.
+      tracking also holds. When tracking holds several copies of the run (under
+      several run-ids), the run started here is used, else an attached copy,
+      with a warning naming the copies passed over.
     - A run-id handle goes to tracking first, and a tracked run wins outright:
       when the project area holds another run of that run-id, a warning says so
       and names how to pick it. If the tracked run's directory is gone, a copy of

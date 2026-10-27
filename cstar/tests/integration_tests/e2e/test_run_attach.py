@@ -20,12 +20,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 
 from cstar.base.utils import slugify
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
     Product,
+    find_transformed_workplan,
     read_run_manifest,
     read_step_record,
     write_step_record,
@@ -399,3 +401,51 @@ def test_attach_as_another_run_id(attach_run: AttachRun) -> None:
     first = run_cstar(env, "run", "show", RUN_ID, "--format", "json")
     assert first.returncode == 0, _output(first)
     assert json.loads(first.stdout)["id"] == attach_run.uuid
+
+
+def test_a_uuid_finds_the_original_over_a_copy_attached_as_another_run_id(
+    attach_run: AttachRun,
+) -> None:
+    """A copy attached ``--as`` next to the original leaves ``run://<uuid>`` on the original."""
+    env = attach_run.original_env
+    copy_id = f"{RUN_ID}-copy"
+    copy = attach_run.copy("uuid-copy")
+    attached = _attach(env, copy, "--as", copy_id)
+    assert attached.returncode == 0, _output(attached)
+
+    path = run_cstar(env, "run", "path", attach_run.handle)
+    assert path.returncode == 0, _output(path)
+    assert Path(path.stdout.strip()).resolve() == attach_run.original.resolve()
+    assert f"Passed over: '{copy_id}'" in flat_output(path.stderr), _output(path)
+
+    root = attach_run.root / "uuid-consumer"
+    consumer_id = "uuid-consumer"
+    workplan = write_consumer(root / "plan", attach_run.handle)
+    state_home = attach_run.root / "producer" / "state"
+    data_home = attach_run.root / "producer" / "data"
+    proc = run_cstar(env, "workplan", "submit", "--run-id", consumer_id, str(workplan))
+    try:
+        statuses = wait_for_terminal(
+            state_home,
+            consumer_id,
+            [STEP],
+            timeout=RUN_TIMEOUT,
+            poll_interval=POLL_INTERVAL,
+        )
+        if proc.returncode != 0 or statuses != {STEP: DONE}:
+            pytest.fail(
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
+                f"{_output(proc)}\n{run_log_tails(data_home, consumer_id)}"
+            )
+    finally:
+        kill_run(state_home, consumer_id, [STEP])
+
+    assert f"Passed over: '{copy_id}'" in flat_output(_output(proc)), _output(proc)
+    # the alias is pinned to the record chosen, so it resolves there again
+    transformed = find_transformed_workplan(data_home / "workplan_runs" / consumer_id)
+    assert transformed is not None
+    pinned = yaml.safe_load(transformed.read_text())["runs"]["base"]
+    assert (pinned["run_id"], pinned["id"]) == (RUN_ID, attach_run.uuid), pinned
+    log = step_root(data_home, consumer_id, STEP) / "logs" / f"{STEP}.out"
+    producer_output = attach_run.original / "tasks" / slugify(PRODUCER) / "output"
+    assert f"Hello, {producer_output}" in log.read_text(errors="replace")

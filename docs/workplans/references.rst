@@ -116,7 +116,9 @@ A run is named in one of three ways:
 - ``run://<uuid>`` is the ``id`` in the run's :doc:`manifest
   <../runs/moving/manifest>`, which the ``Id`` row of ``cstar run show``
   prints. The scheme is not case-sensitive. A uuid names one run; two runs
-  can share a run-id.
+  can share a run-id. When copies of the run are tracked here under several
+  run IDs, the uuid resolves to the run started here first, then to an
+  attached copy.
 - A directory is the run directory, the one that holds ``cstar-run.yaml``.
   Anything with a ``/``, or starting with ``.`` or ``~``, is read as a
   directory, so ``./spinup`` is a directory and ``spinup`` is a run ID. A
@@ -174,7 +176,11 @@ How run references are resolved
   in directories of that name in your data home and the project runs area.
   If two different runs share the run ID, C-Star stops and lists them; name
   the one you mean by ``run://<uuid>`` or by its directory.
-- ``run://<uuid>`` is looked up in the same places.
+- ``run://<uuid>`` is looked up in the same places; when copies of the run
+  are tracked under several run IDs, it resolves to the run started here
+  first, then to an owned attached copy, then to a read-only one, with a
+  warning naming the copies passed over (name a copy by its run ID or
+  directory to use it).
 - A directory is read directly, wherever it is.
 
 The rules
