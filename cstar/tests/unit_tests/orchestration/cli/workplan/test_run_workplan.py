@@ -4373,6 +4373,55 @@ def test_workplan_run_refuses_to_reload_an_attached_run(
     run_dag.assert_not_called()
 
 
+@pytest.mark.parametrize("explicit", [True, False])
+def test_workplan_run_refuses_to_launch_over_an_attached_run(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    squash_cli_output: Callable[[str], str],
+    explicit: bool,
+) -> None:
+    """Verify an authored workplan whose run-id, given with `--run-id` or derived
+    from its name, is that of a run attached from elsewhere is refused before
+    anything is written, and the attached run stays tracked as it was.
+
+    Parameters
+    ----------
+    explicit : bool
+        Whether the run-id is passed with `--run-id` rather than derived.
+    """
+    step = Step(
+        name="Say Hello", application="hello_world", blueprint=hello_world_bp_path
+    )
+    wp_path = _write_workplan(tmp_path / "hw-workplan.yaml", [step])
+    run_id = (
+        "attached-elsewhere"
+        if explicit
+        else WorkplanRun.get_default_run_id(wp_path.as_posix())
+    )
+    root = tmp_path / "colleague" / run_id
+    TrackingRepository().put_workplan_run_sync(
+        _recorded_run(run_id, wp_path, root, attached=True)
+    )
+    args = [wp_path.as_posix(), *([ARG_RUN_ID, run_id] if explicit else [])]
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch("cstar.orchestration.dag_runner.run_dag") as run_dag,
+    ):
+        result = CliRunner().invoke(app, args, color=False)
+
+    assert result.exit_code == 1, result.output
+    text = squash_cli_output(result.output)
+    assert squash_cli_output(f"Run '{run_id}' was attached from {root}") in text
+    assert squash_cli_output("--run-id <new>") in text
+    run_dag.assert_not_called()
+    assert not list(StateDirectoryManager.data_dir(run_id).glob("*_transformed.yaml"))
+    tracked = TrackingRepository().get_workplan_run_sync(run_id)
+    assert tracked is not None
+    assert tracked.attached
+    assert tracked.output_path == root
+
+
 def test_handle_run_reloading_refuses_an_attached_run(
     tmp_path: Path, wp_templates_dir: Path, mock_run_id: str
 ) -> None:

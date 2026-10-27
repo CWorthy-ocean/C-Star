@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.manifest import (
@@ -51,6 +51,7 @@ from cstar.orchestration.tracking import (
     WorkplanRun,
     measure_step_sizes,
     read_run_record,
+    require_relaunchable,
     require_writable,
 )
 from cstar.system.migration import CstarSchemaTooNewError
@@ -1429,6 +1430,25 @@ def test_require_writable_refuses_a_read_only_run(tmp_path: Path) -> None:
     assert "--repair writes into" in message
     assert str(run.output_path) in message
     assert "--own" in message
+
+
+def test_require_relaunchable_lets_a_scheduled_run_through(tmp_path: Path) -> None:
+    """Verify a run that was not attached may be relaunched."""
+    require_relaunchable(_make_workplan_run(tmp_path, "mine"))
+
+
+def test_require_relaunchable_refuses_an_attached_run(tmp_path: Path) -> None:
+    """Verify the refusal names the run and where it was attached from, and says
+    to start a new run that references it.
+    """
+    run = _make_workplan_run(tmp_path, "theirs", attached=True)
+
+    with pytest.raises(CstarExpectationFailed, match="'theirs' was attached from") as e:
+        require_relaunchable(run)
+
+    message = str(e.value)
+    assert str(run.output_path) in message
+    assert "--run-id <new>" in message
 
 
 def test_workplanrun_manifest_is_read_on_every_access(tmp_path: Path) -> None:

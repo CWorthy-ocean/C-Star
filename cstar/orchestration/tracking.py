@@ -29,7 +29,7 @@ from pydantic import (
     model_validator,
 )
 
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import MAX_CONCURRENCY, slugify, utc_now
 from cstar.execution.file_system import (
@@ -653,6 +653,33 @@ def require_writable(run: WorkplanRun, *, action: str) -> None:
             "ownership of it."
         )
         raise CstarError(msg)
+
+
+def require_relaunchable(run: WorkplanRun) -> None:
+    """Refuse to relaunch a run that was attached from elsewhere.
+
+    The one chokepoint every route that launches a run calls: an attached run
+    has no sentinels on this machine, and relaunching it would displace the
+    tracking of the run it stands for.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The tracked run, as its latest record has it.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the run was attached from elsewhere.
+    """
+    if run.attached:
+        msg = (
+            f"Run {run.run_id!r} was attached from {run.output_path}: attached runs "
+            "can be inspected and referenced, and relaunching after a move is not "
+            "supported. Start a new run with `--run-id <new>` that references it "
+            "(see 'Extending a finished run' in the workplan docs)."
+        )
+        raise CstarExpectationFailed(msg)
 
 
 def read_run_record(path: Path, *, tolerant: bool = False) -> WorkplanRun:

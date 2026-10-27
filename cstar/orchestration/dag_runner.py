@@ -10,6 +10,7 @@ from itertools import cycle
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import yaml
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.applications.core import get_application
@@ -90,6 +91,7 @@ from cstar.orchestration.tracking import (
     WorkplanRun,
     aware_utc,
     measure_step_sizes,
+    require_relaunchable,
 )
 from cstar.orchestration.transforms import (
     ExternalRuns,
@@ -1699,9 +1701,10 @@ async def build_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, a step that reached Done or is
-        still queued or running was edited and not clobbered, or the run-id has
-        step state left by a run whose directory is gone.
+        If the run was attached from elsewhere (its latest record says so), its
+        manifest cannot be read, a step that reached Done or is still queued or
+        running was edited and not clobbered, or the run-id has step state left
+        by a run whose directory is gone.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -1714,6 +1717,19 @@ async def build_dag(
     facts = await asyncio.to_thread(
         describe_steps, wp_orig, wp_path.parent, blueprint_sources
     )
+
+    # `run_dag` records the run under the run-id it is given, so with none there
+    # is no tracked run for this launch to displace; only `attached` is read. A
+    # record that is not a valid one is replaced by this launch's, as before; one
+    # too new for this build is refused, as its manifest would be
+    if run_id:
+        try:
+            record = await TrackingRepository().get_workplan_run(run_id, tolerant=True)
+        except (OSError, ValueError, yaml.YAMLError):
+            log.debug(f"Unable to read the run record of {run_id!r}", exc_info=True)
+            record = None
+        if record is not None:
+            require_relaunchable(record)
 
     # the guard runs before `prepare_workplan` writes anything
     escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
@@ -1986,9 +2002,10 @@ async def build_and_run_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, a step that reached Done or is
-        still queued or running was edited and not clobbered, or the run-id has
-        step state left by a run whose directory is gone.
+        If the run was attached from elsewhere (its latest record says so), its
+        manifest cannot be read, a step that reached Done or is still queued or
+        running was edited and not clobbered, or the run-id has step state left
+        by a run whose directory is gone.
     """
     planner, prepared_wp_path, facts, carried = await build_dag(
         wp_path,

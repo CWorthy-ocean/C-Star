@@ -2695,6 +2695,70 @@ async def test_build_dag_refuses_state_of_a_run_tracked_in_another_directory(
 
 
 @pytest.mark.asyncio
+async def test_build_dag_refuses_to_relaunch_an_attached_run(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a fresh launch under the run-id of an attached run is refused,
+    naming the run, before anything is written to the run directory.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    attached_from = tmp_path / "elsewhere" / mock_run_id
+    attached_from.mkdir(parents=True)
+    TrackingRepository().put_workplan_run_sync(
+        WorkplanRun(output_path=attached_from, run_id=mock_run_id, attached=True)
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert repr(mock_run_id) in msg
+    assert f"attached from {attached_from}" in msg
+    assert not list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+    assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
+
+
+@pytest.mark.asyncio
+async def test_build_dag_relaunches_a_run_that_was_not_attached(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a tracked run that was scheduled here is re-entered: only an
+    attached latest record refuses a launch.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    TrackingRepository().put_workplan_run_sync(
+        WorkplanRun(output_path=output_dir, run_id=mock_run_id)
+    )
+
+    with mock.patch("cstar.orchestration.dag_runner.check_environment"):
+        await build_dag(wp_path, mock_run_id)
+
+    assert list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["status: [unclosed", "just text"])
+async def test_build_dag_launches_over_a_run_record_it_cannot_read(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path, content: str
+) -> None:
+    """Verify a latest record that cannot be read does not stop a launch: whether
+    the run was attached is unknown, and the launch records the run anew.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(WorkplanRun(output_path=output_dir, run_id=mock_run_id))
+    repo._find_run_path(mock_run_id, None).write_text(content)
+
+    with mock.patch("cstar.orchestration.dag_runner.check_environment"):
+        await build_dag(wp_path, mock_run_id)
+
+    assert list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+
+
+@pytest.mark.asyncio
 async def test_build_dag_re_enters_a_run_directory_that_has_no_manifest(
     tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
 ) -> None:
