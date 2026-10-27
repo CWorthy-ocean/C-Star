@@ -5,7 +5,8 @@
 #   forge_parent     forge        parent grid, 24x24 cells over 400 km north-west of Scotland;
 #                                 the parent also extracts hourly boundary data for the child
 #   forge_child      forge        child grid, 24x24 cells over 100 km, nested in the parent;
-#                                 one ALK release near its east boundary
+#                                 one ALK release near its east boundary, in its southern half,
+#                                 where the current carries it into the parent within the day
 #   forge_parent_up  forge        the parent grid again, CDR mode "upscaled"
 #   parent           ucla_roms    2012-01-01T00 -> 01-03T07, restarts every 6 h; writes
 #                                 child_bry.*.nc for the child

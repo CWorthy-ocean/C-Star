@@ -124,8 +124,8 @@ cdr:
     model_reference_date: '2000-01-01T00:00:00'
     releases:
     - name: oae_east
-      lat: 60.4
-      lon: -5.779
+      lat: 60.155
+      lon: -5.785
       depth: 10.0
       hsc: 2500.0
       vsc: 15.0
@@ -517,5 +517,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:54bbe603b8ed31f1e878667b08ae5d36097f3dfc19d0481c96ce0a81451d8b83
+  content_hash: bp-v2:54b53b9d8bfebaa76d16ae0ad950411e0a762370ae601f24707087a44e8201dd
   notes: null
