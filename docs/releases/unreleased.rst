@@ -105,6 +105,17 @@ Breaking Changes
 
 - A ModelSpec file with a key a ModelSpec does not have is now refused with an error naming the key, on every read (catalog, wizard, ``cstar forge``); before, unknown keys were silently dropped. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 - Spec files written by this release (the wizard's saved specs, every ``register_*``) start with ``schema_version``, which cstar-ocean 0.17 and earlier do not know: a CdrSpec written by this release is refused there, so share catalogs between releases with care. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+- New namelist tier for ucla-roms >= 0.13.0: it adds ``v_sponge_trc`` to ``&V_SPONGE_SETTINGS``. Earlier releases stop on unknown namelist keys, so they keep the 0.12 tier, and Forge rejects a ``v_sponge_trc`` of 0 or more there with an error naming 0.13.0. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+
+  - A negative ``v_sponge_trc`` means "the same as ``v_sponge``", which is what earlier releases do, so Forge drops it on those tiers instead of rejecting it.
+
+- Branch pins: a branch pin selects the newest tier in both Forge and ucla_roms, so a run pinned to a ucla-roms branch without the ``v_sponge_trc`` change stops on the new key. A commit-hash pin resolves to its nearest release tag in both steps and keeps that release's tier. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- The wizard's default model spec, the bundled specs' newest release and the integration pin move to ``roms-marbl-0.13-default`` (ucla-roms 0.13.0); ``roms-marbl-0.12-default`` stays for 0.12.0. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+
+  - On ucla-roms 0.13.0 a run stops at startup when the averaging period of the ``_cdr`` or ``_bgc_dia_avg`` output is not a whole multiple of the MARBL timestep, ``marbl_timestep`` rounded down to a multiple of ``dt``.
+  - ``_bgc_avg`` and ``_bgc_dia_avg`` files now hold ``nrpf`` records each instead of one per file.
+  - A MARBL run whose ``marbl_config_file`` does not exist now stops at startup; C-Star's templates and bundled specs ship ``marbl_in``.
+
 
 
 
@@ -324,6 +335,18 @@ New features
   - ``cstar env show`` prints the system in use and how it was chosen.
   - ``cstar init`` shows the system and, when C-Star doesn't recognise it, offers to set ``CSTAR_SYSTEM``.
 
+- ``v_sponge_trc`` setting for ucla-roms >= 0.13.0: the tracer diffusivity added in the sponge band, separate from ``v_sponge``. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+
+  - Default -1.0 (negative): tracers get the same sponge as currents, as before.
+  - 0 puts the sponge on currents only; a positive value sets the tracer sponge on its own.
+  - The wizard shows it as "Sponge tracer diffusivity" for models that carry it.
+
+- The surface-flux output's "Restoring tracer flux" switch (``wrt_rstflx``) writes the surface restoring flux on ucla-roms >= 0.13.0. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+
+  - In a Forge build that is the salinity flux of an SSS restoring forcing; Forge refuses the switch without one.
+  - Forge refuses it on earlier releases, which write nothing for it.
+
+
 
 
 
@@ -537,6 +560,10 @@ Improvements
   - In ``cdr_lite`` mode the wizard starts the switch off, because UCLA-ROMS writes the sensitivities time-averaged by default (``wrt_cdr_gas_avg``).
   - Your own choice, and the value in a loaded blueprint, are kept.
 
+- On ucla-roms 0.13.0 and newer, the CDR output Forge turns on for a CDR forcing averages over whole MARBL steps (every 2 hours instead of hourly when ``dt`` is 2 hours), with fewer records per file so each file covers the same time. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- Forge refuses a ``_cdr`` or ``_bgc_dia_avg`` averaging period that is not a whole multiple of the MARBL timestep when the pinned ucla-roms is 0.13.0 or newer, in the wizard and before generating inputs, instead of at ROMS startup. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- The CCS and tiny nesting/upscaling examples move to ucla-roms 0.13.0, and their upscaled child uses a currents-only sponge (``v_sponge_trc: 0.0``); the parents keep the full sponge. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+
 
 
 
@@ -660,4 +687,8 @@ Miscellaneous
 - Bundled specs and the integration-test catalog carry ``schema_version``; the catalog page and the contributing guide's compatibility section describe spec versions and spec migrations. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 - New "On a cluster that isn't listed" section on the supported machines page, with pointers from the installation and system registration pages. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
 - The wizard page of the docs describes the switch and its default. (`#855 <https://github.com/CWorthy-ocean/C-Star/pull/855>`_)
+- The bundled domains, the ``wio-toy-example`` and ``wio-toy-simple`` forge blueprints and the documentation's example blueprint now use ``roms-marbl-0.13-default``. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- The wizard labels the ``wrt_swflx`` switch "Freshwater flux (P-E)", what ROMS writes, instead of "Shortwave flux". (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- ``cstar init`` asks for the "Default walltime limit per job" instead of the "Maximum walltime per job". (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- The CCS tutorial page explains the child's sponge choice and marks its resource and CDR numbers for a refresh after a rerun on 0.13.0. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 
