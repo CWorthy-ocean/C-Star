@@ -1,3 +1,5 @@
+:orphan:
+
 .. _tutorials-index:
 
 Guided tutorials
