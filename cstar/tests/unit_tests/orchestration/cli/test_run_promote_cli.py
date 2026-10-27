@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.base.exceptions import CstarError
 from cstar.cli.run import app as app_run
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.index import run_uri
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
@@ -31,7 +32,13 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.orchestration import ProcessHandle, Status
-from cstar.orchestration.run_check import Finding, FindingKind, RunCheckReport
+from cstar.orchestration.run_check import (
+    TRANSFORMED_WORKPLAN_GLOB,
+    Finding,
+    FindingKind,
+    RunCheckReport,
+    recorded_run_root,
+)
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import Access, TrackingRepository, WorkplanRun
@@ -653,6 +660,9 @@ def test_verify_records_digests_in_the_copy_only(
 
     assert result.exit_code == 0, result.output + result.stderr
     assert "Recorded 1 digest(s)" in result.output
+    assert (
+        "Compared 1 product(s) with their recorded digest: 1 matched." in result.output
+    )
     copied = read_step_record(project_runs / built.run_id / "tasks" / "spin-up")
     assert copied is not None
     assert copied.products[0].digest.startswith("sha256:")
@@ -692,7 +702,9 @@ def test_absolute_paths_are_not_problems_of_the_copy(
     monkeypatch: pytest.MonkeyPatch,
     flatten_cli_output: t.Callable[[str], str],
 ) -> None:
-    """Verify the source's absolute paths, found in the copy, do not make a promotion fail."""
+    """Verify the source's absolute paths outside the run, found in the copy, do
+    not make a promotion fail.
+    """
     built = elsewhere()
 
     def inherited(run_root: Path, **_: t.Any) -> RunCheckReport:
@@ -708,6 +720,33 @@ def test_absolute_paths_are_not_problems_of_the_copy(
     assert result.exit_code == 0, result.output + result.stderr
     assert "/old/root" in flatten_cli_output(result.output)
     assert not built.root.exists()
+
+
+def test_paths_into_the_source_are_informational_in_the_copy(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify a run in the data home, whose transformed workplan names its own
+    step directories, promotes cleanly: the copy lists those paths for
+    information, by the rule `cstar run check` applies in place.
+    """
+    built = elsewhere()
+    source = StateDirectoryManager.workplan_runs_dir() / built.run_id
+    shutil.copytree(built.root, source, symlinks=True)
+    # as if the workplan had been transformed there
+    recorded = recorded_run_root(source)
+    assert recorded is not None
+    for trx in source.glob(TRANSFORMED_WORKPLAN_GLOB):
+        trx.write_text(trx.read_text().replace(str(recorded), str(source)))
+
+    in_place = invoke("check", str(source))
+    result = invoke("promote", str(source))
+
+    heading = "Absolute paths inside the run in run files (informational)"
+    assert in_place.exit_code == 0, in_place.output
+    assert heading in in_place.output
+    assert result.exit_code == 0, result.output + result.stderr
+    assert heading in result.output
+    assert f"No problems found in {project_runs / built.run_id}, " in result.output
 
 
 def test_gathered_output_is_rebuilt_in_the_copy(

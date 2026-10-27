@@ -253,6 +253,8 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
     proc = _attach(env, intact, "--verify")
     assert proc.returncode == 0, _output(proc)
     assert DIGEST_HEADING not in flat_output(proc.stdout), _output(proc)
+    matched = "Compared 1 product(s) with their recorded digest: 1 matched."
+    assert matched in proc.stdout, _output(proc)
 
     # a byte of the product differs and its size does not: attached, with a problem
     changed = attach_run.copy("verify-changed", attach_run.original)
@@ -261,6 +263,10 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
     proc = _attach(env, changed, "--verify")
     assert proc.returncode == 1, _output(proc)
     assert DIGEST_HEADING in flat_output(proc.stdout), _output(proc)
+    differed = (
+        "Compared 1 product(s) with their recorded digest: 0 matched, 1 differed."
+    )
+    assert differed in proc.stdout, _output(proc)
     path = run_cstar(env, "run", "path", RUN_ID)
     assert path.returncode == 0, _output(path)
 

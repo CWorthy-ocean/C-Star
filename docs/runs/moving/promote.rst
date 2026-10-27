@@ -41,7 +41,11 @@ them:
 ``promote`` never overwrites an existing run, and never writes into the
 source. After the copy, the destination is checked as ``cstar run check``
 does; pass ``--verify`` to compare the content of every file too (see
-:doc:`manifest`).
+:doc:`manifest`). Absolute paths in the copied files that name the source are
+listed for information, as ``cstar run check`` lists paths that name the run
+itself. An absolute path to another place in your data home is listed as a
+problem, as it is in the source, but does not stop the promotion: the copy
+inherited it.
 
 
 Copy, link, materialize or move

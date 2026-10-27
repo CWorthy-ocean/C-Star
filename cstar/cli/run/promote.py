@@ -93,11 +93,12 @@ KEY_SOURCE: t.Final[str] = "promote_source"
 INHERITED_KINDS: t.Final[frozenset[FindingKind]] = frozenset(
     {FindingKind.ABSOLUTE_PATH}
 )
-"""The findings that say nothing about the copy.
+"""The problems the copy inherits from the source, which do not stop a move.
 
-Absolute paths inside the copied files are the source's (the transformed
-workplan records its root, which `LiveWorkplan.load` rebases): they are reported
-in place too, and do not stop a move.
+An absolute path naming the source itself is informational in the copy, by the
+rule `cstar run check` applies in place (`is_run_path`). One naming another
+place in the data home stays a problem, but it is the source's as much as the
+copy's: `cstar run check` reports it in place too.
 """
 
 HELP_SHORT = "Copy, link or move a run into the project's runs area."
@@ -138,9 +139,12 @@ stops the command with exit code 1: `cstar run check <run-id>` it first.
 The copy is checked as `cstar run check` does, and its findings are listed.
 {ARG_VERIFY} also compares each product of the copy with its recorded digest,
 computing and recording a digest in the copy first for each product that has
-none; the source is not written. Absolute paths found inside the copied files are
-the source's own and do not count as problems of the copy. A copy with problems
-exits with code 1, and `move` then keeps the source and its tracking record.
+none (the source is not written), and says in one line how many matched.
+Absolute paths found inside the copied files that name the source are
+informational, as `cstar run check` treats paths that name the run; any other
+absolute path is the source's as much as the copy's and does not count as a
+problem of the copy. A copy with problems exits with code 1, and `move` then
+keeps the source and its tracking record.
 
 {ARG_DRY_RUN} runs every refusal and prints what would be copied and where, then
 stops: nothing is written.

@@ -570,6 +570,9 @@ def test_verify_reports_a_digest_mismatch_and_still_attaches(
     assert plain.exit_code == 0, plain.output
     assert verified.exit_code == 1
     assert "differs from the record" in verified.output
+    summary = "Compared 1 product(s) with their recorded digest: 0 matched, 1 differed."
+    assert summary in verified.output
+    assert "Compared" not in plain.output
     written = tracked(built.run_id)
     assert written is not None
     assert written.output_path == built.root

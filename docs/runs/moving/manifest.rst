@@ -134,4 +134,15 @@ directory passed explicitly.
 On arrival, ``cstar run attach --verify`` and ``cstar run check --verify``
 compare every product that has a digest against it, so an incomplete or
 corrupted transfer is reported rather than discovered later. ``cstar run
-promote --verify`` does the same for the copy it makes.
+promote --verify`` does the same for the copy it makes. Each prints one line
+saying what it compared, for example:
+
+.. code-block:: text
+
+   Compared 61 product(s) with their recorded digest: 61 matched.
+
+Products whose content differs are listed above that line, under their own
+heading, and make the command exit with code 1. The line also counts the
+products it skipped, and why: no digest recorded (``--record-digests`` records
+one), a digest recorded with a scheme this release does not compute, or a
+product that is missing or has changed size, which is reported on its own.

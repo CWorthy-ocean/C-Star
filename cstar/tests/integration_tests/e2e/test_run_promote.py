@@ -56,7 +56,9 @@ PRODUCT = "output/result.dat"
 """The file the producer step is given, relative to its step root."""
 CONTENT = "hello product\n"
 TRANSFORMED_WORKPLAN_NAME = "workplan_transformed.yaml"
-ABSOLUTE_HEADING = "Absolute paths in run files"
+ABSOLUTE_HEADING = "Absolute paths "
+"""The start of both absolute-path headings: outside the run, and inside it."""
+VERIFIED = "Compared 1 product(s) with their recorded digest: 1 matched."
 
 
 def _output(proc: subprocess.CompletedProcess[str]) -> str:
@@ -217,16 +219,17 @@ def _assert_only_inherited_findings(proc: subprocess.CompletedProcess[str]) -> N
     """Assert a ``cstar run check`` report names only the transformed workplan.
 
     The workplan the harness writes names its blueprints by absolute path, so the
-    transformed workplan is reported under the absolute-path check, which is
-    inherited from the source and is not a problem of the copy.
+    transformed workplan is reported under the absolute-path checks, which are
+    inherited from the source and are not a problem of the copy.
     """
     lines = proc.stdout.splitlines()
-    heading = (i for i, line in enumerate(lines) if line.startswith(ABSOLUTE_HEADING))
+    headings = [i for i, line in enumerate(lines) if line.startswith(ABSOLUTE_HEADING)]
     findings = []
-    for line in lines[next(heading, len(lines)) + 1 :]:
-        if not line.startswith("  "):
-            break
-        findings.append(line)
+    for heading in headings:
+        for line in lines[heading + 1 :]:
+            if not line.startswith("  "):
+                break
+            findings.append(line)
     assert all(TRANSFORMED_WORKPLAN_NAME in line for line in findings), _output(proc)
 
 
@@ -437,6 +440,7 @@ def test_verify_records_digests_in_the_copy(promote_run: PromoteRun) -> None:
     assert "Recorded 1 digest(s) in the copy." in flat_output(proc.stdout), _output(
         proc
     )
+    assert VERIFIED in proc.stdout, _output(proc)
 
     step = Path("tasks") / slugify(PRODUCER)
     copied = read_step_record(destination / step)
@@ -450,6 +454,7 @@ def test_verify_records_digests_in_the_copy(promote_run: PromoteRun) -> None:
 
     checked = run_cstar(env, "run", "check", str(destination), "--verify")
     assert checked.returncode in (0, 1), _output(checked)
+    assert VERIFIED in checked.stdout, _output(checked)
     _assert_only_inherited_findings(checked)
 
 
