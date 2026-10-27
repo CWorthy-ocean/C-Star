@@ -699,5 +699,6 @@ Miscellaneous
 - The guided tutorials were regenerated on ucla-roms 0.13.0 and roms-tools 5.3.0, and the nesting tutorial now lists reference CDR metrics for its run. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - The CDR metrics page explains that, from roms-tools 5.3.0, uptake leaves out each domain's outermost cells, so a nested child's exported perturbation is counted once. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - The blueprint tutorial's wizard screenshot shows the current default model, and the UCLA-ROMS example page's roms-tools snippet uses ``Grid(filename=...)``. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
+- The prebuilt-case integration test now builds and runs ucla-roms 0.13.0 instead of 0.4.2. (`#869 <https://github.com/CWorthy-ocean/C-Star/pull/869>`_)
 
 
