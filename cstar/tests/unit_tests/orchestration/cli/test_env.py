@@ -1,14 +1,27 @@
+import os
+import re
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_SYSTEM
-from cstar.cli.environment.show import app
+from cstar.base.env import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_LOG_LEVEL,
+    ENV_CSTAR_STATE_HOME,
+    ENV_CSTAR_SYSTEM,
+    env_var_groups,
+)
+from cstar.cli.environment.show import app, effective_value
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.manager import MacOSSystemContext, SystemSelection, SystemSource
 
@@ -46,16 +59,9 @@ def test_cli_env_show_internal_group() -> None:
 
 
 @pytest.mark.usefixtures("mock_env")
-def test_cli_env_show_export_omits_internal(
-    flatten_cli_output: Callable[[str], str],
-) -> None:
+def test_cli_env_show_export_omits_internal() -> None:
     """Verify that export statements leave out the internal group but still
     include a setting that is not persistable.
-
-    Parameters
-    ----------
-    flatten_cli_output : Callable[[str], str]
-        Fixture that joins the output lines that rich wrapped.
     """
     runner = CliRunner()
 
@@ -66,7 +72,7 @@ def test_cli_env_show_export_omits_internal(
     )
 
     assert "CSTAR_RUNID" not in result.stdout
-    assert "export CSTAR_CONFIG_HOME=" in flatten_cli_output(result.stdout)
+    assert "export CSTAR_CONFIG_HOME=" in result.stdout
     assert not result.stderr
 
 
@@ -157,7 +163,6 @@ def test_cli_env_show_says_when_there_is_no_configuration_file(
 def test_cli_env_show_export_has_no_source_markers(
     isolate_user_config: Path,
     monkeypatch: pytest.MonkeyPatch,
-    flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify the export display carries no source markers.
 
@@ -167,8 +172,6 @@ def test_cli_env_show_export_has_no_source_markers(
         The configuration file the loader reads for this test.
     monkeypatch : pytest.MonkeyPatch
         Fixture to modify the environment.
-    flatten_cli_output : Callable[[str], str]
-        Fixture that joins the output lines that rich wrapped.
     """
     monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
     monkeypatch.setenv(ENV_CSTAR_LOG_LEVEL, "DEBUG")
@@ -176,10 +179,9 @@ def test_cli_env_show_export_has_no_source_markers(
 
     result = CliRunner().invoke(app, ["--display", "export"], color=False)
 
-    output = flatten_cli_output(result.stdout)
-    assert f"export {ENV_CSTAR_LOG_LEVEL}=" in output
+    assert f"export {ENV_CSTAR_LOG_LEVEL}=DEBUG" in result.stdout
     for marker in ("[config]", "[env]", "[default]"):
-        assert marker not in output
+        assert marker not in result.stdout
     assert not result.stderr
 
 
@@ -286,17 +288,258 @@ def test_cli_env_show_survives_a_system_setting_that_names_nothing(
 
 
 @pytest.mark.usefixtures("mock_env")
-def test_cli_env_show_export_omits_the_system_line(
-    flatten_cli_output: Callable[[str], str],
-) -> None:
-    """Verify the export display stays a list of export statements.
+def test_cli_env_show_export_omits_the_system_line() -> None:
+    """Verify the export display stays a list of export statements."""
+    result = CliRunner().invoke(app, ["--display", "export"], color=False)
+
+    assert "System:" not in result.stdout
+    assert not result.stderr
+
+
+EXPORT_LINE = re.compile(r"^(?P<comment># )?export \w+=")
+"""A line that assigns a setting, commented out or not (descriptions also start
+with ``#``)."""
+
+
+def parse_exports(output: str) -> dict[str, tuple[bool, str]]:
+    """Read the export statements out of ``cstar env show --display export``.
+
+    Each statement is parsed as a shell would, so a value that is quoted
+    wrongly, or split over two lines, fails here rather than in a user's shell.
 
     Parameters
     ----------
-    flatten_cli_output : Callable[[str], str]
-        Fixture that joins the output lines that rich wrapped.
-    """
-    result = CliRunner().invoke(app, ["--display", "export"], color=False)
+    output : str
+        The command's output, exactly as printed.
 
-    assert "System:" not in flatten_cli_output(result.stdout)
+    Returns
+    -------
+    dict[str, tuple[bool, str]]
+        Each setting's name mapped to whether its statement is active (not
+        commented out) and the value the statement assigns.
+    """
+    parsed: dict[str, tuple[bool, str]] = {}
+
+    for line in output.splitlines():
+        if match := EXPORT_LINE.match(line):
+            command, assignment = shlex.split(line.removeprefix("# "))
+            assert command == "export"
+            name, _, value = assignment.partition("=")
+            parsed[name] = (not match["comment"], value)
+
+    return parsed
+
+
+def export_output(args: list[str] | None = None) -> str:
+    """Run ``cstar env show --display export`` and return its stdout."""
+    result = CliRunner().invoke(
+        app, [*(args or []), "--display", "export"], color=False
+    )
+    assert result.exit_code == 0, result.output
     assert not result.stderr
+    return result.stdout
+
+
+def test_cli_env_show_export_is_a_shell_script(
+    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify every line of the export display is a comment or one export
+    statement a shell reads as a single assignment.
+
+    Parameters
+    ----------
+    isolate_user_config : Path
+        The configuration file the loader reads for this test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    monkeypatch.setenv(ENV_CSTAR_LOG_LEVEL, "DEBUG")
+    isolate_user_config.write_text(f'{ENV_CSTAR_SLURM_ACCOUNT}="my account"\n')
+
+    output = export_output()
+
+    lines = [line for line in output.splitlines() if line.strip()]
+    for line in lines:
+        assert line.startswith("#") or (line.startswith("export ") and "=" in line)
+    parsed = parse_exports(output)
+    assert parsed[ENV_CSTAR_SLURM_ACCOUNT] == (True, "my account")
+    assert len(parsed) == sum(len(items) for items in env_var_groups().values())
+
+
+def test_cli_env_show_export_comments_out_what_the_user_did_not_set(
+    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify only a setting that was exported or came from the configuration
+    file is an active statement, so sourcing the output cannot freeze defaults.
+
+    Parameters
+    ----------
+    isolate_user_config : Path
+        The configuration file the loader reads for this test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    monkeypatch.setenv(ENV_CSTAR_LOG_LEVEL, "DEBUG")
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_MAX_WALLTIME, raising=False)
+    isolate_user_config.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
+
+    output = export_output()
+
+    parsed = parse_exports(output)
+    assert f"\nexport {ENV_CSTAR_LOG_LEVEL}=DEBUG\n" in output
+    assert parsed[ENV_CSTAR_LOG_LEVEL] == (True, "DEBUG")
+    assert parsed[ENV_CSTAR_SLURM_ACCOUNT] == (True, "m1234")
+    assert parsed[ENV_CSTAR_SLURM_MAX_WALLTIME] == (False, "48:00:00")
+
+
+def test_cli_env_show_export_never_exports_an_empty_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a setting that is empty is commented out, since exporting it would
+    turn off the fallback the setting has when it is not set.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "")
+
+    parsed = parse_exports(export_output())
+
+    assert parsed[ENV_CSTAR_SLURM_QUEUE] == (False, "")
+    assert not [
+        name for name, (active, value) in parsed.items() if active and not value
+    ]
+
+
+@pytest.mark.parametrize(
+    ("setting", "xdg_variable", "home"),
+    [
+        (ENV_CSTAR_CACHE_HOME, "XDG_CACHE_HOME", "cache_home"),
+        (ENV_CSTAR_CONFIG_HOME, "XDG_CONFIG_HOME", "config_home"),
+        (ENV_CSTAR_DATA_HOME, "XDG_DATA_HOME", "data_home"),
+        (ENV_CSTAR_STATE_HOME, "XDG_STATE_HOME", "state_home"),
+    ],
+)
+def test_cli_env_show_reports_the_directory_xdg_settings_resolve_to(
+    setting: str,
+    xdg_variable: str,
+    home: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    squash_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a home taken from an ``XDG_*_HOME`` variable is shown as the
+    ``cstar`` directory under it, which is where C-Star writes, in both displays.
+
+    Parameters
+    ----------
+    setting : str
+        The ``CSTAR_*_HOME`` setting under test.
+    xdg_variable : str
+        The standard variable the setting falls back to.
+    home : str
+        The `DirectoryManager` method that returns the directory C-Star uses.
+    tmp_path : Path
+        Temporary directory standing in for the XDG base directory.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    squash_cli_output : Callable[[str], str]
+        Fixture that removes the whitespace rich wrapped paths at.
+    """
+    base = tmp_path.resolve() / "xdg-base"
+    monkeypatch.delenv(setting, raising=False)
+    monkeypatch.setenv(xdg_variable, str(base))
+    # a scratch file system would take precedence over the XDG variable
+    monkeypatch.setattr("cstar.base.env.hpc_data_directory", lambda: None)
+    expected = getattr(DirectoryManager, home)()
+    assert expected == base / "cstar"
+
+    active, value = parse_exports(export_output())[setting]
+
+    assert not active
+    assert value == str(expected)
+    assert value.endswith("/cstar")
+    assert Path(value).is_relative_to(tmp_path.resolve())
+    interactive = CliRunner().invoke(app, [], color=False)
+    assert f"{setting}:{expected}[default]" in squash_cli_output(interactive.stdout)
+
+
+def test_cli_env_show_export_matches_what_c_star_uses(
+    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify every active statement assigns the value the shell or the
+    configuration file gave the setting, so sourcing the output changes nothing,
+    and that a home's value is the directory C-Star uses.
+
+    Parameters
+    ----------
+    isolate_user_config : Path
+        The configuration file the loader reads for this test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    monkeypatch.setenv(ENV_CSTAR_LOG_LEVEL, "DEBUG")
+    isolate_user_config.write_text(f'{ENV_CSTAR_SLURM_ACCOUNT}="my account"\n')
+    items = {item.name: item for group in env_var_groups().values() for item in group}
+
+    active = {
+        name: value
+        for name, (is_active, value) in parse_exports(export_output()).items()
+        if is_active
+    }
+
+    assert {ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_DATA_HOME} <= set(
+        active
+    )
+    for name, value in active.items():
+        assert value == os.environ[name] == effective_value(items[name])
+    assert active[ENV_CSTAR_DATA_HOME] == str(DirectoryManager.data_home())
+
+
+def test_cli_env_show_export_keeps_a_home_as_the_user_set_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a home the user set is exported as written, not resolved, so
+    sourcing the output does not swap a symlink for its target.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory holding the link and its target.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(link))
+
+    assert parse_exports(export_output())[ENV_CSTAR_DATA_HOME] == (True, str(link))
+
+
+@pytest.mark.parametrize("value", ["x" * 150, "[bold]x[/bold]"], ids=["long", "markup"])
+def test_cli_env_show_export_writes_each_statement_verbatim(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a statement is neither wrapped at the terminal width nor altered by
+    rich markup, either of which would corrupt the script.
+
+    Parameters
+    ----------
+    value : str
+        A value that a wrapping or markup-aware printer would change.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, value)
+
+    output = export_output()
+
+    assert (
+        f"export {ENV_CSTAR_SLURM_ACCOUNT}={shlex.quote(value)}" in output.splitlines()
+    )
+    assert parse_exports(output)[ENV_CSTAR_SLURM_ACCOUNT] == (True, value)

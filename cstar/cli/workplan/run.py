@@ -12,16 +12,17 @@ from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
-    ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     REMOVED_SETTINGS,
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
+    DEFAULT_LOG_LEVEL_CHOICE,
     SCHEMA_ERRORS,
+    LogLevelOption,
     cb_pipeline,
     exit_on_refused_settings,
     format_validation_errors,
@@ -30,7 +31,6 @@ from cstar.cli.common import (
     present,
     schema_message,
     set_env,
-    update_loggers,
 )
 from cstar.cli.workplan.shared import (
     colored,
@@ -43,9 +43,6 @@ from cstar.cli.workplan.shared import (
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_WORKPLAN_HELP,
-    ARG_LOGLEVEL_HELP,
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
     ARG_PRE_RUN,
     ARG_PRE_RUN_WORKPLAN_HELP,
     ARG_RESUME,
@@ -122,9 +119,8 @@ COMMAND_SUBMIT: t.Final[str] = "submit"
 ALIAS = "run"
 """Earlier name of the launch command, still registered but hidden from `--help`."""
 HELP_SHORT = "Submit a workplan: schedule every step and exit."
-HELP_ALIASED = f"{HELP_SHORT} (alias: {ALIAS})"
 HELP_LONG = f"""\
-{HELP_ALIASED}
+{HELP_SHORT}
 
 Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 
@@ -1150,16 +1146,7 @@ def submit(
             is_eager=True,
         ),
     ] = "",
-    log_level: t.Annotated[
-        LogLevelChoices,
-        typer.Option(
-            ARG_LOGLEVEL_LONG,
-            ARG_LOGLEVEL_SHORT,
-            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
-            help=ARG_LOGLEVEL_HELP,
-            envvar=ENV_CSTAR_LOG_LEVEL,
-        ),
-    ] = LogLevelChoices.INFO,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL_CHOICE,
     clobber: t.Annotated[
         list[str],
         typer.Option(

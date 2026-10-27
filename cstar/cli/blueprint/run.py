@@ -14,16 +14,15 @@ from cstar.applications.core import (
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import CstarError
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import get_logger
 from cstar.base.utils import utc_now
 from cstar.cli.common import (
+    DEFAULT_LOG_LEVEL_CHOICE,
     SCHEMA_ERRORS,
-    cb_pipeline,
+    LogLevelOption,
     format_validation_errors,
     localize_and_migrate,
     report_schema_error,
-    set_env,
-    update_loggers,
 )
 from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.utils import (
@@ -31,9 +30,6 @@ from cstar.entrypoint.utils import (
     ARG_CLOBBER_HELP,
     ARG_DIRECTIVES_URI_LONG,
     ARG_DIRECTIVES_URI_SHORT,
-    ARG_LOGLEVEL_HELP,
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
     ARG_PRE_RUN,
     ARG_PRE_RUN_HELP,
     ARG_RESUME,
@@ -207,16 +203,7 @@ def run(
             callback=path_callback,
         ),
     ],
-    log_level: t.Annotated[
-        LogLevelChoices,
-        typer.Option(
-            ARG_LOGLEVEL_LONG,
-            ARG_LOGLEVEL_SHORT,
-            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
-            help=ARG_LOGLEVEL_HELP,
-            envvar=ENV_CSTAR_LOG_LEVEL,
-        ),
-    ] = LogLevelChoices.INFO,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL_CHOICE,
     clobber: t.Annotated[
         bool,
         typer.Option(ARG_CLOBBER, help=ARG_CLOBBER_HELP),

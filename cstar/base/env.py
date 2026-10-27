@@ -208,12 +208,13 @@ def generate_run_id() -> str:
 ENV_CSTAR_LOG_LEVEL: t.Annotated[
     t.Literal["CSTAR_LOG_LEVEL"],
     EnvVar(
-        "Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+        "Specify the logging level for terminal messages. Options: TRACE, DEBUG, "
+        "INFO, WARNING, ERROR, CRITICAL; any case is accepted.",
         GROUP_SIM,
         default="INFO",
     ),
 ] = "CSTAR_LOG_LEVEL"
-"""Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
+"""Specify the logging level for terminal messages. Options: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL; any case is accepted."""
 
 ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
     t.Literal["CSTAR_DISABLE_BUILD_VERIFICATION"],
@@ -589,15 +590,55 @@ def missing_value_problem(name: str) -> str:
     return f"{name} has no value; write {name}=<value> or comment the line out"
 
 
+def canonical_user_config_value(name: str, value: str) -> str:
+    """Return `value` as the configuration file stores it for the setting `name`.
+
+    A setting whose reader accepts several spellings of one value is stored in
+    one: a log level in upper case. Every other setting's value is returned as
+    it is.
+
+    Parameters
+    ----------
+    name : str
+        The setting's name.
+    value : str
+        The value as given.
+
+    Returns
+    -------
+    str
+        The value to store.
+
+    Raises
+    ------
+    ValueError
+        Naming the setting, the value and what the setting accepts, when `value`
+        is not one the setting can take.
+    """
+    if name == ENV_CSTAR_LOG_LEVEL:
+        # imported lazily: cstar.base.log imports this module
+        from cstar.base.log import LogLevelChoices
+
+        try:
+            return LogLevelChoices(value).value
+        except ValueError as ex:
+            accepted = ", ".join(LogLevelChoices)
+            msg = f"{name}={value!r} is not a log level; use one of {accepted}"
+            raise ValueError(msg) from ex
+    return value
+
+
 def parse_user_config(path: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Parse the configuration file at `path`, sorting its keys.
 
     A key that `user_config_problems` rejects is skipped rather than refused:
     the file may be shared with another version of C-Star, which may read a
     name this one removed or does not know yet. Values have ``~`` and ``$VAR``
-    references expanded against the process environment. A key written without
-    a value (``CSTAR_X=``) yields an empty string, as an exported empty variable
-    would; a name with no ``=`` is skipped too, rather than guessed at.
+    references expanded against the process environment, then go through
+    `canonical_user_config_value`; a value it rejects is skipped like a bad
+    name. A key written without a value (``CSTAR_X=``) yields an empty string,
+    as an exported empty variable would; a name with no ``=`` is skipped too,
+    rather than guessed at.
 
     Parameters
     ----------
@@ -632,7 +673,11 @@ def parse_user_config(path: Path) -> tuple[dict[str, str], dict[str, str]]:
         elif value is None:
             skipped[name] = missing_value_problem(name)
         else:
-            values[name] = os.path.expandvars(os.path.expanduser(value))
+            expanded = os.path.expandvars(os.path.expanduser(value))
+            try:
+                values[name] = canonical_user_config_value(name, expanded)
+            except ValueError as ex:
+                skipped[name] = str(ex)
     return values, skipped
 
 
@@ -780,20 +825,22 @@ def read_by_another_version(name: str) -> bool:
     )
 
 
-def render_unrecognised_block(name: str, value: str | None) -> str:
-    """Render a line this version will not apply, under a comment saying why.
+def render_unrecognised_block(name: str, value: str | None, problem: str) -> str:
+    """Render a line this version will not apply, under `problem`, the reason
+    `parse_user_config` skips it.
 
-    The line stays active when another version of C-Star may read it, so a file
-    shared between versions keeps working for both; otherwise it is commented out.
+    The line stays active when another version of C-Star may read it (a name this
+    version removed or does not know, or a value this version does not accept),
+    so a file shared between versions keeps working for both; otherwise it is
+    commented out.
     """
-    problems = user_config_problems([name])
-    problem = problems[0] if problems else missing_value_problem(name)
     reason = textwrap.fill(
         problem, width=78, initial_indent="# ", subsequent_indent="# "
     )
     if value is None:
         line = f"# {name}"
-    elif read_by_another_version(name):
+    # a name this version accepts was skipped for its value
+    elif read_by_another_version(name) or not user_config_problems([name]):
         line = f"{name}={format_user_config_value(value)}"
     else:
         line = f"# {name}={format_user_config_value(value)}"
@@ -809,7 +856,8 @@ UNRECOGNISED_SECTION_NOTE: t.Final[str] = """\
 
 
 def render_user_config(
-    values: Mapping[str, str], unrecognised: Mapping[str, str | None] | None = None
+    values: Mapping[str, str],
+    unrecognised: Mapping[str, tuple[str | None, str]] | None = None,
 ) -> str:
     """Render a whole configuration file from the registry.
 
@@ -822,9 +870,10 @@ def render_user_config(
     ----------
     values : Mapping[str, str]
         The settings to set, by name; each must pass `user_config_problems`.
-    unrecognised : Mapping[str, str | None] | None
+    unrecognised : Mapping[str, tuple[str | None, str]] | None
         Lines from an earlier file that this version will not apply, by name, with
-        their values as written (`None` for a name written without ``=``).
+        their values as written (`None` for a name written without ``=``) and the
+        reason `parse_user_config` skips each.
 
     Returns
     -------
@@ -855,8 +904,8 @@ def render_user_config(
         import cstar
 
         blocks = [
-            render_unrecognised_block(name, value)
-            for name, value in unrecognised.items()
+            render_unrecognised_block(name, value, problem)
+            for name, (value, problem) in unrecognised.items()
         ]
         title = f"Not applied by C-Star {cstar.__version__}"
         sections.append(

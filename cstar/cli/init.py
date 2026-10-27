@@ -29,10 +29,10 @@ from cstar.base.env import (
     get_env_item,
     hpc_data_directory,
     load_user_config_for_repair,
+    parse_user_config,
     render_user_config,
-    user_config_problems,
 )
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarUserConfigError
 from cstar.cli.environment import NAME as NAME_ENV
 from cstar.cli.environment import register_kernel, shell_init
 from cstar.cli.environment.show import (
@@ -454,20 +454,24 @@ def locations_section(
     return [ask(r.item.name, r, yes) for r in resolved]
 
 
-def carried_settings(path: "Path") -> tuple[dict[str, str], dict[str, str | None]]:
+def carried_settings(
+    path: "Path",
+) -> tuple[dict[str, str], dict[str, tuple[str | None, str]]]:
     """The lines the file already holds, spelled as the file spells them.
 
     Settings the walkthrough does not prompt for (a log level set with
     `cstar env set`, say) survive the rewrite this way; values are kept
     unexpanded so a ``~`` or ``$VAR`` keeps meaning what it meant. So do the
-    lines this version will not apply (a removed setting, a name from a newer
-    version, a setting written without ``=``), which the rewrite keeps apart.
+    lines `parse_user_config` skips (a removed setting, a name from a newer
+    version, a setting written without ``=``, a value the setting does not
+    accept), which the rewrite keeps apart under the loader's reason.
 
     Returns
     -------
-    tuple[dict[str, str], dict[str, str | None]]
+    tuple[dict[str, str], dict[str, tuple[str | None, str]]]
         The settings to keep, and the lines this version will not apply, with
-        their values (`None` for a name written without ``=``).
+        their values (`None` for a name written without ``=``) and the reason
+        each is skipped.
 
     Raises
     ------
@@ -479,20 +483,22 @@ def carried_settings(path: "Path") -> tuple[dict[str, str], dict[str, str | None
         return {}, {}
     try:
         entries = dotenv_values(path, interpolate=False)
-    except (OSError, UnicodeDecodeError) as ex:
+        skipped = parse_user_config(path)[1]
+    except (OSError, UnicodeDecodeError, CstarUserConfigError) as ex:
         typer.echo(f"Error: cannot read {path}: {ex}", err=True)
         raise typer.Exit(1) from ex
     settings = {
         name: value
         for name, value in entries.items()
-        if value is not None and not user_config_problems([name])
+        if value is not None and name not in skipped
     }
-    return settings, {n: v for n, v in entries.items() if n not in settings}
+    unrecognised = {n: (v, skipped[n]) for n, v in entries.items() if n in skipped}
+    return settings, unrecognised
 
 
 def write_section(
     config: UserConfig,
-    carried: tuple[dict[str, str], dict[str, str | None]],
+    carried: tuple[dict[str, str], dict[str, tuple[str | None, str]]],
     decisions: "Sequence[Decision]",
 ) -> list[str]:
     """Write the configuration file from what it held and the decisions, and
@@ -507,7 +513,7 @@ def write_section(
     values, unrecognised = carried
     for decision in decisions:
         decision.apply(values)
-    # a setting written without a value that the walkthrough answered is replaced
+    # a skipped line for a setting the walkthrough answered is replaced
     unrecognised = {n: v for n, v in unrecognised.items() if n not in values}
     content = render_user_config(values, unrecognised)
     try:

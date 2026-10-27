@@ -11,6 +11,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     REMOVED_SETTINGS,
+    canonical_user_config_value,
     capture_environment,
     get_env_item,
     load_user_config,
@@ -21,7 +22,7 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarUserConfigError
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.execution.file_system import DirectoryManager
-from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import LmodEnvSettings
 from cstar.system.manager import CStarSystemManager
 
@@ -104,14 +105,60 @@ def test_values_are_expanded(
     isolate_user_config.write_text(
         f"{ENV_CSTAR_SLURM_ACCOUNT}=~/x\n"
         f"{ENV_CSTAR_DATA_HOME}=$MYVAR/y\n"
-        f"{ENV_CSTAR_LOG_LEVEL}=${{MYVAR}}/z\n"
+        f"{ENV_CSTAR_SLURM_QUEUE}=${{MYVAR}}/z\n"
     )
 
     values = read_user_config(isolate_user_config)
 
     assert values[ENV_CSTAR_SLURM_ACCOUNT] == str(Path.home() / "x")
     assert values[ENV_CSTAR_DATA_HOME] == "/my/var/y"
-    assert values[ENV_CSTAR_LOG_LEVEL] == "/my/var/z"
+    assert values[ENV_CSTAR_SLURM_QUEUE] == "/my/var/z"
+
+
+def test_log_level_is_stored_in_upper_case(isolate_user_config: Path) -> None:
+    """Verify a log level in any case is read as its upper-case name."""
+    isolate_user_config.write_text(f"{ENV_CSTAR_LOG_LEVEL}=debug\n")
+
+    config, skipped = parse_user_config(isolate_user_config)
+
+    assert config == {ENV_CSTAR_LOG_LEVEL: "DEBUG"}
+    assert not skipped
+
+
+def test_unknown_log_level_is_skipped_with_the_reason(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify a value that is not a log level is skipped like a bad name: one
+    stderr line giving the reason, and the setting is left to its default.
+    """
+    monkeypatch.delenv(ENV_CSTAR_LOG_LEVEL, raising=False)
+    isolate_user_config.write_text(f"{ENV_CSTAR_LOG_LEVEL}=loud\n")
+
+    values, skipped = parse_user_config(isolate_user_config)
+
+    reason = (
+        f"{ENV_CSTAR_LOG_LEVEL}='loud' is not a log level; "
+        "use one of TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL"
+    )
+    assert not values
+    assert skipped == {ENV_CSTAR_LOG_LEVEL: reason}
+
+    config = load_user_config()
+
+    assert (
+        capsys.readouterr().err
+        == f"Ignoring a line in {isolate_user_config}: {reason}\n"
+    )
+    assert not config.applied
+    assert ENV_CSTAR_LOG_LEVEL not in os.environ
+
+
+def test_canonical_value_leaves_other_settings_alone() -> None:
+    """Verify only a setting with a fixed set of spellings is rewritten."""
+    assert canonical_user_config_value(ENV_CSTAR_SLURM_ACCOUNT, "m1234") == "m1234"
+    assert canonical_user_config_value(ENV_CSTAR_LOG_LEVEL, " warning ") == "WARNING"
 
 
 def test_key_without_a_value_is_empty(isolate_user_config: Path) -> None:
@@ -263,7 +310,9 @@ def test_load_is_once_per_process(
 
     first = load_user_config()
     isolate_user_config.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=other\n")
-    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT)
+    # not monkeypatch.delenv: it would record the loader's export as the original
+    # value and put it back after the fixture's `patch.dict` restored the environment
+    del os.environ[ENV_CSTAR_SLURM_ACCOUNT]
     second = load_user_config()
 
     assert second is first

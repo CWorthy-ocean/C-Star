@@ -37,7 +37,7 @@ from cstar.base.env import (
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
-from cstar.base.log import get_logger
+from cstar.base.log import _WARNED_LOG_LEVELS, get_logger
 from cstar.base.utils import additional_files_dir
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
@@ -173,6 +173,43 @@ def _clear_deprecation_warnings() -> Generator[None]:
     _WARNED.clear()
     yield
     _WARNED.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_log_level_warnings() -> Generator[None]:
+    """Forget which unrecognised log levels were reported around each unit test.
+
+    `parse_log_level_name` reports a bad level once per process, so one test's
+    report would otherwise hide the next one's.
+    """
+    _WARNED_LOG_LEVELS.clear()
+    yield
+    _WARNED_LOG_LEVELS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _restore_log_levels() -> Generator[None]:
+    """Put the root logger and every existing logger back to the level each had
+    before the unit test.
+
+    The CLI root callback and the commands' ``--log-level`` option reset every
+    logger to defer to the root logger and set the root's level, which would
+    otherwise leak into the tests that follow. Handlers are left alone: a root
+    logger without them makes `get_logger` reset its level. Only a level that
+    changed is set back, because each `setLevel` clears every logger's cache.
+    """
+    root_level = logging.root.level
+    levels = [
+        (logger, logger.level)
+        for logger in logging.root.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    ]
+    yield
+    if logging.root.level != root_level:
+        logging.root.setLevel(root_level)
+    for logger, level in levels:
+        if logger.level != level:
+            logger.setLevel(level)
 
 
 @pytest.fixture(autouse=True)

@@ -25,6 +25,14 @@ class LogLevelChoices(enum.StrEnum):
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "LogLevelChoices | None":
+        """Match a level name in any case, ignoring surrounding whitespace."""
+        if isinstance(value, str):
+            return cls.__members__.get(value.strip().upper())
+        return None
 
 
 class TraceLogger(logging.Logger):
@@ -236,12 +244,48 @@ class LoggingMixin:
         return self._log
 
 
+_WARNED_LOG_LEVELS: set[str] = set()
+"""The unrecognised log level names `parse_log_level_name` has already reported:
+every logger created at import asks for the level, and the user needs to hear
+about a bad one once per process."""
+
+
 def parse_log_level_name(log_level: int | str) -> int:
-    return (
-        logging.getLevelNamesMapping()[log_level.upper()]
-        if isinstance(log_level, str)
-        else log_level
-    )
+    """Return the numeric value of a log level.
+
+    A name is matched in any case against `LogLevelChoices`. An unrecognised name
+    is reported once per distinct value on stderr and answered with
+    `DEFAULT_LOG_LEVEL`: the loggers created at import ask for the level, so
+    raising would break every command. It prints rather than logs because it
+    runs inside `get_logger`.
+
+    Parameters
+    ----------
+    log_level : int | str
+        A numeric level, returned as is, or a level name.
+
+    Returns
+    -------
+    int
+        The numeric level.
+    """
+    if isinstance(log_level, int):
+        return log_level
+
+    try:
+        choice = LogLevelChoices(log_level)
+    except ValueError:
+        if log_level not in _WARNED_LOG_LEVELS:
+            _WARNED_LOG_LEVELS.add(log_level)
+            accepted = ", ".join(LogLevelChoices)
+            fallback = logging.getLevelName(DEFAULT_LOG_LEVEL)
+            print(
+                f"Ignoring log level {log_level!r}: use one of {accepted}; "
+                f"logging at {fallback}.",
+                file=sys.stderr,
+            )
+        return DEFAULT_LOG_LEVEL
+    return logging.getLevelNamesMapping()[choice.value]
 
 
 def reset_log_level(level: LogLevelChoices) -> None:
