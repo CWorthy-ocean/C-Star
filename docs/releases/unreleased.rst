@@ -448,6 +448,12 @@ Bug Fixes
   - A choice made on the switch before the blueprint is valid carries into the blueprint once it resolves.
 
 - Forge runs no longer print six ``PydanticSerializationUnexpectedValue`` warnings when writing the emitted blueprint; the blueprint itself was always correct. (`#861 <https://github.com/CWorthy-ocean/C-Star/pull/861>`_)
+- A cdr_lite model saved from the wizard no longer fails validation when its BGC mode is switched to marbl. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
+
+  - The wizard's carbonate-sensitivity time-interpolation setting stays in the wizard session and the blueprints it writes; the saved ModelSpec keeps the base model's value.
+  - The save message says "(now unmodified)" only when the model really is unmodified.
+
+- A nested DomainSpec written by a later minor release is no longer refused as too new by this one. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 
 
 
@@ -552,6 +558,8 @@ Improvements
 - ``cstar admin migrate-catalog`` moves 0.17 spec directories into ``specs/``, removes the emptied directories, and leaves anything else (an asset, a ``.bak``) in place and reported. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 
   - Two old files for the same spec are never moved onto one another: the one C-Star reads moves, the other is reported as a collision.
+
+- A ``ucla_roms`` run on ucla-roms 0.13.0 or later whose ``_cdr`` or BGC-diagnostics average period is not a whole number of MARBL steps is now refused by C-Star before launch, and by ``--pre-run``, instead of aborting inside ROMS. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 
 
 
@@ -668,5 +676,6 @@ Miscellaneous
 
 - The wizard's carbonate-sensitivity test reads the default model from the wizard module instead of naming it, which repairs the unit-test job on ``main``. (`#857 <https://github.com/CWorthy-ocean/C-Star/pull/857>`_)
 - The bundled catalog and the integration-test catalog keep their specs under ``specs/``; the catalog, spec, contributing and Python reference pages show the new paths. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
+- The developer docs now say which ucla-roms start-up checks Forge and the ``ucla_roms`` path each run. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 
 
