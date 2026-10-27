@@ -87,7 +87,8 @@ step records list that is missing, or whose size differs, shows that the
 transfer is incomplete: the run is not attached and the command exits with
 code 1. Any other problem is listed and the run is attached all the same, with
 exit code 1: {ARG_VERIFY} also compares the content of each product that
-records a digest, and a mismatch is such a problem. Nothing is repaired or
+records a digest, says in one line how many matched, and a mismatch is such a
+problem. Nothing is repaired or
 recorded: `cstar run check <run-id> {ARG_REPAIR}` and `--record-digests` do
 that.
 

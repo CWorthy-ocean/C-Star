@@ -59,7 +59,9 @@ from cstar.orchestration.run_check import (
 from cstar.orchestration.tracking import WorkplanRun, require_writable
 
 if t.TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Collection, Iterator
+
+    from cstar.orchestration.run_check import DigestTally
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -84,14 +86,19 @@ The run's emitted files are searched for absolute paths under the run or the
 C-Star data home, its symlinks for absolute or missing targets, and its
 transformed workplan for steps without a directory. Files that launchers
 regenerate are skipped unless {ARG_ALL} is given. Steps that have not started
-have no directory yet.
+have no directory yet. An absolute path inside the run (or inside the directory
+the run was copied from, as its transformed workplan records it) names the run's
+own files and is listed for information: the transformed workplan and the
+blueprints that hold one are rebased when they are read. One elsewhere in the
+data home is a problem.
 
 When the run has a manifest, the products each step record lists are compared
 with the directory: missing, or a size that changed (a log is reported only when
 it shrank: the step's own log is still written after the record is taken).
 {ARG_VERIFY} also compares
 the content where a digest is recorded: a bounded sample for netCDF files, the
-whole file otherwise. {ARG_RECORD_DIGESTS} computes and records the digest of
+whole file otherwise; one line says how many products were compared, how many
+matched, and how many were skipped and why. {ARG_RECORD_DIGESTS} computes and records the digest of
 each product that has none, before the checks, which is how a run gets digests
 to verify (with {ARG_VERIFY}, in one pass). The
 files each attempt carried into `attempts/` (the workplan, its variables, the
@@ -99,11 +106,12 @@ blueprints) are compared with the digests the manifest recorded, always. For a
 run tracked on this machine the manifest is refreshed first, as `cstar run show`
 does; {ARG_NO_REFRESH} reads it as last recorded.
 
-Step directories and sentinel files that no step accounts for, symlinks to a
-place outside the run, steps that are done without a record, an attempt that
-has not finished, and carried inputs that are gone (older attempts may be
-deleted by hand) are listed for information and do not fail the check. Nothing
-is deleted.
+Absolute paths inside the run, step directories and sentinel files that no
+step accounts for, symlinks to a place outside the run, dangling symlinks inside
+a step's cloned codebases (committed by the codebase's repository), steps that
+are done without a record, an attempt that has not finished, and carried inputs
+that are gone (older attempts may be deleted by hand) are listed for
+information and do not fail the check. Nothing is deleted.
 
 {ARG_REPAIR} rewrites each absolute symlink that points inside the run as a
 relative one and rebuilds `gathered_output` if the run has one. It changes
@@ -115,12 +123,12 @@ pass its directory. A run attached read-only takes neither.
 
 To validate a workplan file, use `cstar workplan check <file>` instead.
 
-Exit code 0: nothing to fix. 1: findings remain, or a repair or digest write
+Exit code 0: nothing to fix. 1: problems remain, or a repair or digest write
 failed. 2: bad arguments.
 """
 
 _HEADINGS: t.Final[dict[FindingKind, str]] = {
-    FindingKind.ABSOLUTE_PATH: "Absolute paths in run files",
+    FindingKind.ABSOLUTE_PATH: "Absolute paths outside the run in run files",
     FindingKind.ABSOLUTE_LINK: f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR})",
     FindingKind.DANGLING_LINK: "Symlinks whose target does not exist",
     FindingKind.MISSING_STEP_DIR: "Steps without a directory",
@@ -128,7 +136,9 @@ _HEADINGS: t.Final[dict[FindingKind, str]] = {
     FindingKind.PRODUCT_SIZE: "Products whose size differs from the record",
     FindingKind.DIGEST_MISMATCH: f"Products whose content differs from the recorded digest ({ARG_VERIFY})",
     FindingKind.INPUT_MISMATCH: "Carried inputs whose content differs from the manifest",
+    FindingKind.RUN_PATH: "Absolute paths inside the run in run files (informational)",
     FindingKind.EXTERNAL_LINK: "Symlinks with a target outside the run (informational)",
+    FindingKind.CODEBASE_LINK: "Symlinks in cloned codebases whose target does not exist (informational)",
     FindingKind.RECORD_MISSING: "Steps that are done without a step record (informational)",
     FindingKind.ATTEMPT_OPEN: "Latest attempt not finished (informational)",
     FindingKind.INPUT_MISSING: "Carried inputs missing from the run (informational)",
@@ -285,7 +295,7 @@ def format_findings(report: RunCheckReport) -> "Iterator[str]":
         if found := [f for f in report.findings if f.kind is kind]:
             yield f"{heading} ({len(found)}):"
             for f in found:
-                if kind is FindingKind.ABSOLUTE_PATH:
+                if kind in {FindingKind.ABSOLUTE_PATH, FindingKind.RUN_PATH}:
                     yield f"  {f.file}:{f.line}: {f.path}"
                 elif kind in {
                     FindingKind.MISSING_STEP_DIR,
@@ -311,28 +321,73 @@ def format_findings(report: RunCheckReport) -> "Iterator[str]":
         yield f"Sentinel files no step accounts for (informational) ({len(report.orphans.sentinels)}):"
         yield from (f"  {p}" for p in report.orphans.sentinels)
 
+    if report.verification is not None:
+        yield format_verification(report.verification)
     yield from (f"Skipped {reason}" for reason in report.skipped)
 
 
-def summarize(report: RunCheckReport) -> str:
+def format_verification(tally: "DigestTally") -> str:
+    """Say in one line what comparing the products with their digests found.
+
+    Parameters
+    ----------
+    tally : DigestTally
+        What the comparison counted.
+
+    Returns
+    -------
+    str
+    """
+    if tally.compared:
+        line = f"Compared {tally.compared} product(s) with their recorded digest: {tally.matched} matched"
+        if tally.differed:
+            line += f", {tally.differed} differed"
+    else:
+        line = "Compared no product with a recorded digest"
+
+    reasons = []
+    if tally.no_digest:
+        reasons.append(f"{tally.no_digest} with no digest recorded")
+    if tally.foreign:
+        schemes = ", ".join(repr(scheme) for scheme in sorted(tally.foreign))
+        reasons.append(
+            f"{sum(tally.foreign.values())} recorded with a scheme this build "
+            f"does not compute ({schemes})"
+        )
+    if tally.not_compared:
+        reasons.append(f"{tally.not_compared} missing, resized or not a regular file")
+    if reasons:
+        line += f"; skipped {', '.join(reasons)}"
+    return f"{line}."
+
+
+def summarize(
+    report: RunCheckReport, *, inherited: "Collection[FindingKind]" = ()
+) -> str:
     """Summarize the report in one line.
 
     Parameters
     ----------
     report : RunCheckReport
         The report to summarize.
+    inherited : Collection[FindingKind]
+        The kinds of problem a copy inherits from its source: counted apart,
+        not as problems of the copy.
 
     Returns
     -------
     str
     """
+    problems = [p for p in report.problems if p.kind not in inherited]
+    from_source = len(report.problems) - len(problems)
     informational = len(report.findings) - len(report.problems)
     informational += len(report.orphans.step_dirs) + len(report.orphans.sentinels)
-    extra = f", {informational} informational" if informational else ""
+    extra = f", {from_source} inherited from the source" if from_source else ""
+    extra += f", {informational} informational" if informational else ""
 
-    if report.clean:
+    if not problems:
         return f"No problems found in {report.run_root}{extra}."
-    return f"{len(report.problems)} problem(s) found in {report.run_root}{extra}."
+    return f"{len(problems)} problem(s) found in {report.run_root}{extra}."
 
 
 def _load_manifest(
