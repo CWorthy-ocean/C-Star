@@ -313,6 +313,12 @@ New features
 
   - Files already current (versioned or not) are left untouched, and so is a file written by a newer cstar-ocean; ``--dry-run`` reports without writing.
 
+- Wizard fields known to misbehave now show an amber "Experimental" chip under their label; hovering over it explains that the feature may not work correctly. (`#851 <https://github.com/CWorthy-ocean/C-Star/pull/851>`_)
+
+  - The "Automatic tiling" option is the first field marked experimental.
+
+- The Workplan page shows an "Under development" notice under its status bar: the page works but is still being improved, so check the saved workplan before running it. (`#851 <https://github.com/CWorthy-ocean/C-Star/pull/851>`_)
+
 
 
 
