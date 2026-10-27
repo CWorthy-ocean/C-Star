@@ -46,6 +46,12 @@ Model
    them on the blueprint. With ParallelIO on, Forge converts any file that is
    not classic netCDF to CDF-5 when it stages the copies.
 
+   With ucla-roms 0.12.0 or later the group also has **Interpolate carbonate
+   sensitivities in time**. Leave it off when the files hold time-averaged
+   values, so each record is held for its averaging period; turn it on when
+   they hold instantaneous values. UCLA-ROMS writes the sensitivities
+   time-averaged by default, so the wizard starts with it off.
+
 Domain and grid
    Where the model runs and how finely it is resolved. Pick a **DomainSpec**
    from the catalog or edit the grid geometry (extent, resolution, rotation),
