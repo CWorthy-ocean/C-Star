@@ -100,8 +100,17 @@ UPTAKE_SERIES = ("carbon_uptake_from_flux", "carbon_uptake_from_DIC_difference")
 """The uptake series ``cdr_metrics.nc`` holds per domain (``<domain>_<series>``) and combined (``cdr_<series>``)."""
 FOOTPRINT_SERIES = "parent_up_DIC_difference_inside_child"
 """The DIC perturbation ``parent_up`` carries inside the child, which the combined uptake would count twice."""
-MAX_CLOSURE_FRACTION = 0.10
-"""The largest share of the final flux-based uptake the closure residual may be."""
+MAX_CLOSURE_FRACTION = 1e-3
+"""The largest share of the final flux-based uptake the closure residual may be.
+
+The two uptakes are two sums over one carbon budget once the child's ``_uscl`` export
+holds the mixing flux (ucla-roms #399) and each domain's metrics leave out its boundary
+rows and columns (roms-tools after 5.2.2), so the residual is round-off: 7e-6 on this example.
+"""
+NO_MIXING_EXPORT_REFS = ("0.11.0", "0.12.0")
+"""ucla-roms releases whose ``_uscl`` export leaves out the mixing flux (before #399)."""
+NO_MIXING_EXPORT_MAX_CLOSURE_FRACTION = 0.15
+"""`MAX_CLOSURE_FRACTION` for `NO_MIXING_EXPORT_REFS`: the missing flux is +9.8 % here."""
 CONSERVATION_RTOL = 1e-3
 """How far ``parent_up``'s injected alkalinity may be from the upscaled file's flux."""
 REGISTRY_SOURCES = {
@@ -577,17 +586,23 @@ def test_cdr_metrics_are_finite_at_the_final_record(nesting_run: NestingRun) -> 
 
 
 def test_cdr_metrics_close_at_the_final_record(nesting_run: NestingRun) -> None:
-    """The closure residual is under a tenth of the flux-based CO2 uptake at the last time.
+    """The closure residual is a small share of the flux-based CO2 uptake at the last time.
 
     The residual is the combined flux-based uptake minus the combined DIC-difference
     uptake, two estimates of the same CO2 that agree when the domains account for the
-    release consistently.
+    release consistently. A ucla-roms release without the mixing flux in its export gets
+    the looser bound.
     """
     (path,) = nesting_run.outputs("cdr_metrics", METRICS_FILENAME)
     final = final_record(path, COMBINED_SERIES)
     uptake = final["cdr_carbon_uptake_from_flux"]
+    bound = (
+        NO_MIXING_EXPORT_MAX_CLOSURE_FRACTION
+        if ROMS_REF in NO_MIXING_EXPORT_REFS
+        else MAX_CLOSURE_FRACTION
+    )
     assert uptake > 0, final
-    assert abs(final["closure_residual"]) / uptake < MAX_CLOSURE_FRACTION, final
+    assert abs(final["closure_residual"]) / uptake < bound, final
 
 
 def test_cdr_metrics_keep_each_domains_series(nesting_run: NestingRun) -> None:
