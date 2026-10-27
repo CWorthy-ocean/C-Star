@@ -494,6 +494,13 @@ Bug Fixes
   - The cache, config, data and state homes show the ``cstar`` directory under ``XDG_*_HOME`` or scratch, not the directory it is derived from.
   - Export lines no longer wrap when piped, values are shell-quoted, and settings at their default or empty are commented out.
 
+- ``run://<uuid>`` no longer refuses with "More than one tracked run has the uuid" when copies of one run are tracked under several run-ids. (`#872 <https://github.com/CWorthy-ocean/C-Star/pull/872>`_)
+
+  - It uses the run started here, else an owned attached copy, else a read-only one, the most recently recorded among equals.
+  - A warning names the copy used and the copies passed over; name a copy by its run-id or directory to use another.
+
+- Naming the directory of an attached copy finds that copy's own record (and its read-only setting) even when the original is tracked too. (`#872 <https://github.com/CWorthy-ocean/C-Star/pull/872>`_)
+
 
 
 
@@ -734,5 +741,6 @@ Miscellaneous
 - The nesting tutorial's alkalinity release moved into the current along the child's east boundary, so it crosses into the parent within the day and the run shows the transfer. (`#871 <https://github.com/CWorthy-ocean/C-Star/pull/871>`_)
 - The nesting tutorial now shows a map of the two domains, the combined CDR metrics plot and each domain's CO2 uptake, with reference values from ucla-roms 0.13.0 and roms-tools 5.3.0. (`#871 <https://github.com/CWorthy-ocean/C-Star/pull/871>`_)
 - The configuration page no longer suggests ``cstar env show --display export`` as a starter script; it already points at ``cstar init`` and ``cstar env set``. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
+- The run-reference and ``cstar run attach`` docs say how a uuid resolves when copies of the run are tracked. (`#872 <https://github.com/CWorthy-ocean/C-Star/pull/872>`_)
 
 
