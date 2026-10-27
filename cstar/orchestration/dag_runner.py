@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import os
 import shutil
 import typing as t
 from collections import OrderedDict
@@ -99,8 +100,9 @@ from cstar.orchestration.transforms import (
     materialize_inline_blueprints,
     resolve_external_runs,
 )
-from cstar.system.manager import get_sysmgr
+from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr
 from cstar.system.migration import CstarSchemaTooNewError, version_key
+from cstar.system.scheduler import in_scheduler_job
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable
@@ -312,7 +314,10 @@ def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestr
     """Create the orchestrator that launches the steps of a plan.
 
     Each launch persists the step's handle and records the submission in the
-    run's manifest (see `on_launched`).
+    run's manifest (see `on_launched`). On a machine whose scheduler the system
+    context cannot submit to (see `SystemSelection.unsupported_scheduler`), a run
+    started outside a job is warned that every step runs on this node; a pre-run
+    runs on this node by design and is not.
 
     Parameters
     ----------
@@ -328,6 +333,15 @@ def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestr
     Orchestrator
     """
     launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
+    selection = get_sysmgr().selection
+    family = selection.unsupported_scheduler(os.environ)
+    if family and not planner.workplan.pre_run and not in_scheduler_job(os.environ):
+        log.warning(
+            "Every step runs on this node: C-Star uses the system "
+            f"{selection.describe()}, which cannot submit to this machine's {family} "
+            "scheduler. Run the workplan inside an allocation, or register the "
+            f"system to submit its steps (see {DOCS_MACHINES_URL})."
+        )
 
     orchestrator = Orchestrator(planner, launcher, run_uuid=run_uuid)
     orchestrator.set_callback("launched", functools.partial(on_launched, root=root))

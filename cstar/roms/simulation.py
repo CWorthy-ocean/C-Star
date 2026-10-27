@@ -34,7 +34,11 @@ from cstar.applications.ucla_roms.adapter import (
 )
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, ENV_CSTAR_DEBUG_BUILD_MODE
+from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
+    ENV_CSTAR_SYSTEM,
+)
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import (
@@ -97,7 +101,7 @@ from cstar.roms.namelist import (
 from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
 from cstar.simulation import Simulation
-from cstar.system.manager import get_sysmgr
+from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr, warn_once
 from cstar.system.scheduler import in_scheduler_job
 
 if TYPE_CHECKING:
@@ -2542,9 +2546,11 @@ class ROMSSimulation(Simulation):
 
         ROMS always runs as a local process of the calling process. On a system
         with a scheduler, outside any scheduler job (a login node, say), that
-        would run the model where it does not belong. The answer depends only on
-        the process and the system, so a caller can ask before it builds a
-        simulation.
+        would run the model where it does not belong. On a cluster C-Star does
+        not recognise, whose generic context has no scheduler while the machine
+        shows one, the launch may be in the same place but C-Star cannot be sure,
+        so it warns once instead. The answer depends only on the process and the
+        system, so a caller can ask before it builds a simulation.
 
         Raises
         ------
@@ -2553,16 +2559,27 @@ class ROMSSimulation(Simulation):
             job, and `CSTAR_ALLOW_LOGIN_NODE_RUN` is not set to `1`.
         """
         cstar_sysmgr = get_sysmgr()
-        if (
-            cstar_sysmgr.scheduler is not None
-            and not in_scheduler_job(os.environ)
-            and not is_flag_enabled(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN)
+        if in_scheduler_job(os.environ) or is_flag_enabled(
+            ENV_CSTAR_ALLOW_LOGIN_NODE_RUN
         ):
+            return
+        if cstar_sysmgr.scheduler is not None:
             raise CstarError(
                 f"Refusing to launch ROMS outside a scheduler job on {cstar_sysmgr.name}, "
                 "which has a scheduler. Submit it with 'cstar blueprint submit "
                 "<blueprint>', run it inside an allocation, or set "
                 f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run it here anyway."
+            )
+        selection = cstar_sysmgr.selection
+        if family := selection.unsupported_scheduler(os.environ):
+            warn_once(
+                "ROMS will run outside a scheduler job on a machine with a "
+                f"{family} scheduler, which the system {selection.describe()} "
+                "cannot submit to. If this is a login node, stop it and run it inside "
+                "an allocation (salloc, qsub -I, or your own batch script). Set "
+                f"{ENV_CSTAR_SYSTEM} to the system's name if C-Star lists it, or "
+                f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run here without this "
+                f"warning (see {DOCS_MACHINES_URL})."
             )
 
     def run(self, job_name: str | None = None) -> "ExecutionHandler":

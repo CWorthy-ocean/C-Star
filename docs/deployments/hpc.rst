@@ -57,6 +57,8 @@ which is more than some queues allow. These settings are the defaults for
 every step of a workplan, and a step can ask for different resources (see
 :ref:`workplan_compute_environment`).
 
+.. _hpc_compute_nodes:
+
 Run work on the compute nodes
 -----------------------------
 
@@ -64,7 +66,9 @@ Submit your work as a :doc:`workplan <../workplans/index>`. ``cstar workplan
 submit`` sends each step to SLURM and returns, so every stage runs on a
 compute node and you can log off. For one blueprint, ``cstar blueprint
 submit my_blueprint.yaml`` does the same with a single-step workplan (see
-:doc:`../applications/blueprints`).
+:doc:`../applications/blueprints`). On a cluster that isn't in the
+:doc:`table of systems <machines>`, these commands submit no jobs; see
+:ref:`machines_unlisted`.
 
 ``cstar blueprint run`` instead runs everything on the node you start it
 from, so use it inside an allocation (``salloc``, or your own batch script).

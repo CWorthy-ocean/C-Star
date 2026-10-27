@@ -18,6 +18,7 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
     ENV_CSTAR_DEBUG_BUILD_MODE,
+    ENV_CSTAR_SYSTEM,
     FLAG_OFF,
     FLAG_ON,
 )
@@ -57,6 +58,12 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.simulation import ROMSSimulation, _join_workers
 from cstar.system.manager import (
+    DOCS_MACHINES_URL,
+    AnvilSystemContext,
+    LinuxSystemContext,
+    SystemContext,
+    SystemSelection,
+    SystemSource,
     get_sysmgr,
 )
 
@@ -2831,6 +2838,174 @@ class TestProcessingAndExecution:
 
         with pytest.raises(CstarError, match="Refusing to launch ROMS"):
             stub_romssimulation.run()
+
+    @pytest.fixture
+    def unrecognised_cluster(self, monkeypatch: pytest.MonkeyPatch) -> mock.Mock:
+        """Put the process outside any job on a cluster C-Star does not recognise:
+        the generic context in use, no scheduler of its own, and SLURM visible.
+        """
+        for name in (
+            "SLURM_JOB_ID",
+            "SLURM_JOBID",
+            "PBS_JOBID",
+            ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+        sysmgr = mock.Mock()
+        sysmgr.name = LinuxSystemContext.name
+        sysmgr.scheduler = None
+        sysmgr.selection = SystemSelection(
+            LinuxSystemContext, SystemSource.FALLBACK, "frontera"
+        )
+        monkeypatch.setattr("cstar.roms.simulation.get_sysmgr", lambda: sysmgr)
+        monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda _: "SLURM")
+        return sysmgr
+
+    @staticmethod
+    def launch_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+        """Return the logged warnings that ROMS will run outside a scheduler job."""
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+            and record.getMessage().startswith("ROMS will run outside a scheduler job")
+        ]
+
+    def test_check_launch_location_warns_once_on_an_unrecognised_cluster(
+        self, unrecognised_cluster: mock.Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Outside a job on a cluster that fell back to the generic context but shows
+        a scheduler, C-Star warns, once per process, naming the scheduler, the
+        system, `CSTAR_SYSTEM`, the login-node flag and the docs, and does not refuse.
+        """
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+            ROMSSimulation.check_launch_location()
+
+        (message,) = self.launch_warnings(caplog)
+        assert message.startswith(
+            "ROMS will run outside a scheduler job on a machine with a SLURM scheduler, "
+            f"which the system {unrecognised_cluster.selection.describe()} cannot "
+            "submit to."
+        )
+        assert "'frontera'" in message
+        assert LinuxSystemContext.name in message
+        assert ENV_CSTAR_SYSTEM in message
+        assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
+        assert DOCS_MACHINES_URL in message
+
+    def test_run_warns_then_launches_on_an_unrecognised_cluster(
+        self,
+        unrecognised_cluster: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """`run` on an unrecognised cluster's login node warns and then goes on to
+        prepare and start the local process, as it does anywhere else.
+        """
+        with (
+            caplog.at_level(logging.WARNING),
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch") as mock_prepare,
+        ):
+            execution_handler = stub_romssimulation.run()
+
+        assert len(self.launch_warnings(caplog)) == 1
+        mock_prepare.assert_called_once()
+        mock_local_process.return_value.start.assert_called_once()
+        assert execution_handler is mock_local_process.return_value
+
+    @pytest.mark.parametrize("job_id_var", ["SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"])
+    def test_check_launch_location_allows_a_job_on_an_unrecognised_cluster(
+        self,
+        unrecognised_cluster: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        job_id_var: str,
+    ) -> None:
+        """Inside a scheduler job, an unrecognised cluster is allowed without a warning."""
+        monkeypatch.setenv(job_id_var, "12345")
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
+
+    def test_check_launch_location_allows_the_login_node_flag_on_an_unrecognised_cluster(
+        self,
+        unrecognised_cluster: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """`CSTAR_ALLOW_LOGIN_NODE_RUN=1` lets ROMS launch on an unrecognised cluster
+        without the warning.
+        """
+        monkeypatch.setenv(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, FLAG_ON)
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
+
+    def test_check_launch_location_allows_an_unrecognised_machine_without_a_scheduler(
+        self,
+        unrecognised_cluster: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A fallback to the generic context on a machine that shows no scheduler, a
+        laptop or a workstation, launches without a warning.
+        """
+        monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda _: "")
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
+
+    def test_check_launch_location_warns_for_a_generic_context_pinned_by_the_setting(
+        self, unrecognised_cluster: mock.Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Pinning the generic context with `CSTAR_SYSTEM`, to silence the fallback
+        warning, does not silence the login-node warning: it says the context was set.
+        """
+        unrecognised_cluster.selection = SystemSelection(
+            LinuxSystemContext, SystemSource.SETTING
+        )
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        (message,) = self.launch_warnings(caplog)
+        assert "SLURM scheduler" in message
+        assert f"set by {ENV_CSTAR_SYSTEM}" in message
+        assert LinuxSystemContext.name in message
+
+    @pytest.mark.parametrize(
+        ("context", "source"),
+        [
+            pytest.param(LinuxSystemContext, SystemSource.DETECTED, id="generic"),
+            pytest.param(AnvilSystemContext, SystemSource.DETECTED, id="slurm"),
+            pytest.param(AnvilSystemContext, SystemSource.SETTING, id="set-slurm"),
+        ],
+    )
+    def test_check_launch_location_trusts_a_detected_system_or_one_that_submits(
+        self,
+        unrecognised_cluster: mock.Mock,
+        caplog: pytest.LogCaptureFixture,
+        context: type[SystemContext],
+        source: SystemSource,
+    ) -> None:
+        """A system C-Star detected, or one `CSTAR_SYSTEM` names that has a scheduler
+        of its own, launches without a warning even where a scheduler is visible.
+        """
+        unrecognised_cluster.selection = SystemSelection(context, source)
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
 
     def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.

@@ -312,15 +312,23 @@ class CStarEnvironment:
 
     @property
     def uses_lmod(self) -> bool:
-        """Checks if the system uses Linux Environment Modules (Lmod) based on OS type
-        and presence of `LMOD_DIR` in environment variables.
+        """Checks if the system uses Linux Environment Modules (Lmod): the OS is Linux,
+        `LMOD_CMD` is set, and C-Star has a module list for the system.
+
+        A generic context (`linux_x86_64`, say) has no module list: on a cluster C-Star
+        does not recognise it keeps the modules the user loaded and builds with the
+        conda environment's toolchain, as on a laptop.
 
         Returns
         -------
         bool
-            True if the OS is Linux and `LMOD_DIR` is present in environment variables.
+            True if the OS is Linux, `LMOD_CMD` is set, and `lmod_path` exists.
         """
-        return platform.system() == "Linux" and bool(self._lmod_settings.CMD)
+        return (
+            platform.system() == "Linux"
+            and bool(self._lmod_settings.CMD)
+            and self.lmod_path.is_file()
+        )
 
     @property
     def system_env_path(self) -> Path:

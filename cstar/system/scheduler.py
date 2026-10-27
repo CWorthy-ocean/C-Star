@@ -1,4 +1,5 @@
 import functools
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Final
@@ -46,6 +47,40 @@ def in_scheduler_job(environ: "Mapping[str, str]") -> bool:
         (`PBS_JOBID`) is set to a non-empty value.
     """
     return bool(slurm_job_id(environ) or environ.get("PBS_JOBID"))
+
+
+VISIBLE_SCHEDULERS: Final = (("SLURM", "sbatch", "SLURM_"), ("PBS", "qsub", "PBS_"))
+"""Each scheduler family `visible_scheduler` looks for: its name, its submit command,
+and the prefix of the variables it sets."""
+
+
+def visible_scheduler(
+    environ: "Mapping[str, str]", which: Callable[..., str | None] = shutil.which
+) -> str:
+    """Name the batch scheduler a machine shows, whether or not C-Star knows the system.
+
+    A login node shows its scheduler by the submit command on its `PATH`, and a
+    job also by the variables the scheduler sets.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables; its `PATH` is searched.
+    which : Callable[..., str | None]
+        Locates a command on a search path, as `shutil.which` does.
+
+    Returns
+    -------
+    str
+        `"SLURM"` or `"PBS"`, else empty.
+    """
+    path = environ.get("PATH")
+    for family, command, prefix in VISIBLE_SCHEDULERS:
+        if which(command, path=path) or any(
+            name.startswith(prefix) for name in environ
+        ):
+            return family
+    return ""
 
 
 def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
