@@ -236,6 +236,14 @@ first deprecated, then removed. Blueprint schema changes follow their own
 rule (a major ``schema_version`` with a migration, see
 :doc:`developers/custom_applications`) and are not covered here.
 
+Renaming or restructuring a field of a catalog spec (ModelSpec, DomainSpec,
+ForcingSpec, OutputSpec, CdrSpec) needs a registered spec migration: a
+``SchemaAdapter`` added to ``SPEC_MIGRATIONS`` in
+``cstar/applications/forge/migration.py``, a major bump of that kind in
+``SPEC_SCHEMA_VERSIONS`` (``cstar/catalog/spec_schema.py``), and the bundled
+specs restamped. The adapter must leave content that is already current
+unchanged. An additive optional key is a minor bump with no adapter.
+
 **Deprecating.** The old form keeps working, and the code that detects it
 calls ``cstar.base.deprecation.deprecated``:
 

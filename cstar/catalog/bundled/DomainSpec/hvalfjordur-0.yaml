@@ -1,3 +1,4 @@
+schema_version: 1.0.0
 description: "Hvalfjörður, Iceland"
 model_name: "roms-marbl-0.12-default"
 grid_name: "hvalfjordur-0"

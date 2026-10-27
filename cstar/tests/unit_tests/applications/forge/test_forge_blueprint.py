@@ -5043,15 +5043,21 @@ def _legacy_output_settings(enabled=False):
 
 
 @pytest.mark.parametrize("model_path", [_MODEL_PATH_ROMS070, _MODEL_PATH_ROMS090])
-def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_path, caplog):
+def test_resolver_renames_a_legacy_output_spec_with_a_warning(
+    model_path, caplog, monkeypatch
+):
     import copy
+
+    from cstar.catalog import spec_schema
+
+    monkeypatch.setattr(spec_schema, "_WARNED", set())
 
     legacy = _legacy_output_settings(enabled=True)
     snapshot = copy.deepcopy(legacy)
     overrides: dict[str, t.Any] = {"param": {"nt_cdr_oae": 1}}
     if model_path == _MODEL_PATH_ROMS090:  # CDR tracers need CDR_LITE on 0.9
         overrides["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
-    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+    with caplog.at_level(logging.WARNING, logger="cstar.catalog.spec_schema"):
         cfg = _build(
             model_path=model_path,
             output_settings=legacy,
@@ -5060,11 +5066,13 @@ def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_path, caplog
     settings = cfg.model_settings
     assert "cdr_tracer_output" not in settings
     assert settings["cdr_lite_output"]["do_cdr_lite_output"] is True
-    warnings_ = _resolver_warnings(caplog)
+    warnings_ = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == "cstar.catalog.spec_schema"
+    ]
     assert len(warnings_) == 1
-    assert "output_settings" in warnings_[0]
-    assert "'cdr_tracer_output' -> 'cdr_lite_output'" in warnings_[0]
-    assert "CDR_LITE" in warnings_[0]
+    assert "OutputSpec output_settings is schema 1.0.0" in warnings_[0]
     assert legacy == snapshot  # the caller's dict is not mutated
 
 
@@ -5106,14 +5114,15 @@ def test_resolver_names_a_model_by_its_catalog_entry_in_either_layout(tmp_path):
 
 def test_resolver_renames_a_legacy_model_spec(tmp_path, caplog):
     model = yaml.safe_load(_MODEL_PATH_ROMS070.read_text())
+    model.pop("schema_version")  # a file without one is the pre-rename schema
     model["model_settings"]["cdr_tracer_output"] = {"do_cdr_tracer_output": False}
     model_path = tmp_path / "legacy-model.yaml"
     model_path.write_text(yaml.safe_dump(model))
-    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+    with caplog.at_level(logging.WARNING, logger="cstar.catalog.spec_schema"):
         cfg = _build(model_path=model_path)
     assert "cdr_tracer_output" not in cfg.model_settings
     assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
-    assert "ModelSpec 'legacy-model'" in caplog.text
+    assert f"ModelSpec {model_path} is schema 1.0.0" in caplog.text
 
 
 def test_resolver_does_not_warn_for_current_names(caplog):

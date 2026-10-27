@@ -1,3 +1,4 @@
+schema_version: 2.0.0
 description: "Test: GLORYS + ERA5 from pinned local files, BGC from constant values"
 # No bgc surface item: forge has no constants surface source.
 

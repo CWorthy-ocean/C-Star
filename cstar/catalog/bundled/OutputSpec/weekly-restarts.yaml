@@ -6,6 +6,7 @@
 # with the fewest edits: 'standard's weekly averages and 7-records-per-file
 # daily-period streams already divide a week, so only the restart period and
 # the surf_flux/upscale/random packing change.
+schema_version: 2.0.0
 description: "Weekly restarts; all output streams divide the restart period (ucla-roms >= 0.5.0 precheck-safe)"
 
 ocean_vars:

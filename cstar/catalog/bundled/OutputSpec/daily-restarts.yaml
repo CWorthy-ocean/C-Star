@@ -6,6 +6,7 @@
 # file packing to roll at least daily: nrpf 7 -> 1 for the daily-period streams,
 # averages weekly -> daily, and the surf_flux/upscale/random packing aligned to
 # one file per day.
+schema_version: 2.0.0
 description: "Daily restarts; all output streams divide the restart period (ucla-roms >= 0.5.0 precheck-safe)"
 
 ocean_vars:

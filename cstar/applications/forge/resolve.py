@@ -374,10 +374,10 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 def _with_current_section_names(
     settings: dict[str, Any] | None, source: str
 ) -> dict[str, Any]:
-    """A deep copy of a settings dict entering the resolver (ModelSpec model
-    settings, OutputSpec, run-time overrides) with legacy section names renamed
+    """A deep copy of a settings dict entering the resolver (the run-time
+    overrides, which are not a spec file) with legacy section names renamed
     (:func:`normalize_legacy_sections`); warns once per ``source`` when it
-    renamed anything, since a spec still using them predates ucla-roms 0.9.0.
+    renamed anything, since settings still using them predate ucla-roms 0.9.0.
     """
     settings = copy.deepcopy(settings or {})
     if renamed := normalize_legacy_sections(settings):
@@ -398,21 +398,19 @@ def load_model_spec_data(model_path: str | Path) -> dict[str, Any]:
     (roms/marbl/pio + template refs) and ``model_settings`` (flat, mirrors
     ``ForgeBlueprint.model_settings`` 1:1 -- no separate compile/run-time defaults
     files to resolve). Returns ``{"model_name": <entry name>, "model": <file dict>}``,
-    the entry name being the catalog's (``spec_entry_name``): the file's stem.
+    the entry name being the catalog's (``spec_entry_name``): the file's stem; the
+    model is at the current ModelSpec schema (``read_model_spec``).
     """
     # Deferred, as cstar.catalog is not otherwise needed to resolve a blueprint.
+    from cstar.applications.forge.models import read_model_spec
     from cstar.catalog.domain_catalog import spec_entry_name
 
     model_path = Path(model_path)
-    model = yaml.safe_load(model_path.read_text())
-    # single-model file: sections at top level; else unwrap a single named block
-    if not any(k in model for k in ("code", "model_settings")):
-        if len(model) == 1:
-            model = next(iter(model.values()))
-
+    model_name = spec_entry_name(model_path)
+    data = yaml.safe_load(model_path.read_text()) or {}
     return {
-        "model_name": spec_entry_name(model_path),
-        "model": model,
+        "model_name": model_name,
+        "model": read_model_spec(data, model_name, model_path),
     }
 
 
@@ -894,7 +892,12 @@ def build_forge_blueprint(
             "output_settings is required: ModelSpec no longer provides default output "
             "settings -- select or supply an OutputSpec (e.g. catalog.output_data(name))."
         )
-    inputs = forcing_inputs
+    # Specs read from the catalog arrive migrated; a caller that parsed its own
+    # spec file may not have, so the resolver guarantees the schema itself.
+    from cstar.catalog.spec_schema import read_spec
+
+    inputs = read_spec("ForcingSpec", forcing_inputs, "forcing_inputs")
+    output_settings = read_spec("OutputSpec", output_settings, "output_settings")
 
     # ----- optional user-provided grid file ----------------------------------
     # Normalize `grid_file` into a UserProvidedFile, then load the grid ONCE
@@ -975,9 +978,7 @@ def build_forge_blueprint(
         v_sponge = _compute_v_sponge_default(grid_kwargs, loaded_grid)
 
     # ----- flat model_settings ----------------------------------------------
-    settings: dict[str, Any] = _with_current_section_names(
-        model.get("model_settings"), f"ModelSpec {model_name!r}"
-    )
+    settings: dict[str, Any] = copy.deepcopy(model.get("model_settings") or {})
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
@@ -1142,9 +1143,7 @@ def build_forge_blueprint(
 
     # OutputSpec spec: deep-merge the output-settings selection over the model
     # defaults (before manual overrides, so a hand override still wins).
-    _deep_merge(
-        settings, _with_current_section_names(output_settings, "output_settings")
-    )
+    _deep_merge(settings, output_settings)
 
     # overrides win (mirror ForgeExecutor.configure_build precedence)
     if compile_time_overrides:

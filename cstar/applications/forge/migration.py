@@ -234,10 +234,9 @@ def migrate_forcing_inputs(
     """Migrate the pre-v8 forcing-input shapes IN PLACE (idempotent).
 
     Shared by :func:`migrate_forge_blueprint_data` (where ``initial_conditions``
-    lives inside ``forcing``) and by the wizard's ForcingSpec loader (where a
-    catalog ForcingSpec keeps ``initial_conditions`` and ``forcing`` as
-    top-level siblings and is otherwise never migrated) -- one function, so
-    the two entry points cannot drift.
+    lives inside ``forcing``) and :class:`ForcingSpecAdapterV1V2` (where a
+    ForcingSpec keeps ``initial_conditions`` and ``forcing`` as top-level
+    siblings) -- one function, so the two entry points cannot drift.
 
     * ``initial_conditions.bgc_source`` (a single source dict) is rewrapped as a
       one-item ``bgc_sources`` list; absent/``None`` becomes ``[]``. Both keys
@@ -420,4 +419,6 @@ SPEC_MIGRATIONS: Final[tuple[type[SchemaAdapter], ...]] = (
 )
 """The catalog spec migrations, read by ``cstar.catalog.spec_schema``. A spec
 field rename adds an adapter here and bumps its kind's major in
-``SPEC_SCHEMA_VERSIONS``."""
+``SPEC_SCHEMA_VERSIONS``. Each adapter must leave content already at its target
+unchanged: catalog readers return content without ``schema_version``, and
+``build_forge_blueprint`` reads what it is given as unversioned."""
