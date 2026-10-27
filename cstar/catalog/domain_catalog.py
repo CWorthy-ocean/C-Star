@@ -15,6 +15,8 @@ import yaml
 from cstar.base.application_names import canonical_application
 from cstar.base.deprecation import deprecated
 from cstar.base.env import ENV_CSTAR_CATALOG, default_catalog_root, get_env_item
+from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, read_spec
+from cstar.system.migration import KEY_SV
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -866,6 +868,10 @@ class DomainCatalog:
     # Path accessors (raise KeyError if not found)
     # ------------------------------------------------------------------
 
+    def spec_paths(self, kind: CatalogSpecKind) -> dict[str, Path]:
+        """Return the spec file of every *kind* entry, by name."""
+        return dict(self._specs[kind])
+
     def model_path(self, model_name: str) -> Path:
         """Return the spec file of a named model."""
         if model_name not in self._specs["ModelSpec"]:
@@ -916,55 +922,46 @@ class DomainCatalog:
         return self.blueprint_path(_FORGE, forge_blueprint_name)
 
     # ------------------------------------------------------------------
-    # Data accessors (return raw dicts)
+    # Data accessors (return dicts at the current schema)
     # ------------------------------------------------------------------
 
-    def model_data(self, model_name: str) -> dict:
-        """Return the raw YAML data dict for a named model."""
-        path = self.model_path(model_name)
-        with self._fs_open(path) as f:
-            return yaml.safe_load(f) or {}
-
-    def domain_data(self, domain_name: str) -> dict:
-        """Return the raw YAML data dict for a named domain."""
-        path = self.domain_path(domain_name)
-        with self._fs_open(path) as f:
-            return yaml.safe_load(f) or {}
-
-    def forcing_data(self, forcing_name: str) -> dict:
-        """Return the raw YAML data dict for a named forcing spec."""
-        if forcing_name not in self._specs["ForcingSpec"]:
+    def _spec_data(self, kind: CatalogSpecKind, name: str) -> dict:
+        """Return a *kind* entry's content at the current schema (`read_spec`)."""
+        if name not in self._specs[kind]:
             raise KeyError(
-                f"ForcingSpec '{forcing_name}' not found in catalog at {self.catalog_root}. "
-                f"Available: {self.forcing_names}"
+                f"{kind} '{name}' not found in catalog at {self.catalog_root}. "
+                f"Available: {', '.join(sorted(self._specs[kind])) or '(none)'}"
             )
-        path = self._specs["ForcingSpec"][forcing_name]
-        with self._fs_open(path) as f:
-            return yaml.safe_load(f) or {}
-
-    def output_data(self, output_name: str) -> dict:
-        """Return the raw YAML data dict for a named output spec."""
-        if output_name not in self._specs["OutputSpec"]:
-            raise KeyError(
-                f"OutputSpec '{output_name}' not found in catalog at {self.catalog_root}. "
-                f"Available: {self.output_names}"
-            )
-        path = self._specs["OutputSpec"][output_name]
+        path = self._specs[kind][name]
         with self._fs_open(path) as f:
             data = yaml.safe_load(f) or {}
+        if kind == "ModelSpec":
+            from cstar.applications.forge.models import read_model_spec
+
+            return read_model_spec(data, name, path)
+        return read_spec(kind, data, path)
+
+    def model_data(self, model_name: str) -> dict:
+        """Return the data dict of a named model, at the current ModelSpec schema."""
+        return self._spec_data("ModelSpec", model_name)
+
+    def domain_data(self, domain_name: str) -> dict:
+        """Return the data dict of a named domain, at the current DomainSpec schema."""
+        return self._spec_data("DomainSpec", domain_name)
+
+    def forcing_data(self, forcing_name: str) -> dict:
+        """Return the data dict of a named forcing spec, at the current schema."""
+        return self._spec_data("ForcingSpec", forcing_name)
+
+    def output_data(self, output_name: str) -> dict:
+        """Return the data dict of a named output spec, at the current schema."""
+        data = self._spec_data("OutputSpec", output_name)
         data.pop("description", None)
         return data
 
     def cdr_data(self, cdr_name: str) -> dict:
-        """Return the raw YAML data dict for a named CDR spec."""
-        if cdr_name not in self._specs["CdrSpec"]:
-            raise KeyError(
-                f"CdrSpec '{cdr_name}' not found in catalog at {self.catalog_root}. "
-                f"Available: {self.cdr_names}"
-            )
-        path = self._specs["CdrSpec"][cdr_name]
-        with self._fs_open(path) as f:
-            return yaml.safe_load(f) or {}
+        """Return the data dict of a named CDR spec, at the current schema."""
+        return self._spec_data("CdrSpec", cdr_name)
 
     # ------------------------------------------------------------------
     # Sketch-compatible accessor methods (name or index)
@@ -1071,7 +1068,8 @@ class DomainCatalog:
     ) -> None:
         """Write a new *kind* entry *name* as ``<kind>/<name>.yaml`` and rescan *kind*.
 
-        Refuses a name this catalog already has, in either layout.
+        The file opens with the kind's current ``schema_version``. Refuses a name
+        this catalog already has, in either layout.
         """
         path = self.catalog_root / kind / f"{name}.yaml"
         existing = self._specs[kind].get(name)
@@ -1082,7 +1080,11 @@ class DomainCatalog:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w") as f:
             yaml.safe_dump(
-                data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+                {KEY_SV: SPEC_SCHEMA_VERSIONS[kind], **data},
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
             )
         self._scan_specs(kind)
 
@@ -1292,7 +1294,14 @@ class DomainCatalog:
         Refuses to overwrite an existing entry.
         """
         self._check_writable()
-        base = yaml.safe_load(Path(base_model_path).read_text()) or {}
+        from cstar.applications.forge.models import read_model_spec
+
+        base_model_path = Path(base_model_path)
+        base = read_model_spec(
+            yaml.safe_load(base_model_path.read_text()) or {},
+            spec_entry_name(base_model_path),
+            base_model_path,
+        )
         code = dict(base.get("code") or {})
 
         def _override_ref(repo_key: str, ref: str | None) -> None:

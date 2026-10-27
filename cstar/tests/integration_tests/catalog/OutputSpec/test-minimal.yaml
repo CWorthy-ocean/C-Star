@@ -1,5 +1,6 @@
 # OutputSpec 'test-minimal': restarts only, every 1800 s, two records per file, so a
 # 1-hour run writes exactly two restart records and nothing else.
+schema_version: 2.0.0
 description: "Test output: restarts only"
 
 ocean_vars:

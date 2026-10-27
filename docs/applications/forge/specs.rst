@@ -63,6 +63,7 @@ A ModelSpec file has this shape:
 
 .. code-block:: yaml
 
+   schema_version: 2.0.0
    bgc_mode: marbl   # marbl, none or cdr_lite; the default for the wizard's biogeochemistry choice
    use_pio: false    # default for the wizard's ParallelIO checkbox
 

@@ -106,6 +106,11 @@ Nothing is overwritten: an entry whose new location is already taken is
 left where it is and reported, and so is anything that is not a spec or a
 blueprint, such as a file you kept in a domain's ``Assets/`` directory.
 
+Each spec file records the ``schema_version`` of its kind. C-Star reads a
+spec written by an older release by migrating it in memory, with a warning;
+``cstar admin migrate-catalog`` brings such files up to date on disk and
+keeps the previous version of each as ``<file>.bak``.
+
 If you used the standalone ``cstar-forge`` package, your old catalog may be
 at ``~/cstar-forge-data/catalog``, which C-Star does not read. Move it to
 ``~/cstar/catalog``, or point ``CSTAR_CATALOG`` at it.

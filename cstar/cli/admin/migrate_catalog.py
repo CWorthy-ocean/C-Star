@@ -1,24 +1,31 @@
+import os
+import shutil
+import tempfile
 import typing as t
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import typer
+import yaml
 from rich.console import Console
 from rich.markup import escape
 
 from cstar.base.application_names import APPLICATION_ALIASES, canonical_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_DRY_RUN
+from cstar.system.migration import KEY_SV, CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from cstar.catalog.domain_catalog import DomainCatalog
 
 log = get_logger(__name__)
 app = typer.Typer()
 console = Console()
 
 short_help: t.Final[str] = (
-    "Move a catalog's blueprints and specs into the current layout."
+    "Move a catalog's blueprints and specs into the current layout and schema versions."
 )
 _EARLIER_NAME_FORMS: t.Final[str] = "\n".join(
     f"- `blueprints/{alias}/<name>.yaml` (a {current} blueprint under the "
@@ -53,6 +60,16 @@ spec is moved, its `Assets/` directory is removed if it holds nothing but a
 Anything else in them (a `Build/` directory, `_grid.yaml`,
 `settings_B_*.yaml`, an asset file, ...) is left in place and reported, as is
 a directory that is a symbolic link.
+
+The command also brings spec files up to their kind's current
+`schema_version`. A spec written for an older schema is read as migrated (with
+a warning), but its file is only changed here: it is rewritten with the
+current content and a `schema_version`, and its previous content is kept as
+`<file>.bak`. The rewrite drops YAML comments; the `.bak` keeps them. A spec
+that is already current, even if it has no `schema_version`, is not
+touched, nor is one written by a newer cstar-ocean (it is reported). A file
+that cannot be migrated is reported and left as it is, as is one whose
+`.bak` already exists, which is never overwritten.
 
 The catalog is read with validation suppressed, so an otherwise incomplete
 catalog can still be migrated. Pass `--dry-run` to see what would change
@@ -89,6 +106,25 @@ class CatalogMigrationReport:
     left_in_place: list[Path] = field(default_factory=list[Path])
     """Legacy directories that still hold other files after the move, or are
     symbolic links, and so were not removed.
+    """
+    rewritten: list[tuple[Path, str, str, str]] = field(
+        default_factory=list[tuple[Path, str, str, str]]
+    )
+    """Tuples of `(file, kind, found, target)` for every spec file rewritten at
+    its kind's current schema version (or, in `dry_run` mode, that would be),
+    its previous content kept as `<file>.bak`.
+    """
+    newer_specs: list[tuple[Path, str]] = field(default_factory=list[tuple[Path, str]])
+    """Pairs of `(file, reason)` for spec files written by a newer cstar-ocean,
+    which are never changed.
+    """
+    failed_specs: list[tuple[Path, str]] = field(default_factory=list[tuple[Path, str]])
+    """Pairs of `(file, reason)` for spec files that could not be read, migrated
+    or written, and were left as they were.
+    """
+    backup_exists: list[Path] = field(default_factory=list[Path])
+    """Spec files that need a rewrite but were left as they were because their
+    `<file>.bak` already exists, which is never overwritten.
     """
 
 
@@ -198,8 +234,104 @@ def migrate_catalog_layout(
             path.unlink()
         for directory in report.removed_dirs:
             directory.rmdir()
+        # The moved files now sit at their new places: rescan to find them.
+        catalog = DomainCatalog(root, suppress_validation=True)
 
+    _migrate_spec_schemas(catalog, report, dry_run=dry_run)
     return report
+
+
+def _rewrite_spec(path: Path, content: dict[str, t.Any], target: str) -> None:
+    """Replace `path` with `content` at schema `target`, keeping its previous
+    content as `<path>.bak`.
+
+    The new text goes to a temporary file in the same directory first and is
+    moved over `path` last, so a failure leaves `path` as it was (and no
+    `.bak` behind).
+    """
+    backup = path.with_name(path.name + ".bak")
+    document = {KEY_SV: target, **content}
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    tmp = Path(tmp_name)
+    made_backup = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(
+                document,
+                handle,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+        shutil.copymode(path, tmp)
+        shutil.copy2(path, backup)
+        made_backup = True
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        if made_backup:
+            backup.unlink(missing_ok=True)
+        raise
+
+
+def _migrate_spec_schemas(
+    catalog: "DomainCatalog", report: CatalogMigrationReport, *, dry_run: bool
+) -> None:
+    """Rewrite each spec file that a schema migration changes, adding the
+    outcome of every file that needs attention to `report`.
+
+    A file that is current is not touched. One failing file is reported and
+    skipped; the others carry on. A symbolic link is left alone, as its target
+    may be shared, and so is a multi-model ModelSpec file. In `dry_run` mode a
+    legacy-layout file is reported at the place the moves would give it.
+    """
+    # Imported here: the schema module reaches the application registry.
+    from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, migrate_spec
+
+    moved_to = dict(report.moved) if dry_run else {}
+    kinds = t.cast("Iterable[t.Any]", SPEC_SCHEMA_VERSIONS)
+    for kind in kinds:
+        for source in catalog.spec_paths(kind).values():
+            path = moved_to.get(source, source)
+            data: t.Any = None
+            try:
+                data = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+                spec = migrate_spec(kind, data, path)
+            except CstarSchemaTooNewError as ex:
+                report.newer_specs.append((path, str(ex)))
+                continue
+            except Exception as ex:
+                # a multi-model file fails the ModelSpec key check on its model names
+                multi_model = (
+                    kind == "ModelSpec"
+                    and isinstance(data, dict)
+                    and not {"code", "model_settings"}.intersection(data)
+                )
+                reason = (
+                    "a multi-model ModelSpec file; split it into one <name>.yaml "
+                    "per model to migrate it"
+                    if multi_model
+                    else str(ex)
+                )
+                report.failed_specs.append((path, reason))
+                continue
+            if not spec.changed:
+                continue
+            if source.is_symlink():
+                report.failed_specs.append(
+                    (path, "a symbolic link; update the file it points to")
+                )
+                continue
+            if path.with_name(path.name + ".bak").exists():
+                report.backup_exists.append(path)
+                continue
+            if not dry_run:
+                try:
+                    _rewrite_spec(path, spec.content, spec.target)
+                except OSError as ex:
+                    report.failed_specs.append((path, str(ex)))
+                    continue
+            report.rewritten.append((path, kind, spec.found, spec.target))
 
 
 def _plan_spec_moves(
@@ -266,17 +398,24 @@ def migrate_catalog(
         ),
     ] = False,
 ) -> None:
-    """Move a catalog's blueprints and specs into the current layout."""
+    """Move a catalog's blueprints and specs into the current layout and schema versions."""
     report = migrate_catalog_layout(path, dry_run=dry_run)
     # Paths and the "[dry-run]" prefix are plain text: escape them so a
     # literal `[...]` is not parsed as a Rich style tag and silently dropped.
     prefix = f"{escape('[dry-run]')} " if dry_run else ""
     console.soft_wrap = True
 
-    if not (report.moved or report.skipped_collisions):
+    if not (
+        report.moved
+        or report.skipped_collisions
+        or report.rewritten
+        or report.newer_specs
+        or report.failed_specs
+        or report.backup_exists
+    ):
         console.print(
-            f"{prefix}Nothing to migrate: no legacy-layout blueprints or specs under "
-            f"{escape(str(path))}."
+            f"{prefix}Nothing to migrate: no legacy-layout blueprints or specs and "
+            f"no outdated spec files under {escape(str(path))}."
         )
         console.soft_wrap = False
         return
@@ -297,12 +436,38 @@ def migrate_catalog(
             f"{prefix}left in place (still holds other files): {escape(str(p))}"
         )
 
+    for file, kind, found, target in report.rewritten:
+        bak = file.with_name(file.name + ".bak")
+        verb = "would rewrite" if dry_run else "rewrote"
+        console.print(
+            f"{prefix}{verb} {escape(str(file))} ({kind} {found} -> {target}), "
+            f"backup {escape(str(bak))}"
+        )
+    for file, reason in report.newer_specs:
+        console.print(
+            f"{prefix}left (written by a newer cstar-ocean): {escape(str(file))}: "
+            f"{escape(reason)}"
+        )
+    for file, reason in report.failed_specs:
+        console.print(
+            f"{prefix}failed (left as is): {escape(str(file))}: {escape(reason)}"
+        )
+    for file in report.backup_exists:
+        console.print(
+            f"{prefix}skipped (backup exists): {escape(str(file))} was left as is; "
+            f"{escape(str(file.with_name(file.name + '.bak')))} already exists"
+        )
+
     console.print(
         f"{prefix}Summary: moved {len(report.moved)} entr(y/ies), "
         f"skipped {len(report.skipped_collisions)} collision(s), "
         f"removed {len(report.removed_files)} placeholder(s) and "
         f"{len(report.removed_dirs)} empty director(y/ies), "
-        f"left {len(report.left_in_place)} director(y/ies) in place."
+        f"left {len(report.left_in_place)} director(y/ies) in place; "
+        f"{'would rewrite' if dry_run else 'rewrote'} {len(report.rewritten)} "
+        f"spec file(s), left {len(report.newer_specs)} newer, "
+        f"{len(report.failed_specs)} failed and "
+        f"{len(report.backup_exists)} with an existing backup."
     )
     console.soft_wrap = False
 

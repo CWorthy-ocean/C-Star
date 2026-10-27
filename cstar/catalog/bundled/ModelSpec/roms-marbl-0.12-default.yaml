@@ -1,3 +1,4 @@
+schema_version: 2.0.0
 description: Generated blueprint (ucla-roms 0.12.0, adds the carbonate-sensitivity time-interpolation switch cdr_lite.cdr_carbonate_sensitivity_time_interpolation)
 bgc_mode: marbl
 use_pio: true

@@ -458,7 +458,7 @@ class TestLoadModelsYaml:
         assert spec.code.roms.commit == "6588486"
 
     def test_load_missing_model_raises_keyerror(self, tmp_path):
-        yaml_path = self._write(tmp_path, {"other_model": {}})
+        yaml_path = self._write(tmp_path, {"other_model": {}, "another_model": {}})
         with pytest.raises(KeyError) as exc_info:
             load_models_yaml(yaml_path, "test_model")
         assert "test_model" in str(exc_info.value)

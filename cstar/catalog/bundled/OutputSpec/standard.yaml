@@ -2,6 +2,7 @@
 # Deep-merged over the model's run-time defaults when selected; manual edits in
 # the wizard's Advanced settings still win on top. Covers the output-control
 # sections + the MARBL output write-lists.
+schema_version: 2.0.0
 description: "Standard output settings (model defaults)"
 
 ocean_vars:

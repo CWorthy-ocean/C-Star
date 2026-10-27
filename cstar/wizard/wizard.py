@@ -72,7 +72,6 @@ from cstar.applications.forge.blueprint import (
     TidalForcingItem,
     TidalSource,
 )
-from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
     CDR_OUTPUT_SECTIONS,
     MARBL_ONLY_OUTPUT_FLAGS,
@@ -922,16 +921,12 @@ def _split_forcing_data(
     ``_on_forcing_spec``/``_populate_from`` so CDR routes consistently everywhere
     a ForcingSpec is read.
 
-    Also migrates any pre-v8 forcing-input shapes in place (see
-    ``migrate_forcing_inputs``) -- a hand-authored or older catalog ForcingSpec
-    may still carry ``initial_conditions.bgc_source`` (singular) or a list-shaped
-    ``forcing.boundary``, neither of which the forcing editor understands; deep-
-    copied first so this never mutates the catalog's own parsed dict.
+    ``d`` is already at the current schema (``catalog.forcing_data``); deep-copied
+    first so this never mutates the catalog's own parsed dict.
     """
     d = copy.deepcopy(d)
     d.pop("description", None)
     cdr = d.pop("cdr_forcing", None)
-    migrate_forcing_inputs(d.get("initial_conditions"), d.get("forcing"))
     return d, cdr
 
 
@@ -2631,15 +2626,10 @@ class _ForcingEditor:
     def __init__(self, W, forcing_inputs: dict[str, Any], on_change):
         self.W = W
         self.on_change = on_change
-        # Deep-copied so migration and every `.get(...)` below never mutate the
-        # caller's dict (a catalog-parsed ForcingSpec, or a resolved config's
-        # `_sources_to_inputs` reconstruction). `_split_forcing_data` already
-        # migrates a catalog ForcingSpec before it reaches here, but a caller
-        # (e.g. the fresh-wizard-startup seed) may hand a raw catalog dict
-        # straight through -- migrating again is a no-op (idempotent) when it
-        # already has been.
+        # Deep-copied so no `.get(...)` below can mutate the caller's dict (a
+        # catalog-parsed ForcingSpec, or a resolved config's `_sources_to_inputs`
+        # reconstruction), both at the current schema.
         fi = copy.deepcopy(forcing_inputs) if forcing_inputs else {}
-        migrate_forcing_inputs(fi.get("initial_conditions"), fi.get("forcing"))
         # An explicit `None` (emitted by `_sources_to_inputs` for a loaded child
         # blueprint with no IC) means "seed as (none)"; a plain missing key (fresh-
         # wizard startup, which always supplies a real initial_conditions block)

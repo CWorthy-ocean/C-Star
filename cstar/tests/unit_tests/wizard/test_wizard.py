@@ -646,13 +646,16 @@ def test_stale_per_row_interp_not_emitted_for_derived_bgc_sources(editor, cat):
 
 
 # ===========================================================================
-# F4: a pre-v8 ("old-shaped") ForcingSpec dict must migrate cleanly instead of
-# crashing ``_ForcingEditor.__init__`` or silently dropping data.
+# F4: a pre-v8 ("old-shaped") ForcingSpec dict, read through ``read_spec`` as the
+# catalog does, must seed ``_ForcingEditor`` instead of crashing it or silently
+# dropping data.
 # ===========================================================================
 
 
-def test_forcing_editor_migrates_singular_ic_bgc_source():
+def test_forcing_editor_seeds_from_a_migrated_singular_ic_bgc_source():
     import ipywidgets as W
+
+    from cstar.catalog.spec_schema import read_spec
 
     old_shaped = {
         "initial_conditions": {
@@ -661,20 +664,24 @@ def test_forcing_editor_migrates_singular_ic_bgc_source():
         },
         "forcing": {},
     }
-    ed = _ForcingEditor(W, old_shaped, on_change=lambda: None)
+    ed = _ForcingEditor(
+        W, read_spec("ForcingSpec", old_shaped, "old.yaml"), on_change=lambda: None
+    )
     assert len(ed._rows["ic_bgc"]) == 1
     assert ed._rows["ic_bgc"][0]["name"].value == "UNIFIED"
     gathered = ed.gather()
     assert gathered["initial_conditions"]["bgc_sources"] == [
         {"source": {"name": "UNIFIED"}}
     ]
-    # migration deep-copies before mutating -- the caller's dict is untouched
+    # the migration leaves the caller's dict untouched
     assert old_shaped["initial_conditions"]["bgc_source"] == {"name": "UNIFIED"}
     assert "bgc_sources" not in old_shaped["initial_conditions"]
 
 
-def test_forcing_editor_migrates_list_shaped_boundary():
+def test_forcing_editor_seeds_from_a_migrated_list_shaped_boundary():
     import ipywidgets as W
+
+    from cstar.catalog.spec_schema import read_spec
 
     old_shaped = {
         "initial_conditions": {"source": {"name": "GLORYS"}},
@@ -685,7 +692,9 @@ def test_forcing_editor_migrates_list_shaped_boundary():
             ]
         },
     }
-    ed = _ForcingEditor(W, old_shaped, on_change=lambda: None)
+    ed = _ForcingEditor(
+        W, read_spec("ForcingSpec", old_shaped, "old.yaml"), on_change=lambda: None
+    )
     assert ed.boundary_name.value == "GLORYS"
     assert len(ed._rows["boundary_bgc"]) == 1
     gathered = ed.gather()
@@ -694,7 +703,7 @@ def test_forcing_editor_migrates_list_shaped_boundary():
     assert boundary["bgc_sources"] == [
         {"source": {"name": "UNIFIED"}, "use_vars": ["ALK"]}
     ]
-    # migration deep-copies before mutating -- the caller's dict is untouched
+    # the migration leaves the caller's dict untouched
     assert isinstance(old_shaped["forcing"]["boundary"], list)
 
 
@@ -3985,7 +3994,7 @@ def test_saving_a_model_spec_does_not_bake_in_the_derived_cdr_lite_cppdef():
 
 def test_legacy_named_output_spec_shows_up_under_the_new_section_name(tmp_path, caplog):
     """A user OutputSpec still using ``cdr_tracer_output`` (before the rename)
-    reaches the wizard through the resolver, which renames it: the composed
+    reaches the wizard through the catalog reader, which renames it: the composed
     settings and the editor carry ``cdr_lite_output`` only.
     """
     import logging
@@ -4006,7 +4015,7 @@ def test_legacy_named_output_spec_shows_up_under_the_new_section_name(tmp_path, 
     wiz = ForgeBlueprintWizard(catalog=catalog)
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+    with caplog.at_level(logging.WARNING, logger="cstar.catalog.spec_schema"):
         wiz.output_dd.value = "legacy-out"
     wiz._rebuild()
 
@@ -4014,7 +4023,7 @@ def test_legacy_named_output_spec_shows_up_under_the_new_section_name(tmp_path, 
     assert "cdr_tracer_output" not in wiz.config.model_settings
     assert wiz.config.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
-    assert "legacy settings section" in caplog.text
+    assert "is schema 1.0.0" in caplog.text
     assert wiz.config.composition.output.modified is False
 
 

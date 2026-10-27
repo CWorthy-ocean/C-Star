@@ -1,3 +1,4 @@
+schema_version: 2.0.0
 description: Generated blueprint (ucla-roms 0.6.4, adds &PIO_SETTINGS support)
 archived: true
 bgc_mode: marbl

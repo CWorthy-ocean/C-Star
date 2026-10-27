@@ -1,3 +1,4 @@
+schema_version: 2.0.0
 description: "GLORYS physics + ERA5 surface (WOA sss-restoring) + TPXO tides + DAI rivers; no BGC (bgc_mode none / cdr_lite)"
 # A ForcingSpec is a selectable forcing configuration (initial conditions + surface/
 # boundary/tidal/river forcing). Every domain must explicitly pick one -- there is no

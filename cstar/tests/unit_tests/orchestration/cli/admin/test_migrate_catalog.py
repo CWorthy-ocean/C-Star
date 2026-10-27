@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 import typer
+import yaml
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -49,14 +50,20 @@ def legacy_root(tmp_path: Path) -> Path:
     - a domain with a real asset: ``DomainSpec/asset-domain/{Domain.yaml,Assets/bathy.nc}``
     """
     root = tmp_path / "catalog"
-    _write(root / "ModelSpec" / "m" / "model.yaml", "model-m")
-    _write(root / "DomainSpec" / "clean-domain" / "Domain.yaml", "domain-clean")
+    _write(root / "ModelSpec" / "m" / "model.yaml", "description: model-m\n")
+    _write(
+        root / "DomainSpec" / "clean-domain" / "Domain.yaml",
+        "description: domain-clean\n",
+    )
     _write(root / "DomainSpec" / "clean-domain" / "Assets" / ".gitkeep", "")
-    _write(root / "DomainSpec" / "asset-domain" / "Domain.yaml", "domain-asset")
+    _write(
+        root / "DomainSpec" / "asset-domain" / "Domain.yaml",
+        "description: domain-asset\n",
+    )
     _write(root / "DomainSpec" / "asset-domain" / "Assets" / "bathy.nc", "asset")
-    _write(root / "ForcingSpec" / "f" / "Forcing.yml", "forcing-f")
-    _write(root / "OutputSpec" / "o" / "Output.yaml", "output-o")
-    _write(root / "CdrSpec" / "c" / "Cdr.yaml", "cdr-c")
+    _write(root / "ForcingSpec" / "f" / "Forcing.yml", "description: forcing-f\n")
+    _write(root / "OutputSpec" / "o" / "Output.yaml", "description: output-o\n")
+    _write(root / "CdrSpec" / "c" / "Cdr.yaml", "description: cdr-c\n")
     bp = root / "blueprints"
     _write(bp / "flat-forge.forge_blueprint.yaml", "forge-flat")
     _write(bp / "B_flat-roms.yml", "roms-flat")
@@ -138,16 +145,16 @@ def test_migrate_catalog_layout_report_and_tree(legacy_root: Path) -> None:
 
     # each spec kind directory now holds only `<name>.yaml` files, apart from the
     # domain whose real asset keeps its directory
-    assert _tree(root / "ModelSpec") == {"m.yaml": "model-m"}
-    assert _tree(root / "ForcingSpec") == {"f.yaml": "forcing-f"}
-    assert _tree(root / "OutputSpec") == {"o.yaml": "output-o"}
-    assert _tree(root / "CdrSpec") == {"c.yaml": "cdr-c"}
+    assert _tree(root / "ModelSpec") == {"m.yaml": "description: model-m\n"}
+    assert _tree(root / "ForcingSpec") == {"f.yaml": "description: forcing-f\n"}
+    assert _tree(root / "OutputSpec") == {"o.yaml": "description: output-o\n"}
+    assert _tree(root / "CdrSpec") == {"c.yaml": "description: cdr-c\n"}
     assert _tree(root / "DomainSpec") == {
         "asset-domain": None,
-        "asset-domain.yaml": "domain-asset",
+        "asset-domain.yaml": "description: domain-asset\n",
         "asset-domain/Assets": None,
         "asset-domain/Assets/bathy.nc": "asset",
-        "clean-domain.yaml": "domain-clean",
+        "clean-domain.yaml": "description: domain-clean\n",
     }
 
 
@@ -382,11 +389,17 @@ def test_migrate_catalog_layout_spec_collision_is_skipped(tmp_path: Path) -> Non
     flat file is named as the destination; nothing else changes.
     """
     root = tmp_path.resolve()
-    model = _write(root / "ModelSpec" / "dup" / "model.yaml", "legacy-model")
-    model_flat = _write(root / "ModelSpec" / "dup.yml", "current-model")
-    domain = _write(root / "DomainSpec" / "d" / "Domain.yaml", "legacy-domain")
+    model = _write(
+        root / "ModelSpec" / "dup" / "model.yaml", "description: legacy-model\n"
+    )
+    model_flat = _write(root / "ModelSpec" / "dup.yml", "description: current-model\n")
+    domain = _write(
+        root / "DomainSpec" / "d" / "Domain.yaml", "description: legacy-domain\n"
+    )
     _write(root / "DomainSpec" / "d" / "Assets" / ".gitkeep", "")
-    domain_flat = _write(root / "DomainSpec" / "d.yaml", "current-domain")
+    domain_flat = _write(
+        root / "DomainSpec" / "d.yaml", "description: current-domain\n"
+    )
     snapshot = _tree(root)
 
     report = migrate_catalog_layout(root)
@@ -404,7 +417,7 @@ def test_migrate_catalog_layout_keeps_a_symlinked_spec_directory(
     inside its (possibly shared) target is cleaned up.
     """
     root = (tmp_path / "catalog").resolve()
-    shared = _write(tmp_path / "shared" / "Domain.yaml", "domain").parent
+    shared = _write(tmp_path / "shared" / "Domain.yaml", "description: domain\n").parent
     _write(shared / "Assets" / ".gitkeep", "")
     link = root / "DomainSpec" / "linked"
     link.parent.mkdir(parents=True)
@@ -416,7 +429,7 @@ def test_migrate_catalog_layout_keeps_a_symlinked_spec_directory(
     assert report == CatalogMigrationReport(
         moved=[(link / "Domain.yaml", dst)], left_in_place=[link]
     )
-    assert dst.read_text() == "domain"
+    assert dst.read_text() == "description: domain\n"
     assert (shared / "Assets" / ".gitkeep").is_file()
 
 
@@ -446,7 +459,8 @@ def test_cli_migrate_catalog_dry_run_names_the_spec_cleanup(legacy_root: Path) -
     assert (
         "[dry-run] Summary: moved 11 entr(y/ies), skipped 0 collision(s), "
         "removed 1 placeholder(s) and 8 empty director(y/ies), "
-        "left 2 director(y/ies) in place."
+        "left 2 director(y/ies) in place; would rewrite 0 spec file(s), "
+        "left 0 newer, 0 failed and 0 with an existing backup."
     ) in out
     assert _tree(root) == snapshot
 
@@ -560,3 +574,253 @@ def test_migrate_catalog_is_attached_under_admin(
 
     assert result.exit_code == 0, result.output
     assert "--dry-run" in result.stdout
+
+
+OUTDATED_FORCING = """\
+# a comment the rewrite drops
+description: old forcing
+initial_conditions:
+  bgc_source:
+    name: GLORYS
+"""
+"""A ForcingSpec at schema 1.0.0 (no `schema_version`): `bgc_source` became `bgc_sources`."""
+
+CURRENT_FORCING = """\
+# a comment a current file keeps
+schema_version: 2.0.0
+description: current forcing
+"""
+
+
+def _bak(path: Path) -> Path:
+    return path.with_name(path.name + ".bak")
+
+
+def test_outdated_forcing_spec_is_rewritten_with_backup(tmp_path: Path) -> None:
+    """A spec a migration changes is rewritten at the current version and its
+    previous content is kept byte for byte as `<file>.bak`.
+    """
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+
+    report = migrate_catalog_layout(root)
+
+    assert report.rewritten == [(spec, "ForcingSpec", "1.0.0", "2.0.0")]
+    assert report.newer_specs == report.failed_specs == report.backup_exists == []
+    new = yaml.safe_load(spec.read_text())
+    assert new["schema_version"] == "2.0.0"
+    assert "bgc_sources" in new["initial_conditions"]
+    assert "bgc_source" not in new["initial_conditions"]
+    assert _bak(spec).read_text() == OUTDATED_FORCING
+    assert [p.name for p in root.rglob(".*")] == []
+
+
+def test_current_specs_are_left_byte_identical(tmp_path: Path) -> None:
+    """A spec at the current version, and an unversioned one already in the
+    current shape, are not rewritten (so their comments survive) and get no `.bak`.
+    """
+    root = tmp_path.resolve()
+    unversioned = "# unversioned but current\ndescription: plain\n"
+    _write(root / "ForcingSpec" / "versioned.yaml", CURRENT_FORCING)
+    _write(root / "ForcingSpec" / "unversioned.yaml", unversioned)
+    _write(root / "DomainSpec" / "d.yaml", unversioned)
+    snapshot = _tree(root)
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport()
+    assert _tree(root) == snapshot
+
+
+def test_outdated_output_spec_is_rewritten(tmp_path: Path) -> None:
+    """An OutputSpec with `cdr_tracer_output` is rewritten to `cdr_lite_output`."""
+    root = tmp_path.resolve()
+    original = "cdr_tracer_output:\n  output_period: 3600\n"
+    spec = _write(root / "OutputSpec" / "o.yaml", original)
+
+    report = migrate_catalog_layout(root)
+
+    assert report.rewritten == [(spec, "OutputSpec", "1.0.0", "2.0.0")]
+    new = yaml.safe_load(spec.read_text())
+    assert new["schema_version"] == "2.0.0"
+    assert "cdr_lite_output" in new
+    assert "cdr_tracer_output" not in new
+    assert _bak(spec).read_text() == original
+
+
+def test_newer_major_spec_is_untouched_and_reported(tmp_path: Path) -> None:
+    """A spec of a newer major is reported, never changed, and does not stop
+    the others from being migrated.
+    """
+    root = tmp_path.resolve()
+    original = "schema_version: 9.0.0\ndescription: from the future\n"
+    newer = _write(root / "ForcingSpec" / "newer.yaml", original)
+    old = _write(root / "ForcingSpec" / "old.yaml", OUTDATED_FORCING)
+
+    report = migrate_catalog_layout(root)
+
+    assert [p for p, _ in report.newer_specs] == [newer]
+    assert newer.read_text() == original
+    assert not _bak(newer).exists()
+    assert [p for p, *_ in report.rewritten] == [old]
+
+
+def test_unreadable_spec_is_reported_and_others_carry_on(tmp_path: Path) -> None:
+    """A spec that cannot be parsed is reported and skipped; the rest are migrated."""
+    root = tmp_path.resolve()
+    broken = _write(root / "OutputSpec" / "broken.yaml", "a: [unclosed\n")
+    listy = _write(root / "OutputSpec" / "listy.yaml", "- not\n- a mapping\n")
+    old = _write(root / "ForcingSpec" / "old.yaml", OUTDATED_FORCING)
+
+    report = migrate_catalog_layout(root)
+
+    assert sorted(p for p, _ in report.failed_specs) == sorted([broken, listy])
+    assert broken.read_text() == "a: [unclosed\n"
+    assert not _bak(broken).exists()
+    assert [p for p, *_ in report.rewritten] == [old]
+
+
+def test_dry_run_reports_the_rewrite_and_writes_nothing(tmp_path: Path) -> None:
+    """`dry_run` names the rewrite but leaves the file alone and makes no `.bak`."""
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    snapshot = _tree(root)
+
+    report = migrate_catalog_layout(root, dry_run=True)
+
+    assert report.rewritten == [(spec, "ForcingSpec", "1.0.0", "2.0.0")]
+    assert _tree(root) == snapshot
+
+
+def test_existing_backup_skips_the_file(tmp_path: Path) -> None:
+    """A `.bak` is never overwritten: the spec is left as it is and reported."""
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    _write(_bak(spec), "an earlier backup\n")
+    snapshot = _tree(root)
+
+    report = migrate_catalog_layout(root)
+
+    assert report.backup_exists == [spec]
+    assert report.rewritten == []
+    assert _tree(root) == snapshot
+
+
+def test_failed_write_leaves_neither_backup_nor_temp_file(tmp_path: Path) -> None:
+    """A failure while writing is reported; the file is as it was, with no `.bak`
+    and no temporary file left behind.
+    """
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    snapshot = _tree(root)
+
+    with patch("cstar.cli.admin.migrate_catalog.os.replace", side_effect=OSError("no")):
+        report = migrate_catalog_layout(root)
+
+    assert report.rewritten == []
+    assert report.failed_specs == [(spec, "no")]
+    assert _tree(root) == snapshot
+
+
+def test_legacy_layout_spec_is_moved_and_rewritten(tmp_path: Path) -> None:
+    """One non-dry run moves a legacy-layout spec and rewrites it at its new place."""
+    root = tmp_path.resolve()
+    legacy = _write(root / "ForcingSpec" / "f" / "Forcing.yaml", OUTDATED_FORCING)
+    dst = root / "ForcingSpec" / "f.yaml"
+
+    report = migrate_catalog_layout(root)
+
+    assert report.moved == [(legacy, dst)]
+    assert report.rewritten == [(dst, "ForcingSpec", "1.0.0", "2.0.0")]
+    assert yaml.safe_load(dst.read_text())["schema_version"] == "2.0.0"
+    assert _bak(dst).read_text() == OUTDATED_FORCING
+    assert not legacy.parent.exists()
+
+
+def test_legacy_layout_spec_dry_run_reports_where_the_run_rewrites(
+    tmp_path: Path,
+) -> None:
+    """A dry run reports a legacy-layout spec's rewrite at the place the real run
+    rewrites it: where the move puts it.
+    """
+    root = tmp_path.resolve()
+    _write(root / "ForcingSpec" / "f" / "Forcing.yaml", OUTDATED_FORCING)
+    snapshot = _tree(root)
+
+    report = migrate_catalog_layout(root, dry_run=True)
+
+    dst = root / "ForcingSpec" / "f.yaml"
+    assert report.rewritten == [(dst, "ForcingSpec", "1.0.0", "2.0.0")]
+    assert _tree(root) == snapshot
+
+
+def test_rewrite_keeps_the_file_mode(tmp_path: Path) -> None:
+    """A rewritten spec keeps its permissions, so a shared catalog stays readable."""
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    spec.chmod(0o664)
+
+    migrate_catalog_layout(root)
+
+    assert spec.stat().st_mode & 0o777 == 0o664
+
+
+def test_symlinked_spec_is_reported_and_left_alone(tmp_path: Path) -> None:
+    """An outdated spec that is a symbolic link is reported, not replaced by a file."""
+    root = tmp_path.resolve()
+    target = _write(tmp_path / "shared" / "f.yaml", OUTDATED_FORCING)
+    link = root / "ForcingSpec" / "f.yaml"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+
+    report = migrate_catalog_layout(root)
+
+    assert [p for p, _ in report.failed_specs] == [link]
+    assert link.is_symlink()
+    assert target.read_text() == OUTDATED_FORCING
+
+
+def test_multi_model_spec_is_reported_with_how_to_migrate_it(tmp_path: Path) -> None:
+    """A multi-model ModelSpec file is not rewritten; the report says to split it."""
+    root = tmp_path.resolve()
+    original = "a:\n  code: {}\nb:\n  code: {}\n"
+    spec = _write(root / "ModelSpec" / "m.yaml", original)
+
+    report = migrate_catalog_layout(root)
+
+    assert len(report.failed_specs) == 1
+    assert report.failed_specs[0][0] == spec
+    assert "split it" in report.failed_specs[0][1]
+    assert spec.read_text() == original
+
+
+def test_cli_migrate_catalog_prints_the_rewrite_and_summary(tmp_path: Path) -> None:
+    """The command prints one line per rewritten file and counts them in the summary."""
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    _write(root / "OutputSpec" / "n.yaml", "schema_version: 9.0.0\n")
+
+    result = CliRunner().invoke(app, [str(root)])
+
+    out = result.stdout.replace("\n", "")
+    assert result.exit_code == 0, result.output
+    assert (f"rewrote {spec} (ForcingSpec 1.0.0 -> 2.0.0), backup {_bak(spec)}") in out
+    assert "left (written by a newer cstar-ocean)" in out
+    assert (
+        "rewrote 1 spec file(s), left 1 newer, 0 failed and 0 with an existing" in out
+    )
+    assert "Nothing to migrate" not in out
+
+
+def test_cli_migrate_catalog_dry_run_prints_would_rewrite(tmp_path: Path) -> None:
+    """`--dry-run` says what would be rewritten, with the prefix, and writes nothing."""
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    snapshot = _tree(root)
+
+    result = CliRunner().invoke(app, [str(root), "--dry-run"])
+
+    out = result.stdout.replace("\n", "")
+    assert result.exit_code == 0, result.output
+    assert f"[dry-run] would rewrite {spec} (ForcingSpec 1.0.0 -> 2.0.0)" in out
+    assert _tree(root) == snapshot

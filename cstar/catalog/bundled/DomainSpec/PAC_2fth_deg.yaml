@@ -1,3 +1,4 @@
+schema_version: 1.0.0
 description: "Pacific 2/15 deg (nested)"
 model_name: "roms-marbl-0.12-default"
 grid_name: "PAC_2fth_deg"
