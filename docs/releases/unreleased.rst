@@ -408,6 +408,8 @@ Bug Fixes
 - A ucla_roms run given CDR forcing whose build does not define ``CDR_FORCING`` is refused at build and on resume, instead of staging a file ROMS never reads. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 - The wizard's "Upscale a nested run" recipe is marked not yet supported and its controls are disabled, because the rerun it generated ignored the upscaled CDR forcing. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 - A forge step with workplan overrides (dates, tiling, a ucla-roms commit) no longer warns that its blueprint "appears to have been hand-edited". (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
+- Steps started by ``cstar workplan submit`` on a workstation keep running after the launching terminal or tmux pane closes; before, every step still waiting on a dependency was killed. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
+- ``cstar run status`` no longer records a step that is still waiting on its dependencies as Running, and no longer rewrites a step's start time in a different format. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 
 
 
@@ -493,6 +495,8 @@ Improvements
 - An error while a blueprint's runner starts, including the login-node refusal, prints a message and exits 1 instead of a traceback. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - Inside a scheduler job, joining ROMS output sizes its pool from the job's cores rather than the whole node. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - A forge blueprint that really was edited by hand is reported once, before workplan overrides or a migration rewrite it, rather than twice. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
+- ``cstar run status --no-refresh`` now shows the run without writing anything back to its records. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
+- A step waiting on a dependency logs "Awaiting process" once instead of every few seconds. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 
 
 
@@ -610,4 +614,5 @@ Miscellaneous
 - The generated ``cppdefs.opt`` no longer lists ``EXACT_RESTARTS`` or ``PRINT_HOSTNAME``, which never had any effect; exact restarts stay on in every 3D build, as before. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
 - Every bundled model spec now pins its Forge templates to the commit that drops them; builds are unchanged for every ucla-roms release the specs pin. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
 - The wizard pages point to the nesting and upscaling tutorial for building an upscaled rerun by hand. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
+- The nesting and upscaling tutorial says that closing the terminal does not stop a submitted run. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 
