@@ -454,6 +454,14 @@ Bug Fixes
   - The save message says "(now unmodified)" only when the model really is unmodified.
 
 - A nested DomainSpec written by a later minor release is no longer refused as too new by this one. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
+- The ``wio_toy`` example's tidal forcing was referenced to 2012-01-01 while its other inputs use 2000-01-01, which offset the tidal phases; it now uses a matching file. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
+- ``cstar run promote`` and ``cstar run check --repair`` / ``--record-digests`` print a one-line error and exit with code 1 instead of a traceback when a copy, link, repair, regather or digest write fails. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
+
+  - A promote that fails before the copy is complete leaves nothing at the destination, so it can simply be run again; a failure after the copy says where the copy is.
+
+- Launching a workplan under the run-id of a run attached from elsewhere (with ``--run-id``, or derived from the workplan's name) is refused before anything is written, instead of replacing the attached run's tracking. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
+- A status read (``cstar run status``, ``show``, ``check``, ``promote``) no longer records a local step as Failed when the step finished and exited while the read was in progress. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
+- Runs made by cstar 0.17 from a ``.yml`` workplan, whose transformed workplan is ``<name>_transformed.yml``, work again with ``cstar run status``, ``show``, ``check``, ``attach``, ``promote`` and ``--resume``, and as cross-run references. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
 
 
 
@@ -560,6 +568,10 @@ Improvements
   - Two old files for the same spec are never moved onto one another: the one C-Star reads moves, the other is reported as a collision.
 
 - A ``ucla_roms`` run on ucla-roms 0.13.0 or later whose ``_cdr`` or BGC-diagnostics average period is not a whole number of MARBL steps is now refused by C-Star before launch, and by ``--pre-run``, instead of aborting inside ROMS. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
+- The ``wio_toy`` example and the bundled ``wales-toy`` blueprint now run on ucla-roms 0.13.0. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
+
+  - ``wales-toy`` builds ParallelIO from CWorthy's ``2.7.1-fork``, which ucla-roms 0.13 needs.
+
 
 
 
@@ -677,5 +689,8 @@ Miscellaneous
 - The wizard's carbonate-sensitivity test reads the default model from the wizard module instead of naming it, which repairs the unit-test job on ``main``. (`#857 <https://github.com/CWorthy-ocean/C-Star/pull/857>`_)
 - The bundled catalog and the integration-test catalog keep their specs under ``specs/``; the catalog, spec, contributing and Python reference pages show the new paths. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 - The developer docs now say which ucla-roms start-up checks Forge and the ``ucla_roms`` path each run. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
+- The guided tutorials were regenerated on ucla-roms 0.13.0 and roms-tools 5.3.0, and the nesting tutorial now lists reference CDR metrics for its run. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
+- The CDR metrics page explains that, from roms-tools 5.3.0, uptake leaves out each domain's outermost cells, so a nested child's exported perturbation is counted once. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
+- The blueprint tutorial's wizard screenshot shows the current default model, and the UCLA-ROMS example page's roms-tools snippet uses ``Grid(filename=...)``. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 
 
