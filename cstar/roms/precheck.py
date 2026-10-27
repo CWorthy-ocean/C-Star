@@ -30,9 +30,11 @@ schema version.
 Rule C -- :func:`check_averages_end_on_marbl_step` mirrors ucla-roms >= 0.13.0's
 ``check_avg_ends_on_marbl_step`` (``src/precheck.F90``, PR #400): the averaged
 ``_cdr`` and ``_bgc_dia_avg`` streams must average over whole MARBL timesteps.
-:func:`averages_end_on_marbl_step_applies_to` gates it on the pinned release
-rather than on the 0.13.0 schema, so that an unresolved commit hash, which
-selects the newest schema, is not checked.
+Forge gates it on the pinned release with
+:func:`averages_end_on_marbl_step_applies_to`, so that an unresolved commit hash,
+which selects the newest schema, is not checked; the ``ucla_roms`` path, which has
+resolved the schema, gates on it with
+:func:`averages_end_on_marbl_step_applies_to_schema`.
 
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
@@ -129,6 +131,22 @@ def averages_end_on_marbl_step_applies_to(roms_ref: str | None) -> bool:
         return False
     version = roms_version_from_ref(roms_ref)
     return version is None or version >= AVERAGES_END_ON_MARBL_STEP_MIN_ROMS
+
+
+def averages_end_on_marbl_step_applies_to_schema(
+    schema: type[RomsNamelistBase],
+) -> bool:
+    """True if Rule C (:func:`check_averages_end_on_marbl_step`) applies to
+    namelist schema ``schema``.
+
+    The ``ucla_roms`` path gates on the schema where Forge gates on the ref
+    (:func:`averages_end_on_marbl_step_applies_to`): by the time it reads the
+    namelist it has resolved a commit-hash pin to a schema, through the clone or
+    the build record, so a hash from before 0.13.0 is not refused for a rule its
+    release does not have. Every schema from ``RomsNamelistV0_13_0`` on subclasses
+    it.
+    """
+    return issubclass(schema, RomsNamelistV0_13_0)
 
 
 def _section(container: Any, name: str) -> Any:
@@ -626,7 +644,8 @@ def check_averages_end_on_marbl_step(
     MARBL_DIAGS and CDR_FORCING) and the ``_bgc_dia_avg`` average
     (``wrt_bgc_dia_avg`` on; built with MARBL and MARBL_DIAGS) against it.
     Unlike Rule A, it does not depend on ``wrt_file_rst``. Gate the call on the
-    pinned release with :func:`averages_end_on_marbl_step_applies_to`.
+    pinned release with :func:`averages_end_on_marbl_step_applies_to`, or on the
+    namelist schema with :func:`averages_end_on_marbl_step_applies_to_schema`.
 
     Parameters
     ----------

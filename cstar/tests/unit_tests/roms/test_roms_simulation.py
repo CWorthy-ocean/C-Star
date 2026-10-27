@@ -53,6 +53,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
     namelist_schema_for_ref,
 )
@@ -81,6 +82,12 @@ EXAMPLE_NAMELIST_V0_6_0 = (
 )
 EXAMPLE_NAMELIST_V0_9_0 = (
     Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
+)
+EXAMPLE_NAMELIST_V0_12_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
+)
+EXAMPLE_NAMELIST_V0_13_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 )
 _REAL_NAMELIST_READ = RomsNamelist.read
 _REAL_NAMELIST_READ_V0_5_0 = RomsNamelistV0_5_0.read
@@ -742,6 +749,31 @@ class TestROMSSimulationInitialization:
         )
         return sim
 
+    def _prepare_sim_for_runtime_settings_with_schema(
+        self,
+        sim,
+        stageddatacollection_remote_files,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        schema,
+        fixture,
+    ):
+        """Same as `_prepare_sim_for_runtime_settings_v0_5_0`, but reads a genuine
+        `schema` namelist from `fixture` -- for the 0.13.0 startup checks, whose
+        gate is the schema class itself.
+        """
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        mock_grid_path.return_value = [Path("grid.nc")]
+        mock_ini_path.return_value = [Path("fake_ini.nc")]
+        mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
+        mock_schema_for_ref.return_value.__name__ = schema.__name__
+        mock_schema_for_ref.return_value.read.side_effect = lambda _: schema.read(
+            fixture
+        )
+        return sim
+
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
     @mock.patch.object(
@@ -1055,6 +1087,136 @@ class TestROMSSimulationInitialization:
         result = sim.roms_runtime_settings
 
         assert result.frc_output_settings.wrt_frc is True
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_off_marbl_step_cdr_average_raises(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An override that turns the `_cdr` average on with a period that is not
+        a whole multiple of the MARBL step is rejected -- ucla-roms >= 0.13.0's
+        `check_avg_ends_on_marbl_step` (`precheck.F90`) would abort the run at
+        startup otherwise. The fixture's `dt` is 2160 s and its `marbl_timestep`
+        3600 s, which ROMS rounds down to one `dt`: a 2160 s MARBL step.
+        """
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_13_0,
+            EXAMPLE_NAMELIST_V0_13_0,
+        )
+        # the fixture's 3600 s `_cdr` period (nrpf_cdr 24) divides the restart
+        # period, so only the MARBL-step rule fires
+        sim.namelist_overrides = {"cdr_output_settings": {"do_cdr_output": True}}
+
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_active_cppdefs_for_precheck",
+                return_value={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
+            ),
+            pytest.raises(ValueError, match="output_period_cdr.*3600.0 s"),
+        ):
+            _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_on_marbl_step_cdr_average_passes(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Companion to the off-step case: a `_cdr` period of two MARBL steps
+        (4320 s; `nrpf_cdr` 20 keeps the file rollover dividing the restart
+        period) does not raise.
+        """
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_13_0,
+            EXAMPLE_NAMELIST_V0_13_0,
+        )
+        sim.namelist_overrides = {
+            "cdr_output_settings": {
+                "do_cdr_output": True,
+                "output_period_cdr": 4320.0,
+                "nrpf_cdr": 20,
+            }
+        }
+
+        with mock.patch.object(
+            ROMSSimulation,
+            "_active_cppdefs_for_precheck",
+            return_value={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
+        ):
+            result = sim.roms_runtime_settings
+
+        assert result.cdr_output_settings.output_period_cdr == 4320.0
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_off_marbl_step_cdr_average_not_checked_before_0_13_0(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """The same off-step override on a 0.12.0 schema is not checked: those
+        releases do not abort on it.
+        """
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_12_0,
+            EXAMPLE_NAMELIST_V0_12_0,
+        )
+        sim.namelist_overrides = {"cdr_output_settings": {"do_cdr_output": True}}
+
+        with mock.patch.object(
+            ROMSSimulation,
+            "_active_cppdefs_for_precheck",
+            return_value={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
+        ):
+            result = sim.roms_runtime_settings
+
+        assert result.cdr_output_settings.do_cdr_output is True
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
