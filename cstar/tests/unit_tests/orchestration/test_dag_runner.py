@@ -29,6 +29,7 @@ from cstar.execution.file_system import (
     LockTimeoutError,
     LockUnsupportedError,
     StateDirectoryManager,
+    write_text_atomic,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.dag_runner import (
@@ -111,6 +112,7 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.serialization import (
     deserialize,
+    model_to_yaml,
     read_raw,
     serialize,
 )
@@ -280,6 +282,36 @@ async def test_dag_runner_load_run_state_persist(
 
     assert changed.await_count == (len(handles) if persist else 0)
     assert handle.name in dag_status.details
+
+
+@pytest.mark.asyncio
+async def test_dag_runner_load_run_state_keeps_status_finalized_during_read(
+    layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    mock_run_id: str,
+) -> None:
+    """Verify a step whose proxy records Done and exits after its handle was read
+    as Running is reported Done and its sentinel is not overwritten with Failed.
+    """
+    _, handles = layered_workplan
+    handle = next(iter(handles.values()))
+    handle.status = Status.Running
+    await StateRepository().put_sentinel(handle)
+
+    def finish_then_exit(h: LocalHandle) -> bool:
+        if h.name == handle.name:
+            write_text_atomic(
+                StateRepository.sentinel_path(h),
+                model_to_yaml(h.model_copy(update={"status": Status.Done})),
+                sync=False,
+            )
+        return False
+
+    with mock.patch.object(LocalLauncher, "_is_alive", side_effect=finish_then_exit):
+        dag_status = await load_run_state(mock_run_id, LocalLauncher(), persist=True)
+
+    on_disk = deserialize(StateRepository.sentinel_path(handle), LocalHandle)
+    assert on_disk.status == Status.Done
+    assert dag_status.details[handle.name] == Status.Done
 
 
 @pytest.mark.parametrize(
