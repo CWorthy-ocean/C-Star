@@ -13,9 +13,19 @@ CDR efficiency of the whole release.
 This tutorial runs a tiny version of that workflow on a laptop, from one
 workplan, in about 20 minutes. The parent is a 24 by 24 cell grid over 400 km
 north-west of Scotland. The child is a 24 by 24 cell grid over 100 km inside it, with
-one alkalinity (ALK) release near its east boundary. If workplans,
+one alkalinity (ALK) release near its east boundary, in its southern half. The
+current there carries the alkalinity out of the child within the day, so the
+run shows the release being handed from the child to the parent. If workplans,
 ``continue-from`` or the CDR metrics are new to you, :doc:`cdr_workplan`
 introduces them on a simpler workplan without nesting.
+
+.. figure:: ../images/nest-tiny-domains.png
+   :alt: Map of the seas north-west of Scotland, with the 400 km parent grid outlined in orange and the 100 km child grid outlined in blue inside it
+   :width: 60%
+
+   The parent grid (orange) and the child grid (blue). The workplan's last step
+   draws this map, ``cdr_domains.png``, labelling the parent by its
+   ``parent_up`` run.
 
 Before you start
 ----------------
@@ -155,7 +165,8 @@ What to look at afterwards
 The last step is the result. ``tasks/cdr_metrics/output/cdr_metrics.nc`` holds
 time series of the CO2 uptake in tonnes and of the CDR efficiency, each from
 the CO2 flux and from the DIC difference. ``cdr_metrics.png`` plots the
-combined efficiency and uptake, and ``cdr_domains.png`` maps the two domains.
+combined efficiency and uptake, and ``cdr_domains.png`` maps the two domains,
+as at the top of this page.
 
 The two domains are combined in a specific way:
 
@@ -192,17 +203,43 @@ and roms-tools 5.3.0 gave these combined values (rounded):
      - From the flux
      - From the DIC difference
    * - CO2 uptake (tonnes)
-     - 5.51
-     - 5.51
+     - 5.03
+     - 5.03
    * - CDR efficiency
-     - 0.0043
-     - 0.0043
+     - 0.0040
+     - 0.0040
 
 ``closure_residual`` was below 0.001 tonnes, and
-``parent_up_DIC_difference_inside_child`` was -0.006 tonnes. Nearly all of the
-uptake happens in the child: the release lasts four hours and little of it
-leaves the child within the day. Your numbers should be close to these but need
-not match them exactly.
+``parent_up_DIC_difference_inside_child`` was 0.08 tonnes. Your numbers should
+be close to these but need not match them exactly.
+
+.. figure:: ../images/nest-tiny-metrics.png
+   :alt: Combined CDR efficiency and CO2 uptake against time. The flux and DIC-difference curves overlap and reach about 5 tonnes; the child's flux-based uptake levels off near 3.8 tonnes while parent_up's rises to about 1.3 tonnes
+   :width: 90%
+
+   ``cdr_metrics.png`` from the reference run. Top: the combined efficiency,
+   from the CO2 flux and from the DIC difference, which lie on top of each
+   other. Bottom: the combined uptake the same two ways, and the flux-based
+   uptake of each domain: the child's levels off as the alkalinity leaves it,
+   and ``parent_up``'s rises.
+
+Each domain's own series show the hand-off. Until about midday on the 2nd the
+alkalinity stays in the child, and its two uptake curves rise together. Then
+the current carries the alkalinity east across the child's boundary, and the
+two views part. The DIC difference counts the perturbation where it is now, so
+the child's falls back to zero as its DIC leaves, and ``parent_up``'s rises to
+nearly the whole 5 tonnes. The flux counts where the CO2 entered the ocean, so
+the child keeps the 3.8 tonnes it took up while it held the alkalinity, and
+``parent_up`` adds 1.3 tonnes after it arrives. Summed over both domains the
+two views agree, which is what ``closure_residual`` checks.
+
+.. figure:: ../images/nest-tiny-domain-uptake.png
+   :alt: Two panels of CO2 uptake against time. Child: the flux-based curve rises to 3.8 tonnes and levels off; the DIC-based curve peaks near 2.6 tonnes and falls back to zero. parent_up: the flux-based curve rises to 1.3 tonnes and the DIC-based curve to 5.1 tonnes, both starting around midday
+   :width: 100%
+
+   Each domain's CO2 uptake in the reference run, from the CO2 flux (solid) and
+   from the DIC difference (dashed): the per-domain series in
+   ``cdr_metrics.nc``.
 
 Where to go next
 ----------------
