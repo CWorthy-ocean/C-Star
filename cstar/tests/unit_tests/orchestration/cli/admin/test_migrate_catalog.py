@@ -737,18 +737,61 @@ def test_legacy_layout_spec_is_moved_and_rewritten(tmp_path: Path) -> None:
     assert not legacy.parent.exists()
 
 
-def test_legacy_layout_spec_dry_run_reports_at_its_current_place(
+def test_legacy_layout_spec_dry_run_reports_where_the_run_rewrites(
     tmp_path: Path,
 ) -> None:
-    """A dry run reports a legacy-layout spec's rewrite where the file is now."""
+    """A dry run reports a legacy-layout spec's rewrite at the place the real run
+    rewrites it: where the move puts it.
+    """
     root = tmp_path.resolve()
-    legacy = _write(root / "ForcingSpec" / "f" / "Forcing.yaml", OUTDATED_FORCING)
+    _write(root / "ForcingSpec" / "f" / "Forcing.yaml", OUTDATED_FORCING)
     snapshot = _tree(root)
 
     report = migrate_catalog_layout(root, dry_run=True)
 
-    assert report.rewritten == [(legacy, "ForcingSpec", "1.0.0", "2.0.0")]
+    dst = root / "ForcingSpec" / "f.yaml"
+    assert report.rewritten == [(dst, "ForcingSpec", "1.0.0", "2.0.0")]
     assert _tree(root) == snapshot
+
+
+def test_rewrite_keeps_the_file_mode(tmp_path: Path) -> None:
+    """A rewritten spec keeps its permissions, so a shared catalog stays readable."""
+    root = tmp_path.resolve()
+    spec = _write(root / "ForcingSpec" / "f.yaml", OUTDATED_FORCING)
+    spec.chmod(0o664)
+
+    migrate_catalog_layout(root)
+
+    assert spec.stat().st_mode & 0o777 == 0o664
+
+
+def test_symlinked_spec_is_reported_and_left_alone(tmp_path: Path) -> None:
+    """An outdated spec that is a symbolic link is reported, not replaced by a file."""
+    root = tmp_path.resolve()
+    target = _write(tmp_path / "shared" / "f.yaml", OUTDATED_FORCING)
+    link = root / "ForcingSpec" / "f.yaml"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+
+    report = migrate_catalog_layout(root)
+
+    assert [p for p, _ in report.failed_specs] == [link]
+    assert link.is_symlink()
+    assert target.read_text() == OUTDATED_FORCING
+
+
+def test_multi_model_spec_is_reported_with_how_to_migrate_it(tmp_path: Path) -> None:
+    """A multi-model ModelSpec file is not rewritten; the report says to split it."""
+    root = tmp_path.resolve()
+    original = "a:\n  code: {}\nb:\n  code: {}\n"
+    spec = _write(root / "ModelSpec" / "m.yaml", original)
+
+    report = migrate_catalog_layout(root)
+
+    assert len(report.failed_specs) == 1
+    assert report.failed_specs[0][0] == spec
+    assert "split it" in report.failed_specs[0][1]
+    assert spec.read_text() == original
 
 
 def test_cli_migrate_catalog_prints_the_rewrite_and_summary(tmp_path: Path) -> None:

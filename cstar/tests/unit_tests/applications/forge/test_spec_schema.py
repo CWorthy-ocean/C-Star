@@ -154,6 +154,19 @@ def test_current_shape_without_version_is_not_changed(
     assert not _spec_warnings(caplog)
 
 
+def test_migrate_catalog_advice_only_for_a_file(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """The warning points at `migrate-catalog` for a file, not for an argument."""
+    data = {"cdr_tracer_output": {"do_cdr_tracer_output": True}}
+    with caplog.at_level(logging.WARNING, logger=_SPEC_LOGGER):
+        read_spec("OutputSpec", data, "output_settings")
+        read_spec("OutputSpec", data, tmp_path / "o.yaml")
+    in_memory, on_disk = _spec_warnings(caplog)
+    assert "migrate-catalog" not in in_memory
+    assert "migrate-catalog" in on_disk
+
+
 def test_schema_version_is_not_in_the_content() -> None:
     data = {KEY_SV: SPEC_SCHEMA_VERSIONS["DomainSpec"], "grid_name": "g"}
     content = read_spec("DomainSpec", data, "f.yaml")

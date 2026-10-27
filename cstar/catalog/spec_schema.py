@@ -15,6 +15,7 @@ import typing as t
 from collections.abc import Mapping
 from copy import deepcopy
 from functools import cache
+from pathlib import Path
 
 from cstar.base.log import get_logger
 from cstar.system.migration import (
@@ -28,8 +29,6 @@ from cstar.system.migration import (
 )
 
 if t.TYPE_CHECKING:
-    from pathlib import Path
-
     from cstar.orchestration.models import CatalogSpecKind
 
 log = get_logger(__name__)
@@ -216,9 +215,14 @@ def read_spec(
     spec = migrate_spec(kind, data, where)
     if spec.changed and (str(where), spec.found) not in _WARNED:
         _WARNED.add((str(where), spec.found))
+        # only a file can be updated on disk; `where` may name an argument
+        update = (
+            " Run `cstar admin migrate-catalog` on its catalog to update the file."
+            if isinstance(where, Path)
+            else ""
+        )
         log.warning(
             f"{kind} {where} is schema {spec.found}; it was migrated to "
-            f"{spec.target} on read. Run `cstar admin migrate-catalog` on its "
-            "catalog to update the file."
+            f"{spec.target} on read.{update}"
         )
     return spec.content

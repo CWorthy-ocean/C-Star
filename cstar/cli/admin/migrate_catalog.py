@@ -263,6 +263,7 @@ def _rewrite_spec(path: Path, content: dict[str, t.Any], target: str) -> None:
                 sort_keys=False,
                 allow_unicode=True,
             )
+        shutil.copymode(path, tmp)
         shutil.copy2(path, backup)
         made_backup = True
         os.replace(tmp, path)
@@ -279,25 +280,47 @@ def _migrate_spec_schemas(
     """Rewrite each spec file that a schema migration changes, adding the
     outcome of every file that needs attention to `report`.
 
-    A file that is current is not read again or touched. One failing file is
-    reported and skipped; the others carry on.
+    A file that is current is not touched. One failing file is reported and
+    skipped; the others carry on. A symbolic link is left alone, as its target
+    may be shared, and so is a multi-model ModelSpec file. In `dry_run` mode a
+    legacy-layout file is reported at the place the moves would give it.
     """
     # Imported here: the schema module reaches the application registry.
     from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, migrate_spec
 
+    moved_to = dict(report.moved) if dry_run else {}
     kinds = t.cast("Iterable[t.Any]", SPEC_SCHEMA_VERSIONS)
     for kind in kinds:
-        for path in catalog.spec_paths(kind).values():
+        for source in catalog.spec_paths(kind).values():
+            path = moved_to.get(source, source)
+            data: t.Any = None
             try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                data = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
                 spec = migrate_spec(kind, data, path)
             except CstarSchemaTooNewError as ex:
                 report.newer_specs.append((path, str(ex)))
                 continue
             except Exception as ex:
-                report.failed_specs.append((path, str(ex)))
+                # a multi-model file fails the ModelSpec key check on its model names
+                multi_model = (
+                    kind == "ModelSpec"
+                    and isinstance(data, dict)
+                    and not {"code", "model_settings"}.intersection(data)
+                )
+                reason = (
+                    "a multi-model ModelSpec file; split it into one <name>.yaml "
+                    "per model to migrate it"
+                    if multi_model
+                    else str(ex)
+                )
+                report.failed_specs.append((path, reason))
                 continue
             if not spec.changed:
+                continue
+            if source.is_symlink():
+                report.failed_specs.append(
+                    (path, "a symbolic link; update the file it points to")
+                )
                 continue
             if path.with_name(path.name + ".bak").exists():
                 report.backup_exists.append(path)
