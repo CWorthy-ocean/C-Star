@@ -33,9 +33,6 @@ The following variables control C-Star behavior. Put them in the
 setup. ``cstar env show`` prints the value of each in effect and where it
 came from.
 
-.. tip::
-    Use ``cstar env show --display export`` to generate a starter script.
-
 .. envvar-table::
     cstar.base.env
     cstar.base.utils
