@@ -40,6 +40,9 @@ machine, so ``status`` shows what its manifest and step records say, and
 The run is attached under the run ID its manifest names. If you already have
 a run ID with that name, ``attach`` refuses; pass ``--as <run-id>`` to
 attach the run under a free one.
+A copy attached ``--as`` another run ID keeps the run's uuid, so
+``run://<uuid>`` resolves to the run tracked here first, then to attached
+copies; name a copy by its run ID or directory to use it.
 
 
 Owned or read-only

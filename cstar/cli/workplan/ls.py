@@ -29,19 +29,16 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.index import (
-    WHERE_ATTACHED,
-    WHERE_ATTACHED_READ_ONLY,
-    WHERE_TRACKED,
     ManifestRecord,
     Origin,
     default_index,
     untracked_locations,
     where_kept,
+    where_tracked,
 )
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import (
     UNKNOWN_SIZE,
-    Access,
     TrackingRepository,
     WorkplanRun,
 )
@@ -201,12 +198,6 @@ async def adapt_runs_to_views(
         if name == UNKNOWN_NAME:
             unresolved.append(run.run_id)
 
-        if not run.attached:
-            where = WHERE_TRACKED
-        else:
-            read_only = run.access is Access.read_only
-            where = WHERE_ATTACHED_READ_ONLY if read_only else WHERE_ATTACHED
-
         views.append(
             ItemView(
                 run_id=run.run_id,
@@ -214,7 +205,7 @@ async def adapt_runs_to_views(
                 raw_size=run.size_mb,
                 raw_start=run.start_at,
                 format=format,
-                where=where,
+                where=where_tracked(run),
             )
         )
 

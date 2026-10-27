@@ -9,6 +9,7 @@ from unittest import mock
 from uuid import uuid4
 
 import pytest
+import yaml
 
 import cstar.orchestration.index as index_module
 import cstar.orchestration.manifest as manifest_module
@@ -50,6 +51,7 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
+    Access,
     TrackingRepository,
     WorkplanRun,
 )
@@ -125,7 +127,13 @@ def local_manifest_id(root: Path) -> str:
 
 
 def track(
-    root: Path, run_id: str, *, uuid: str = "", attached: bool = False
+    root: Path,
+    run_id: str,
+    *,
+    uuid: str = "",
+    attached: bool = False,
+    access: Access = Access.owned,
+    recorded_at: datetime | None = None,
 ) -> WorkplanRun:
     """Record a run in tracking, stamped with `uuid` when given."""
     metadata = {KEY_RUN_UUID: uuid} if uuid else {}
@@ -134,6 +142,8 @@ def track(
         run_id=run_id,
         metadata=metadata,
         attached=attached,
+        access=access,
+        recorded_at=recorded_at or datetime.now(UTC),
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run
@@ -1176,20 +1186,127 @@ class TestTrackedByUuid:
 
         assert tracked_by_uuid(wanted) is None
 
-    def test_several_records_are_an_error_that_lists_them(self, tmp_path: Path) -> None:
+    def test_one_record_is_found_without_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         wanted = str(uuid4())
-        for name in ("first", "second"):
+        (tmp_path / "solo").mkdir()
+        track(tmp_path / "solo", "solo", uuid=wanted)
+
+        with caplog.at_level(logging.DEBUG):
+            found = tracked_by_uuid(wanted)
+
+        assert found is not None
+        assert found.run_id == "solo"
+        assert not warnings_of(caplog)
+
+    def test_the_run_started_here_is_chosen_over_an_attached_copy(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wanted = str(uuid4())
+        for name in ("original", "shared"):
             (tmp_path / name).mkdir()
-            track(tmp_path / name, name, uuid=wanted)
+        track(tmp_path / "original", "original", uuid=wanted, recorded_at=NOW)
+        # attached later, so recency alone would choose it
+        track(
+            tmp_path / "shared",
+            "shared",
+            uuid=wanted,
+            attached=True,
+            recorded_at=NOW + timedelta(hours=1),
+        )
 
-        with pytest.raises(CstarError, match="More than one tracked run") as raised:
-            tracked_by_uuid(wanted)
+        with caplog.at_level(logging.DEBUG):
+            found = tracked_by_uuid(wanted)
 
-        message = str(raised.value)
-        assert "'first'" in message
-        assert "'second'" in message
-        assert str(tmp_path / "first") in message
-        assert "run-id" in message
+        assert found is not None
+        assert found.run_id == "original"
+        (warning,) = warnings_of(caplog)
+        assert f"using 'original' at {tmp_path / 'original'} (local)" in warning
+        assert f"Passed over: 'shared' at {tmp_path / 'shared'} (attached)" in warning
+
+    def test_an_owned_copy_is_chosen_when_the_original_directory_is_gone(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wanted = str(uuid4())
+        track(tmp_path / "purged", "original", uuid=wanted, recorded_at=NOW)
+        for name in ("owned", "read-only"):
+            (tmp_path / name).mkdir()
+        track(
+            tmp_path / "owned",
+            "owned",
+            uuid=wanted,
+            attached=True,
+            recorded_at=NOW,
+        )
+        track(
+            tmp_path / "read-only",
+            "read-only",
+            uuid=wanted,
+            attached=True,
+            access=Access.read_only,
+            recorded_at=NOW + timedelta(hours=1),
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            found = tracked_by_uuid(wanted)
+
+        assert found is not None
+        assert found.run_id == "owned"
+        (warning,) = warnings_of(caplog)
+        assert "(attached, read-only)" in warning
+        assert "'original'" not in warning
+
+    def test_the_latest_recorded_of_equal_copies_is_chosen(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        wanted = str(uuid4())
+        for hours, name in enumerate(("first", "latest", "second")):
+            (tmp_path / name).mkdir()
+            moment = NOW + timedelta(hours=2 if name == "latest" else hours)
+            track(
+                tmp_path / name,
+                name,
+                uuid=wanted,
+                attached=True,
+                access=Access.read_only,
+                recorded_at=moment,
+            )
+
+        with caplog.at_level(logging.DEBUG):
+            found = tracked_by_uuid(wanted)
+
+        assert found is not None
+        assert found.run_id == "latest"
+        (warning,) = warnings_of(caplog)
+        assert "3 tracked runs are copies" in warning
+        assert "'first'" in warning
+        assert "'second'" in warning
+
+    def test_a_record_of_an_older_release_ranks_by_its_start(
+        self, tmp_path: Path
+    ) -> None:
+        wanted = str(uuid4())
+        for name in ("legacy", "current"):
+            (tmp_path / name).mkdir()
+        old = track(tmp_path / "legacy", "legacy", uuid=wanted, attached=True)
+        track(
+            tmp_path / "current",
+            "current",
+            uuid=wanted,
+            attached=True,
+            recorded_at=NOW,
+        )
+        # a record cstar 0.17.0 wrote: a naive start, no recorded_at
+        data = old.model_dump(mode="json", exclude={"recorded_at", "schema_version"})
+        data["start_at"] = (NOW + timedelta(hours=1)).replace(tzinfo=None).isoformat()
+        record = TrackingRepository().latest_dir / "legacy.yaml"
+        record.write_text(yaml.safe_dump(data))
+
+        found = tracked_by_uuid(wanted)
+
+        assert found is not None
+        assert found.run_id == "legacy"
 
     def test_a_record_that_does_not_cache_its_uuid_is_never_read_for_it(
         self, tmp_path: Path, opened: list[Path], monkeypatch: pytest.MonkeyPatch
@@ -1303,21 +1420,71 @@ class TestAttachedRuns:
         assert isinstance(found, WorkplanRun)
         assert found.run_id == "shared-copy"
 
-    def test_a_directory_named_by_the_user_is_found_though_the_uuid_is_ambiguous(
-        self, tmp_path: Path
+    def test_a_directory_named_by_the_user_is_found_though_copies_are_tracked(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         root = local_run("original")
         wanted = local_manifest_id(root)
-        for name in ("first", "second"):
+        for hours, name in enumerate(("first", "second")):
             (tmp_path / name).mkdir()
-            track(tmp_path / name, name, uuid=wanted, attached=True)
+            track(
+                tmp_path / name,
+                name,
+                uuid=wanted,
+                attached=True,
+                recorded_at=NOW + timedelta(hours=hours),
+            )
 
-        by_path = resolve_run(parse_run_handle(str(root)))
+        with caplog.at_level(logging.DEBUG):
+            by_path = resolve_run(parse_run_handle(str(root)))
 
         assert isinstance(by_path, ManifestRecord)
         assert by_path.output_path == root
-        with pytest.raises(CstarError, match="More than one tracked run"):
-            resolve_run(parse_run_handle(run_uri(wanted)))
+        assert not warnings_of(caplog)
+        by_uuid = resolve_run(parse_run_handle(run_uri(wanted)))
+        assert isinstance(by_uuid, WorkplanRun)
+        assert by_uuid.run_id == "second"
+
+    def test_a_directory_named_by_the_user_is_its_own_copy(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = local_run("original")
+        wanted = local_manifest_id(root)
+        track(root, "original", uuid=wanted, recorded_at=NOW)
+        copy = StateDirectoryManager.workplan_runs_dir() / "copy"
+        make_run(copy, "original", uuid=wanted)
+        track(
+            copy,
+            "original-copy",
+            uuid=wanted,
+            attached=True,
+            access=Access.read_only,
+            recorded_at=NOW,
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            found = resolve_run(parse_run_handle(str(copy)))
+
+        assert isinstance(found, WorkplanRun)
+        assert found.run_id == "original-copy"
+        assert found.access is Access.read_only
+        assert not warnings_of(caplog)
+
+    def test_a_uuid_finds_the_original_over_its_attached_copy(self) -> None:
+        root = local_run("original")
+        wanted = local_manifest_id(root)
+        track(root, "original", uuid=wanted, recorded_at=NOW)
+        copy = StateDirectoryManager.workplan_runs_dir() / "copy"
+        make_run(copy, "original", uuid=wanted)
+        track(copy, "original-copy", uuid=wanted, attached=True)
+        index = RunIndex()
+
+        found = resolve_run(parse_run_handle(run_uri(wanted)), index=index)
+
+        assert isinstance(found, WorkplanRun)
+        assert found.run_id == "original"
+        assert found.output_path == root
+        assert not index.scanned
 
     def test_a_directory_named_by_the_user_must_be_the_attached_one(
         self, tmp_path: Path
