@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import typing as t
 from datetime import UTC, datetime
@@ -372,6 +373,41 @@ def test_repair_rebuilds_gathered_output_even_when_no_link_needed_fixing(
     assert "No symlink to rewrite." in result.stdout
     assert f"Rebuilt {gathered} with 2 link(s)." in result.stdout
     assert sorted(p.name for p in gathered.iterdir()) == ["a.nc", "result.yaml"]
+
+
+def test_a_repair_that_cannot_write_exits_1_without_a_traceback(run: FakeRun) -> None:
+    """Verify a file system error while rewriting symlinks is one line and exit 1."""
+    with mock.patch(
+        "cstar.cli.run.check.repair_symlinks",
+        side_effect=PermissionError("read-only file system"),
+    ):
+        result = invoke(str(run.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "Symlink repair stopped: read-only file system"
+
+
+def test_a_gather_that_fails_names_the_command_to_rerun(run: FakeRun) -> None:
+    """Verify a `gathered_output` that cannot be rebuilt is one line, exit 1, and says
+    which command to rerun.
+    """
+    handle = shlex.quote(str(run.root))
+
+    with mock.patch(
+        "cstar.cli.workplan.gather.shutil.rmtree",
+        side_effect=PermissionError("directory not empty"),
+    ):
+        result = invoke(str(run.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    message = result.stderr.strip()
+    assert "\n" not in message
+    assert message == (
+        "`gathered_output` was not rebuilt (once the cause is fixed, rerun "
+        f"`cstar run {COMMAND_CHECK} {handle} {ARG_REPAIR}`): directory not empty"
+    )
 
 
 def test_repair_without_a_workplan_leaves_gathered_output_alone(tmp_path: Path) -> None:
@@ -1395,3 +1431,21 @@ def test_record_digests_without_a_manifest_says_so(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_FINDINGS, result.output
     assert "no readable run manifest" in result.stderr
     assert "Recorded" not in result.stdout
+
+
+def test_record_digests_that_cannot_write_exits_1_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """Verify a file system error while recording digests is one line and exit 1."""
+    root = small_run(tmp_path / "small")
+    write_manifest(root, entry("run", "tasks/run", product("output/x.yaml", size=17)))
+
+    with mock.patch(
+        "cstar.cli.run.check.record_product_digests",
+        side_effect=OSError("disk quota exceeded"),
+    ):
+        result = invoke(str(root), ARG_RECORD_DIGESTS)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "No digest recorded: disk quota exceeded"
