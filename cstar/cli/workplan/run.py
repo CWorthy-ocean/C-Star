@@ -118,9 +118,8 @@ COMMAND_SUBMIT: t.Final[str] = "submit"
 ALIAS = "run"
 """Earlier name of the launch command, still registered but hidden from `--help`."""
 HELP_SHORT = "Submit a workplan: schedule every step and exit."
-HELP_ALIASED = f"{HELP_SHORT} (alias: {ALIAS})"
 HELP_LONG = f"""\
-{HELP_ALIASED}
+{HELP_SHORT}
 
 Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 

@@ -85,7 +85,7 @@ def test_subcommand_aliases_are_hidden_from_help(build_app):
 
 @pytest.mark.parametrize(
     ("primary", "alias"),
-    [*SUBCOMMAND_ALIASES, ("ls", ALIAS_LS), (COMMAND_SUBMIT, ALIAS_SUBMIT)],
+    [*SUBCOMMAND_ALIASES, ("ls", ALIAS_LS)],
     ids=lambda v: v,
 )
 def test_help_text_advertises_the_registered_alias(build_app, primary, alias):
@@ -96,10 +96,18 @@ def test_help_text_advertises_the_registered_alias(build_app, primary, alias):
     """
     root = get_command(build_app())
     workplan = root.commands["workplan"]
-    group = workplan if primary in {"ls", COMMAND_SUBMIT} else root
+    group = workplan if primary == "ls" else root
     command = group.commands[primary]
 
     assert f"(alias: {alias})" in (command.help or "")
+
+
+def test_submit_help_does_not_advertise_its_deprecated_alias(build_app):
+    """`run` is deprecated, so `workplan submit --help` must not name it."""
+    root = get_command(build_app())
+    command = root.commands["workplan"].commands[COMMAND_SUBMIT]
+
+    assert "(alias:" not in (command.help or "")
 
 
 def test_ls_alias_is_the_same_command():
