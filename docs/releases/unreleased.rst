@@ -505,6 +505,12 @@ Bug Fixes
   - Other failures of ``cstar workplan submit`` (an unknown ``--clobber`` step, bad variables, a run record that cannot be read) are also one message, with the traceback at ``--log-level DEBUG``.
 
 - ``cstar run status`` on a run whose workplan or blueprint file is missing prints one line naming the file instead of a traceback. (`#873 <https://github.com/CWorthy-ocean/C-Star/pull/873>`_)
+- ``CSTAR_SYSTEM`` now applies to Forge, provenance stamps and the wizard, which previously named the detected host and ignored the setting. (`#874 <https://github.com/CWorthy-ocean/C-Star/pull/874>`_)
+
+  - ``cstar forge show-paths`` and ``cstar forge run`` refuse an unknown ``CSTAR_SYSTEM`` with the list of registered systems and exit code 1, like the other commands, instead of printing the detected system or failing mid-run with a traceback.
+  - ``show-paths`` says when the system was set by ``CSTAR_SYSTEM`` or is the generic fallback for a cluster C-Star does not list.
+  - On a cluster C-Star does not list, provenance stamps and ``show-paths --json`` record the generic system C-Star runs with (e.g. ``linux_x86_64``), not the cluster's own name.
+
 
 
 
