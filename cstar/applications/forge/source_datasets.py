@@ -612,12 +612,16 @@ def _prepare_unified_bgc_dataset(self: SourceDatasets) -> Path:
     path = dataset_dir / UNIFIED_BGC_FILENAME
     needs_download = self.clobber or (not path.exists())
 
-    stale = dataset_dir / "BGCdataset.nc"
-    if stale.exists():
-        print(
-            f"ℹ️  A pre-v2.1 BGC file is still cached at {stale} and is no longer "
-            "used; delete it to reclaim the space."
-        )
+    for stale, label in (
+        (dataset_dir / "BGCdataset.nc", "pre-v2.1"),
+        (dataset_dir / "BGCdataset_v2_1.nc", "v2.1, superseded by a unit fix"),
+    ):
+        if stale.exists():
+            print(
+                f"ℹ️  The unified BGC file {stale.name} ({label}) is still cached at "
+                f"{dataset_dir} and is no longer used: Forge now stages "
+                f"{UNIFIED_BGC_FILENAME}. Delete the old file to reclaim about 10 GB."
+            )
 
     if needs_download:
         if path.exists():
