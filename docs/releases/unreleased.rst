@@ -28,6 +28,17 @@ Breaking Changes
 
 - New namelist tier for ucla-roms >= 0.12.0, which always writes ``cdr_carbonate_sensitivity_time_interpolation``; earlier releases stop on that key, so they keep the 0.11 tier, and Forge rejects turning it off there with an error naming 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
 
+- The ROMS application is now named ``ucla_roms``; ``roms_marbl`` is still accepted everywhere (blueprints, workplan steps, CLI arguments, catalog lookups) and never needs editing. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+
+  - Files C-Star writes (transformed workplans, blueprints emitted by forge, chunk and resume blueprints, migrated copies) now say ``ucla_roms``, which earlier releases refuse.
+  - In Python, ``Application.ROMS_MARBL`` is now ``Application.UCLA_ROMS``.
+
+- Standalone runs and catalogs use the new name: the default run directory is ``blueprint_runs/ucla_roms/<name>``, and catalogs keep ROMS blueprints under ``blueprints/ucla_roms/``. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+
+  - An existing ``blueprint_runs/roms_marbl/<name>`` is still found and reused, so resuming or continuing an earlier run works.
+  - A catalog's ``blueprints/roms_marbl/`` directory is read with a warning for one more release; ``cstar admin migrate-catalog`` moves it.
+
+
 - Forge stages the corrected unified BGC climatology as ``BGCdataset_v2_1a.nc``: the first Forge run after upgrading downloads it again (about 10 GB) into the shared source-data cache. (`#875 <https://github.com/CWorthy-ocean/C-Star/pull/875>`_)
 
   - A cached ``BGCdataset_v2_1.nc`` is reported as stale on every staging run until it is deleted; Forge never deletes it.
@@ -68,23 +79,13 @@ Breaking Changes
 
   - Like every feature flag it is set in the shell, not the configuration file; a configuration file that still names ``CSTAR_ORCH_TRX_FREQ`` stops cstar commands until that line is removed.
 
-- The developer-only commands ``cstar workplan compose``, ``cstar workplan generate``, ``cstar workplan plan`` and ``cstar template create`` are removed, with their four ``CSTAR_FF_CLI_*`` flags. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
 - Every old name above prints a warning naming its replacement when it is still exported. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
 - ``CSTAR_FF_DEVELOPER_MODE`` no longer enables other feature flags; set ``CSTAR_FF_ORCH_TRX_TIMESPLIT=1`` to turn on automatic time-splitting. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - ``CSTAR_RUNID`` is internal: ``cstar env show`` lists it only with ``--group internal``, and neither ``--display export`` nor the configuration docs include it. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 
-- The ROMS application is named ``ucla_roms``; ``roms_marbl`` is still accepted everywhere (blueprints, workplan steps, CLI arguments, catalog lookups) and never needs editing. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
-
-  - Files C-Star writes (transformed workplans, blueprints emitted by forge, chunk and resume blueprints, migrated copies) now say ``ucla_roms``, which earlier releases refuse.
-  - In Python, ``Application.ROMS_MARBL`` is now ``Application.UCLA_ROMS``.
-
-- Standalone runs and catalogs use the new name: the default run directory is ``blueprint_runs/ucla_roms/<name>``, and catalogs keep ROMS blueprints under ``blueprints/ucla_roms/``. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
-
-  - An existing ``blueprint_runs/roms_marbl/<name>`` is still found and reused, so resuming or continuing an earlier run works.
-  - A catalog's ``blueprints/roms_marbl/`` directory is read with a warning for one more release; ``cstar admin migrate-catalog`` moves it.
+- Catalogs keep each spec as one file, ``specs/<Kind>/<name>.yaml`` (for example ``specs/ModelSpec/roms-marbl-0.13-default.yaml``); entries saved in this layout are not visible to earlier C-Star releases reading the same catalog. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_) (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 
 - Deprecated: ``blueprints/roms_marbl/`` in a catalog, removed in 0.20.0; run ``cstar admin migrate-catalog <root>`` to move it to ``blueprints/ucla_roms/``. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
-- Catalogs keep each spec as one file, ``specs/<Kind>/<name>.yaml`` (for example ``specs/ModelSpec/roms-marbl-0.13-default.yaml``); entries saved in this layout are not visible to earlier C-Star releases reading the same catalog. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_) (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 - Deprecated: the per-entry spec directories ``<Kind>/<name>/<File>.yaml`` (``ModelSpec/<name>/model.yaml``, ``DomainSpec/<name>/Domain.yaml``, ...), removed in 0.20.0; run ``cstar admin migrate-catalog <root>``. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 - Deprecated: the catalog's legacy blueprint layouts (flat ``<name>.forge_blueprint.yaml`` and ``B_<name>.yaml``, and ``blueprints/<machine>/<name>/B_*.yaml``), removed in 0.20.0; run ``cstar admin migrate-catalog <root>``. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
 - A ModelSpec file with a key a ModelSpec does not have is now refused with an error naming the key, on every read (catalog, wizard, ``cstar forge``); before, unknown keys were silently dropped. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
@@ -110,7 +111,6 @@ Breaking Changes
   - ``cstar workplan check`` and ``cstar workplan submit`` now warn about them, naming the step, not only the step's log on the compute node.
 
 - Blueprints and workplans are always read as YAML, which still loads ordinary JSON but not tab-indented JSON. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
-- ``cstar blueprint migrate --in-place`` on a ``.json`` blueprint now writes YAML into that file. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 - The bundled forge blueprints ``cson_roms-marbl_v0.1_wio-toy_10procs`` and ``roms-marbl-0.3-default_wio-toy_10procs`` are removed; load ``wio-toy-example``, the same toy domain on the current model spec, instead. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
 
 
