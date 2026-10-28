@@ -92,7 +92,7 @@ Breaking Changes
 - ``CSTAR_NPROCS_POST`` is removed; joining ROMS output uses a quarter of the cores available to the process, at most one thread per model rank. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - Python API: ``ROMSSimulation.run()`` drops ``account_key``, ``walltime`` and ``queue_name``; runners take ``(request, service_cfg)``; ``JobConfig``, ``get_job_config`` and ``Scheduler.in_active_allocation`` are removed, and ``JOBFILE_DATE_FORMAT`` lives in ``cstar.applications.core``. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - ``cstar workplan submit`` (and ``cstar blueprint submit``) no longer rewrites the authored workplan when it migrates a path-referenced blueprint: the workplan keeps pointing at your original blueprint, and each submit runs a fresh migrated copy from the state home. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
-- Catalogs keep each spec as one file, ``<Kind>/<name>.yaml``; entries saved in this layout are not visible to earlier C-Star releases reading the same catalog. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- Catalogs keep each spec as one file, ``specs/<Kind>/<name>.yaml`` (for example ``specs/ModelSpec/roms-marbl-0.13-default.yaml``); entries saved in this layout are not visible to earlier C-Star releases reading the same catalog. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_) (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 - The catalog's Python API follows the file layout. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 
   - ``DomainCatalog.model_dir`` and ``add_asset_to_domain`` are removed (also on ``LayeredCatalog``), and ``domain_path`` returns the spec file rather than a directory.
@@ -114,7 +114,7 @@ Breaking Changes
 - ucla-roms refs that aren't release tags (``main``, other branches, and commit hashes C-Star cannot resolve to a release) select the newest tier in both Forge and ucla_roms, so a build without the 0.12.0 or 0.13.0 keys (``cdr_carbonate_sensitivity_time_interpolation``, ``v_sponge_trc``) stops on them. Pin a release tag (e.g. ``0.11.0``) to keep its tier; a commit hash that resolves to a release keeps that release's tier in both steps. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_) (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 - The wizard's default model spec, the bundled specs' newest release and the integration pin move to ``roms-marbl-0.13-default`` (ucla-roms 0.13.0); ``roms-marbl-0.12-default`` stays for 0.12.0. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 
-  - On ucla-roms 0.13.0 a run stops at startup when the averaging period of the ``_cdr`` or ``_bgc_dia_avg`` output is not a whole multiple of the MARBL timestep, ``marbl_timestep`` rounded down to a multiple of ``dt``.
+  - On ucla-roms 0.13.0 the averaging period of the ``_cdr`` or ``_bgc_dia_avg`` output must be a whole multiple of the MARBL timestep, ``marbl_timestep`` rounded down to a multiple of ``dt``; Forge and the ``ucla_roms`` step refuse one that is not (see Improvements).
   - ``_bgc_avg`` and ``_bgc_dia_avg`` files now hold ``nrpf`` records each instead of one per file.
   - A MARBL run whose ``marbl_config_file`` does not exist now stops at startup; C-Star's templates and bundled specs ship ``marbl_in``.
 
@@ -214,7 +214,7 @@ New features
 - ``cdr_lite.cdr_carbonate_sensitivity_time_interpolation`` (ucla-roms >= 0.12.0) controls whether ddic_dco2/ddic_dalk read from forcing files are interpolated in time (default, as before) or held until the next record. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
 
   - Setting it to false is rejected where ROMS would ignore it: outside ``bgc_mode: cdr_lite``, or with online carbonate sensitivities.
-  - The wizard shows it under the CDR settings in ``bgc_mode: cdr_lite`` only.
+  - The wizard shows it in ``bgc_mode: cdr_lite`` only, in the Model card's Carbonate sensitivities group.
 
 - The ucla-roms 0.12 namelist schema accepts one entry per child domain (up to 8) for the extraction settings, so a 0.12 namelist or namelist override with several children validates. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
 
@@ -260,14 +260,14 @@ New features
   - The California Current tutorial (16 km parent, 4 km child) uses real forcing and runs under SLURM or on a workstation; ``full.vars`` holds a year-long window, and the page shows how to run a month.
 
 - ``cstar env show --group internal`` lists the variables C-Star sets for its own processes. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
-- C-Star reads ``config.env`` under its config home (``~/.config/cstar``, or ``CSTAR_CONFIG_HOME`` / ``XDG_CONFIG_HOME/cstar``) on every command and when used from Python. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+- C-Star reads ``config.env`` under its config home (``~/.config/cstar``, or ``CSTAR_CONFIG_HOME`` / ``XDG_CONFIG_HOME/cstar``) on every command and when used from Python. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_) (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
 
   - The file is dotenv: one ``NAME=value`` per line, ``#`` comments, ``~`` and ``$VAR`` expanded in values.
   - Precedence, highest first: a command-line option, an exported variable, the configuration file, the system's own default, the built-in default.
   - A key the file may not set (an unknown name, a feature flag, ``CSTAR_CONFIG_HOME``, a removed setting, or a name with no value) stops the command with one error naming the file and every offending key.
 
 - ``cstar env set NAME VALUE`` writes or updates one line of the file, creating it on first use and keeping comments; ``cstar env unset NAME`` comments the line out. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
-- ``cstar env show`` prints the configuration file's path and marks each value ``[env]``, ``[config]`` or ``[default]``; ``--display export`` is unchanged. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+- ``cstar env show`` prints the configuration file's path and marks each value ``[env]``, ``[config]`` or ``[default]``. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 - ``cstar init`` walks through the setup that follows an install and writes ``~/.config/cstar/config.env`` from the answers. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
 
   - On a SLURM system it asks for the account, queue and default walltime, listing your ``sacctmgr`` associations and ``sinfo`` partitions when they can be queried, and marks the settings the system requires.
@@ -318,12 +318,13 @@ New features
 - ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` lets ROMS launch outside a scheduler job on a cluster, for a very small run or when C-Star misjudges that it is not inside a job. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - ``cstar forge run`` also prints the ``cstar blueprint submit`` command for the emitted blueprint when it runs on a cluster. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - C-Star supports Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
-- ``cstar admin migrate-catalog`` moves a catalog's spec directories to ``<Kind>/<name>.yaml``, alongside the blueprint forms it already handled. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- ``cstar admin migrate-catalog`` moves a catalog's 0.17 spec directories to ``specs/<Kind>/<name>.yaml``, alongside the blueprint forms it already handled. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_) (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 
   - After a spec moves, its ``Assets/`` directory is removed if it holds nothing but ``.gitkeep``, then the emptied entry directory.
-  - Anything else, such as a file kept in ``Assets/`` or an entry whose new name is already taken, is left in place and reported; ``--dry-run`` shows the plan without changing anything.
+  - Anything else, such as a file kept in ``Assets/``, a ``.bak`` or an entry whose new name is already taken, is left in place and reported; ``--dry-run`` shows the plan without changing anything.
+  - Two old files for the same spec are never moved onto one another: the one C-Star reads moves, the other is reported as a collision.
 
-- Each catalog spec file records the ``schema_version`` of its kind; a file without one reads as 1.0.0. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+- Each catalog spec file records the ``schema_version`` of its kind; a file without one reads as 1.0.0. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_) (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 
   - A spec from an older release is migrated in memory, with one warning naming the file.
   - A spec from a newer major release is refused with "upgrade cstar-ocean"; one from a newer minor release is refused only if it uses a key this release does not know, which the error names.
@@ -337,11 +338,12 @@ New features
   - The "Automatic tiling" option is the first field marked experimental.
 
 - The Workplan page shows an "Under development" notice under its status bar: the page works but is still being improved, so check the saved workplan before running it. (`#851 <https://github.com/CWorthy-ocean/C-Star/pull/851>`_)
-- ``CSTAR_SYSTEM`` names the system C-Star uses on a machine and takes precedence over detection; set it with ``cstar env set CSTAR_SYSTEM <name>``. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
+- ``CSTAR_SYSTEM`` names the system C-Star uses on a machine and takes precedence over detection, in every command, Forge, the wizard and the provenance stamps; set it with ``cstar env set CSTAR_SYSTEM <name>``. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_) (`#874 <https://github.com/CWorthy-ocean/C-Star/pull/874>`_)
 
-  - An unknown name is refused with the list of systems C-Star knows (for example ``perlmutter``, ``anvil``, ``linux_x86_64``).
-  - ``cstar env show`` prints the system in use and how it was chosen.
+  - An unknown name is refused with the list of systems C-Star knows (for example ``perlmutter``, ``anvil``, ``linux_x86_64``) and exit code 1.
+  - ``cstar env show`` prints the system in use and how it was chosen; ``cstar forge show-paths`` says when the system was set by ``CSTAR_SYSTEM`` or is the generic fallback for a cluster C-Star does not list.
   - ``cstar init`` shows the system and, when C-Star doesn't recognise it, offers to set ``CSTAR_SYSTEM``.
+  - On a cluster C-Star does not list, provenance stamps and ``show-paths --json`` record the generic system C-Star runs with (e.g. ``linux_x86_64``), not the cluster's own name.
 
 - ``v_sponge_trc`` setting for ucla-roms >= 0.13.0: the tracer diffusivity added in the sponge band, separate from ``v_sponge``. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 
@@ -459,17 +461,12 @@ Bug Fixes
 - A ForcingSpec in the pre-v8 shape (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) failed with a validation error when passed to ``build_forge_blueprint`` outside the wizard; it is now migrated. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 - On a Linux cluster with Lmod that C-Star doesn't list, C-Star reset the user's loaded modules and then crashed looking for a module list that doesn't exist. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
 - Log lines from classes with their own logger (e.g. ``Launched step: …`` during ``cstar workplan submit`` / ``run``) were printed twice to STDOUT; they now print once. (`#860 <https://github.com/CWorthy-ocean/C-Star/pull/860>`_)
-- The wizard's carbonate-sensitivity time-interpolation switch and its note stayed hidden in ``cdr_lite`` mode until a CDR forcing was assigned and the blueprint became valid. (`#858 <https://github.com/CWorthy-ocean/C-Star/pull/858>`_)
-
-  - A choice made on the switch before the blueprint is valid carries into the blueprint once it resolves.
-
 - Forge runs no longer print six ``PydanticSerializationUnexpectedValue`` warnings when writing the emitted blueprint; the blueprint itself was always correct. (`#861 <https://github.com/CWorthy-ocean/C-Star/pull/861>`_)
 - A cdr_lite model saved from the wizard no longer fails validation when its BGC mode is switched to marbl. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 
   - The wizard's carbonate-sensitivity time-interpolation setting stays in the wizard session and the blueprints it writes; the saved ModelSpec keeps the base model's value.
   - The save message says "(now unmodified)" only when the model really is unmodified.
 
-- A nested DomainSpec written by a later minor release is no longer refused as too new by this one. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 - The ``wio_toy`` example's tidal forcing was referenced to 2012-01-01 while its other inputs use 2000-01-01, which offset the tidal phases; it now uses a matching file. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - ``cstar run promote`` and ``cstar run check --repair`` / ``--record-digests`` print a one-line error and exit with code 1 instead of a traceback when a copy, link, repair, regather or digest write fails. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
 
@@ -489,7 +486,6 @@ Bug Fixes
 
 - ``cstar run promote`` no longer prints "N problem(s) found" for a healthy copy: the source's paths into itself are informational, and any other absolute path the copy inherited is counted as "inherited from the source", matching the exit code. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - ``cstar run check`` no longer counts the dangling link a cloned ucla-roms holds (``NHMG/src/.libs/libnhmg.la``) as a problem: dangling links inside a step's cloned codebases are informational. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
-- A ``CSTAR_LOG_LEVEL`` set in the configuration file now applies to every ``cstar`` command, not only the four that take ``--log-level``. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
 - An unknown ``CSTAR_LOG_LEVEL`` no longer makes every ``cstar`` command fail, ``cstar --help`` included. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
 
   - Exported, it prints one warning and logs at ``INFO``; in the configuration file, the line is skipped with the reason.
@@ -511,12 +507,6 @@ Bug Fixes
   - Other failures of ``cstar workplan submit`` (an unknown ``--clobber`` step, bad variables, a run record that cannot be read) are also one message, with the traceback at ``--log-level DEBUG``.
 
 - ``cstar run status`` on a run whose workplan or blueprint file is missing prints one line naming the file instead of a traceback. (`#873 <https://github.com/CWorthy-ocean/C-Star/pull/873>`_)
-- ``CSTAR_SYSTEM`` now applies to Forge, provenance stamps and the wizard, which previously named the detected host and ignored the setting. (`#874 <https://github.com/CWorthy-ocean/C-Star/pull/874>`_)
-
-  - ``cstar forge show-paths`` and ``cstar forge run`` refuse an unknown ``CSTAR_SYSTEM`` with the list of registered systems and exit code 1, like the other commands, instead of printing the detected system or failing mid-run with a traceback.
-  - ``show-paths`` says when the system was set by ``CSTAR_SYSTEM`` or is the generic fallback for a cluster C-Star does not list.
-  - On a cluster C-Star does not list, provenance stamps and ``show-paths --json`` record the generic system C-Star runs with (e.g. ``linux_x86_64``), not the cluster's own name.
-
 
 
 
@@ -609,21 +599,15 @@ Improvements
   - When ROMS starts outside a scheduler job on such a cluster's login node, C-Star warns once; ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` silences it.
   - Running a workplan there warns that every step runs on the node where you started it.
 
-- The wizard shows "Interpolate carbonate sensitivities in time" in the Model card's Carbonate sensitivities group, below the sensitivity source and files. (`#855 <https://github.com/CWorthy-ocean/C-Star/pull/855>`_)
+- The wizard shows "Interpolate carbonate sensitivities in time" in the Model card's Carbonate sensitivities group, below the sensitivity source and files. (`#855 <https://github.com/CWorthy-ocean/C-Star/pull/855>`_) (`#858 <https://github.com/CWorthy-ocean/C-Star/pull/858>`_)
 
   - A note under the switch says to leave it off for time-averaged sensitivity files and turn it on for instantaneous ones.
   - In ``cdr_lite`` mode the wizard starts the switch off, because UCLA-ROMS writes the sensitivities time-averaged by default (``wrt_cdr_gas_avg``).
   - Your own choice, and the value in a loaded blueprint, are kept.
 
 - On ucla-roms 0.13.0 and newer, the CDR output Forge turns on for a CDR forcing averages over whole MARBL steps (every 2 hours instead of hourly when ``dt`` is 2 hours), with fewer records per file so each file covers the same time. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
-- Forge refuses a ``_cdr`` or ``_bgc_dia_avg`` averaging period that is not a whole multiple of the MARBL timestep when the pinned ucla-roms is 0.13.0 or newer, in the wizard and before generating inputs, instead of at ROMS startup. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- Forge refuses a ``_cdr`` or ``_bgc_dia_avg`` averaging period that is not a whole multiple of the MARBL timestep when the pinned ucla-roms is 0.13.0 or newer, in the wizard and before generating inputs, and the ``ucla_roms`` step refuses it before launch and in ``--pre-run``, instead of at ROMS startup. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_) (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 - The CCS and tiny nesting/upscaling examples move to ucla-roms 0.13.0, and their upscaled child uses a currents-only sponge (``v_sponge_trc: 0.0``); the parents keep the full sponge. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
-- Each catalog spec is one file at ``specs/<Kind>/<name>.yaml`` (for example ``specs/ModelSpec/roms-marbl-0.13-default.yaml``); the wizard and ``register_*`` calls save new specs there. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
-- ``cstar admin migrate-catalog`` moves 0.17 spec directories into ``specs/``, removes the emptied directories, and leaves anything else (an asset, a ``.bak``) in place and reported. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
-
-  - Two old files for the same spec are never moved onto one another: the one C-Star reads moves, the other is reported as a collision.
-
-- A ``ucla_roms`` run on ucla-roms 0.13.0 or later whose ``_cdr`` or BGC-diagnostics average period is not a whole number of MARBL steps is now refused by C-Star before launch, and by ``--pre-run``, instead of aborting inside ROMS. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 - The ``wio_toy`` example and the bundled ``wales-toy`` blueprint now run on ucla-roms 0.13.0. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 
   - ``wales-toy`` builds ParallelIO from CWorthy's ``2.7.1-fork``, which ucla-roms 0.13 needs.
@@ -724,13 +708,13 @@ Miscellaneous
 
 - The workplan tutorial corrects the ``cstar run path`` usage, shows the ``num_cpus`` a step needs on a cluster when its blueprint comes from an earlier step, and shows ``cstar run show`` output from a real run. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
 - The nesting tutorial no longer describes the test suite. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
-- C-Star now requires roms-tools 5.2.2 or newer; the conda environment files allow Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
+- The conda environment files allow Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
 - Unit tests and the weekly extended integration tests run Python 3.12, 3.13 and 3.14 on Ubuntu and only Python 3.14 on macOS. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
 - The Tier 3 nesting + upscaling integration test checks the per-domain CDR metric series and that the combined CO2 uptake is the sum of the child and upscaled parent. (`#839 <https://github.com/CWorthy-ocean/C-Star/pull/839>`_)
 - The resume section of the UCLA-ROMS pre-run and resume docs says the namelist is written for the ucla-roms version the executable was compiled from. (`#840 <https://github.com/CWorthy-ocean/C-Star/pull/840>`_)
 - The re-entry and blueprint versioning docs say what a blueprint major means for a run in progress. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
-- The bundled catalog ships in the one-file-per-entry layout. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
-- The catalog, specs, wizard-launching, Python reference and developer pages describe the new layout, and the catalog page's migration section covers spec directories. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- The bundled catalog and the integration-test catalog ship in the one-file-per-spec layout under ``specs/``. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_) (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
+- The catalog, specs, contributing, wizard-launching, Python reference and developer pages describe the new layout, and the catalog page's migration section covers spec directories. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_) (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 - The ``cstar blueprint migrate --help`` text now says where a copy is written when no output path is given. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
 - The re-entry and run-status documentation describe queued and running steps as they behave now, and the ``--clobber`` help says a queued or running step is cancelled first. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
 - The generated ``cppdefs.opt`` no longer lists ``EXACT_RESTARTS`` or ``PRINT_HOSTNAME``, which never had any effect; exact restarts stay on in every 3D build, as before. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
@@ -749,7 +733,6 @@ Miscellaneous
   - Setup steps: install C-Star, run ``cstar init``, and register for Copernicus Marine and run ``copernicusmarine login`` (TPXO is not needed for the tutorials).
 
 - The wizard's carbonate-sensitivity test reads the default model from the wizard module instead of naming it, which repairs the unit-test job on ``main``. (`#857 <https://github.com/CWorthy-ocean/C-Star/pull/857>`_)
-- The bundled catalog and the integration-test catalog keep their specs under ``specs/``; the catalog, spec, contributing and Python reference pages show the new paths. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 - The developer docs now say which ucla-roms start-up checks Forge and the ``ucla_roms`` path each run. (`#862 <https://github.com/CWorthy-ocean/C-Star/pull/862>`_)
 - The guided tutorials were regenerated on ucla-roms 0.13.0 and roms-tools 5.3.0, and the nesting tutorial now lists reference CDR metrics for its run. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
 - The CDR metrics page explains that, from roms-tools 5.3.0, uptake leaves out each domain's outermost cells, so a nested child's exported perturbation is counted once. (`#865 <https://github.com/CWorthy-ocean/C-Star/pull/865>`_)
