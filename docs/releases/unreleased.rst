@@ -122,6 +122,12 @@ Breaking Changes
 
   - River files that Forge generates follow roms-tools 5.3.0's river order (largest first) and keep rivers below the minimum discharge, so ``nriv`` and river IDs can differ from files made with earlier releases.
 
+- Forge stages the corrected unified BGC climatology as ``BGCdataset_v2_1a.nc``: the first Forge run after upgrading downloads it again (about 10 GB) into the shared source-data cache. (`#875 <https://github.com/CWorthy-ocean/C-Star/pull/875>`_)
+
+  - A cached ``BGCdataset_v2_1.nc`` is reported as stale on every staging run until it is deleted; Forge never deletes it.
+  - Domains whose initial or boundary BGC came from UNIFIED should be regenerated before a run that will be compared with earlier ones.
+
+
 
 
 New features
@@ -626,6 +632,7 @@ Improvements
 - ``cstar run promote`` classifies the copy's absolute paths by the same rule as ``cstar run check``: paths into the source are informational in the copy. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - The note about sentinel files that ``check``, ``attach`` and ``promote`` print for a run checked by its directory now says why there are none to check. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - ``cstar workplan submit --help`` no longer names the deprecated ``run`` alias. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
+- The stale-file notice names the file Forge now stages and the space the old one takes. (`#875 <https://github.com/CWorthy-ocean/C-Star/pull/875>`_)
 
 
 
