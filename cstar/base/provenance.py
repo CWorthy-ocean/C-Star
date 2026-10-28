@@ -62,8 +62,11 @@ def package_versions(names: "Sequence[str]" = DEFAULT_PACKAGES) -> dict[str, str
 def system_name() -> str:
     """The C-Star system this process runs on, or ``""`` when it can't be named.
 
-    Best effort: the name is informational metadata, never configuration, so a
-    host C-Star cannot identify must not stop a record from being stamped.
+    The system C-Star uses (see `cstar.system.manager.selected_system_name`), so
+    `CSTAR_SYSTEM` and the generic fallback apply as they do everywhere else. Best
+    effort: the name is informational metadata, never configuration, so a host
+    C-Star cannot identify, or a setting that names no system, must not stop a
+    record from being stamped.
 
     Returns
     -------
@@ -71,11 +74,12 @@ def system_name() -> str:
         The system name, or an empty string when the host cannot be identified.
     """
     # Lazy: keeps importing this module light.
-    from cstar.system.manager import HostNameEvaluator
+    from cstar.base.exceptions import CstarError
+    from cstar.system.manager import selected_system_name
 
     try:
-        return HostNameEvaluator().name
-    except OSError:
+        return selected_system_name()
+    except (CstarError, OSError):
         return ""
 
 

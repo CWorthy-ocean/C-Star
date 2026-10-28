@@ -20,7 +20,7 @@ from cstar.applications.forge.host import HostPaths
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.catalog.domain_catalog import user_catalog_root
 from cstar.execution.file_system import DirectoryManager
-from cstar.system.manager import HostNameEvaluator
+from cstar.system.manager import select_system, selected_system_name
 
 
 def _ensure_dir(path: Path) -> Path:
@@ -78,13 +78,21 @@ def resolve_host(working_dir: str | Path) -> HostPaths:
     directory or a ``--working-dir`` override. It is used as written (after ``~``
     expansion), like every other C-Star application; inside a workplan the step's
     assigned directory arrives here already applied. The source-data cache comes from
-    ``DirectoryManager.source_data_home()`` and the machine name from C-Star's
-    ``HostNameEvaluator``.
+    ``DirectoryManager.source_data_home()`` and the system name from
+    :func:`cstar.system.manager.selected_system_name`.
+
+    Raises
+    ------
+    CstarError
+        If C-Star cannot choose a system (``CSTAR_SYSTEM`` names an unregistered
+        one, for instance).
+    OSError
+        If no system name can be determined at all.
     """
     return HostPaths(
         working_dir=Path(working_dir).expanduser(),
         source_data_cache=DirectoryManager.source_data_home(),
-        system=HostNameEvaluator().name,
+        system=selected_system_name(),
     )
 
 
@@ -105,10 +113,21 @@ def _hostname() -> str:
 def format_paths(*, as_json: bool = False) -> str:
     """Render the detected system and configured data paths as a string.
 
-    Backs the ``cstar forge show-paths`` CLI command. The project home and its runs
-    area follow the data paths; in JSON each is `null` when there is no project.
+    Backs the ``cstar forge show-paths`` CLI command. The system is the one C-Star
+    uses (see :func:`cstar.system.manager.select_system`): the text names how it
+    was chosen when not detected, JSON gives the bare name. The project home and
+    its runs area follow the data paths; in JSON each is `null` when there is no
+    project.
+
+    Raises
+    ------
+    CstarError
+        If C-Star cannot choose a system (``CSTAR_SYSTEM`` names an unregistered
+        one, for instance).
+    OSError
+        If no system name can be determined at all.
     """
-    system_tag = HostNameEvaluator().name
+    selection = select_system()
     hostname = _hostname()
     dp = get_data_paths()
     project_home = DirectoryManager.project_home()
@@ -116,7 +135,7 @@ def format_paths(*, as_json: bool = False) -> str:
 
     if as_json:
         payload = {
-            "system": system_tag,
+            "system": selection.context.name,
             "hostname": hostname,
             "paths": _paths_to_dict(dp)
             | {
@@ -136,7 +155,7 @@ def format_paths(*, as_json: bool = False) -> str:
         runs_text = "none, without a project home"
 
     lines = [
-        f"System tag : {system_tag}",
+        f"System tag : {selection.describe()}",
         f"Hostname   : {hostname}",
         "",
         "Paths:",

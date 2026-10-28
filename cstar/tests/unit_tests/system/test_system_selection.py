@@ -27,6 +27,7 @@ from cstar.system.manager import (
     get_system_context,
     registered_context,
     select_system,
+    selected_system_name,
     system_label,
     warn_fallback,
     warn_once,
@@ -291,6 +292,51 @@ def test_undeterminable_system_label_does_not_raise(
         select_system()
 
     assert system_label().startswith("not determined:")
+
+
+def test_selected_system_name_is_the_setting_over_detection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The selected name is the system `CSTAR_SYSTEM` names, not the detected one."""
+    monkeypatch.setenv("RCAC_CLUSTER", "anvil")
+    monkeypatch.setenv(ENV_CSTAR_SYSTEM, "linux_x86_64")
+
+    assert HostNameEvaluator().name == "anvil"
+    assert selected_system_name() == "linux_x86_64"
+
+
+def test_selected_system_name_reads_the_configuration_file(
+    monkeypatch: pytest.MonkeyPatch, isolate_user_config: Path
+) -> None:
+    """A `CSTAR_SYSTEM` saved in the configuration file applies outside the CLI."""
+    monkeypatch.setenv("RCAC_CLUSTER", "anvil")
+    isolate_user_config.parent.mkdir(parents=True, exist_ok=True)
+    isolate_user_config.write_text(f"{ENV_CSTAR_SYSTEM}=bouchet\n")
+
+    assert selected_system_name() == "bouchet"
+
+
+def test_selected_system_name_refuses_an_unknown_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `CSTAR_SYSTEM` that names no registered system raises, listing them."""
+    monkeypatch.setenv("RCAC_CLUSTER", "anvil")
+    monkeypatch.setenv(ENV_CSTAR_SYSTEM, "not-a-system")
+
+    with pytest.raises(CstarError, match="anvil, bouchet"):
+        selected_system_name()
+
+
+def test_selected_system_name_is_the_generic_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On a cluster C-Star does not list, the name is the platform's generic one,
+    not the name the cluster reports.
+    """
+    monkeypatch.setenv("LMOD_SYSHOST", "frontera")
+
+    assert HostNameEvaluator().name == "frontera"
+    assert selected_system_name() == "linux_x86_64"
 
 
 def test_unregistered_lmod_name_with_a_matching_context_is_detected(

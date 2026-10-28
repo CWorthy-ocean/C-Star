@@ -4,7 +4,7 @@ Tests for the config.py module.
 Tests cover:
 - DataPaths dataclass
 - user_catalog_root (the catalog half of the data paths)
-- resolve_host (working directory used as written, system named by HostNameEvaluator)
+- resolve_host (working directory used as written, system the one C-Star selected)
 - get_data_paths / ensure_data_dirs (source-data location itself is tested with
   DirectoryManager.source_data_home)
 - format_paths
@@ -17,6 +17,8 @@ import pytest
 
 import cstar.applications.forge.config as config_module
 from cstar.applications.forge.config import DataPaths, ensure_data_dirs, get_data_paths
+from cstar.base.env import ENV_CSTAR_SYSTEM
+from cstar.base.exceptions import CstarError
 from cstar.catalog.domain_catalog import user_catalog_root
 from cstar.execution.file_system import DirectoryManager
 
@@ -79,16 +81,6 @@ class TestUserCatalogRoot:
         assert not result.exists()
 
 
-def _fake_evaluator(name: str) -> type:
-    """Stand in for C-Star's HostNameEvaluator, whose heuristics are tested elsewhere."""
-
-    class _FakeEvaluator:
-        pass
-
-    _FakeEvaluator.name = name  # type: ignore[attr-defined]
-    return _FakeEvaluator
-
-
 class TestResolveHost:
     """resolve_host uses the working directory as written: expanded, never relocated."""
 
@@ -111,9 +103,7 @@ class TestResolveHost:
         home = tmp_path / "home"
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
-        monkeypatch.setattr(
-            config_module, "HostNameEvaluator", _fake_evaluator("anvil")
-        )
+        monkeypatch.setenv(ENV_CSTAR_SYSTEM, "anvil")
 
         host = config_module.resolve_host(home / "runs" / "my-run")
 
@@ -133,12 +123,16 @@ class TestResolveHost:
 
         assert host.source_data_cache == tmp_path / "src"
 
-    def test_system_is_named_by_host_name_evaluator(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(
-            config_module, "HostNameEvaluator", _fake_evaluator("perlmutter")
-        )
+    def test_system_is_the_one_cstar_system_names(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(ENV_CSTAR_SYSTEM, "perlmutter")
 
         assert config_module.resolve_host(tmp_path / "wd").system == "perlmutter"
+
+    def test_unknown_system_setting_is_refused(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(ENV_CSTAR_SYSTEM, "not-a-system")
+
+        with pytest.raises(CstarError, match="not a registered system"):
+            config_module.resolve_host(tmp_path / "wd")
 
     def test_real_evaluator_returns_a_nonempty_system(self, tmp_path):
         # No mocking: exercises the actual import wiring end to end (the dev box
@@ -195,15 +189,13 @@ class TestFormatPaths:
     def fake_paths(self, monkeypatch, tmp_path):
         dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
         monkeypatch.setattr(config_module, "get_data_paths", lambda: dp)
-        monkeypatch.setattr(
-            config_module, "HostNameEvaluator", _fake_evaluator("anvil")
-        )
+        monkeypatch.setenv(ENV_CSTAR_SYSTEM, "anvil")
         monkeypatch.setattr(config_module, "_hostname", lambda: "node01")
         return dp
 
     def test_text_output(self, fake_paths):
         out = config_module.format_paths()
-        assert "System tag : anvil" in out
+        assert f"System tag : anvil (set by {ENV_CSTAR_SYSTEM})" in out
         assert "Hostname   : node01" in out
         assert str(fake_paths.source_data) in out and str(fake_paths.catalog) in out
 
@@ -222,6 +214,28 @@ class TestFormatPaths:
         ]
         assert payload["paths"]["source_data"] == str(fake_paths.source_data)
         assert payload["paths"]["catalog"] == str(fake_paths.catalog)
+
+    @pytest.mark.parametrize("as_json", [False, True])
+    def test_unknown_system_setting_is_refused(self, fake_paths, monkeypatch, as_json):
+        monkeypatch.setenv(ENV_CSTAR_SYSTEM, "not-a-system")
+
+        with pytest.raises(CstarError, match="not a registered system"):
+            config_module.format_paths(as_json=as_json)
+
+    def test_text_names_a_generic_fallback(self, fake_paths, monkeypatch):
+        monkeypatch.delenv(ENV_CSTAR_SYSTEM)
+        monkeypatch.setenv("LMOD_SYSHOST", "frontera")
+        monkeypatch.setattr(
+            "cstar.system.manager.HostNameEvaluator.platform_hostname",
+            property(lambda _: "linux_x86_64"),
+        )
+
+        out = config_module.format_paths()
+
+        assert (
+            "System tag : linux_x86_64 (generic; 'frontera' is not a registered system)"
+            in out
+        )
 
     def test_json_project_paths_are_null_without_a_project(self, fake_paths):
         import json

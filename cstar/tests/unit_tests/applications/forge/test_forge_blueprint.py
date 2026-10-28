@@ -6540,26 +6540,20 @@ class TestGenerationHelpers:
         monkeypatch.setattr(provenance, "_pkg_version", _only_cstar)
         assert fb.generation_versions() == {"cstar-ocean": "1.2.3"}
 
-    def test_system_name_is_the_hosts_name(self, monkeypatch):
+    def test_system_name_is_the_selected_system(self, monkeypatch):
         from cstar.applications.forge import blueprint as fb
-        from cstar.system import manager
 
-        class _Host:
-            name = "anvil"
-
-        monkeypatch.setattr(manager, "HostNameEvaluator", _Host)
+        monkeypatch.setenv("CSTAR_SYSTEM", "anvil")
         assert fb._system_name() == "anvil"
 
     def test_system_name_is_empty_when_the_host_cannot_be_named(self, monkeypatch):
         from cstar.applications.forge import blueprint as fb
         from cstar.system import manager
 
-        class _Unknown:
-            @property
-            def name(self):
-                raise OSError("C-Star cannot determine your system name.")
+        def _unknown():
+            raise OSError("C-Star cannot determine your system name.")
 
-        monkeypatch.setattr(manager, "HostNameEvaluator", _Unknown)
+        monkeypatch.setattr(manager, "select_system", _unknown)
         assert fb._system_name() == ""
 
     def test_new_generated_by_records_the_running_environment(self, monkeypatch):

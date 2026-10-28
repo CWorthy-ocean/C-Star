@@ -1105,6 +1105,16 @@ def test_topo_source_dropdown_includes_emod():
     assert "EMOD" in wiz.topo_source.options
 
 
+def test_run_warning_names_the_selected_system(monkeypatch):
+    """The run note names the system C-Star uses, saying `CSTAR_SYSTEM` chose it."""
+    monkeypatch.setenv("CSTAR_SYSTEM", "linux_x86_64")
+    wiz = ForgeBlueprintWizard()
+    assert (
+        "System: <code>linux_x86_64 (set by CSTAR_SYSTEM)</code>"
+        in wiz.run_warning.value
+    )
+
+
 def test_wizard_smoke_assembles_widget():
     """The redesigned Grid card assembles cleanly, with geometry, open
     boundaries, and nesting appearing in the expected relative order (mirrors
