@@ -1,22 +1,32 @@
 import asyncio
 import os
+import shlex
 import typing as t
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import typer
 
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, get_from_ctxmap, set_ctxmap
-from cstar.cli.run.shared import is_path_like, refuse_workplan_file
+from cstar.cli.common import (
+    cb_pipeline,
+    exit_on_failure,
+    get_from_ctxmap,
+    refuse_workplan_file,
+    set_ctxmap,
+    try_get_from_ctxmap,
+)
+from cstar.cli.run.shared import resolve_by_handle
 from cstar.cli.workplan.gather import collect_links, relink, report_conflicts
-from cstar.cli.workplan.shared import list_runs, preload_run_record
+from cstar.cli.workplan.shared import HELP_RUN_HANDLE, KEY_RUN, list_runs
 from cstar.entrypoint.utils import (
     ARG_ALL,
     ARG_ALL_HELP,
     ARG_NO_REFRESH,
     ARG_NO_REFRESH_HELP,
+    ARG_RECORD_DIGESTS,
+    ARG_RECORD_DIGESTS_HELP,
     ARG_REPAIR,
     ARG_REPAIR_HELP,
     ARG_VERIFY,
@@ -30,12 +40,15 @@ from cstar.orchestration.dag_runner import (
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     RunManifest,
+    compute_product_digests,
+    find_transformed_workplan,
     fold_step_records,
+    manifest_lock,
     read_run_manifest,
+    record_product_digests,
 )
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     FindingKind,
     RunCheckReport,
     check_run,
@@ -43,12 +56,12 @@ from cstar.orchestration.run_check import (
     repair_symlinks,
     steps_inside_run,
 )
-from cstar.orchestration.serialization import try_deserialize
-from cstar.orchestration.tracking import WorkplanRun
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.orchestration.tracking import WorkplanRun, require_writable
 
 if t.TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Collection, Iterator
+
+    from cstar.orchestration.run_check import DigestTally
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -63,49 +76,72 @@ HELP_SHORT = "Check that a run directory still works when it is moved."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-The target is a run-id, or the path of a run directory (one that contains
-`tasks/`, or `cstar-run.yaml` alone for a standalone blueprint run, whose
-symlinks and products are checked; the step-directory checks need `tasks/`).
+The target is a run-id, `run://<uuid>`, or the path of a run directory (one
+that contains `tasks/`, or `cstar-run.yaml` alone for a standalone blueprint
+run, whose symlinks and products are checked; the step-directory checks need
+`tasks/`). A run found only by its manifest in the data home or the project
+area is checked as its directory, and so is a run attached from elsewhere (not
+refreshed, as it has no sentinels here).
 The run's emitted files are searched for absolute paths under the run or the
 C-Star data home, its symlinks for absolute or missing targets, and its
 transformed workplan for steps without a directory. Files that launchers
 regenerate are skipped unless {ARG_ALL} is given. Steps that have not started
-have no directory yet.
+have no directory yet. An absolute path inside the run (or inside the directory
+the run was copied from, as its transformed workplan records it) names the run's
+own files and is listed for information: the transformed workplan and the
+blueprints that hold one are rebased when they are read. One elsewhere in the
+data home is a problem.
 
 When the run has a manifest, the products each step record lists are compared
 with the directory: missing, or a size that changed (a log is reported only when
 it shrank: the step's own log is still written after the record is taken).
 {ARG_VERIFY} also compares
-the content where a sha256 is recorded, and nothing records one yet. For a
-run-id the manifest is refreshed first, as `cstar run show` does;
-{ARG_NO_REFRESH} reads it as last recorded.
+the content where a digest is recorded: a bounded sample for netCDF files, the
+whole file otherwise; one line says how many products were compared, how many
+matched, and how many were skipped and why. {ARG_RECORD_DIGESTS} computes and records the digest of
+each product that has none, before the checks, which is how a run gets digests
+to verify (with {ARG_VERIFY}, in one pass). The
+files each attempt carried into `attempts/` (the workplan, its variables, the
+blueprints) are compared with the digests the manifest recorded, always. For a
+run tracked on this machine the manifest is refreshed first, as `cstar run show`
+does; {ARG_NO_REFRESH} reads it as last recorded.
 
-Step directories and sentinel files that no step accounts for, symlinks to a
-place outside the run, steps that are done without a record, and an attempt
-that has not finished are listed for information and do not fail the check.
-Nothing is deleted.
+Absolute paths inside the run, step directories and sentinel files that no
+step accounts for, symlinks to a place outside the run, dangling symlinks inside
+a step's cloned codebases (committed by the codebase's repository), steps that
+are done without a record, an attempt that has not finished, and carried inputs
+that are gone (older attempts may be deleted by hand) are listed for
+information and do not fail the check. Nothing is deleted.
 
 {ARG_REPAIR} rewrites each absolute symlink that points inside the run as a
 relative one and rebuilds `gathered_output` if the run has one. It changes
 nothing else: files that name absolute paths are regenerated by running the
-workplan again.
+workplan again. {ARG_RECORD_DIGESTS} writes into the run too (the
+step records and the manifest). As both write into the run, a run found only by
+its manifest is not repaired, nor given digests, by its run-id or `run://<uuid>`:
+pass its directory. A run attached read-only takes neither.
 
 To validate a workplan file, use `cstar workplan check <file>` instead.
 
-Exit code 0: nothing to fix. 1: findings remain. 2: bad arguments.
+Exit code 0: nothing to fix. 1: problems remain, or a repair or digest write
+failed. 2: bad arguments.
 """
 
 _HEADINGS: t.Final[dict[FindingKind, str]] = {
-    FindingKind.ABSOLUTE_PATH: "Absolute paths in run files",
+    FindingKind.ABSOLUTE_PATH: "Absolute paths outside the run in run files",
     FindingKind.ABSOLUTE_LINK: f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR})",
     FindingKind.DANGLING_LINK: "Symlinks whose target does not exist",
     FindingKind.MISSING_STEP_DIR: "Steps without a directory",
     FindingKind.PRODUCT_MISSING: "Products missing from the run",
     FindingKind.PRODUCT_SIZE: "Products whose size differs from the record",
-    FindingKind.HASH_MISMATCH: f"Products whose content differs from the record ({ARG_VERIFY})",
+    FindingKind.DIGEST_MISMATCH: f"Products whose content differs from the recorded digest ({ARG_VERIFY})",
+    FindingKind.INPUT_MISMATCH: "Carried inputs whose content differs from the manifest",
+    FindingKind.RUN_PATH: "Absolute paths inside the run in run files (informational)",
     FindingKind.EXTERNAL_LINK: "Symlinks with a target outside the run (informational)",
+    FindingKind.CODEBASE_LINK: "Symlinks in cloned codebases whose target does not exist (informational)",
     FindingKind.RECORD_MISSING: "Steps that are done without a step record (informational)",
     FindingKind.ATTEMPT_OPEN: "Latest attempt not finished (informational)",
+    FindingKind.INPUT_MISSING: "Carried inputs missing from the run (informational)",
 }
 """The heading of each kind of finding, in the order the kinds are listed."""
 
@@ -117,9 +153,12 @@ class CheckTarget:
     run_root: Path
     """The run directory to check."""
     run_id: str | None
-    """The run-id, when the target was found through tracking."""
+    """The run-id, when the run is tracked on this machine."""
     workplan_path: Path | None
     """The transformed workplan, when one is known."""
+    repairable: bool = True
+    """Whether `--repair` and `--record-digests` may write into the run: not when
+    it was found only by its manifest, which the user did not name by its directory."""
 
 
 def _directory_target(target: str) -> CheckTarget:
@@ -150,27 +189,21 @@ def _directory_target(target: str) -> CheckTarget:
         )
         raise typer.BadParameter(msg)
 
-    workplans = sorted(run_root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(workplans) > 1:
-        names = ", ".join(p.name for p in workplans)
-        msg = (
-            f"{str(run_root)!r} holds more than one transformed workplan ({names}); "
-            "remove the stale ones."
-        )
-        raise typer.BadParameter(msg)
+    try:
+        workplan = find_transformed_workplan(run_root)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
-    return CheckTarget(run_root, None, next(iter(workplans), None))
+    return CheckTarget(run_root, None, workplan)
 
 
-def _run_target(context: typer.Context, target: str) -> CheckTarget:
-    """Resolve a target spelled as a run-id through tracking.
+def _tracked_target(run: WorkplanRun) -> CheckTarget:
+    """Resolve a run tracked on this machine, which is refreshed before it is checked.
 
     Parameters
     ----------
-    context : typer.Context
-        The typer context; receives the run record from `preload_run_record`.
-    target : str
-        The user-supplied run-id.
+    run : WorkplanRun
+        The tracking record of the run.
 
     Returns
     -------
@@ -179,18 +212,8 @@ def _run_target(context: typer.Context, target: str) -> CheckTarget:
     Raises
     ------
     typer.BadParameter
-        - Raised when no run is tracked under the run-id.
-        - Raised when the run's recorded directory does not exist.
+        Raised when the run's recorded directory does not exist.
     """
-    try:
-        preload_run_record(context, target)
-    except typer.BadParameter as ex:
-        if Path(target).is_dir():
-            msg = f"{ex.message} To check the directory ./{target}, pass it as a path."
-            raise typer.BadParameter(msg) from ex
-        raise
-
-    run = get_from_ctxmap(context, "run", WorkplanRun)
     if not run.output_path.is_dir():
         msg = (
             f"The directory recorded for run {run.run_id!r} does not exist: "
@@ -198,7 +221,29 @@ def _run_target(context: typer.Context, target: str) -> CheckTarget:
         )
         raise typer.BadParameter(msg)
 
-    return CheckTarget(run.output_path, run.run_id, run.trx_workplan_path)
+    return CheckTarget(run.output_path, run.run_id, run.try_trx_workplan_path())
+
+
+def _indexed_target(run_root: str) -> CheckTarget:
+    """Resolve a run that is not tracked here and was found by its manifest.
+
+    It is checked as its directory is, and never repaired.
+
+    Parameters
+    ----------
+    run_root : str
+        The path of the run's directory.
+
+    Returns
+    -------
+    CheckTarget
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the directory cannot be checked, as `_directory_target` does.
+    """
+    return replace(_directory_target(run_root), repairable=False)
 
 
 def resolve_target(context: typer.Context, target: str) -> str:
@@ -207,9 +252,10 @@ def resolve_target(context: typer.Context, target: str) -> str:
     Parameters
     ----------
     context : typer.Context
-        The typer context.
+        The typer context; receives the run record when the run is tracked on
+        this machine.
     target : str
-        The user-supplied run-id or directory path.
+        The user-supplied run-id, `run://<uuid>`, or directory path.
 
     Returns
     -------
@@ -221,16 +267,19 @@ def resolve_target(context: typer.Context, target: str) -> str:
     typer.BadParameter
         Raised when the target does not identify a run directory.
     """
-    resolved = (
-        _directory_target(target)
-        if is_path_like(target)
-        else _run_target(context, target)
+    resolved = resolve_by_handle(
+        context,
+        target,
+        verb=COMMAND_CHECK,
+        directory=_directory_target,
+        tracked=_tracked_target,
+        indexed=_indexed_target,
     )
     set_ctxmap(context, KEY_TARGET, resolved)
     return target
 
 
-def _format_findings(report: RunCheckReport) -> "Iterator[str]":
+def format_findings(report: RunCheckReport) -> "Iterator[str]":
     """Format the report: a heading and one line per finding, kind by kind.
 
     Parameters
@@ -246,16 +295,21 @@ def _format_findings(report: RunCheckReport) -> "Iterator[str]":
         if found := [f for f in report.findings if f.kind is kind]:
             yield f"{heading} ({len(found)}):"
             for f in found:
-                if kind is FindingKind.ABSOLUTE_PATH:
+                if kind in {FindingKind.ABSOLUTE_PATH, FindingKind.RUN_PATH}:
                     yield f"  {f.file}:{f.line}: {f.path}"
                 elif kind in {
                     FindingKind.MISSING_STEP_DIR,
                     FindingKind.PRODUCT_MISSING,
                     FindingKind.RECORD_MISSING,
                     FindingKind.ATTEMPT_OPEN,
+                    FindingKind.INPUT_MISSING,
                 }:
                     yield f"  {f.file}"
-                elif kind in {FindingKind.PRODUCT_SIZE, FindingKind.HASH_MISMATCH}:
+                elif kind in {
+                    FindingKind.PRODUCT_SIZE,
+                    FindingKind.DIGEST_MISMATCH,
+                    FindingKind.INPUT_MISMATCH,
+                }:
                     yield f"  {f.file}: {f.path}"
                 else:
                     yield f"  {f.file} -> {f.path}"
@@ -267,32 +321,81 @@ def _format_findings(report: RunCheckReport) -> "Iterator[str]":
         yield f"Sentinel files no step accounts for (informational) ({len(report.orphans.sentinels)}):"
         yield from (f"  {p}" for p in report.orphans.sentinels)
 
+    if report.verification is not None:
+        yield format_verification(report.verification)
     yield from (f"Skipped {reason}" for reason in report.skipped)
 
 
-def _summary(report: RunCheckReport) -> str:
+def format_verification(tally: "DigestTally") -> str:
+    """Say in one line what comparing the products with their digests found.
+
+    Parameters
+    ----------
+    tally : DigestTally
+        What the comparison counted.
+
+    Returns
+    -------
+    str
+    """
+    if tally.compared:
+        line = f"Compared {tally.compared} product(s) with their recorded digest: {tally.matched} matched"
+        if tally.differed:
+            line += f", {tally.differed} differed"
+    else:
+        line = "Compared no product with a recorded digest"
+
+    reasons = []
+    if tally.no_digest:
+        reasons.append(f"{tally.no_digest} with no digest recorded")
+    if tally.foreign:
+        schemes = ", ".join(repr(scheme) for scheme in sorted(tally.foreign))
+        reasons.append(
+            f"{sum(tally.foreign.values())} recorded with a scheme this build "
+            f"does not compute ({schemes})"
+        )
+    if tally.not_compared:
+        reasons.append(f"{tally.not_compared} missing, resized or not a regular file")
+    if reasons:
+        line += f"; skipped {', '.join(reasons)}"
+    return f"{line}."
+
+
+def summarize(
+    report: RunCheckReport, *, inherited: "Collection[FindingKind]" = ()
+) -> str:
     """Summarize the report in one line.
 
     Parameters
     ----------
     report : RunCheckReport
         The report to summarize.
+    inherited : Collection[FindingKind]
+        The kinds of problem a copy inherits from its source: counted apart,
+        not as problems of the copy.
 
     Returns
     -------
     str
     """
+    problems = [p for p in report.problems if p.kind not in inherited]
+    from_source = len(report.problems) - len(problems)
     informational = len(report.findings) - len(report.problems)
     informational += len(report.orphans.step_dirs) + len(report.orphans.sentinels)
-    extra = f", {informational} informational" if informational else ""
+    extra = f", {from_source} inherited from the source" if from_source else ""
+    extra += f", {informational} informational" if informational else ""
 
-    if report.clean:
+    if not problems:
         return f"No problems found in {report.run_root}{extra}."
-    return f"{len(report.problems)} problem(s) found in {report.run_root}{extra}."
+    return f"{len(problems)} problem(s) found in {report.run_root}{extra}."
 
 
 def _load_manifest(
-    resolved: CheckTarget, workplan: LiveWorkplan | None, no_refresh: bool
+    resolved: CheckTarget,
+    workplan: LiveWorkplan | None,
+    no_refresh: bool,
+    *,
+    tolerant: bool,
 ) -> RunManifest | None:
     """Read the manifest of the run, refreshed first when the run is tracked.
 
@@ -310,6 +413,10 @@ def _load_manifest(
         The run's transformed workplan, when it could be loaded.
     no_refresh : bool
         Whether to read a tracked run's manifest without refreshing it.
+    tolerant : bool
+        Whether a manifest or record newer than this build, within its major,
+        loads with the keys this build does not know ignored: true unless the
+        check writes into the run.
 
     Returns
     -------
@@ -326,15 +433,91 @@ def _load_manifest(
             typer.echo(f"Warning: the manifest was not refreshed: {ex}", err=True)
 
     try:
-        manifest = read_run_manifest(run_root)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+        manifest = read_run_manifest(run_root, tolerant=tolerant)
+    except CstarError as ex:
         typer.echo(f"Warning: {ex}", err=True)
         return None
 
     if manifest is not None and resolved.run_id is None:
-        fold_step_records(manifest, run_root)
+        fold_step_records(manifest, run_root, tolerant=tolerant)
 
     return manifest
+
+
+def _require_may_write(
+    context: typer.Context, resolved: CheckTarget, option: str, verb: str
+) -> None:
+    """Refuse a write into a run that is attached read-only or was not named by its directory.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context, holding the tracked run when there is one.
+    resolved : CheckTarget
+        The run to write into.
+    option : str
+        The option that writes, named in the message.
+    verb : str
+        What the option does to the run, for the message ("repair", "record digests in").
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the run is attached read-only, or was found only by its manifest.
+    """
+    run_root = resolved.run_root
+    if run := try_get_from_ctxmap(context, KEY_RUN, WorkplanRun):
+        try:
+            require_writable(run, action=option)
+        except CstarError as ex:
+            raise typer.BadParameter(str(ex), param_hint=option) from ex
+    elif not resolved.repairable:
+        msg = (
+            f"The run at {run_root} was found by its manifest and is not tracked "
+            f"here, and {option} writes into the run. To {verb} it "
+            "deliberately, pass its directory: "
+            f"`cstar run {COMMAND_CHECK} {shlex.quote(str(run_root))} {option}`."
+        )
+        raise typer.BadParameter(msg, param_hint=option)
+
+
+def _record_digests(resolved: CheckTarget, manifest: RunManifest | None) -> None:
+    """Record the digest of each product that has none, and say how many.
+
+    Parameters
+    ----------
+    resolved : CheckTarget
+        The run; a tracked run's manifest is written under its lock.
+    manifest : RunManifest | None
+        The run's manifest, with the step records folded in.
+
+    Notes
+    -----
+    The digests are computed without the lock, which may take long; only the
+    write of the records, from a fresh read of the manifest, holds it.
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 when the run has no manifest.
+    OSError
+        If the lock cannot be taken, or a record cannot be written.
+    """
+    if manifest is None:
+        typer.echo(
+            f"No digest recorded: {resolved.run_root} has no readable run manifest.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    digests = compute_product_digests(resolved.run_root, manifest)
+    if resolved.run_id is None:
+        recorded = record_product_digests(resolved.run_root, digests)
+    else:
+        with manifest_lock(resolved.run_id):
+            recorded = record_product_digests(resolved.run_root, digests)
+
+    typer.echo(f"Recorded {recorded} digest(s).")
 
 
 def _regather(run_root: Path, workplan: LiveWorkplan | None) -> None:
@@ -388,7 +571,7 @@ def check(
     target: t.Annotated[
         str,
         typer.Argument(
-            help="A run-id, or the path of a run directory.",
+            help=HELP_RUN_HANDLE,
             autocompletion=list_runs,
             callback=cb_pipeline(refuse_workplan_file, resolve_target),
         ),
@@ -399,19 +582,35 @@ def check(
         bool, typer.Option(ARG_NO_REFRESH, help=ARG_NO_REFRESH_HELP)
     ] = False,
     verify: t.Annotated[bool, typer.Option(ARG_VERIFY, help=ARG_VERIFY_HELP)] = False,
+    record_digests: t.Annotated[
+        bool, typer.Option(ARG_RECORD_DIGESTS, help=ARG_RECORD_DIGESTS_HELP)
+    ] = False,
 ) -> None:
     """Check that a run directory still works when it is moved."""
     resolved = get_from_ctxmap(context, KEY_TARGET, CheckTarget)
     run_root = resolved.run_root
+    if repair:
+        _require_may_write(context, resolved, ARG_REPAIR, "repair")
+    if record_digests:
+        _require_may_write(context, resolved, ARG_RECORD_DIGESTS, "record digests in")
 
+    # a check that writes into the run reads what it writes strictly
+    tolerant = not (repair or record_digests)
     workplan = None
     if resolved.workplan_path is not None:
-        workplan = try_deserialize(resolved.workplan_path, LiveWorkplan)
+        workplan = LiveWorkplan.try_load(resolved.workplan_path, tolerant=tolerant)
         if workplan is None:
             msg = f"Warning: unable to load the transformed workplan {resolved.workplan_path}"
             typer.echo(msg, err=True)
 
-    manifest = _load_manifest(resolved, workplan, no_refresh)
+    manifest = _load_manifest(resolved, workplan, no_refresh, tolerant=tolerant)
+    if record_digests:
+        # before the checks, so one `--verify` pass sees the digests just recorded
+        with exit_on_failure("No digest recorded"):
+            _record_digests(resolved, manifest)
+        manifest = _load_manifest(
+            resolved, workplan, no_refresh=True, tolerant=tolerant
+        )
 
     def run_checks() -> RunCheckReport:
         return check_run(
@@ -425,7 +624,8 @@ def check(
 
     report = run_checks()
     if repair:
-        repaired = repair_symlinks(run_root)
+        with exit_on_failure("Symlink repair stopped"):
+            repaired = repair_symlinks(run_root)
         if repaired:
             typer.echo(f"Rewrote {len(repaired)} symlink(s) as relative:")
             for link in repaired:
@@ -434,12 +634,16 @@ def check(
         else:
             typer.echo("No symlink to rewrite.")
 
-    for line in _format_findings(report):
+    for line in format_findings(report):
         typer.echo(line)
-    typer.echo(_summary(report))
+    typer.echo(summarize(report))
 
     if repair:
-        _regather(run_root, workplan)
+        with exit_on_failure(
+            f"`gathered_output` was not rebuilt (once the cause is fixed, rerun "
+            f"`cstar run {COMMAND_CHECK} {shlex.quote(target)} {ARG_REPAIR}`)"
+        ):
+            _regather(run_root, workplan)
 
     if not report.clean:
         raise typer.Exit(1)

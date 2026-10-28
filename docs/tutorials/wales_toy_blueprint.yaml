@@ -6,25 +6,25 @@ valid_start_date: 2012-01-01 00:00:00
 valid_end_date: 2012-01-31 12:00:00
 code:
   pio:
-    location: https://github.com/NCAR/ParallelIO.git
-    branch: pio2_7_0
+    location: https://github.com/CWorthy-ocean/ParallelIO.git
+    commit: 2.7.1-fork
   roms:
     documentation: cworthy fork
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: a8032136b386b8336007aec50e454208f35ba5dc
+    commit: 0.13.0
   run_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
     branch: main
     filter:
-      directory: wales-toy-domain-namelist
+      directory: wales-toy-domain-namelist-ucla-roms-0.13
       files:
       - marbl_in
       - namelist.nml
   compile_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: pio
+    branch: main
     filter:
-      directory: wales-toy-domain-namelist
+      directory: wales-toy-domain-namelist-ucla-roms-0.13
       files:
       - cppdefs.opt
   marbl:
@@ -64,5 +64,5 @@ runtime_params:
 cdr_forcing:
   data:
   - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/my_cdr_forcing.nc
-application: roms_marbl
+application: ucla_roms
 schema_version: 3.0.0

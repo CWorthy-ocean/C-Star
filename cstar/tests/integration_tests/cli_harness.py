@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 import cstar
+from cstar.base.env import ENV_CSTAR_RUNID, REMOVED_SETTINGS
 from cstar.base.utils import slugify
 
 if t.TYPE_CHECKING:
@@ -28,7 +29,9 @@ DONE, CANCELLED, FAILED = 5, 6, 7
 TERMINAL = {DONE, CANCELLED, FAILED}
 
 
-def make_shim(directory: Path, startup_delay: float = 0.0) -> Path:
+def make_shim(
+    directory: Path, startup_delay: float = 0.0, *, gate: Path | None = None
+) -> Path:
     """Write a ``cstar`` executable that runs this checkout's CLI.
 
     Parameters
@@ -38,6 +41,10 @@ def make_shim(directory: Path, startup_delay: float = 0.0) -> Path:
     startup_delay : float
         Seconds every invocation sleeps before starting the CLI, for tests that need a
         step to outlast a short walltime regardless of how fast the CLI imports.
+    gate : Path | None
+        A file every invocation waits to see exist before it starts the CLI (before
+        any ``startup_delay``), for tests that need steps to stay running, or queued
+        behind them, until the test creates it.
 
     Returns
     -------
@@ -46,9 +53,11 @@ def make_shim(directory: Path, startup_delay: float = 0.0) -> Path:
     """
     directory.mkdir(parents=True, exist_ok=True)
     shim = directory / "cstar"
+    wait = f'while [ ! -e "{gate}" ]; do sleep 0.2; done\n' if gate else ""
     delay = f"sleep {startup_delay}\n" if startup_delay else ""
     shim.write_text(
         "#!/bin/sh\n"
+        f"{wait}"
         f"{delay}"
         f'export PYTHONPATH="{REPO_ROOT}"\n'
         f'exec "{sys.executable}" -m cstar.cli.cli "$@"\n'
@@ -75,11 +84,8 @@ def make_cli_env(root: Path, shim: Path) -> dict[str, str]:
         interpreter's ``bin`` first on ``PATH``, and ``CONDA_PREFIX`` defaulted to
         ``sys.prefix`` (the system env files expand ``${CONDA_PREFIX}``).
     """
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in {"CSTAR_RUNID", "CSTAR_CLOBBER_WORKING_DIR"}
-    }
+    ignored = {ENV_CSTAR_RUNID, *REMOVED_SETTINGS}
+    env = {k: v for k, v in os.environ.items() if k not in ignored}
     env_bin = str(Path(sys.prefix) / "bin")
     env.setdefault("CONDA_PREFIX", sys.prefix)
     env.update(
@@ -87,7 +93,6 @@ def make_cli_env(root: Path, shim: Path) -> dict[str, str]:
         CSTAR_STATE_HOME=str(root / "state"),
         CSTAR_CACHE_HOME=str(root / "cache"),
         CSTAR_CONFIG_HOME=str(root / "config"),
-        CSTAR_ORCH_LOCAL_DELAY="1",
         PATH=os.pathsep.join([str(shim.parent), env_bin, os.environ["PATH"]]),
         PYTHONPATH=str(REPO_ROOT),
     )
@@ -95,17 +100,33 @@ def make_cli_env(root: Path, shim: Path) -> dict[str, str]:
 
 
 def run_cstar(
-    env: dict[str, str], *args: str, timeout: float = 900
+    env: dict[str, str],
+    *args: str,
+    timeout: float = 900,
+    shim: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run ``cstar`` through the shim and capture its output."""
+    """Run ``cstar`` and capture its output.
+
+    ``cstar`` is the one found on ``env``'s ``PATH``, or ``shim`` when given: a test
+    whose steps must run a different shim than the CLI submitting them (a gated one
+    that holds them back) names the submitting CLI's shim here.
+    """
     return subprocess.run(
-        ["cstar", *args],
+        [str(shim) if shim else "cstar", *args],
         env=env,
         capture_output=True,
         text=True,
         timeout=timeout,
         check=False,
     )
+
+
+def flat_output(text: str) -> str:
+    """The text on one line, without the borders of rich's panels or the colour
+    codes rich adds where colour is forced (CI), which can split a wrapped phrase.
+    """
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", " ", plain))
 
 
 def sentinel_path(state_home: Path, run_id: str, step: str) -> Path:

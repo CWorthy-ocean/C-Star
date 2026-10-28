@@ -26,7 +26,7 @@ from cstar.catalog.outputs import (
     find_blueprint_outputs,
 )
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
-from cstar.orchestration.models import BlueprintIdentity
+from cstar.orchestration.models import CONTENT_HASH_SCHEME, BlueprintIdentity
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -110,15 +110,11 @@ def _run(
     plan = LiveWorkplan(
         name=f"{run_id}-plan", description="A fabricated run.", steps=[step]
     )
-    trx_path = tmp_path / "trx" / f"{run_id}.yaml"
+    run_dir = tmp_path / "trx" / run_id
+    trx_path = run_dir / f"{run_id}_transformed.yaml"
     assert serialize(trx_path, plan)
     TrackingRepository().put_workplan_run_sync(
-        WorkplanRun(
-            workplan_path=tmp_path / f"{run_id}.yaml",
-            trx_workplan_path=trx_path,
-            output_path=tmp_path,
-            run_id=run_id,
-        )
+        WorkplanRun(output_path=run_dir, run_id=run_id)
     )
     if purged:
         trx_path.unlink()
@@ -147,7 +143,7 @@ async def test_current_standalone_output(tmp_path: Path) -> None:
     assert outputs == [
         BlueprintOutput(
             path=emitted,
-            application="roms_marbl",
+            application="ucla_roms",
             producer=producer,
             status=OutputStatus.CURRENT,
             generated_at=_NEWER,
@@ -173,6 +169,33 @@ async def test_output_of_an_edited_entry_is_changed(tmp_path: Path) -> None:
     assert output.producer == recorded
 
 
+@pytest.mark.parametrize("same_digest", [True, False], ids=["same-digest", "other"])
+async def test_output_hashed_under_an_earlier_scheme_is_unverified(
+    tmp_path: Path, same_digest: bool
+) -> None:
+    """A producer hash with another scheme than the entry's was computed by an
+    earlier recipe: it is neither current nor changed, even when its digest is
+    the entry's own.
+    """
+    root, work = tmp_path / "catalog", tmp_path / "work"
+    _, current = _entry(root, "wio", work)
+    digest = current.content_hash.removeprefix(f"{CONTENT_HASH_SCHEME}:")
+    recorded = current.model_copy(
+        update={"content_hash": digest if same_digest else "ab" * 32}
+    )
+    assert recorded.content_hash != current.content_hash
+    _emit(
+        work / "output" / "B_wio.yaml",
+        name="wio",
+        derived_from=[recorded.model_dump()],
+    )
+
+    [output] = await _catalog(root).blueprint_outputs(FORGE)
+
+    assert output.status is OutputStatus.UNVERIFIED
+    assert output.producer == recorded
+
+
 async def test_standalone_output_without_provenance_is_unverified(
     tmp_path: Path,
 ) -> None:
@@ -184,7 +207,7 @@ async def test_standalone_output_without_provenance_is_unverified(
 
     assert output == BlueprintOutput(
         path=emitted,
-        application="roms_marbl",
+        application="ucla_roms",
         producer=BlueprintIdentity(kind="Blueprint", application=FORGE, name="wio"),
         status=OutputStatus.UNVERIFIED,
     )
@@ -206,7 +229,7 @@ async def test_workplan_output_carries_its_run_and_step(tmp_path: Path) -> None:
     assert outputs == [
         BlueprintOutput(
             path=emitted,
-            application="roms_marbl",
+            application="ucla_roms",
             producer=producer,
             status=OutputStatus.CURRENT,
             generated_at=_NEWER,
@@ -377,7 +400,7 @@ async def test_purged_run_is_skipped(
     _run(tmp_path, "run-a", entry, purged=True)
     kept = _run(tmp_path, "run-b", entry)
     _emit(kept.fsm.output_dir / "B_wio.yaml", derived_from=[producer.model_dump()])
-    assert not (tmp_path / "trx" / "run-a.yaml").exists()
+    assert not (tmp_path / "trx" / "run-a" / "run-a_transformed.yaml").exists()
 
     with caplog.at_level(logging.DEBUG, logger=_LOGGER):
         outputs = await _catalog(root).blueprint_outputs(FORGE)
@@ -394,6 +417,23 @@ async def test_steps_of_other_applications_are_ignored(tmp_path: Path) -> None:
     _emit(other.fsm.output_dir / "B_wio.yaml", derived_from=[producer.model_dump()])
 
     assert await _catalog(root).blueprint_outputs(FORGE) == []
+
+
+async def test_an_earlier_application_name_finds_what_the_current_one_does(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "catalog"
+    root.mkdir()
+    step = _run(tmp_path, "run-a", tmp_path / "entry.yaml", application="ucla_roms")
+    emitted = _emit(step.fsm.output_dir / "B_wio.yaml", name="wio")
+    catalog = _catalog(root)
+
+    [output] = await catalog.blueprint_outputs("ucla_roms")
+
+    assert output.path == emitted
+    assert output.run_id == "run-a"
+    assert await catalog.blueprint_outputs("roms_marbl") == [output]
+    assert await find_blueprint_outputs(catalog, "roms_marbl") == [output]
 
 
 async def test_unloadable_entries_are_skipped_and_named_in_one_message(
@@ -657,7 +697,7 @@ async def test_application_that_emits_no_blueprint_finds_nothing(
     stack = LayeredCatalog(
         [DomainCatalog(root, suppress_validation=True), DomainCatalog(read_only=True)]
     )
-    assert "wales-toy" in stack.blueprint_names("roms_marbl")
+    assert "wales-toy" in stack.blueprint_names("ucla_roms")
 
     assert await stack.blueprint_outputs("roms_marbl") == []
 

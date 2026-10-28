@@ -26,6 +26,7 @@ from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Step, StepRef, Workplan
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import WorkplanRun
+from cstar.system.migration import TOLERATE_UNKNOWN
 
 SHARED_LOGGER = "cstar.cli.workplan.shared"
 
@@ -359,7 +360,7 @@ def make_plan(steps: Mapping[str, Path]) -> SimpleNamespace:
 
 
 def make_workplan_run(run_id: str, tmp_path: Path) -> WorkplanRun:
-    """Build a bare `WorkplanRun` with dummy paths under `tmp_path`.
+    """Build a bare `WorkplanRun` whose run directory is under `tmp_path`.
 
     Parameters
     ----------
@@ -373,8 +374,6 @@ def make_workplan_run(run_id: str, tmp_path: Path) -> WorkplanRun:
     WorkplanRun
     """
     return WorkplanRun(
-        workplan_path=tmp_path / run_id / "workplan.yaml",
-        trx_workplan_path=tmp_path / run_id / "trx.yaml",
         output_path=tmp_path / run_id / "out",
         run_id=run_id,
     )
@@ -405,6 +404,8 @@ async def test_refresh_disk_usage_measures_and_persists(
         "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run", put_mock
     )
 
+    run.output_path.mkdir(parents=True)
+    (run.output_path / "plan_transformed.yaml").touch()
     plans = t.cast("dict[Path, t.Any]", {run.trx_workplan_path: plan})
     await refresh_disk_usage([run], plans)
 
@@ -414,6 +415,52 @@ async def test_refresh_disk_usage_measures_and_persists(
     assert awaited_run is run
     assert awaited_step_dirs == step_dirs
     put_mock.assert_awaited_once_with(run.run_id, mock.ANY)
+
+
+@pytest.mark.asyncio
+async def test_refresh_disk_usage_skips_a_record_a_newer_release_wrote(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a run whose record was read with keys a newer release wrote ignored
+    is neither measured nor persisted, with a warning naming it, so one such
+    record does not stop the others.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy step paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    caplog : pytest.LogCaptureFixture
+        Captures the warning.
+    """
+    data = make_workplan_run("run-1", tmp_path).model_dump(mode="json")
+    major, minor, _ = data["schema_version"].split(".")
+    newer = WorkplanRun.model_validate(
+        {**data, "schema_version": f"{major}.{int(minor) + 1}.0", "future": 1},
+        context={TOLERATE_UNKNOWN: True},
+    )
+    newer.output_path.mkdir(parents=True)
+    (newer.output_path / "plan_transformed.yaml").touch()
+    plan = make_plan({"step-a": tmp_path / "step-a"})
+
+    measure_mock = mock.AsyncMock()
+    put_mock = mock.AsyncMock()
+    monkeypatch.setattr("cstar.cli.workplan.shared.measure_step_sizes", measure_mock)
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run", put_mock
+    )
+
+    plans = t.cast("dict[Path, t.Any]", {newer.trx_workplan_path: plan})
+    with caplog.at_level(logging.WARNING):
+        await refresh_disk_usage([newer], plans)
+
+    measure_mock.assert_not_awaited()
+    put_mock.assert_not_awaited()
+    assert "run-1" in caplog.text
+    assert "newer cstar-ocean" in caplog.text
 
 
 @pytest.mark.asyncio

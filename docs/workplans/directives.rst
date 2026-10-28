@@ -6,16 +6,11 @@ mapping, that runs on the compute node just before the application starts and
 modifies the blueprint using information that only exists at run time -- for
 example, a restart file written by an earlier step.
 
-apply-overrides
-----------------
-
-C-Star packages every step's ``blueprint_overrides``, together with the
-system-level overrides it adds (such as the step's working directory), into an
-``apply-overrides`` directive when the workplan is scheduled, and applies them
-on the compute node. You do not write this directive yourself.
+Existing directives
+-------------------
 
 continue-from
---------------
+`````````````
 
 Sets a step's initial conditions from a restart file of an earlier run.
 Configure exactly one restart source:
@@ -38,12 +33,7 @@ different one, add:
 
 Only the restart whose file name carries exactly that timestamp is used. The
 timestamp is matched against the file name -- the date C-Star uses as the
-step's start date -- not against the time records inside the file. If the
-source has restart files but none with that timestamp, the step fails with an
-error that lists the timestamps it does have. A ``path`` that names a single
-file must carry the same timestamp. A malformed ``timestamp`` (one with a
-timezone or fractional seconds, or a partial date such as ``2012-02``) is
-reported when the workplan is checked or submitted, before any step runs.
+step's start date -- not against the time records inside the file.
 
 .. code-block:: yaml
 
@@ -54,11 +44,12 @@ reported when the workplan is checked or submitted, before any step runs.
 
 If the step also carries an explicit ``runtime_params.start_date`` override
 (via ``blueprint_overrides``) that disagrees with the restart file this
-directive locates, a warning is logged. A step that leaves ``start_date`` to
-the directive is not warned.
+directive locates, a warning is logged. It's recommended not to override
+the start date directly when using ``continue-from`` -- let the directive
+set the correct date for you.
 
 nest-from
-----------
+`````````
 
 Supplies boundary forcing for a nested child run from a parent (or sibling)
 simulation. Configure exactly one of:
@@ -71,22 +62,19 @@ simulation. Configure exactly one of:
 
 Several sources can be joined by separating them with ``;`` in a single
 ``step`` or ``path`` value; boundary files from every listed source are
-combined, in the order given.
+combined, in the order given. If your parent and child are split into matching
+time segments, you may need to specify the directly corresponding parent segment
+as well as the one right after it, so that ROMS has enough forcing data to finish
+the last time step.
 
-Two keys are deprecated:
 
-- ``bry_path`` was an alias for ``path``; use ``path`` instead.
-- ``rst_path`` additionally set the step's initial conditions from a restart
-  file found at the given path; use a ``continue-from`` directive instead.
-  ``rst_path`` cannot be combined with a ``continue-from`` directive on the
-  same step, since both would set ``initial_conditions``.
 
 carbonate-sensitivity-from
---------------------------
+``````````````````````````
 
 Supplies the carbonate sensitivities that a CDR-LiTE run reads as surface
 forcing -- the variables ``ddic_dco2`` and ``ddic_dalk`` -- from an earlier
-ROMS-MARBL run, by setting the blueprint's ``forcing.carbonate_sensitivity``
+UCLA-ROMS run, by setting the blueprint's ``forcing.carbonate_sensitivity``
 dataset. Configure exactly one of:
 
 - ``step`` -- the name of the step whose output holds the carbonate
@@ -104,8 +92,8 @@ ROMS writes the sensitivities to ``<output_root_name>_cdrgas.<timestamp>.nc``
 files only when the producing run has MARBL enabled and its namelist sets
 ``do_cdr_gas_exch_output`` to true (``cdr_gas_exch_output_settings`` in the
 blueprint's ``namelist_overrides``; ``cdr_gas_exch_output`` in a forge output
-spec), so the step the directive reads from must be a ROMS-MARBL run with that
-option on. The files found there replace any ``forcing.carbonate_sensitivity``
+spec), so the step the directive reads from must be a UCLA-ROMS run with MARBL and
+that option on. The files found there replace any ``forcing.carbonate_sensitivity``
 entries already in the blueprint.
 
 .. code-block:: yaml
@@ -124,9 +112,8 @@ entries already in the blueprint.
 Ordering
 --------
 
-``apply-overrides`` always runs first, so a deferred blueprint's overrides
-are applied before any other directive inspects or modifies it. Other
-directives on a step run in the order they are listed under ``directives:``.
+A step's ``blueprint_overrides`` are applied first, then its directives, in
+the order they are listed under ``directives:``.
 
 Example
 -------
@@ -143,11 +130,11 @@ its boundary forcing from the parent's output.
 
     steps:
       - name: parent_run
-        application: roms_marbl
+        application: ucla_roms
         blueprint: ./blueprints/parent_blueprint.yaml
 
       - name: child_run
-        application: roms_marbl
+        application: ucla_roms
         blueprint: ./blueprints/child_blueprint.yaml
         depends_on:
           - parent_run

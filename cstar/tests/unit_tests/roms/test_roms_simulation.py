@@ -3,6 +3,7 @@ import pickle
 import re
 import tempfile
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -14,8 +15,16 @@ import xarray as xr
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
+    ENV_CSTAR_SYSTEM,
+    FLAG_OFF,
+    FLAG_ON,
+)
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -44,12 +53,20 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_9_0,
-    RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
     namelist_schema_for_ref,
 )
-from cstar.roms.simulation import ROMSSimulation
-from cstar.system.environment import CStarEnvironment
-from cstar.system.manager import get_sysmgr
+from cstar.roms.simulation import ROMSSimulation, _join_workers
+from cstar.system.manager import (
+    DOCS_MACHINES_URL,
+    AnvilSystemContext,
+    LinuxSystemContext,
+    SystemContext,
+    SystemSelection,
+    SystemSource,
+    get_sysmgr,
+)
 
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
@@ -65,6 +82,12 @@ EXAMPLE_NAMELIST_V0_6_0 = (
 )
 EXAMPLE_NAMELIST_V0_9_0 = (
     Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
+)
+EXAMPLE_NAMELIST_V0_12_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
+)
+EXAMPLE_NAMELIST_V0_13_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 )
 _REAL_NAMELIST_READ = RomsNamelist.read
 _REAL_NAMELIST_READ_V0_5_0 = RomsNamelistV0_5_0.read
@@ -628,7 +651,7 @@ class TestROMSSimulationInitialization:
         ``checkout_target`` to select a namelist schema, and that a non-release
         ``checkout_target`` (as set up by the ``stub_romssimulation`` fixture)
         surfaces the ``namelist_schema_for_ref`` fallback warning through the
-        property, actually selects the latest schema (``RomsNamelistV0_11_0``),
+        property, actually selects the latest schema (``RomsNamelistV0_13_0``),
         while still returning a valid namelist.
 
         The read is stubbed (the stub's working copy has no real files on
@@ -636,7 +659,7 @@ class TestROMSSimulationInitialization:
         the 0.5.0-style fixture — so the property's overrides are exercised
         against a real versioned schema, not the legacy one — but which class
         was actually *selected* is captured separately via the
-        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_11_0``
+        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_13_0``
         is a subclass of ``RomsNamelistV0_5_0`` and the stubbed read makes
         ``isinstance(result, RomsNamelistV0_5_0)`` true regardless of which
         class was selected.
@@ -672,7 +695,7 @@ class TestROMSSimulationInitialization:
         # the stub's codebase has no working copy, so no repo path is available
         # for commit-hash-to-release-tag resolution
         mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
-        assert selected_schemas == [RomsNamelistV0_11_0]
+        assert selected_schemas == [RomsNamelistV0_13_0]
         assert isinstance(result, RomsNamelistV0_5_0)
         run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
         assert result.time_stepping.ntimes == run_length_seconds // 2160.0
@@ -723,6 +746,31 @@ class TestROMSSimulationInitialization:
         mock_schema_for_ref.return_value.__name__ = "RomsNamelistV0_5_0"
         mock_schema_for_ref.return_value.read.side_effect = lambda _: (
             _REAL_NAMELIST_READ_V0_5_0(EXAMPLE_NAMELIST_V0_5_0)
+        )
+        return sim
+
+    def _prepare_sim_for_runtime_settings_with_schema(
+        self,
+        sim,
+        stageddatacollection_remote_files,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        schema,
+        fixture,
+    ):
+        """Same as `_prepare_sim_for_runtime_settings_v0_5_0`, but reads a genuine
+        `schema` namelist from `fixture` -- for the 0.13.0 startup checks, whose
+        gate is the schema class itself.
+        """
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        mock_grid_path.return_value = [Path("grid.nc")]
+        mock_ini_path.return_value = [Path("fake_ini.nc")]
+        mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
+        mock_schema_for_ref.return_value.__name__ = schema.__name__
+        mock_schema_for_ref.return_value.read.side_effect = lambda _: schema.read(
+            fixture
         )
         return sim
 
@@ -1039,6 +1087,136 @@ class TestROMSSimulationInitialization:
         result = sim.roms_runtime_settings
 
         assert result.frc_output_settings.wrt_frc is True
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_off_marbl_step_cdr_average_raises(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An override that turns the `_cdr` average on with a period that is not
+        a whole multiple of the MARBL step is rejected -- ucla-roms >= 0.13.0's
+        `check_avg_ends_on_marbl_step` (`precheck.F90`) would abort the run at
+        startup otherwise. The fixture's `dt` is 2160 s and its `marbl_timestep`
+        3600 s, which ROMS rounds down to one `dt`: a 2160 s MARBL step.
+        """
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_13_0,
+            EXAMPLE_NAMELIST_V0_13_0,
+        )
+        # the fixture's 3600 s `_cdr` period (nrpf_cdr 24) divides the restart
+        # period, so only the MARBL-step rule fires
+        sim.namelist_overrides = {"cdr_output_settings": {"do_cdr_output": True}}
+
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_active_cppdefs_for_precheck",
+                return_value={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
+            ),
+            pytest.raises(ValueError, match="output_period_cdr.*3600.0 s"),
+        ):
+            _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_on_marbl_step_cdr_average_passes(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Companion to the off-step case: a `_cdr` period of two MARBL steps
+        (4320 s; `nrpf_cdr` 20 keeps the file rollover dividing the restart
+        period) does not raise.
+        """
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_13_0,
+            EXAMPLE_NAMELIST_V0_13_0,
+        )
+        sim.namelist_overrides = {
+            "cdr_output_settings": {
+                "do_cdr_output": True,
+                "output_period_cdr": 4320.0,
+                "nrpf_cdr": 20,
+            }
+        }
+
+        with mock.patch.object(
+            ROMSSimulation,
+            "_active_cppdefs_for_precheck",
+            return_value={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
+        ):
+            result = sim.roms_runtime_settings
+
+        assert result.cdr_output_settings.output_period_cdr == 4320.0
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_off_marbl_step_cdr_average_not_checked_before_0_13_0(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """The same off-step override on a 0.12.0 schema is not checked: those
+        releases do not abort on it.
+        """
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_12_0,
+            EXAMPLE_NAMELIST_V0_12_0,
+        )
+        sim.namelist_overrides = {"cdr_output_settings": {"do_cdr_output": True}}
+
+        with mock.patch.object(
+            ROMSSimulation,
+            "_active_cppdefs_for_precheck",
+            return_value={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
+        ):
+            result = sim.roms_runtime_settings
+
+        assert result.cdr_output_settings.do_cdr_output is True
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
@@ -1670,6 +1848,53 @@ class TestProcessingAndExecution:
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 10
 
+    @pytest.mark.parametrize("clobber", [False, True])
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_clears_working_directory_only_when_clobbering(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        clobber: bool,
+    ) -> None:
+        """Tests that `setup` empties the working directory only when asked to.
+
+        Parameters
+        ----------
+        clobber : bool
+            The value passed to `setup`.
+        """
+        sim = stub_romssimulation
+
+        with mock.patch.object(sim.fs_manager, "clear") as mock_clear:
+            sim.setup(clobber=clobber)
+
+        assert mock_clear.call_count == int(clobber)
+
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_into_populated_directory_requires_clobber(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+    ) -> None:
+        """Tests that `setup` refuses an already-staged directory and names
+        `--clobber` as the way to continue, and that clobbering then succeeds.
+        """
+        sim = stub_romssimulation
+        sim.setup()
+
+        with pytest.raises(CstarExpectationFailed, match="Re-run with --clobber"):
+            sim.setup()
+
+        sim.setup(clobber=True)
+
     @mock.patch.object(ROMSSimulation, "build")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(AdditionalCode, "get")
@@ -1952,6 +2177,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -1978,6 +2205,68 @@ class TestProcessingAndExecution:
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
 
+    @pytest.mark.parametrize(
+        ("value", "expected_clause"),
+        [(FLAG_ON, "BUILD_MODE=debug "), (FLAG_OFF, ""), (None, "")],
+    )
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
+    def test_build_debug_mode_setting(
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_verify_linkage,
+        mock_rpath_flags,
+        value: str | None,
+        expected_clause: str,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Tests that `CSTAR_DEBUG_BUILD_MODE=1` adds `BUILD_MODE=debug` to the
+        `make` command, and that it is the only thing that does: developer mode,
+        exported throughout, no longer enables it.
+        """
+        monkeypatch.setenv(ENV_FF_DEVELOPER_MODE, FLAG_ON)
+        if value is None:
+            monkeypatch.delenv(ENV_CSTAR_DEBUG_BUILD_MODE, raising=False)
+        else:
+            monkeypatch.setenv(ENV_CSTAR_DEBUG_BUILD_MODE, value)
+        sim = stub_romssimulation
+        build_dir = sim.fs_manager.compile_time_code_dir
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
+        sim.compile_time_code._working_copy = stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
+        compiler = get_sysmgr().environment.compiler
+        mock_subprocess.assert_any_call(
+            f"make {expected_clause}COMPILER={compiler}",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+
     @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
@@ -1985,7 +2274,7 @@ class TestProcessingAndExecution:
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
     @mock.patch.object(ROMSSimulation, "_validate_cppdef_flag")
-    def test_build_validates_parallel_io_and_mpi_masking_cppdefs(
+    def test_build_validates_parallel_io_mpi_masking_and_cdr_forcing_cppdefs(
         self,
         mock_validate_cppdef_flag,
         mock_subprocess,
@@ -1997,8 +2286,9 @@ class TestProcessingAndExecution:
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
-        """Test that `build` checks both the `PARALLEL_IO` cppdef against
-        `use_pio` and the `MPI_MASKING` cppdef against `auto_tiling`.
+        """Test that `build` checks the `PARALLEL_IO` cppdef against `use_pio`,
+        the `MPI_MASKING` cppdef against `auto_tiling`, and the `CDR_FORCING`
+        cppdef against the presence of CDR forcing.
         """
         sim = stub_romssimulation
         build_dir = sim.fs_manager.compile_time_code_dir
@@ -2015,19 +2305,25 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
 
-        assert mock_validate_cppdef_flag.call_count == 2
+        assert mock_validate_cppdef_flag.call_count == 3
         defines = [
             call.kwargs["define"] for call in mock_validate_cppdef_flag.call_args_list
         ]
         enabled = [
             call.kwargs["enabled"] for call in mock_validate_cppdef_flag.call_args_list
         ]
-        assert defines == ["PARALLEL_IO", "MPI_MASKING"]
-        assert enabled == [sim.use_pio, sim.auto_tiling]
+        assert defines == ["PARALLEL_IO", "MPI_MASKING", "CDR_FORCING"]
+        assert enabled == [
+            sim.use_pio,
+            sim.auto_tiling,
+            sim.cdr_forcing is not None,
+        ]
 
     @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
@@ -2071,6 +2367,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2123,6 +2421,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2222,6 +2522,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             with pytest.raises(
@@ -2272,6 +2574,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             with pytest.raises(RuntimeError, match="Error when compiling ROMS"):
@@ -2465,10 +2769,7 @@ class TestProcessingAndExecution:
             sources=sim.runtime_code.source,
         )
 
-        with (
-            mock.patch("cstar.roms.simulation.LocalProcess"),
-            mock.patch("cstar.roms.simulation.create_scheduler_job"),
-        ):
+        with mock.patch("cstar.roms.simulation.LocalProcess"):
             sim.prepare_launch()
 
         symlink_path = sim.fs_manager.run_dir / "roms"
@@ -2489,15 +2790,11 @@ class TestProcessingAndExecution:
         stageddatacollection_remote_files,
     ):
         """`prepare_launch` writes the namelist, links the executable and
-        returns the launch command, but neither starts a local process nor
-        creates a scheduler job.
+        returns the launch command, but does not start a local process.
         """
         sim = stub_romssimulation
 
-        with (
-            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-        ):
+        with mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process:
             sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
             sim.exe_path.parent.mkdir(parents=True, exist_ok=True)
             sim.exe_path.write_text("binary")
@@ -2525,11 +2822,9 @@ class TestProcessingAndExecution:
         )
         assert plan.run_path == run_dir
         assert plan.runtime_settings_file == namelist_path
-        assert plan.script_path == run_dir / "romstest.sh"
         assert plan.output_file == sim.fs_manager.logs_dir / "romstest.out"
 
         mock_local_process.assert_not_called()
-        mock_create_job.assert_not_called()
 
     @pytest.mark.parametrize(
         ("use_pio", "expect_temp_output"),
@@ -2587,10 +2882,10 @@ class TestProcessingAndExecution:
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
-        """`run` rotates a previous attempt's namelist, job script, and ROMS
-        stdout out of the way (`.1`, `.2`, ...) instead of silently
-        overwriting them, and re-creates the exe symlink instead of raising
-        `FileExistsError` when one is already there from a previous attempt.
+        """`run` rotates a previous attempt's namelist and ROMS stdout out of
+        the way (`.1`, `.2`, ...) instead of silently overwriting them, and
+        re-creates the exe symlink instead of raising `FileExistsError` when
+        one is already there from a previous attempt.
         """
         sim = stub_romssimulation
 
@@ -2619,9 +2914,6 @@ class TestProcessingAndExecution:
             namelist_path = run_dir / "cstar_generated_roms.nml"
             namelist_path.write_text("old namelist")
 
-            script_path = run_dir / "romstest.sh"
-            script_path.write_text("old script")
-
             output_file = sim.fs_manager.logs_dir / "romstest.out"
             output_file.write_text("old output")
 
@@ -2631,145 +2923,251 @@ class TestProcessingAndExecution:
             sim.run()
 
         assert (run_dir / "cstar_generated_roms.nml.1").read_text() == "old namelist"
-        assert (run_dir / "romstest.sh.1").read_text() == "old script"
         assert (sim.fs_manager.logs_dir / "romstest.out.1").read_text() == "old output"
         assert symlink_path.is_symlink()
         assert symlink_path.resolve() == sim.exe_path.resolve()
 
-    @pytest.mark.parametrize(
-        "mock_system_name,exp_mpi_prefix",
-        [
-            ["darwin_arm64", "mpirun"],
-            ["derecho", "mpirun"],
-            ["expanse", "srun --mpi=pmi2 --kill-on-bad-exit=1"],
-            ["perlmutter", "srun --kill-on-bad-exit=1"],
-        ],
-    )
-    @mock.patch.object(
-        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
-    )
-    def test_run_with_scheduler(
+    def test_run_refuses_outside_scheduler_job(
         self,
-        mock_runtime_settings,
+        login_node: None,
         stub_romssimulation: ROMSSimulation,
-        stageddatacollection_remote_files,
-        mock_system_name: str,
-        exp_mpi_prefix: str,
     ):
-        """Tests that `run` correctly submits a job to a scheduler when available.
-
-        This test verifies that if a scheduler is present, `run` creates a scheduler job
-        with the appropriate parameters and submits it.
+        """`run` refuses, before it prepares anything, to launch ROMS outside a
+        scheduler job on a system that has a scheduler.
         """
-        sim = stub_romssimulation
-        build_dir = sim.fs_manager.compile_time_code_dir
-        runtime_code_dir = sim.fs_manager.runtime_code_dir
-        script_dir = sim.fs_manager.run_dir
-        sim.runtime_code._working_copy = stageddatacollection_remote_files(
-            paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
-            sources=sim.runtime_code.source,
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch") as mock_prepare,
+            pytest.raises(CstarError) as excinfo,
+        ):
+            stub_romssimulation.run()
+
+        message = str(excinfo.value)
+        assert "Refusing to launch ROMS outside a scheduler job on fake_hpc" in message
+        assert "cstar blueprint submit" in message
+        assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
+        mock_prepare.assert_not_called()
+        mock_local_process.assert_not_called()
+
+    @pytest.mark.parametrize("job_id_var", ["SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"])
+    def test_run_inside_scheduler_job_runs_locally(
+        self,
+        login_node: None,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+        job_id_var: str,
+    ):
+        """Inside a scheduler job, `run` starts ROMS as a local process of the job."""
+        monkeypatch.setenv(job_id_var, "12345")
+
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch") as mock_prepare,
+        ):
+            execution_handler = stub_romssimulation.run(job_name="a_job")
+
+        mock_prepare.assert_called_once_with("a_job")
+        mock_local_process.assert_called_once()
+        mock_local_process.return_value.start.assert_called_once()
+        assert execution_handler is mock_local_process.return_value
+
+    def test_run_with_login_node_flag_runs_locally(
+        self,
+        login_node: None,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """`CSTAR_ALLOW_LOGIN_NODE_RUN=1` lets `run` start ROMS outside a scheduler job."""
+        monkeypatch.setenv(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, FLAG_ON)
+
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch"),
+        ):
+            execution_handler = stub_romssimulation.run()
+
+        mock_local_process.return_value.start.assert_called_once()
+        assert execution_handler is mock_local_process.return_value
+
+    def test_run_with_empty_job_id_still_refuses(
+        self,
+        login_node: None,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """An empty job-id variable does not count as being inside a job."""
+        monkeypatch.setenv("SLURM_JOB_ID", "")
+
+        with pytest.raises(CstarError, match="Refusing to launch ROMS"):
+            stub_romssimulation.run()
+
+    @pytest.fixture
+    def unrecognised_cluster(self, monkeypatch: pytest.MonkeyPatch) -> mock.Mock:
+        """Put the process outside any job on a cluster C-Star does not recognise:
+        the generic context in use, no scheduler of its own, and SLURM visible.
+        """
+        for name in (
+            "SLURM_JOB_ID",
+            "SLURM_JOBID",
+            "PBS_JOBID",
+            ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+        sysmgr = mock.Mock()
+        sysmgr.name = LinuxSystemContext.name
+        sysmgr.scheduler = None
+        sysmgr.selection = SystemSelection(
+            LinuxSystemContext, SystemSource.FALLBACK, "frontera"
+        )
+        monkeypatch.setattr("cstar.roms.simulation.get_sysmgr", lambda: sysmgr)
+        monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda _: "SLURM")
+        return sysmgr
+
+    @staticmethod
+    def launch_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+        """Return the logged warnings that ROMS will run outside a scheduler job."""
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+            and record.getMessage().startswith("ROMS will run outside a scheduler job")
+        ]
+
+    def test_check_launch_location_warns_once_on_an_unrecognised_cluster(
+        self, unrecognised_cluster: mock.Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Outside a job on a cluster that fell back to the generic context but shows
+        a scheduler, C-Star warns, once per process, naming the scheduler, the
+        system, `CSTAR_SYSTEM`, the login-node flag and the docs, and does not refuse.
+        """
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+            ROMSSimulation.check_launch_location()
+
+        (message,) = self.launch_warnings(caplog)
+        assert message.startswith(
+            "ROMS will run outside a scheduler job on a machine with a SLURM scheduler, "
+            f"which the system {unrecognised_cluster.selection.describe()} cannot "
+            "submit to."
+        )
+        assert "'frontera'" in message
+        assert LinuxSystemContext.name in message
+        assert ENV_CSTAR_SYSTEM in message
+        assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
+        assert DOCS_MACHINES_URL in message
+
+    def test_run_warns_then_launches_on_an_unrecognised_cluster(
+        self,
+        unrecognised_cluster: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """`run` on an unrecognised cluster's login node warns and then goes on to
+        prepare and start the local process, as it does anywhere else.
+        """
+        with (
+            caplog.at_level(logging.WARNING),
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch") as mock_prepare,
+        ):
+            execution_handler = stub_romssimulation.run()
+
+        assert len(self.launch_warnings(caplog)) == 1
+        mock_prepare.assert_called_once()
+        mock_local_process.return_value.start.assert_called_once()
+        assert execution_handler is mock_local_process.return_value
+
+    @pytest.mark.parametrize("job_id_var", ["SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"])
+    def test_check_launch_location_allows_a_job_on_an_unrecognised_cluster(
+        self,
+        unrecognised_cluster: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        job_id_var: str,
+    ) -> None:
+        """Inside a scheduler job, an unrecognised cluster is allowed without a warning."""
+        monkeypatch.setenv(job_id_var, "12345")
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
+
+    def test_check_launch_location_allows_the_login_node_flag_on_an_unrecognised_cluster(
+        self,
+        unrecognised_cluster: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """`CSTAR_ALLOW_LOGIN_NODE_RUN=1` lets ROMS launch on an unrecognised cluster
+        without the warning.
+        """
+        monkeypatch.setenv(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, FLAG_ON)
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
+
+    def test_check_launch_location_allows_an_unrecognised_machine_without_a_scheduler(
+        self,
+        unrecognised_cluster: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A fallback to the generic context on a machine that shows no scheduler, a
+        laptop or a workstation, launches without a warning.
+        """
+        monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda _: "")
+
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
+
+        assert self.launch_warnings(caplog) == []
+
+    def test_check_launch_location_warns_for_a_generic_context_pinned_by_the_setting(
+        self, unrecognised_cluster: mock.Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Pinning the generic context with `CSTAR_SYSTEM`, to silence the fallback
+        warning, does not silence the login-node warning: it says the context was set.
+        """
+        unrecognised_cluster.selection = SystemSelection(
+            LinuxSystemContext, SystemSource.SETTING
         )
 
-        # Mock scheduler object
-        mock_scheduler = mock.MagicMock()
-        mock_scheduler.primary_queue_name = "default_queue"
-        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
-        mock_scheduler.in_active_allocation = False
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
 
-        with (
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-            mock.patch(
-                "cstar.system.environment.CStarEnvironment.uses_lmod",
-                new_callable=mock.PropertyMock,
-                return_value=False,
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.name",
-                new_callable=mock.PropertyMock,
-                return_value=mock_system_name,
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.environment",
-                CStarEnvironment(
-                    system_name=mock_system_name,
-                    mpi_exec_prefix=exp_mpi_prefix,
-                    compiler="mock-compiler",
-                ),
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=mock.PropertyMock,
-                return_value=mock_scheduler,
-            ),
-            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
-        ):
-            sim.exe_path = build_dir / "roms"
-            mock_job_instance = mock.MagicMock()
-            mock_create_job.return_value = mock_job_instance
+        (message,) = self.launch_warnings(caplog)
+        assert "SLURM scheduler" in message
+        assert f"set by {ENV_CSTAR_SYSTEM}" in message
+        assert LinuxSystemContext.name in message
 
-            # Call `run()` without explicitly passing `queue_name` and `walltime`
-            execution_handler = sim.run(account_key="some_key")
-            mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.nml",
-                job_name=None,
-                cpus=6,
-                account_key="some_key",
-                run_path=sim.fs_manager.run_dir,
-                script_path=script_dir / "romstest.sh",
-                queue_name="default_queue",
-                walltime="12:00:00",
-                output_file=sim.fs_manager.logs_dir / "romstest.out",
-            )
-
-            mock_job_instance.submit.assert_called_once()
-
-            assert execution_handler == mock_job_instance
-
-    @mock.patch.object(
-        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    @pytest.mark.parametrize(
+        ("context", "source"),
+        [
+            pytest.param(LinuxSystemContext, SystemSource.DETECTED, id="generic"),
+            pytest.param(AnvilSystemContext, SystemSource.DETECTED, id="slurm"),
+            pytest.param(AnvilSystemContext, SystemSource.SETTING, id="set-slurm"),
+        ],
     )
-    def test_run_with_scheduler_raises_if_no_account_key(
+    def test_check_launch_location_trusts_a_detected_system_or_one_that_submits(
         self,
-        mock_runtime_settings,
-        stub_romssimulation,
-        stageddatacollection_remote_files,
-    ):
-        """Tests that `run` raises a `ValueError` if no account key is provided when
-        using a scheduler.
-
-        This test ensures that if a scheduler is available but `account_key` is not provided,
-        the method raises an appropriate error instead of submitting a job.
+        unrecognised_cluster: mock.Mock,
+        caplog: pytest.LogCaptureFixture,
+        context: type[SystemContext],
+        source: SystemSource,
+    ) -> None:
+        """A system C-Star detected, or one `CSTAR_SYSTEM` names that has a scheduler
+        of its own, launches without a warning even where a scheduler is visible.
         """
-        sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        unrecognised_cluster.selection = SystemSelection(context, source)
 
-        # Mock scheduler object
-        mock_scheduler = mock.MagicMock()
-        mock_scheduler.primary_queue_name = "default_queue"
-        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
-        mock_scheduler.in_active_allocation = False
+        with caplog.at_level(logging.WARNING):
+            ROMSSimulation.check_launch_location()
 
-        with (
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=mock.PropertyMock,
-                return_value=mock_scheduler,
-            ),
-            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
-        ):
-            sim.exe_path = build_dir / "roms"
-
-            # Call `run()` without explicitly passing `queue_name` and `walltime`
-            with pytest.raises(
-                ValueError,
-                match=re.escape(
-                    "please call Simulation.run() with a value for account_key"
-                ),
-            ):
-                sim.run()
-            mock_create_job.assert_not_called()
+        assert self.launch_warnings(caplog) == []
 
     def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.
@@ -2894,6 +3292,65 @@ class TestProcessingAndExecution:
         assert not (temp_output_dir / "ocean_his.20240101000000.002.nc").exists()
         assert not (temp_output_dir / "ocean_ext.20240101000000.001.nc").exists()
         assert not (temp_output_dir / "ocean_rst.20240101000000.001.nc").exists()
+
+    @pytest.mark.parametrize(
+        ("available", "n_procs", "expected"),
+        [
+            pytest.param(128, 4, 4, id="capped-by-the-ranks"),
+            pytest.param(12, 64, 3, id="a-quarter-of-the-cpus"),
+            pytest.param(3, 64, 1, id="at-least-one"),
+        ],
+    )
+    def test_join_workers_is_a_quarter_of_the_cpus_up_to_the_rank_count(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        available: int,
+        n_procs: int,
+        expected: int,
+    ) -> None:
+        """The join pool takes a quarter of the CPUs the process may use, but no more
+        threads than the model had ranks, and never fewer than one.
+        """
+        monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: available)
+
+        assert _join_workers(n_procs) == expected
+
+    @pytest.mark.parametrize(
+        ("cores", "expected_workers"),
+        [
+            pytest.param(128, 6, id="capped-by-the-ranks"),
+            pytest.param(12, 3, id="twelve-cores"),
+            pytest.param(2, 1, id="two-cores"),
+        ],
+    )
+    def test_post_run_sizes_the_join_pool_from_the_cpus_and_ranks(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+        cores: int,
+        expected_workers: int,
+    ) -> None:
+        """`post_run` joins with as many threads as `_join_workers` allows for the
+        simulation's ranks, so a process with two cores joins with one thread
+        rather than none.
+        """
+        monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: cores)
+        sim = stub_romssimulation
+        sim.fs_manager.prepare()
+        (sim.fs_manager.temp_output_dir / "ocean_his.20240101000000.001.nc").touch()
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+
+        with (
+            mock.patch(
+                "cstar.roms.simulation.ThreadPoolExecutor", wraps=ThreadPoolExecutor
+            ) as mock_pool,
+            mock.patch("cstar.roms.simulation._ncjoin_wildcard") as mock_ncjoin,
+        ):
+            sim.post_run()
+
+        mock_pool.assert_called_once_with(max_workers=expected_workers)
+        mock_ncjoin.assert_called_once()
 
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
@@ -3786,6 +4243,10 @@ class TestAttach:
         msg = str(exc_info.value)
         assert str(exe_path) in msg
         assert sim.tidal_forcing.source.location in msg
+        # the advice to clobber warns what it deletes for a non-ParallelIO step
+        assert not sim.use_pio
+        assert f"--clobber deletes {sim.fs_manager.temp_output_dir}" in msg
+        assert "restart pieces; move it aside first" in msg
         mock_partition.assert_not_called()
 
     @mock.patch.object(ROMSExternalCodeBase, "attach")
@@ -4390,6 +4851,54 @@ class TestROMSSimulationUsePIO:
                 sim._validate_cppdef_flag(build_dir, **kwargs)
         else:
             sim._validate_cppdef_flag(build_dir, **kwargs)
+
+    @pytest.mark.parametrize(
+        "has_cdr_forcing, cppdefs_content, should_raise",
+        [
+            # CDR forcing and the define agree
+            (True, "#define CDR_FORCING\n#define MARBL\n", False),
+            # CDR forcing without the define: ROMS would never read it
+            (True, "#define MARBL\n", True),
+            # a commented-out define does not count
+            (True, "! #define CDR_FORCING\n", True),
+            # define present without CDR forcing: one-directional, no error
+            (False, "#define CDR_FORCING\n", False),
+            (False, "#define MARBL\n", False),
+        ],
+    )
+    def test_validate_build_flags_cdr_forcing(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        has_cdr_forcing: bool,
+        cppdefs_content: str,
+        should_raise: bool,
+    ):
+        """Test that `_validate_build_flags` refuses CDR forcing when
+        `CDR_FORCING` is not defined in cppdefs.opt, and checks nothing the
+        other way round.
+        """
+        sim = stub_romssimulation
+        if has_cdr_forcing:
+            assert sim.cdr_forcing is not None
+        else:
+            sim.cdr_forcing = None
+        # keep the other two checks satisfied so only CDR_FORCING can fail
+        sim.use_pio = False
+        sim.auto_tiling = False
+        build_dir = tmp_path / "cppdefs_test"
+        build_dir.mkdir()
+        (build_dir / "cppdefs.opt").write_text(cppdefs_content)
+
+        if should_raise:
+            with pytest.raises(
+                ValueError, match="CDR forcing is given but 'CDR_FORCING'"
+            ) as exc:
+                sim._validate_build_flags(build_dir)
+            assert str(build_dir / "cppdefs.opt") in str(exc.value)
+            assert "cdr.mode" in str(exc.value)
+        else:
+            sim._validate_build_flags(build_dir)
 
     def test_validate_cppdef_flag_skips_if_no_cppdefs(
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path

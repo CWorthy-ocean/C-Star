@@ -7,7 +7,7 @@ not resolution** — the app never detects the machine itself; a provider builds
 ``HostPaths`` and injects it at the entry point (``process_forge_blueprint(..., host=...)``).
 
 - Everything the executor PRODUCES (input netCDFs, namelist, cppdefs, the emitted
-  roms_marbl blueprint, build dirs) lands under ``working_dir``.
+  ucla_roms blueprint, build dirs) lands under ``working_dir``.
 - Everything it READS that isn't in the ForgeBlueprint is a *cache* location:
   ``source_data_cache`` (big reference downloads, shared across runs).
 

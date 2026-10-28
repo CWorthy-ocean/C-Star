@@ -1,0 +1,598 @@
+import warnings
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+import pytest
+import yaml
+from pydantic import ValidationError
+
+import cstar
+from cstar.applications.ucla_roms.adapter import (
+    CarbonateSensitivityAdapter,
+    PIOAdapter,
+)
+from cstar.applications.ucla_roms.models import (
+    PartitioningParameterSet,
+    RuntimeParameterSet,
+    UclaRomsBlueprint,
+)
+from cstar.orchestration.models import BlueprintIdentity, CatalogSpecRef, Provenance
+from cstar.orchestration.serialization import model_to_yaml
+from cstar.pio.external_codebase import PIOExternalCodeBase
+
+
+@pytest.fixture
+def complete_blueprint_dict(complete_blueprint_path: Path) -> dict[str, Any]:
+    """A dictionary representation of the complete example blueprint."""
+    with complete_blueprint_path.open() as fp:
+        return yaml.safe_load(fp)
+
+
+class TestUsePIOSchema:
+    """Tests for the `use_pio` model parameter and `code.pio` blueprint section."""
+
+    def test_use_pio_defaults_false(self, complete_blueprint_dict):
+        """Test that `partitioning.use_pio` defaults to False when absent."""
+        complete_blueprint_dict["partitioning"].pop("use_pio", None)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.partitioning.use_pio is False
+        assert bp.code.pio is None
+
+    def test_code_pio_requires_use_pio(self, complete_blueprint_dict):
+        """Test that supplying `code.pio` without `use_pio: true` raises."""
+        complete_blueprint_dict["code"]["pio"] = {
+            "location": "https://github.com/NCAR/ParallelIO.git",
+            "branch": "pio2_7_0",
+        }
+        complete_blueprint_dict["partitioning"]["use_pio"] = False
+        with pytest.raises(
+            ValidationError,
+            match="PIO is not enabled in the partitioning configuration",
+        ):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_code_pio_with_use_pio_validates(self, complete_blueprint_dict):
+        """Test that `code.pio` together with `use_pio: true` validates."""
+        complete_blueprint_dict["code"]["pio"] = {
+            "location": "https://github.com/NCAR/ParallelIO.git",
+            "branch": "pio2_7_0",
+        }
+        complete_blueprint_dict["partitioning"]["use_pio"] = True
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.partitioning.use_pio is True
+        assert bp.code.pio is not None
+        assert bp.code.pio.checkout_target == "pio2_7_0"
+
+    def test_use_pio_without_code_pio_validates(self, complete_blueprint_dict):
+        """Test that `use_pio: true` is valid without a `code.pio` section (the
+        default ParallelIO source is used).
+        """
+        complete_blueprint_dict["partitioning"]["use_pio"] = True
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.partitioning.use_pio is True
+        assert bp.code.pio is None
+
+
+class TestPIOAdapter:
+    """Tests for the `PIOAdapter` converting blueprint models to
+    `PIOExternalCodeBase` instances.
+    """
+
+    def test_adapt_defaults_when_code_pio_absent(
+        self, complete_blueprint_dict, mocksourcedata_remote_repo
+    ):
+        """Test that `adapt` returns a default `PIOExternalCodeBase` when the
+        blueprint has no `code.pio` section.
+        """
+        complete_blueprint_dict["partitioning"]["use_pio"] = True
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        source_data = mocksourcedata_remote_repo(
+            location="https://github.com/NCAR/ParallelIO.git", identifier="pio2_7_0"
+        )
+        with mock.patch(
+            "cstar.base.external_codebase.SourceData", return_value=source_data
+        ) as mock_source:
+            pio_codebase = PIOAdapter(bp).adapt()
+
+        assert isinstance(pio_codebase, PIOExternalCodeBase)
+        mock_source.assert_called_once_with(
+            location="https://github.com/NCAR/ParallelIO.git",
+            identifier="pio2_7_0",
+        )
+
+    def test_adapt_honors_code_pio(
+        self, complete_blueprint_dict, mocksourcedata_remote_repo
+    ):
+        """Test that `adapt` uses the location and checkout target from `code.pio`
+        when supplied.
+        """
+        complete_blueprint_dict["code"]["pio"] = {
+            "location": "https://github.com/my-fork/ParallelIO.git",
+            "commit": "abc1234",
+        }
+        complete_blueprint_dict["partitioning"]["use_pio"] = True
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        source_data = mocksourcedata_remote_repo(
+            location="https://github.com/my-fork/ParallelIO.git",
+            identifier="abc1234",
+        )
+        with mock.patch(
+            "cstar.base.external_codebase.SourceData", return_value=source_data
+        ) as mock_source:
+            pio_codebase = PIOAdapter(bp).adapt()
+
+        assert isinstance(pio_codebase, PIOExternalCodeBase)
+        mock_source.assert_called_once_with(
+            location="https://github.com/my-fork/ParallelIO.git",
+            identifier="abc1234",
+        )
+
+
+class TestNamelistOverrides:
+    """Tests for the `namelist_overrides` field on `UclaRomsBlueprint`."""
+
+    def test_defaults_to_empty_dict(self, complete_blueprint_dict):
+        """Test that `namelist_overrides` defaults to `{}` when absent."""
+        complete_blueprint_dict.pop("namelist_overrides", None)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {}
+
+    def test_accepts_nested_partial_mapping(self, complete_blueprint_dict):
+        """Test that a nested, partial mapping of namelist groups validates."""
+        complete_blueprint_dict["namelist_overrides"] = {
+            "time_stepping": {"dt": 30},
+            "param_settings": {"np_xi": 3},
+        }
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {
+            "time_stepping": {"dt": 30},
+            "param_settings": {"np_xi": 3},
+        }
+
+    def test_model_params_raises(self, complete_blueprint_dict):
+        """Test that the removed `model_params` field is rejected as extra."""
+        complete_blueprint_dict["model_params"] = {"time_step": 60}
+        with pytest.raises(ValidationError, match="model_params"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_unknown_names_rejected_for_pinned_release(self, complete_blueprint_dict):
+        """Test that unknown groups/keys are an error when `code.roms` pins a
+        release version, with all violations in one message.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.5.0"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "not_a_group": {"dt": 1},
+            "time_stepping": {"not_a_key": 1},
+        }
+        with pytest.raises(ValidationError, match="not_a_group.*not_a_key"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_version_specific_key_checked_against_pinned_schema(
+        self, complete_blueprint_dict
+    ):
+        """Test that `nrpf_rst` (removed in ucla-roms 0.5.0) is rejected for a
+        0.5.0 pin but accepted for an older pin.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {
+            "basic_output_settings": {"nrpf_rst": 1}
+        }
+
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.5.0"
+        with pytest.raises(ValidationError, match="nrpf_rst"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.4.9"
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides["basic_output_settings"]["nrpf_rst"] == 1
+
+    def test_unknown_names_warn_for_unpinned_ref(self, complete_blueprint_dict):
+        """Test that unknown names only warn when `code.roms` is an unpinned
+        ref (branch name), since the schema is a best guess.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {"not_a_group": {"dt": 1}}
+        with pytest.warns(UserWarning, match="not_a_group"):
+            bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {"not_a_group": {"dt": 1}}
+
+    def test_valid_names_no_warning_for_unpinned_ref(self, complete_blueprint_dict):
+        """Test that valid overrides on an unpinned ref validate silently."""
+        complete_blueprint_dict["namelist_overrides"] = {"time_stepping": {"dt": 30.0}}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_np_xi_conflict_rejected_even_unpinned(self, complete_blueprint_dict):
+        """Test that a `param_settings.np_xi`/`np_eta` conflict with
+        `partitioning` is an error regardless of schema certainty.
+        """
+        n_procs_x = complete_blueprint_dict["partitioning"]["n_procs_x"]
+        complete_blueprint_dict["namelist_overrides"] = {
+            "param_settings": {"np_xi": n_procs_x + 1}
+        }
+        with pytest.raises(
+            ValidationError, match="conflicts with the blueprint partitioning"
+        ):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_np_xi_matching_value_accepted(self, complete_blueprint_dict):
+        """Test that `np_xi`/`np_eta` overrides matching `partitioning` pass."""
+        complete_blueprint_dict["namelist_overrides"] = {
+            "param_settings": {
+                "np_xi": complete_blueprint_dict["partitioning"]["n_procs_x"]
+            }
+        }
+        UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_pio_settings_override_valid_for_unpinned_ref(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `pio_settings` override validates silently for an
+        unpinned `code.roms` ref: the fallback schema for an unpinned ref is
+        the latest (`RomsNamelistV0_13_0`), which inherits `&pio_settings`
+        from `RomsNamelistV0_6_0`.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {
+            "pio_settings": {"pio_stride": 4}
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {"pio_settings": {"pio_stride": 4}}
+
+    def test_pio_settings_override_rejected_for_0_5_0_pin(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `pio_settings` override is rejected for a `code.roms`
+        pin at 0.5.0, since `&pio_settings` was added in ucla-roms 0.6.0.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.5.0"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "pio_settings": {"pio_stride": 4}
+        }
+        with pytest.raises(ValidationError, match="pio_settings"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_cdr_lite_output_settings_override_valid_for_unpinned_ref(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_lite_output_settings` override validates silently
+        for an unpinned `code.roms` ref: the fallback schema for an unpinned
+        ref is the latest (`RomsNamelistV0_13_0`), which has
+        `&cdr_lite_output_settings`.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_lite_output_settings": {"wrt_alk": False}
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {"cdr_lite_output_settings": {"wrt_alk": False}}
+
+    def test_cdr_tracer_output_settings_override_warns_for_unpinned_ref(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_tracer_output_settings` override only warns for an
+        unpinned `code.roms` ref: the latest schema (`RomsNamelistV0_13_0`)
+        renamed it to `&cdr_lite_output_settings`.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+        with pytest.warns(UserWarning, match="cdr_tracer_output_settings"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_cdr_tracer_output_settings_override_valid_for_0_8_0_pin(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_tracer_output_settings` override validates for a
+        `code.roms` pin at 0.8.0 (`RomsNamelistV0_7_0`, which still has
+        `&cdr_tracer_output_settings`), while `cdr_lite_output_settings` is
+        rejected as not yet existing.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.8.0"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_lite_output_settings": {"wrt_alk": False}
+        }
+        with pytest.raises(ValidationError, match="cdr_lite_output_settings"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_cdr_tracer_output_settings_override_rejected_for_0_9_0_pin(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_tracer_output_settings` override is rejected for a
+        `code.roms` pin at 0.9.0, where it was renamed to
+        `&cdr_lite_output_settings`.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.9.0"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+        with pytest.raises(ValidationError, match="cdr_tracer_output_settings"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_cdr_tracer_output_settings_override_rejected_for_0_6_1_pin(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_tracer_output_settings` override is rejected for a
+        `code.roms` pin at 0.6.1, since `&cdr_tracer_output_settings` was
+        added in ucla-roms 0.7.0.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.6.1"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+        with pytest.raises(ValidationError, match="cdr_tracer_output_settings"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+
+class TestPartitioningParameterSet:
+    """Tests for the `PartitioningParameterSet` validation rules."""
+
+    def test_locked_without_hash_rejected(self):
+        """Test that the inherited `ParameterSet` locked/hash rule still applies."""
+        with pytest.raises(
+            ValidationError, match="A locked parameter set must include a hash"
+        ):
+            PartitioningParameterSet(locked=True, n_procs_x=2, n_procs_y=2)
+
+    def test_runtime_parameter_set_locked_without_hash_rejected(self):
+        """Test that `RuntimeParameterSet` no longer shadows the inherited
+        `ParameterSet` locked/hash rule with its own same-named validator.
+        """
+        with pytest.raises(
+            ValidationError, match="A locked parameter set must include a hash"
+        ):
+            RuntimeParameterSet(
+                locked=True,
+                start_date="2020-01-01",
+                end_date="2020-01-02",
+            )
+
+    def test_auto_tiling_with_use_pio_and_n_cores_valid(self):
+        """Test that `auto_tiling` with `use_pio` and `n_cores` validates."""
+        pps = PartitioningParameterSet(use_pio=True, auto_tiling=True, n_cores=16)
+        assert pps.n_cores == 16
+
+    def test_auto_tiling_without_use_pio_rejected(self):
+        """Test that `auto_tiling` without `use_pio` is rejected."""
+        with pytest.raises(ValidationError, match="auto_tiling requires use_pio"):
+            PartitioningParameterSet(auto_tiling=True, n_cores=16)
+
+    def test_missing_procs_without_auto_tiling_rejected(self):
+        """Test that omitting `n_procs_x`/`n_procs_y` without `auto_tiling`
+        is rejected.
+        """
+        with pytest.raises(
+            ValidationError, match="n_procs_x and n_procs_y are required"
+        ):
+            PartitioningParameterSet()
+
+    def test_n_cores_without_auto_tiling_rejected(self):
+        """Test that supplying `n_cores` without `auto_tiling` is rejected."""
+        with pytest.raises(
+            ValidationError, match="n_cores is only accepted with auto_tiling"
+        ):
+            PartitioningParameterSet(n_procs_x=2, n_procs_y=2, n_cores=4)
+
+    def test_all_three_consistent_accepted(self):
+        """Test that `n_cores` consistent with `n_procs_x * n_procs_y` validates."""
+        pps = PartitioningParameterSet(
+            use_pio=True,
+            auto_tiling=True,
+            n_procs_x=4,
+            n_procs_y=4,
+            n_cores=16,
+        )
+        assert pps.n_cores == 16
+
+    def test_all_three_inconsistent_rejected(self):
+        """Test that `n_cores` inconsistent with `n_procs_x * n_procs_y` is rejected."""
+        with pytest.raises(ValidationError, match="n_cores must equal"):
+            PartitioningParameterSet(
+                use_pio=True,
+                auto_tiling=True,
+                n_procs_x=4,
+                n_procs_y=4,
+                n_cores=99,
+            )
+
+    def test_multiple_violations_all_reported(self):
+        """Test that simultaneous violations are all included in a single error."""
+        with pytest.raises(ValidationError) as exc_info:
+            PartitioningParameterSet(
+                auto_tiling=True,
+                n_procs_x=4,
+                n_procs_y=4,
+                n_cores=99,
+            )
+        msg = str(exc_info.value)
+        assert "auto_tiling requires use_pio" in msg
+        assert "n_cores must equal" in msg
+
+
+class TestCpusNeeded:
+    """Tests for the `cpus_needed` property on `UclaRomsBlueprint`."""
+
+    def test_returns_product_of_procs_by_default(self, complete_blueprint_dict):
+        """Test that `cpus_needed` returns `n_procs_x * n_procs_y` by default."""
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.cpus_needed == (bp.partitioning.n_procs_x * bp.partitioning.n_procs_y)
+
+    def test_returns_n_cores_when_set(self, complete_blueprint_dict):
+        """Test that `cpus_needed` returns `n_cores` when it is set."""
+        complete_blueprint_dict["partitioning"] = {
+            "use_pio": True,
+            "auto_tiling": True,
+            "n_cores": 16,
+        }
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.cpus_needed == 16
+
+
+class TestProvenance:
+    """Tests for the `provenance` block `UclaRomsBlueprint` inherits."""
+
+    def test_defaults_to_empty(self, complete_blueprint_dict):
+        """Test that a blueprint without a `provenance` block validates."""
+        assert "provenance" not in complete_blueprint_dict
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.provenance == Provenance()
+
+    def test_validates_with_a_provenance_block(self, complete_blueprint_dict):
+        """Test that a blueprint carrying `provenance` validates and keeps it."""
+        complete_blueprint_dict["provenance"] = {
+            "generated_at": "2026-10-06T17:40:12Z",
+            "generated_by": {
+                "tool": "forge",
+                "id": "3f9c2a7e-5b1d-4c8e-9a0f-1d2e3f4a5b6c",
+                "system": "perlmutter",
+                "versions": {"cstar-ocean": "0.16.0", "roms-tools": "3.2.1"},
+                "run_id": "chunked-iceland",
+            },
+            "derived_from": [
+                {"kind": "Blueprint", "application": "forge", "name": "wio-toy"},
+                {"kind": "DomainSpec", "name": "wio-toy", "origin": "catalog"},
+            ],
+        }
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        assert bp.provenance.generated_by.tool == "forge"
+        assert bp.provenance.generated_by.id == "3f9c2a7e-5b1d-4c8e-9a0f-1d2e3f4a5b6c"
+        assert bp.provenance.derived_from == [
+            BlueprintIdentity(kind="Blueprint", application="forge", name="wio-toy"),
+            CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="catalog"),
+        ]
+
+    def test_unknown_provenance_field_is_rejected(self, complete_blueprint_dict):
+        """Test that `provenance` accepts only the fields it declares."""
+        complete_blueprint_dict["provenance"] = {"notes": "anything"}
+        with pytest.raises(ValidationError, match="notes"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+
+@pytest.mark.parametrize(
+    ("application", "schema_version", "published"),
+    [
+        ("roms_marbl", "3.0.0", "roms_marbl/roms_marbl_schema.3.0.0.json"),
+        ("roms_marbl", "3.2.0", "roms_marbl/roms_marbl_schema.3.2.0.json"),
+        ("ucla_roms", "3.2.0", "roms_marbl/roms_marbl_schema.3.2.0.json"),
+        ("roms_marbl", "3.3.0", "ucla_roms/ucla_roms_schema.3.3.0.json"),
+        ("ucla_roms", "3.3.0", "ucla_roms/ucla_roms_schema.3.3.0.json"),
+    ],
+)
+def test_schema_header_names_a_published_schema(
+    complete_blueprint_dict: dict[str, Any],
+    application: str,
+    schema_version: str,
+    published: str,
+) -> None:
+    """A blueprint of a version published under the earlier name keeps naming
+    that schema when it is written back; a current one names the new schema.
+    """
+    complete_blueprint_dict |= {
+        "application": application,
+        "schema_version": schema_version,
+    }
+    bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    header = bp.model_dump(mode="json")["$schema"]
+
+    assert header.endswith(f"/docs/schemas/bp/{published}")
+    repo_root = Path(cstar.__file__).resolve().parents[1]
+    assert (repo_root / "docs" / "schemas" / "bp" / published).is_file()
+
+
+class TestCarbonateSensitivity:
+    """Tests for the `forcing.carbonate_sensitivity` field and its adapter."""
+
+    @pytest.fixture
+    def with_sensitivity(self, complete_blueprint_dict) -> dict[str, Any]:
+        """The complete blueprint with a two-file carbonate sensitivity forcing."""
+        complete_blueprint_dict["forcing"]["carbonate_sensitivity"] = {
+            "documentation": "cdrgas output of the control run",
+            "data": [
+                {"location": "https://example.com/ctl_cdrgas.1.nc", "hash": "abc"},
+                {
+                    "location": "https://example.com/ctl_cdrgas.2.000.nc",
+                    "partitioned": True,
+                },
+            ],
+        }
+        return complete_blueprint_dict
+
+    def test_schema_version(self):
+        """Adding the optional field was a minor bump of the schema, now at 3.3.0."""
+        assert UclaRomsBlueprint.model_fields["schema_version"].default == "3.3.0"
+
+    def test_defaults_to_none(self, complete_blueprint_dict):
+        """A blueprint without the field validates, with no sensitivity forcing."""
+        assert "carbonate_sensitivity" not in complete_blueprint_dict["forcing"]
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.forcing.carbonate_sensitivity is None
+
+    def test_round_trips(self, with_sensitivity):
+        """The field survives serialization to YAML and validation back."""
+        bp = UclaRomsBlueprint.model_validate(with_sensitivity)
+        assert bp.forcing.carbonate_sensitivity is not None
+        assert len(bp.forcing.carbonate_sensitivity) == 2
+
+        reloaded = UclaRomsBlueprint.model_validate(yaml.safe_load(model_to_yaml(bp)))
+
+        assert (
+            reloaded.forcing.carbonate_sensitivity == bp.forcing.carbonate_sensitivity
+        )
+
+    def test_unknown_forcing_key_is_still_rejected(self, complete_blueprint_dict):
+        """The forcing block stays strict: only declared keys are accepted."""
+        complete_blueprint_dict["forcing"]["carbonate_sensitivities"] = {"data": []}
+        with pytest.raises(ValidationError, match="carbonate_sensitivities"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_adapter_returns_none_when_absent(self, complete_blueprint_dict):
+        """No `forcing.carbonate_sensitivity`, no datasets (not an empty list)."""
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert CarbonateSensitivityAdapter(bp).adapt() is None
+
+    def test_adapter_builds_one_dataset_per_entry(self, with_sensitivity):
+        """Each `data` entry becomes a `ROMSCarbonateSensitivity`; a partitioned
+        entry takes the blueprint's processor grid as its source partitioning,
+        and a hash is passed through only when the entry has one.
+        """
+        bp = UclaRomsBlueprint.model_validate(with_sensitivity)
+        n_x, n_y = bp.partitioning.n_procs_x, bp.partitioning.n_procs_y
+
+        with mock.patch(
+            "cstar.applications.ucla_roms.adapter.ROMSCarbonateSensitivity"
+        ) as mock_dataset:
+            datasets = CarbonateSensitivityAdapter(bp).adapt()
+
+        assert datasets == [mock_dataset.return_value, mock_dataset.return_value]
+        assert mock_dataset.call_args_list == [
+            mock.call(
+                location="https://example.com/ctl_cdrgas.1.nc",
+                file_hash="abc",
+                start_date=None,
+                end_date=None,
+                source_np_xi=None,
+                source_np_eta=None,
+            ),
+            mock.call(
+                location="https://example.com/ctl_cdrgas.2.000.nc",
+                file_hash=None,
+                start_date=None,
+                end_date=None,
+                source_np_xi=n_x,
+                source_np_eta=n_y,
+            ),
+        ]

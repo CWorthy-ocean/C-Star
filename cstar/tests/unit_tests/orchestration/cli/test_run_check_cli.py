@@ -1,7 +1,10 @@
 """Tests for the `cstar run check` command."""
 
+import contextlib
+import hashlib
 import os
 import re
+import shlex
 import shutil
 import typing as t
 from datetime import UTC, datetime
@@ -12,23 +15,50 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
-from cstar.cli.run.check import COMMAND_CHECK
-from cstar.entrypoint.utils import ARG_ALL, ARG_NO_REFRESH, ARG_REPAIR, ARG_VERIFY
+from cstar.cli.run.check import (
+    COMMAND_CHECK,
+    format_findings,
+    format_verification,
+    summarize,
+)
+from cstar.entrypoint.utils import (
+    ARG_ALL,
+    ARG_NO_REFRESH,
+    ARG_RECORD_DIGESTS,
+    ARG_REPAIR,
+    ARG_VERIFY,
+)
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.index import run_uri
 from cstar.orchestration.manifest import (
+    ATTEMPTS_DIR_NAME,
     RUN_MANIFEST_NAME,
     Attempt,
     Product,
     RunManifest,
     StepEntry,
     StepRecord,
+    carried_digest,
+    compute_product_digests,
+    product_digest,
+    read_run_manifest,
+    read_step_record,
+    record_product_digests,
     write_run_manifest,
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
-from cstar.orchestration.tracking import WorkplanRun
+from cstar.orchestration.run_check import DigestTally, check_run
+from cstar.orchestration.tracking import (
+    KEY_RUN_UUID,
+    Access,
+    WorkplanRun,
+)
+from cstar.tests.unit_tests.orchestration.manifest_runs import BuiltRun
 from cstar.tests.unit_tests.orchestration.run_tree import (
     FakeRun,
     build_fake_run,
@@ -36,24 +66,31 @@ from cstar.tests.unit_tests.orchestration.run_tree import (
     write,
 )
 
-LOOKUP: t.Final[str] = "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run"
-"""The tracking lookup, replaced so that a run-id resolves to a chosen record."""
+LOOKUP: t.Final[str] = (
+    "cstar.orchestration.index.TrackingRepository.get_workplan_run_sync"
+)
+"""The tracking lookup the run resolver makes, replaced so that a run-id resolves
+to a chosen record."""
 
 EXIT_CLEAN: t.Final[int] = 0
 EXIT_FINDINGS: t.Final[int] = 1
 EXIT_BAD_ARGS: t.Final[int] = 2
 
 HEADINGS: t.Final[tuple[str, ...]] = (
-    "Absolute paths in run files (",
+    "Absolute paths outside the run in run files (",
     f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR}) (",
     "Symlinks whose target does not exist (",
     "Steps without a directory (",
     "Products missing from the run (",
     "Products whose size differs from the record (",
-    f"Products whose content differs from the record ({ARG_VERIFY}) (",
+    f"Products whose content differs from the recorded digest ({ARG_VERIFY}) (",
+    "Carried inputs whose content differs from the manifest (",
+    "Absolute paths inside the run in run files (informational) (",
     "Symlinks with a target outside the run (informational) (",
+    "Symlinks in cloned codebases whose target does not exist (informational) (",
     "Steps that are done without a step record (informational) (",
     "Latest attempt not finished (informational) (",
+    "Carried inputs missing from the run (informational) (",
     "Step directories no step accounts for (informational) (",
     "Sentinel files no step accounts for (informational) (",
 )
@@ -115,18 +152,44 @@ def entry(
     )
 
 
-def write_manifest(root: Path, *steps: StepEntry, finished: bool = True) -> RunManifest:
-    """Write the manifest of a run of `steps`, whose attempt is `finished` or not."""
+def write_manifest(
+    root: Path,
+    *steps: StepEntry,
+    finished: bool = True,
+    attempts: t.Sequence[Attempt] = (),
+) -> RunManifest:
+    """Write the manifest of a run of `steps`.
+
+    Its one attempt is `finished` or not, unless `attempts` replaces it.
+    """
     manifest = RunManifest(
         run_id="small",
         name="small",
         kind="workplan",
         created_at=NOW,
-        attempts=[Attempt(start_at=NOW, finished_at=NOW if finished else None)],
+        attempts=list(attempts)
+        or [Attempt(start_at=NOW, finished_at=NOW if finished else None)],
         steps=list(steps),
     )
     write_run_manifest(root, manifest)
     return manifest
+
+
+def carry(
+    root: Path, name: str, files: dict[str, str], *, finished: bool = True
+) -> Attempt:
+    """An attempt that carried `files`, by relative path, into `attempts/<name>`."""
+    directory = f"{ATTEMPTS_DIR_NAME}/{name}"
+    carried = {
+        relative: carried_digest(write(root / directory / relative, text))
+        for relative, text in files.items()
+    }
+    return Attempt(
+        start_at=NOW,
+        finished_at=NOW if finished else None,
+        directory=directory,
+        carried=carried,
+    )
 
 
 def product(path: str, size: int = 0, sha256: str = "") -> Product:
@@ -136,7 +199,7 @@ def product(path: str, size: int = 0, sha256: str = "") -> Product:
 
 def invoke(*args: str, record: WorkplanRun | None = None) -> Result:
     """Run `cstar run check` against a repository that holds only `record`."""
-    with mock.patch(LOOKUP, mock.AsyncMock(return_value=record)):
+    with mock.patch(LOOKUP, mock.Mock(return_value=record)):
         return CliRunner().invoke(app_run, [COMMAND_CHECK, *args], color=False)
 
 
@@ -152,6 +215,15 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     """Verify a tracked run is checked through its record, every section is
     listed in order with one line per finding, and the exit code says it failed.
     """
+    older = carry(run.root, "20261018T090000", {"workplan.yaml": "name: wp\n"})
+    shutil.rmtree(run.root / older.directory)
+    latest = carry(
+        run.root,
+        "20261019T120000",
+        {"blueprints/run/bp.yaml": "a: 1\n"},
+        finished=False,
+    )
+    edited = write(run.root / latest.directory / "blueprints/run/bp.yaml", "a: 2\n")
     write_manifest(
         run.root,
         entry(
@@ -162,7 +234,7 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
             product("output/result.yaml", sha256="0" * 64),
         ),
         entry("run", "tasks/run", status="Done", record=False),
-        finished=False,
+        attempts=[older, latest],
     )
 
     result = invoke(run.record.run_id, ARG_VERIFY, record=run.record)
@@ -183,13 +255,20 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     assert f"  {run.spin_up}/output/gone.nc\n" in result.stdout
     assert f"  {run.spin_up}/output/a.nc: 4 bytes, recorded 9\n" in result.stdout
     assert re.search(
-        rf"  {re.escape(str(run.spin_up))}/output/result.yaml: [0-9a-f]{{64}}\n",
+        rf"  {re.escape(str(run.spin_up))}/output/result.yaml: sha256:[0-9a-f]{{64}}\n",
         result.stdout,
     )
     assert f"  {run.root}/tasks/run/cstar-step.yaml\n" in result.stdout
     assert f"  {run.root}/{RUN_MANIFEST_NAME}\n" in result.stdout
+    assert f"  {edited}: {carried_digest(edited)}\n" in result.stdout
+    assert f"  {run.root}/{older.directory}\n" in result.stdout
+    assert (
+        f"  {run.spin_up}/input/codebases/roms/.libs/lib.la -> ../lib.la\n"
+        in result.stdout
+    )
+    # seven paths into the run itself and the codebase's link join the six
     assert re.search(
-        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 5 informational",
+        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 14 informational",
         result.stdout,
     )
     assert "Skipped" not in result.stdout
@@ -211,7 +290,7 @@ def test_a_directory_is_checked_without_the_run_record(
         assert f"  {run.root}/tasks/run\n" in result.stdout
         assert f"  {run.root}/tasks/stale\n" in result.stdout
         assert "Sentinel files" not in result.stdout
-        assert "Skipped orphaned sentinels: they are found by run-id" in result.stdout
+        assert "Skipped orphaned sentinels: sentinel files live in" in result.stdout
     assert absolute.stdout == relative.stdout
 
 
@@ -306,6 +385,41 @@ def test_repair_rebuilds_gathered_output_even_when_no_link_needed_fixing(
     assert "No symlink to rewrite." in result.stdout
     assert f"Rebuilt {gathered} with 2 link(s)." in result.stdout
     assert sorted(p.name for p in gathered.iterdir()) == ["a.nc", "result.yaml"]
+
+
+def test_a_repair_that_cannot_write_exits_1_without_a_traceback(run: FakeRun) -> None:
+    """Verify a file system error while rewriting symlinks is one line and exit 1."""
+    with mock.patch(
+        "cstar.cli.run.check.repair_symlinks",
+        side_effect=PermissionError("read-only file system"),
+    ):
+        result = invoke(str(run.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "Symlink repair stopped: read-only file system"
+
+
+def test_a_gather_that_fails_names_the_command_to_rerun(run: FakeRun) -> None:
+    """Verify a `gathered_output` that cannot be rebuilt is one line, exit 1, and says
+    which command to rerun.
+    """
+    handle = shlex.quote(str(run.root))
+
+    with mock.patch(
+        "cstar.cli.workplan.gather.shutil.rmtree",
+        side_effect=PermissionError("directory not empty"),
+    ):
+        result = invoke(str(run.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    message = result.stderr.strip()
+    assert "\n" not in message
+    assert message == (
+        "`gathered_output` was not rebuilt (once the cause is fixed, rerun "
+        f"`cstar run {COMMAND_CHECK} {handle} {ARG_REPAIR}`): directory not empty"
+    )
 
 
 def test_repair_without_a_workplan_leaves_gathered_output_alone(tmp_path: Path) -> None:
@@ -409,10 +523,7 @@ def test_an_unknown_run_id_is_a_bad_argument(
     result = invoke("no-such-run")
 
     assert result.exit_code == EXIT_BAD_ARGS
-    assert (
-        "Unable to locate run with unknown run-id: no-such-run"
-        in flatten_cli_output(result.stderr)
-    )
+    assert "No run found for run-id no-such-run" in flatten_cli_output(result.stderr)
 
 
 def test_an_unknown_run_id_that_names_a_directory_suggests_the_path(
@@ -467,6 +578,22 @@ def test_a_directory_with_two_transformed_workplans_is_ambiguous(
 
     assert result.exit_code == EXIT_BAD_ARGS
     assert "more than one transformed workplan" in flatten_cli_output(result.stderr)
+
+
+def test_a_directory_with_a_yml_transformed_workplan_is_checked_against_it(
+    run: FakeRun,
+) -> None:
+    """Verify the plan a 0.17 run wrote for a `.yml` workplan is found, loaded for
+    the checks that need it and scanned for absolute paths, as a `.yaml` one is.
+    """
+    yml = run.trx_path.rename(run.trx_path.with_suffix(".yml"))
+
+    result = invoke(str(run.root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert f"{yml}:" in result.stdout
+    assert "Skipped step directories and orphans" not in result.stdout
+    assert f"  {run.root}/tasks/stale\n" in result.stdout
 
 
 def test_a_run_whose_directory_is_gone_suggests_the_path(
@@ -543,14 +670,75 @@ def test_verify_compares_content_only_where_a_hash_is_recorded(tmp_path: Path) -
     verified = invoke(str(root), ARG_VERIFY)
 
     assert plain.exit_code == EXIT_CLEAN, plain.output
+    assert "Compared" not in plain.stdout
     assert verified.exit_code == EXIT_FINDINGS, verified.output
-    assert f"Products whose content differs from the record ({ARG_VERIFY}) (1):" in (
-        verified.stdout
+    heading = f"Products whose content differs from the recorded digest ({ARG_VERIFY})"
+    assert f"{heading} (1):" in verified.stdout
+    summary = (
+        "Compared 1 product(s) with their recorded digest: 0 matched, 1 differed.\n"
     )
+    assert summary in verified.stdout
+    assert verified.stdout.index(heading) < verified.stdout.index(summary)
 
 
-def test_verify_says_when_no_product_records_a_hash(tmp_path: Path) -> None:
-    """Verify `--verify` over records without hashes passes and names the skip."""
+@pytest.mark.parametrize(
+    ("tally", "line"),
+    [
+        (
+            DigestTally(matched=61),
+            "Compared 61 product(s) with their recorded digest: 61 matched.",
+        ),
+        (
+            DigestTally(matched=2, differed=1),
+            "Compared 3 product(s) with their recorded digest: 2 matched, 1 differed.",
+        ),
+        (
+            DigestTally(no_digest=12),
+            "Compared no product with a recorded digest; skipped 12 with no digest "
+            "recorded.",
+        ),
+        (
+            DigestTally(
+                matched=5, no_digest=1, foreign={"xxh": 1, "blake3": 2}, not_compared=2
+            ),
+            "Compared 5 product(s) with their recorded digest: 5 matched; skipped 1 "
+            "with no digest recorded, 3 recorded with a scheme this build does not "
+            "compute ('blake3', 'xxh'), 2 missing, resized or not a regular file.",
+        ),
+        (DigestTally(), "Compared no product with a recorded digest."),
+    ],
+)
+def test_the_verification_is_said_in_one_line(tally: DigestTally, line: str) -> None:
+    """Verify the line says how many were compared, matched and differed, and
+    how many were skipped and why.
+    """
+    assert format_verification(tally) == line
+
+
+def test_a_dangling_link_in_a_cloned_codebase_alone_exits_zero(tmp_path: Path) -> None:
+    """Verify the libtool link a cloned ucla-roms holds is listed for information
+    and does not fail the check, while the same link in a step's output does.
+    """
+    root = small_run(tmp_path / "small")
+    libs = root / "tasks" / "run" / "input" / "codebases" / "roms" / "NHMG/src/.libs"
+    link(libs / "libnhmg.la", "../libnhmg.la")
+
+    clean = invoke(str(root))
+    link(root / "tasks" / "run" / "output" / "libnhmg.la", "../libnhmg.la")
+    failed = invoke(str(root))
+
+    assert clean.exit_code == EXIT_CLEAN, clean.output
+    heading = (
+        "Symlinks in cloned codebases whose target does not exist (informational) (1):"
+    )
+    assert heading in clean.stdout
+    assert f"No problems found in {root}, 1 informational." in clean.stdout
+    assert failed.exit_code == EXIT_FINDINGS, failed.output
+    assert "Symlinks whose target does not exist (1):" in failed.stdout
+
+
+def test_verify_says_when_no_product_records_a_digest(tmp_path: Path) -> None:
+    """Verify `--verify` over records without digests passes and names the skip."""
     root = small_run(tmp_path / "small")
     write(root / "tasks" / "run" / "output" / "x.nc", "data")
     write_manifest(root, entry("run", "tasks/run", product("output/x.nc", 4)))
@@ -558,7 +746,10 @@ def test_verify_says_when_no_product_records_a_hash(tmp_path: Path) -> None:
     result = invoke(str(root), ARG_VERIFY)
 
     assert result.exit_code == EXIT_CLEAN, result.output
-    assert "Skipped hash verification: no product records a hash" in result.stdout
+    assert (
+        "Compared no product with a recorded digest; skipped 1 with no digest "
+        "recorded.\n"
+    ) in result.stdout
 
 
 def test_informational_manifest_findings_alone_exit_zero(tmp_path: Path) -> None:
@@ -583,6 +774,83 @@ def test_informational_manifest_findings_alone_exit_zero(tmp_path: Path) -> None
     assert "Latest attempt not finished (informational) (1):" in result.stdout
     assert f"  {root.resolve()}/{RUN_MANIFEST_NAME}\n" in result.stdout
     assert f"No problems found in {root.resolve()}, 2 informational." in result.stdout
+
+
+def test_an_edited_carried_input_fails_the_check(tmp_path: Path) -> None:
+    """Verify a carried blueprint that changed since the attempt is named with
+    the digest now found and exits 1, while an untouched carried file is not.
+    """
+    root = small_run(tmp_path / "small")
+    attempt = carry(
+        root,
+        "20261019T120000",
+        {"workplan.yaml": "name: wp\n", "blueprints/run/bp.yaml": "a: 1\n"},
+    )
+    write_manifest(root, entry("run", "tasks/run"), attempts=[attempt])
+    edited = write(root / attempt.directory / "blueprints/run/bp.yaml", "a: 2\n")
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Carried inputs whose content differs from the manifest (1):" in (
+        result.stdout
+    )
+    assert f"  {edited.resolve()}: {carried_digest(edited)}\n" in result.stdout
+    assert "workplan.yaml" not in result.stdout
+    assert "Carried inputs missing" not in result.stdout
+
+
+def test_deleted_carried_inputs_are_informational(tmp_path: Path) -> None:
+    """Verify an older attempt deleted by hand is listed once, by its directory,
+    a carried file gone from the newer attempt is listed too, and the run still
+    exits 0.
+    """
+    root = small_run(tmp_path / "small")
+    older = carry(
+        root,
+        "20261018T090000",
+        {"workplan.yaml": "name: wp\n", "blueprints/run/bp.yaml": "a: 1\n"},
+    )
+    latest = carry(
+        root,
+        "20261019T120000",
+        {"workplan.yaml": "name: wp\n", "workplan.vars": "x=1\n"},
+    )
+    write_manifest(root, entry("run", "tasks/run"), attempts=[older, latest])
+    shutil.rmtree(root / older.directory)
+    (root / latest.directory / "workplan.vars").unlink()
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Carried inputs missing from the run (informational) (2):" in result.stdout
+    assert f"  {root.resolve()}/{older.directory}\n" in result.stdout
+    assert f"  {root.resolve()}/{latest.directory}/workplan.vars\n" in result.stdout
+    assert "bp.yaml" not in result.stdout
+    assert f"No problems found in {root.resolve()}, 2 informational." in result.stdout
+
+
+def test_intact_carried_inputs_are_not_reported(tmp_path: Path) -> None:
+    """Verify a run whose attempt carried inputs that are all as recorded is clean."""
+    root = small_run(tmp_path / "small")
+    attempt = carry(root, "20261019T120000", {"workplan.yaml": "name: wp\n"})
+    write_manifest(root, entry("run", "tasks/run"), attempts=[attempt])
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Carried inputs" not in result.stdout
+    assert f"No problems found in {root.resolve()}." in result.stdout
+
+
+def test_the_help_names_the_carried_inputs(
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify the help says the carried inputs are compared with the manifest."""
+    result = CliRunner().invoke(app_run, [COMMAND_CHECK, "--help"], color=False)
+
+    assert result.exit_code == 0
+    assert "carried" in flatten_cli_output(result.stdout)
 
 
 def test_a_standalone_run_directory_is_accepted(tmp_path: Path) -> None:
@@ -628,7 +896,7 @@ def test_an_unreadable_manifest_is_a_warning_and_the_other_checks_run(
     assert result.stderr.startswith("Warning:")
     assert RUN_MANIFEST_NAME in result.stderr
     assert "Symlinks whose target does not exist (1):" in result.stdout
-    assert "Skipped products: no run manifest" in result.stdout
+    assert "Skipped products and carried inputs: no run manifest" in result.stdout
 
 
 def test_a_run_id_refreshes_the_manifest_before_checking_it(
@@ -711,3 +979,568 @@ def test_a_refresh_that_cannot_run_is_a_warning(run: FakeRun, refresh: Refresh) 
     assert "Warning: the manifest was not refreshed: no scheduler" in result.output
     assert "Products missing from the run (1):" in result.stdout
     refresh.refresh.assert_not_called()
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+def test_an_untracked_run_is_checked_as_its_directory(
+    local_run: t.Callable[..., BuiltRun], refresh: Refresh, handle: str
+) -> None:
+    """Verify a run only its manifest names is checked by its run-id or its uuid
+    as its directory is: never refreshed, the manifest left as it is, and the
+    checks that need a tracked run skipped.
+    """
+    built = local_run("lonely")
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid), record=None
+    )
+
+    # the transformed workplan names the run's own directories: informational
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {built.root}, " in result.stdout
+    assert "Skipped orphaned sentinels: sentinel files live in" in result.stdout
+    refresh.status.assert_not_called()
+    refresh.refresh.assert_not_called()
+    assert built.manifest_bytes == before
+
+
+def test_a_run_in_the_project_area_is_checked_by_its_uuid(
+    project_run: t.Callable[..., BuiltRun], refresh: Refresh
+) -> None:
+    """Verify a run kept in the project's runs area is found by its uuid."""
+    built = project_run("shared-run")
+
+    result = invoke(run_uri(built.uuid), record=None)
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {built.root}, " in result.stdout
+    refresh.refresh.assert_not_called()
+
+
+def test_a_standalone_blueprint_run_is_checked_by_its_uuid(
+    build_run: t.Callable[..., BuiltRun], refresh: Refresh
+) -> None:
+    """Verify a run that holds a manifest and no `tasks/` is accepted."""
+    root = StateDirectoryManager.blueprint_runs_dir() / "hello_world" / "solo"
+    built = build_run(root, "solo", kind="blueprint", steps=("solo",))
+
+    result = invoke(run_uri(built.uuid), record=None)
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {built.root}" in result.stdout
+
+
+def test_the_uuid_of_a_tracked_run_refreshes_it(run: FakeRun, refresh: Refresh) -> None:
+    """Verify a run tracked on this machine is refreshed however it is named."""
+    manifest = write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/a.nc", 4))
+    )
+    manifest.id = "0f8c2ba4-6d57-4a25-9c1e-3b52f0d7a911"
+    write_run_manifest(run.root, manifest)
+
+    result = invoke(run_uri(manifest.id), record=run.record)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    refresh.status.assert_awaited_once()
+    refresh.refresh.assert_called_once()
+
+
+def test_an_unknown_uuid_is_a_bad_argument(
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a uuid no manifest holds is a usage error that names it."""
+    wanted = "6f1c3a58-1b2e-4c6d-8e0f-0a1b2c3d4e5f"
+
+    result = invoke(run_uri(wanted), record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert f"No run has the uuid {wanted}" in flatten_cli_output(result.stderr)
+
+
+def test_a_malformed_uuid_handle_is_a_bad_argument(
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a `run://` handle without a uuid is a usage error naming the form."""
+    result = invoke("run://nonsense", record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert "run://<uuid>" in flatten_cli_output(result.stderr)
+
+
+def add_absolute_link(built: BuiltRun) -> Path:
+    """Put in the first step of a built run a link, with an absolute target, to a file in it."""
+    output = write(built.step_dir("Spin Up") / "output" / "a.nc", "data")
+    return link(built.step_dir("Spin Up") / "input" / "abs_file", output)
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+@pytest.mark.parametrize("kept", ["local_run", "project_run"])
+def test_repair_refuses_a_run_found_only_by_its_manifest(
+    request: pytest.FixtureRequest,
+    refresh: Refresh,
+    squash_cli_output: t.Callable[[str], str],
+    handle: str,
+    kept: str,
+) -> None:
+    """Verify `--repair` writes nothing into a run that only its manifest names,
+    however it is named, and says how to repair it deliberately.
+    """
+    built = request.getfixturevalue(kept)("lonely")
+    absolute = add_absolute_link(built)
+    target = os.readlink(absolute)
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid),
+        ARG_REPAIR,
+        record=None,
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert (
+        squash_cli_output(f"The run at {built.root} was found by its manifest") in text
+    )
+    assert squash_cli_output("is not tracked here") in text
+    assert squash_cli_output(f"cstar run check {built.root} {ARG_REPAIR}") in text
+    assert result.stdout == ""
+    assert os.readlink(absolute) == target
+    assert built.manifest_bytes == before
+    assert not (built.root / "gathered_output").exists()
+    refresh.refresh.assert_not_called()
+
+
+def test_repair_still_repairs_a_directory_the_user_names(
+    project_run: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify naming the directory of a run that only its manifest names is the
+    deliberate way to repair it.
+    """
+    built = project_run("shared-run")
+    absolute = add_absolute_link(built)
+
+    result = invoke(str(built.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Rewrote 1 symlink(s) as relative:" in result.stdout
+    assert os.readlink(absolute) == "../output/a.nc"
+
+
+def test_repair_still_repairs_a_run_tracked_here(
+    run: FakeRun, refresh: Refresh
+) -> None:
+    """Verify a run tracked on this machine is repaired by its run-id."""
+    result = invoke(run.record.run_id, ARG_REPAIR, record=run.record)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Rewrote 3 symlink(s) as relative:" in result.stdout
+    assert os.readlink(run.spin_up / "input" / "abs_file") == "../output/a.nc"
+    refresh.refresh.assert_called_once()
+
+
+def test_the_hint_names_the_directory_as_it_was_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify the hint is for the directory the user typed, whose name is not the
+    run-id the typed text slugifies to.
+    """
+    (tmp_path / "Spin Up").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("Spin Up", record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    text = flatten_cli_output(result.stderr)
+    assert "To check the directory ./Spin Up, pass it as a path." in text
+    assert "./spin-up" not in text
+
+
+def attached_record(built: BuiltRun, access: Access | None = None) -> WorkplanRun:
+    """The tracking record `cstar run attach` makes of a built run kept elsewhere."""
+    return WorkplanRun(
+        output_path=built.root,
+        run_id=built.run_id,
+        attached=True,
+        access=access or Access.owned,
+        metadata={KEY_RUN_UUID: built.uuid},
+    )
+
+
+@pytest.fixture
+def colleague_run(tmp_path: Path, build_run: t.Callable[..., BuiltRun]) -> BuiltRun:
+    """A run copied from elsewhere, kept outside the data home and the project area."""
+    return build_run(tmp_path / "colleague" / "their-run", "their-run")
+
+
+@pytest.mark.parametrize("access", [None, Access.owned])
+def test_an_attached_run_is_checked_as_its_directory_and_not_refreshed(
+    colleague_run: BuiltRun, refresh: Refresh, access: Access | None
+) -> None:
+    """Verify a run attached from elsewhere has no sentinels to refresh from: it
+    is read as found, and `--repair` may rewrite its links when it is owned.
+
+    Parameters
+    ----------
+    access : Access | None
+        The access the record holds; `None` for a record that says nothing.
+    """
+    absolute = add_absolute_link(colleague_run)
+    record = attached_record(colleague_run, access)
+
+    checked = invoke(colleague_run.run_id, record=record)
+    repaired = invoke(colleague_run.run_id, ARG_REPAIR, record=record)
+
+    assert checked.exit_code == EXIT_FINDINGS, checked.output
+    assert "Symlinks with an absolute target inside the run" in checked.stdout
+    assert repaired.exit_code == EXIT_CLEAN, repaired.output
+    assert "Rewrote 1 symlink(s) as relative:" in repaired.stdout
+    assert os.readlink(absolute) == "../output/a.nc"
+    refresh.status.assert_not_called()
+    refresh.refresh.assert_not_called()
+
+
+def test_an_attached_run_by_uuid_is_checked_as_its_directory(
+    colleague_run: BuiltRun, refresh: Refresh
+) -> None:
+    """Verify `run://<uuid>` finds the attached run wherever it is kept."""
+    record = attached_record(colleague_run)
+    with mock.patch(
+        "cstar.orchestration.index.TrackingRepository.list_latest_runs_sync",
+        mock.Mock(return_value=[record]),
+    ):
+        result = invoke(run_uri(colleague_run.uuid), record=None)
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {colleague_run.root}, " in result.stdout
+    refresh.refresh.assert_not_called()
+
+
+def test_repair_refuses_a_run_attached_read_only(
+    colleague_run: BuiltRun,
+    refresh: Refresh,
+    squash_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify `--repair` writes nothing into a run attached read-only, and the
+    message says how to take ownership.
+    """
+    absolute = add_absolute_link(colleague_run)
+    target = os.readlink(absolute)
+    before = colleague_run.manifest_bytes
+
+    result = invoke(
+        colleague_run.run_id,
+        ARG_REPAIR,
+        record=attached_record(colleague_run, Access.read_only),
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert squash_cli_output("is attached read-only") in text
+    assert squash_cli_output(f"cstar run attach {colleague_run.root} --own") in text
+    assert result.stdout == ""
+    assert os.readlink(absolute) == target
+    assert colleague_run.manifest_bytes == before
+    assert not (colleague_run.root / "gathered_output").exists()
+    refresh.refresh.assert_not_called()
+
+
+def test_a_run_attached_read_only_is_still_checked(colleague_run: BuiltRun) -> None:
+    """Verify reading a read-only run is allowed: only `--repair` is refused."""
+    add_absolute_link(colleague_run)
+
+    result = invoke(
+        colleague_run.run_id,
+        record=attached_record(colleague_run, Access.read_only),
+    )
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+
+
+def test_the_report_is_formatted_and_summarized_for_other_commands(
+    run: FakeRun,
+) -> None:
+    """Verify the formatter and the summary are public, for the commands that
+    report on a run directory as `check` does.
+    """
+    report = check_run(run.root, workplan=None, run_id=None, all_files=False)
+
+    lines = list(format_findings(report))
+
+    assert any(line.startswith("Symlinks with an absolute target") for line in lines)
+    assert summarize(report).startswith(f"{len(report.problems)} problem(s) found in")
+    assert str(run.root) in summarize(report)
+
+
+def add_product(built: BuiltRun, name: str, text: str = "line\n") -> Path:
+    """Record, in the first step of a built run, a product it holds as a file.
+
+    The record is written beside the step and folded into the manifest, so the run
+    reads the same tracked or not.
+    """
+    step_dir = built.step_dir("Spin Up")
+    file = write(step_dir / name, text)
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    step = manifest.steps[0]
+    step.record = entry(
+        step.name, step.working_dir, product(name, file.stat().st_size)
+    ).record
+    assert step.record is not None
+    write_step_record(step_dir, step.record)
+    write_run_manifest(built.root, manifest)
+    return file
+
+
+def recorded_digests(root: Path) -> list[str]:
+    """The digest of each product in the manifest on disk, in order."""
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    return [p.digest for e in manifest.steps if e.record for p in e.record.products]
+
+
+def test_record_digests_writes_them_into_a_tracked_run(run: FakeRun) -> None:
+    """Verify `--record-digests` on a run tracked and owned here records each
+    product's digest into the step record and the manifest, and says how many.
+    """
+    write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/result.yaml", 8))
+    )
+    record = entry("Spin Up", "tasks/spin-up", product("output/result.yaml", 8)).record
+    assert record is not None
+    write_step_record(run.spin_up, record)
+
+    result = invoke(run.record.run_id, ARG_RECORD_DIGESTS, record=run.record)
+
+    assert "Recorded 1 digest(s)." in result.stdout
+    wanted = product_digest(run.spin_up / "output" / "result.yaml")
+    assert wanted.startswith(f"{SHA256_SCHEME}:")
+    assert recorded_digests(run.root) == [wanted]
+    on_disk = read_step_record(run.spin_up)
+    assert on_disk is not None
+    assert [p.digest for p in on_disk.products] == [wanted]
+
+
+def _tracked_with_one_product(run: FakeRun) -> None:
+    """Give the tracked run a manifest and step record holding one product."""
+    made = entry("Spin Up", "tasks/spin-up", product("output/result.yaml", 8))
+    write_manifest(run.root, made)
+    assert made.record is not None
+    write_step_record(run.spin_up, made.record)
+
+
+def test_record_digests_holds_the_lock_around_the_write_only(run: FakeRun) -> None:
+    """Verify the digests are computed outside `manifest_lock`, and only the
+    write of the records, from a fresh read of the manifest, is under it.
+    """
+    _tracked_with_one_product(run)
+    events: list[str] = []
+
+    @contextlib.contextmanager
+    def lock(run_id: str) -> t.Iterator[None]:
+        assert run_id == run.record.run_id
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    def spy(name: str, real: t.Callable[..., t.Any]) -> mock.Mock:
+        def call(*args: t.Any, **kwargs: t.Any) -> t.Any:
+            events.append(name)
+            return real(*args, **kwargs)
+
+        return mock.Mock(side_effect=call)
+
+    with (
+        mock.patch("cstar.cli.run.check.manifest_lock", lock),
+        mock.patch(
+            "cstar.cli.run.check.compute_product_digests",
+            spy("compute", compute_product_digests),
+        ),
+        mock.patch(
+            "cstar.cli.run.check.record_product_digests",
+            spy("record", record_product_digests),
+        ),
+    ):
+        result = invoke(run.record.run_id, ARG_RECORD_DIGESTS, record=run.record)
+
+    assert "Recorded 1 digest(s)." in result.stdout
+    assert events == ["compute", "lock", "record", "unlock"]
+
+
+def test_record_digests_with_verify_checks_once_against_the_recorded_digests(
+    run: FakeRun,
+) -> None:
+    """Verify `--record-digests --verify` runs the checks one time, on a manifest
+    that already holds the digests just recorded.
+    """
+    _tracked_with_one_product(run)
+
+    with mock.patch("cstar.cli.run.check.check_run", wraps=check_run) as checked:
+        result = invoke(
+            run.record.run_id, ARG_RECORD_DIGESTS, ARG_VERIFY, record=run.record
+        )
+
+    assert "Recorded 1 digest(s)." in result.stdout
+    assert "Skipped digest verification" not in result.stdout
+    checked.assert_called_once()
+    manifest = checked.call_args.kwargs["manifest"]
+    wanted = product_digest(run.spin_up / "output" / "result.yaml")
+    assert [
+        p.digest for e in manifest.steps if e.record for p in e.record.products
+    ] == [wanted]
+
+
+def test_record_digests_refuses_a_run_attached_read_only(
+    colleague_run: BuiltRun,
+    refresh: Refresh,
+    squash_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify `--record-digests` writes nothing into a run attached read-only, and
+    the message says how to take ownership.
+    """
+    add_product(colleague_run, "output/run.log")
+    before = colleague_run.manifest_bytes
+
+    result = invoke(
+        colleague_run.run_id,
+        ARG_RECORD_DIGESTS,
+        record=attached_record(colleague_run, Access.read_only),
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert squash_cli_output("is attached read-only") in text
+    assert squash_cli_output(f"cstar run attach {colleague_run.root} --own") in text
+    assert squash_cli_output(ARG_RECORD_DIGESTS) in text
+    assert result.stdout == ""
+    assert colleague_run.manifest_bytes == before
+
+
+def test_record_digests_accepts_a_run_attached_and_owned(
+    colleague_run: BuiltRun,
+) -> None:
+    """Verify an owned attached run takes digests, and the absolute paths a built
+    run holds into itself do not fail its check.
+    """
+    add_product(colleague_run, "output/run.log")
+
+    result = invoke(
+        colleague_run.run_id,
+        ARG_RECORD_DIGESTS,
+        record=attached_record(colleague_run, Access.owned),
+    )
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Recorded 1 digest(s)." in result.stdout
+    line_hash = hashlib.sha256(b"line\n").hexdigest()
+    assert recorded_digests(colleague_run.root) == [f"{SHA256_SCHEME}:{line_hash}"]
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+def test_record_digests_refuses_a_run_found_only_by_its_manifest(
+    local_run: t.Callable[..., BuiltRun],
+    squash_cli_output: t.Callable[[str], str],
+    handle: str,
+) -> None:
+    """Verify `--record-digests` writes nothing into a run that only its manifest
+    names, and says how to do it deliberately.
+    """
+    built = local_run("lonely")
+    add_product(built, "output/run.log")
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid),
+        ARG_RECORD_DIGESTS,
+        record=None,
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert squash_cli_output("is not tracked here") in text
+    assert (
+        squash_cli_output(f"cstar run check {built.root} {ARG_RECORD_DIGESTS}") in text
+    )
+    assert result.stdout == ""
+    assert built.manifest_bytes == before
+
+
+def test_record_digests_in_a_named_directory_is_verified_afterwards(
+    tmp_path: Path,
+) -> None:
+    """Verify a directory the user names takes digests, a netCDF file's by
+    content and a log's by bytes, that `--verify` then compares them, and that
+    asking for both at once reports against what was just recorded.
+    """
+    import numpy as np
+    import xarray as xr
+
+    root = small_run(tmp_path / "small")
+    output = root / "tasks" / "run" / "output"
+    nc = output / "x.nc"
+    xr.Dataset({"temp": (["x"], np.array([1.0, 2.0]))}).to_netcdf(nc, engine="netcdf4")
+    log = write(output / "run.log", "line\n")
+    write_manifest(
+        root,
+        entry(
+            "run",
+            "tasks/run",
+            product("output/x.nc", nc.stat().st_size),
+            product("output/run.log", log.stat().st_size),
+        ),
+    )
+    record = read_run_manifest(root)
+    assert record is not None and record.steps[0].record is not None
+    write_step_record(root / "tasks" / "run", record.steps[0].record)
+
+    before = invoke(str(root), ARG_VERIFY)
+    both = invoke(str(root), ARG_RECORD_DIGESTS, ARG_VERIFY)
+    after = invoke(str(root), ARG_VERIFY)
+
+    assert "Compared no product with a recorded digest; skipped 2" in before.stdout
+    assert both.exit_code == EXIT_CLEAN, both.output
+    assert "Recorded 2 digest(s)." in both.stdout
+    summary = "Compared 2 product(s) with their recorded digest: 2 matched.\n"
+    assert summary in both.stdout
+    assert summary in after.stdout
+    digests = recorded_digests(root)
+    assert digests[0].startswith(f"{HASH_SCHEME}:")
+    assert digests[1].startswith(f"{SHA256_SCHEME}:")
+    assert after.exit_code == EXIT_CLEAN, after.output
+    assert "Skipped digest verification" not in after.stdout
+
+    log.write_text("lone\n")
+    changed = invoke(str(root), ARG_VERIFY)
+    assert changed.exit_code == EXIT_FINDINGS, changed.output
+    assert "differs from the recorded digest" in changed.stdout
+
+
+def test_record_digests_without_a_manifest_says_so(tmp_path: Path) -> None:
+    """Verify there is nothing to record into when the run has no manifest."""
+    root = small_run(tmp_path / "small")
+
+    result = invoke(str(root), ARG_RECORD_DIGESTS)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "no readable run manifest" in result.stderr
+    assert "Recorded" not in result.stdout
+
+
+def test_record_digests_that_cannot_write_exits_1_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """Verify a file system error while recording digests is one line and exit 1."""
+    root = small_run(tmp_path / "small")
+    write_manifest(root, entry("run", "tasks/run", product("output/x.yaml", size=17)))
+
+    with mock.patch(
+        "cstar.cli.run.check.record_product_digests",
+        side_effect=OSError("disk quota exceeded"),
+    ):
+        result = invoke(str(root), ARG_RECORD_DIGESTS)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "No digest recorded: disk quota exceeded"

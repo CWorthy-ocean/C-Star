@@ -201,6 +201,11 @@ class StagedRepository(StagedData):
         )
 
     @property
+    def checkout_hash(self) -> str:
+        """The commit the repository was checked out at when it was staged."""
+        return self._checkout_hash
+
+    @property
     def changed_from_source(self) -> bool:
         """Check if the current repo is dirty or differs from a given commit hash."""
         # Check existence

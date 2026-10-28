@@ -25,7 +25,7 @@ from docutils import nodes  # noqa: F401
 from docutils.parsers.rst import Directive
 from sphinx.application import Sphinx
 
-from cstar.base.env import EnvItem, discover_env_vars
+from cstar.base.env import EnvItem, env_var_groups
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -81,13 +81,10 @@ class EnvVarTableDirective(Directive):
         self,
     ) -> dict[str, list[EnvVarRow]]:
         """Reflect through the supplied module to discover all environment variables."""
-        env_vars = discover_env_vars()
-        groups: dict[str, list[EnvVarRow]] = defaultdict(list)
-
-        for var in env_vars.values():
-            groups[var.group].append(EnvVarRow(var))
-
-        return groups
+        return {
+            group: [EnvVarRow(var) for var in items]
+            for group, items in env_var_groups().items()
+        }
 
     def _render_table(self, groups: dict[str, list[EnvVarRow]]) -> list[str]:
         """Render restructuredText for all discovered environment variables."""
@@ -238,6 +235,7 @@ napoleon_custom_sections = [
 html_theme = "sphinx_book_theme"
 # html_theme = 'alabaster'
 html_static_path = ["_static"]
+html_js_files = ["tutorials_caption_link.js"]
 
 
 html_theme_options = {

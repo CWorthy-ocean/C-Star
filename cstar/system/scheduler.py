@@ -1,16 +1,86 @@
 import functools
-import os
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import _run_cmd
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 log = get_logger(__name__)
 
 UNLIMITED_WALLTIMES: Final = frozenset({"infinite", "unlimited", "n/a"})
 """Values SLURM reports for a queue with no walltime limit."""
+
+
+def slurm_job_id(environ: "Mapping[str, str]") -> str:
+    """Read the id of the SLURM job a process runs in from its environment.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+
+    Returns
+    -------
+    str
+        `SLURM_JOB_ID`, else its older alias `SLURM_JOBID`; empty outside a job.
+    """
+    return environ.get("SLURM_JOB_ID") or environ.get("SLURM_JOBID") or ""
+
+
+def in_scheduler_job(environ: "Mapping[str, str]") -> bool:
+    """Tell whether a process runs inside a SLURM or PBS job, from its environment.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+
+    Returns
+    -------
+    bool
+        True when a SLURM job id (`SLURM_JOB_ID` or `SLURM_JOBID`) or a PBS job id
+        (`PBS_JOBID`) is set to a non-empty value.
+    """
+    return bool(slurm_job_id(environ) or environ.get("PBS_JOBID"))
+
+
+VISIBLE_SCHEDULERS: Final = (("SLURM", "sbatch", "SLURM_"), ("PBS", "qsub", "PBS_"))
+"""Each scheduler family `visible_scheduler` looks for: its name, its submit command,
+and the prefix of the variables it sets."""
+
+
+def visible_scheduler(
+    environ: "Mapping[str, str]", which: Callable[..., str | None] = shutil.which
+) -> str:
+    """Name the batch scheduler a machine shows, whether or not C-Star knows the system.
+
+    A login node shows its scheduler by the submit command on its `PATH`, and a
+    job also by the variables the scheduler sets.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables; its `PATH` is searched.
+    which : Callable[..., str | None]
+        Locates a command on a search path, as `shutil.which` does.
+
+    Returns
+    -------
+    str
+        `"SLURM"` or `"PBS"`, else empty.
+    """
+    path = environ.get("PATH")
+    for family, command, prefix in VISIBLE_SCHEDULERS:
+        if which(command, path=path) or any(
+            name.startswith(prefix) for name in environ
+        ):
+            return family
+    return ""
 
 
 def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
@@ -455,12 +525,6 @@ class Scheduler(ABC, LoggingMixin):
         self.documentation = documentation
         self._max_cpus_per_node = max_cpus_per_node
 
-    @property
-    @abstractmethod
-    def in_active_allocation(self) -> bool:
-        """Return True if the current process is running in an active allocation."""
-        raise NotImplementedError()
-
     def get_queue(self, name: str | None) -> Queue:
         """Retrieve a queue by name.
 
@@ -537,24 +601,6 @@ class SlurmScheduler(Scheduler):
     global_max_mem_per_node_gb
         Retrieves the maximum memory available per node in GB.
     """
-
-    @property
-    def in_active_allocation(self) -> bool:
-        override = os.getenv("CSTAR_IN_ACTIVE_ALLOCATION")
-        if override is not None:
-            return override.strip().lower() in {"1", "true", "yes", "on"}
-
-        jupyter_env_vars = (
-            "JUPYTERHUB_API_TOKEN",
-            "JUPYTERHUB_USER",
-            "JUPYTERHUB_SERVICE_PREFIX",
-            "JUPYTER_SERVER_ROOT",
-            "JUPYTER_SERVER_URL",
-        )
-        if any(k in os.environ for k in jupyter_env_vars):
-            return False
-
-        return os.getenv("SLURM_JOBID") is not None
 
     @property
     def global_max_cpus_per_node(self) -> int | None:
@@ -639,11 +685,6 @@ class PBSScheduler(Scheduler):
     """
 
     requires_task_distribution = True
-
-    @property
-    def in_active_allocation(self) -> bool:
-        """Determine whether the process is in an active allocation by looking for the PBS_JOBID environment variable."""
-        return os.getenv("PBS_JOBID") is not None
 
     @property
     def global_max_cpus_per_node(self) -> int | None:

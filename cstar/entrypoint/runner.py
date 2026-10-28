@@ -1,6 +1,9 @@
 import argparse
 import os
+import socket
 import typing as t
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from cstar.applications.core import (
     HasApplication,
@@ -11,11 +14,13 @@ from cstar.applications.core import (
     get_application,
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_RUNID, get_env_item
-from cstar.base.log import LogLevelChoices
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.provenance import package_versions, system_name
 from cstar.base.utils import utc_now
 from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_CLOBBER_HELP,
     ARG_DIRECTIVES_URI_LONG,
     ARG_DIRECTIVES_URI_SHORT,
     ARG_LOGLEVEL_HELP,
@@ -32,22 +37,92 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import (
+    ExecutionFacts,
     StepRecord,
     expand_artifacts,
     merge_products,
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
+from cstar.system.scheduler import slurm_job_id
 
 if t.TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import datetime
 
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
     from cstar.orchestration.manifest import Product
     from cstar.orchestration.models import Blueprint
 
 
+log = get_logger(__name__)
+
 TBlueprint = t.TypeVar("TBlueprint", bound=HasApplication)
+
+
+def _count(environ: "Mapping[str, str]", name: str) -> int:
+    """Read a count from an environment variable.
+
+    A record that says what ran a step must never change the outcome of the
+    run, so a value that is not an integer, such as `2(x3)`, is logged and
+    counts as not reported.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+    name : str
+        The variable to read.
+
+    Returns
+    -------
+    int
+        The count; zero when the variable is unset, empty or not an integer.
+    """
+    value = environ.get(name, "").strip()
+    if not value:
+        return 0
+    try:
+        return int(value)
+    except ValueError:
+        log.debug(f"Ignoring {name}={value!r}: it is not a count")
+        return 0
+
+
+def execution_facts(environ: "Mapping[str, str]") -> ExecutionFacts:
+    """Describe what is running this process, from its environment.
+
+    Inside a SLURM job, including a standalone run in an `salloc`, the facts are
+    the allocation the job was granted. Outside one, the step runs as a local
+    process: its record says so and leaves the counts at zero, since the step
+    does not know the compute it was asked for.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+
+    Returns
+    -------
+    ExecutionFacts
+    """
+    host = socket.gethostname()
+    pid = os.getpid()
+
+    if not (job_id := slurm_job_id(environ)):
+        return ExecutionFacts(scheduler="local", host=host, pid=pid)
+
+    return ExecutionFacts(
+        scheduler="slurm",
+        job_id=job_id,
+        host=host,
+        pid=pid,
+        nodes=_count(environ, "SLURM_JOB_NUM_NODES"),
+        tasks=_count(environ, "SLURM_NTASKS"),
+        cpus=_count(environ, "SLURM_CPUS_ON_NODE"),
+        partition=environ.get("SLURM_JOB_PARTITION", ""),
+        account=environ.get("SLURM_JOB_ACCOUNT", ""),
+    )
 
 
 class BlueprintRunner(Service, XRunner[TBlueprint]):
@@ -57,8 +132,6 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
     """The instigating request."""
     _result: RunnerResult[TBlueprint]
     """The result produced by the application."""
-    _job_cfg: "JobConfig"
-    """Configuration required to submit jobs on an HPC."""
     _started_at: "datetime | None"
     """When the service started, recorded as the start of the step."""
     products: "list[Product]"
@@ -68,7 +141,6 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         self,
         request: RunnerRequest[TBlueprint],
         service_cfg: "ServiceConfiguration",
-        job_cfg: "JobConfig",
     ) -> None:
         """Initialize the instance with the supplied configuration.
 
@@ -78,13 +150,9 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             A request containing information about the blueprint to run.
         service_cfg: ServiceConfiguration
             Configuration for modifying behavior of the service process.
-        job_cfg: JobConfig
-            Configuration for submitting jobs to an HPC, such as account ID,
-            walltime, job name, and priority.
         """
         Service.__init__(self, service_cfg)
         self._request = request
-        self._job_cfg = job_cfg
         self._result = RunnerResult(
             request,
             RunnerState(ExecutionStatus.UNSUBMITTED),
@@ -130,6 +198,28 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             msg = f"Simulation ended with status: {self.state.status}."
             self.log.warning(msg)
 
+    def _blueprint_file(self, root: Path) -> str:
+        """Locate the blueprint this run loaded within the step root.
+
+        Parameters
+        ----------
+        root : Path
+            The step root, the blueprint's effective working directory.
+
+        Returns
+        -------
+        str
+            The POSIX path of the blueprint relative to `root`; empty for a
+            remote blueprint or one outside `root`.
+        """
+        uri = self.blueprint_uri.strip()
+        if not uri or urlsplit(uri).scheme:
+            return ""
+
+        path = Path(uri).expanduser().resolve()
+        root = root.resolve()
+        return path.relative_to(root).as_posix() if path.is_relative_to(root) else ""
+
     def _write_step_record(self) -> None:
         """Record what this step did in its working directory, with the products its
         application declares merged with those reported while it ran.
@@ -155,11 +245,13 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
                 application=bp.application,
                 blueprint=BlueprintIdentity.of(bp),
                 blueprint_schema_version=bp.schema_version,
+                blueprint_file=self._blueprint_file(root),
                 outcome=str(self.state.status),
                 start_at=self._started_at,
                 finished_at=utc_now(),
                 system=system_name(),
                 versions=package_versions(),
+                execution=execution_facts(os.environ),
                 products=products,
                 errors=list(self.result.errors),
             )
@@ -272,7 +364,7 @@ def create_parser() -> argparse.ArgumentParser:
         ARG_LOGLEVEL_SHORT,
         ARG_LOGLEVEL_LONG,
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
-        type=str,
+        type=str.upper,
         required=False,
         help=ARG_LOGLEVEL_HELP,
         choices=list(LogLevelChoices),
@@ -293,6 +385,11 @@ def create_parser() -> argparse.ArgumentParser:
         ARG_PRE_RUN,
         action="store_true",
         help=ARG_PRE_RUN_HELP,
+    )
+    parser.add_argument(
+        ARG_CLOBBER,
+        action="store_true",
+        help=ARG_CLOBBER_HELP,
     )
     parser.add_argument(
         ARG_STEP,

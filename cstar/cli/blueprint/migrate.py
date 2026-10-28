@@ -4,33 +4,23 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
-from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLI_VERBOSE,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_LOG_LEVEL,
-)
-from cstar.base.feature import is_flag_enabled
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.applications.core import get_application
+from cstar.base.log import get_logger
 from cstar.cli.common import (
+    DEFAULT_LOG_LEVEL_CHOICE,
     SCHEMA_ERRORS,
+    LogLevelOption,
     MigrationRequest,
-    cb_pipeline,
     console,
     execute_migration,
+    exit_on_refused_settings,
     format_validation_errors,
     report_schema_error,
-    set_env,
-    set_flag,
-    update_loggers,
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
     ARG_DRY_RUN,
-    ARG_LOGLEVEL_HELP,
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
@@ -39,7 +29,12 @@ from cstar.execution.file_system import (
     is_remote_resource,
     write_local_copy,
 )
-from cstar.system.migration import CstarMigrationError
+from cstar.orchestration.serialization import validate_serialized_entity
+from cstar.system.migration import (
+    CstarMigrationError,
+    CstarSchemaTooNewError,
+    version_key,
+)
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -50,8 +45,9 @@ HELP_LONG = f"""\
 {HELP_SHORT}
 
 The schema will be updated to the latest available version. If an output
-path is not provided, it will be written next to the existing
-file with the version number appended to the file name.
+path is not provided, it will be written to the C-Star state directory
+(CSTAR_STATE_HOME), named after the existing file with a short digest and
+the version number appended.
 """
 
 
@@ -120,19 +116,18 @@ def target_callback(ctx: typer.Context, value: str) -> str:
     -------
     str
     """
+    # before an existing output can be removed below
+    exit_on_refused_settings()
+
     if not value or not value.strip():
         return value.strip()
 
-    # combine each parameter with its environment variable: a flag enabled
-    # only through the environment is processed after this callback and is
-    # not yet present in ctx.params
+    # click processes options before arguments, so these are in ctx.params
     if ctx.params.get("in_place", False):
         console.print(f"Output path {value!r} will be ignored in in-place mode")
-    elif ctx.params.get("dry_run", False) or is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN):
+    elif ctx.params.get("dry_run", False):
         console.print(f"Output path {value!r} will be ignored during dry-run")
-    elif ctx.params.get("clobber", False) or is_flag_enabled(
-        ENV_CSTAR_CLOBBER_WORKING_DIR
-    ):
+    elif ctx.params.get("clobber", False):
         path = Path(value)
         if path.exists():
             log.debug(f"Clobbering output path: {value}")
@@ -188,8 +183,6 @@ def migrate(
         typer.Option(
             ARG_DRY_RUN,
             help="Generate the migration plan without executing it.",
-            callback=set_flag(ENV_CSTAR_CLI_DRY_RUN),
-            envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
     in_place: t.Annotated[
@@ -205,8 +198,6 @@ def migrate(
         typer.Option(
             ARG_VERBOSE,
             help=ARG_VERBOSE_HELP,
-            callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
-            envvar=ENV_CSTAR_CLI_VERBOSE,
             is_eager=True,
         ),
     ] = False,
@@ -215,22 +206,10 @@ def migrate(
         typer.Option(
             ARG_CLOBBER,
             help=ARG_CLOBBER_HELP,
-            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
-            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
             is_eager=True,
         ),
     ] = False,
-    log_level: t.Annotated[
-        LogLevelChoices,
-        typer.Option(
-            ARG_LOGLEVEL_LONG,
-            ARG_LOGLEVEL_SHORT,
-            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
-            help=ARG_LOGLEVEL_HELP,
-            envvar=ENV_CSTAR_LOG_LEVEL,
-            is_eager=True,
-        ),
-    ] = LogLevelChoices.INFO,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL_CHOICE,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
     report_inplace_conflicts(in_place, clobber)
@@ -241,13 +220,14 @@ def migrate(
             path=Path(path),
             output=target,
             in_place=in_place,
+            dry_run=dry_run,
         )
     except ValidationError as ex:
         errors = format_validation_errors(ex)
         raise typer.BadParameter(errors)
 
     try:
-        result = execute_migration(request)
+        result = execute_migration(request, verbose=verbose)
     except SCHEMA_ERRORS as ex:
         report_schema_error(path, ex)
     except CstarMigrationError as ex:
@@ -261,6 +241,14 @@ def migrate(
 
     if plan.is_compatible:
         app_name = result.migration_result.application
+        if version_key(plan.source) > version_key(plan.target):
+            # a newer minor is this build's to read only if it holds nothing
+            # this build does not know: validating it says so
+            checked = validate_serialized_entity(
+                path, get_application(app_name).blueprint
+            )
+            if isinstance(checked.error, CstarSchemaTooNewError):
+                report_schema_error(path, checked.error)
         msg = (
             f"Blueprint {str(path)!r} is {app_name} schema {plan.source}, "
             f"compatible with this build ({plan.target}); nothing to migrate."
@@ -269,7 +257,7 @@ def migrate(
         return
 
     # a dry run has already shown the plan and persisted nothing
-    if request.dry_run():
+    if request.dry_run:
         return
 
     console.print(f"Migrated blueprint persisted to {str(result.target)!r}")

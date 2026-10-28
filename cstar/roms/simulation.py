@@ -1,4 +1,5 @@
 import copy
+import json
 import logging
 import os
 import re
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 import yaml
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.adapter import (
+from cstar.applications.ucla_roms.adapter import (
     AddtlCodeAdapter,
     BoundaryForcingAdapter,
     CarbonateSensitivityAdapter,
@@ -31,33 +32,24 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.applications.roms_marbl.file_system import (
-    GENERATED_NAMELIST_NAME,
-    ROMS_EXECUTABLE_NAME,
-    RomsFileSystemManager,
-)
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_NPROCS_POST,
-    FLAG_ON,
-    get_env_item,
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
+    ENV_CSTAR_SYSTEM,
 )
-from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import (
-    ENV_FF_DEBUG_BUILD_MODE,
-    is_feature_enabled,
-    is_flag_enabled,
-)
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    cpus_available,
     deep_merge,
     slugify,
 )
+from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import (
     is_remote_resource,
     remove_files,
@@ -66,7 +58,6 @@ from cstar.execution.file_system import (
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
-from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.serialization import load_blueprint
@@ -79,6 +70,12 @@ from cstar.roms.build_verification import (
 )
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.file_system import (
+    BUILD_RECORD_NAME,
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
     CARBONATE_SENSITIVITY_VARIABLES,
@@ -96,15 +93,48 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
     missing_carbonate_sensitivity_variables,
 )
-from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
-from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
+from cstar.roms.namelist import (
+    RomsNamelistBase,
+    namelist_schema_for_ref,
+    namelist_schema_named,
+)
+from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
+from cstar.roms.precheck import (
+    applies_to,
+    averages_end_on_marbl_step_applies_to_schema,
+    check_averages_end_on_marbl_step,
+    check_output_streams_divide_rst,
+)
 from cstar.simulation import Simulation
-from cstar.system.manager import get_sysmgr
+from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr, warn_once
+from cstar.system.scheduler import in_scheduler_job
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
     from cstar.execution.file_system import JobFileSystemManager
     from cstar.execution.handler import ExecutionHandler
+
+
+def _join_workers(n_procs: int) -> int:
+    """Count the threads that join output files at once.
+
+    The join runs on the node where the model ran and never uses more threads
+    than the model had ranks, so a small run on a login node (allowed with
+    `CSTAR_ALLOW_LOGIN_NODE_RUN=1`) does not start `ncjoin`s on a quarter of a
+    large login node's cores.
+
+    Parameters
+    ----------
+    n_procs : int
+        The number of processes the model ran on.
+
+    Returns
+    -------
+    int
+        A quarter of the CPUs this process may run on (see `cpus_available`),
+        capped at `n_procs`, and at least 1.
+    """
+    return max(1, min(cpus_available() // 4, n_procs))
 
 
 def _ncjoin_wildcard(
@@ -184,12 +214,8 @@ class LaunchPlan:
 
     command: str
     """The shell command that launches ROMS."""
-    cpus: int
-    """The number of processes ROMS runs on."""
     run_path: Path
     """The directory ROMS is launched from."""
-    script_path: Path
-    """The path of the scheduler job script."""
     output_file: Path
     """The file ROMS stdout is written to."""
     runtime_settings_file: Path
@@ -278,8 +304,8 @@ class ROMSSimulation(Simulation):
         Compiles the ROMS executable if necessary.
     pre_run()
         Performs pre-processing steps before execution.
-    run(account_key=None, walltime=None, queue_name=None, job_name=None)
-        Submits the ROMS simulation for execution.
+    run(job_name=None)
+        Launches the ROMS simulation as a local process.
     post_run()
         Processes model outputs after execution.
 
@@ -487,6 +513,9 @@ class ROMSSimulation(Simulation):
         # roms-specific
         self.exe_path: Path | None = None
         self._exe_hash: str | None = None
+        # the namelist schema `exe_path` was built for, once `build()` or
+        # `attach()` knows it
+        self._namelist_schema: type[RomsNamelistBase] | None = None
 
         self._execution_handler: ExecutionHandler | None = None
 
@@ -675,10 +704,6 @@ class ROMSSimulation(Simulation):
         """Return the file system manager for the simulation."""
         return cast("RomsFileSystemManager", self._fs_manager)
 
-    def _conditionally_clear_root(self):
-        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
-            self.fs_manager.clear()
-
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
         """Returns the default ROMS external codebase.
@@ -778,10 +803,14 @@ class ROMSSimulation(Simulation):
 
     def _read_raw_namelist(
         self,
-    ) -> tuple["RomsNamelistBase", type["RomsNamelistBase"], str | None]:
-        """Parse the runtime namelist file into the schema selected for this
-        simulation's ucla-roms `checkout_target`, without applying any of
-        `roms_runtime_settings`'s simulation-derived settings.
+    ) -> tuple["RomsNamelistBase", type["RomsNamelistBase"], str]:
+        """Parse the runtime namelist file into this simulation's namelist
+        schema, without applying any of `roms_runtime_settings`'s
+        simulation-derived settings.
+
+        The schema is the one the compiled ROMS executable was built for, when
+        `build()` or `attach()` knows it; otherwise the one this C-Star selects
+        for the ucla-roms `checkout_target`.
 
         Shared by `roms_runtime_settings` (which layers derived settings and
         `namelist_overrides` on top) and `_validate_reference_dates` (which
@@ -794,15 +823,14 @@ class ROMSSimulation(Simulation):
         -------
         tuple[RomsNamelistBase, type[RomsNamelistBase], str]
             The parsed namelist, the schema class it was validated against,
-            and the ucla-roms `checkout_target` used to select that schema.
+            and how that schema was chosen, for error messages.
 
         Raises
         ------
         ValueError
             If the runtime namelist has not been retrieved locally via `setup()` or
             `runtime_code.get()`, or if it fails validation against the schema
-            selected for this simulation's ucla-roms `checkout_target` (the
-            original `pydantic.ValidationError` is chained as `__cause__`).
+            (the original `pydantic.ValidationError` is chained as `__cause__`).
         """
         if self.runtime_code.working_copy is None:
             raise ValueError(
@@ -811,12 +839,14 @@ class ROMSSimulation(Simulation):
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        checkout_target = self.codebase.source.checkout_target
-        codebase_copy = self.codebase.working_copy
-        schema = namelist_schema_for_ref(
-            checkout_target,
-            repo_path=codebase_copy.path if codebase_copy is not None else None,
-        )
+        if self._namelist_schema is not None:
+            schema = self._namelist_schema
+            chosen_by = "recorded when the ROMS executable was built"
+        else:
+            schema = self._select_namelist_schema()
+            chosen_by = (
+                f"selected for ucla-roms ref {self.codebase.source.checkout_target!r}"
+            )
         namelist_path = (
             self.runtime_code.working_copy.common_parent / self._namelist_file
         )
@@ -825,18 +855,29 @@ class ROMSSimulation(Simulation):
         except ValidationError as err:
             raise ValueError(
                 f"namelist at {namelist_path} failed validation against "
-                f"{schema.__name__} (selected for ucla-roms ref "
-                f"{checkout_target!r}). The namelist file may target a "
+                f"{schema.__name__} ({chosen_by}). The namelist file may target a "
                 f"different ucla-roms version than the one this simulation pins."
             ) from err
 
-        return nml, schema, checkout_target
+        return nml, schema, chosen_by
+
+    def _select_namelist_schema(self) -> type["RomsNamelistBase"]:
+        """Select the namelist schema for this simulation's ucla-roms pin, as this C-Star sees it.
+
+        A commit-hash pin is resolved to its release tag in the staged clone, when
+        there is one.
+        """
+        codebase_copy = self.codebase.working_copy
+        return namelist_schema_for_ref(
+            self.codebase.source.checkout_target,
+            repo_path=codebase_copy.path if codebase_copy is not None else None,
+        )
 
     def _layer_namelist_overrides(
         self,
         nml: "RomsNamelistBase",
         schema: type["RomsNamelistBase"],
-        checkout_target: str | None,
+        chosen_by: str,
     ) -> "RomsNamelistBase":
         """Deep-merge `namelist_overrides` onto *nml*, re-validating the result.
 
@@ -857,7 +898,7 @@ class ROMSSimulation(Simulation):
         except ValidationError as err:
             raise ValueError(
                 f"namelist_overrides failed validation against {schema.__name__} "
-                f"(selected for ucla-roms ref {checkout_target!r}); check group and "
+                f"({chosen_by}); check group and "
                 "key names against that schema."
             ) from err
 
@@ -866,8 +907,9 @@ class ROMSSimulation(Simulation):
 
         ROMS runs from `run_dir`, so a path inside this simulation's root directory
         is written relative to it (e.g. `../input/input_datasets/grid.nc`). That
-        keeps the string short (ucla-roms builds filenames in 99-character
-        buffers) and valid when the run directory is moved or copied as a unit. A
+        keeps the string short (ucla-roms reads at most 255 characters of a file
+        name; releases before 0.13.0 cut a longer one off silently) and valid when
+        the run directory is moved or copied as a unit. A
         path outside the root, such as an input dataset used from where it was
         authored, keeps its absolute form rather than a chain of `..`.
 
@@ -892,8 +934,10 @@ class ROMSSimulation(Simulation):
         """Generate and return a :class:`RomsNamelistBase` for the simulation.
 
         Reads the Fortran namelist from the `runtime_code`, validates it into
-        the :class:`~cstar.roms.namelist.RomsNamelistBase` subclass selected
-        by :func:`~cstar.roms.namelist.namelist_schema_for_ref` for this
+        the :class:`~cstar.roms.namelist.RomsNamelistBase` subclass the
+        compiled executable was built for (recorded by `build()`, read back by
+        `attach()`) or, before either, the one
+        :func:`~cstar.roms.namelist.namelist_schema_for_ref` selects for this
         simulation's ucla-roms `checkout_target`, and applies settings in two
         stages:
 
@@ -920,9 +964,8 @@ class ROMSSimulation(Simulation):
         ------
         ValueError
             If the runtime namelist has not been retrieved locally via `setup()` or
-            `runtime_code.get()`, or if it fails validation against the schema
-            selected for this simulation's ucla-roms `checkout_target` (the
-            original `pydantic.ValidationError` is chained as `__cause__`) —
+            `runtime_code.get()`, or if it fails validation against that schema
+            (the original `pydantic.ValidationError` is chained as `__cause__`) —
             this can happen if the namelist file targets a different ucla-roms
             version than the one this simulation pins.
             If `namelist_overrides` fails validation against the selected
@@ -934,7 +977,7 @@ class ROMSSimulation(Simulation):
             If a simulation-derived override value is invalid for its namelist
             field (the namelist models re-validate on assignment).
         """
-        nml, schema, checkout_target = self._read_raw_namelist()
+        nml, schema, chosen_by = self._read_raw_namelist()
 
         if self.initial_conditions:
             nml.initial_conditions.inifile = self._namelist_path(
@@ -993,7 +1036,7 @@ class ROMSSimulation(Simulation):
         # User overrides are layered on last, so they take precedence over
         # any of the derived settings above.
         overrides = self.namelist_overrides
-        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
+        nml = self._layer_namelist_overrides(nml, schema, chosen_by)
 
         # The discretization is authoritative for the processor grid: applied
         # after the override merge so np_xi/np_eta cannot drift from the
@@ -1036,9 +1079,14 @@ class ROMSSimulation(Simulation):
         # applies_to (the precheck landed in ucla-roms 0.5.0) -- gated on
         # `nml`'s own concrete type rather than `schema` (which selected it),
         # since `nml` may have been reassigned to a fresh, still-same-type
-        # instance by the override merge above.
+        # instance by the override merge above. Beside it runs the MARBL-step
+        # rule for the averaged `_cdr` and `_bgc_dia_avg` streams (ucla-roms >=
+        # 0.13.0's check_avg_ends_on_marbl_step), gated the same way.
+        cppdefs = self._active_cppdefs_for_precheck()
         if applies_to(type(nml)):
-            check_output_streams_divide_rst(nml, self._active_cppdefs_for_precheck())
+            check_output_streams_divide_rst(nml, cppdefs)
+        if averages_end_on_marbl_step_applies_to_schema(type(nml)):
+            check_averages_end_on_marbl_step(nml, cppdefs)
 
         return nml
 
@@ -1372,9 +1420,9 @@ class ROMSSimulation(Simulation):
             # be relative to, so they are left as authored
             source = SourceData(location=blueprint)
             data = source.retriever.read()
-            bp = RomsMarblBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
+            bp = UclaRomsBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
         else:
-            bp = load_blueprint(blueprint, RomsMarblBlueprint)
+            bp = load_blueprint(blueprint, UclaRomsBlueprint)
 
         return cls(
             name=bp.name,
@@ -1456,9 +1504,7 @@ class ROMSSimulation(Simulation):
         print_dict["ROMS"] = simulation_tree_dict
         return f"{self.directory}\n{_dict_to_tree(print_dict)}"
 
-    def setup(
-        self,
-    ) -> None:
+    def setup(self, clobber: bool = False) -> None:
         """Prepare this ROMSSimulation locally by fetching necessary files and compiling
         any external codebases.
 
@@ -1471,6 +1517,12 @@ class ROMSSimulation(Simulation):
         2. Fetches and organizes compile-time code.
         3. Fetches and organizes runtime code (e.g., namelists).
         4. Fetches and prepares input datasets.
+
+        Parameters
+        ----------
+        clobber : bool
+            Empty the working directory first, so a prior attempt's files are not
+            reused.
 
         Raises
         ------
@@ -1496,7 +1548,8 @@ class ROMSSimulation(Simulation):
         input_datasets_dir = self.fs_manager.input_datasets_dir
         run_dir = self.fs_manager.run_dir
 
-        self._conditionally_clear_root()
+        if clobber:
+            self.fs_manager.clear()
 
         try:
             compile_time_code_dir.mkdir(parents=True)
@@ -1507,7 +1560,7 @@ class ROMSSimulation(Simulation):
             )  # this one gets made by C-Star FSM
         except OSError as e:
             msg = (
-                f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
+                f"The input directory is not empty. Re-run with {ARG_CLOBBER} "
                 "to delete the directory and continue."
             )
             raise CstarExpectationFailed(msg) from e
@@ -1517,13 +1570,6 @@ class ROMSSimulation(Simulation):
         for codebase in (x for x in self.codebases if x is not None):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
             codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
-
-            # if we're running a workplan, for now, set up a code directory for each
-            # step, otherwise they may try to clobber each other or get tripped up on
-            # detecting existing directories.
-            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
-                shutil.rmtree(codebase_dir)
-
             codebase_dir.mkdir(parents=True, exist_ok=True)
             codebase.setup(codebase_dir)
             os.environ[codebase.root_env_var] = str(codebase_dir)
@@ -1665,7 +1711,8 @@ class ROMSSimulation(Simulation):
         completed.
 
         Every component (codebases, runtime/compile-time code, input
-        datasets and their partitions, the compiled executable) is attached
+        datasets and their partitions, the compiled executable and the
+        namelist schema `build()` recorded for it) is attached
         independently, and a problem with one does not stop the others from
         being checked, so a single call reports everything the working
         directory is missing at once.
@@ -1776,6 +1823,7 @@ class ROMSSimulation(Simulation):
                 try:
                     self._validate_build_flags(build_dir)
                     verify_roms_linkage(exe_path)
+                    self._attach_namelist_schema(build_dir)
                     self.exe_path = exe_path
                     self._exe_hash = _get_sha256_hash(exe_path)
                     self.log.debug(f"Attached ROMS executable at {exe_path}")
@@ -1802,6 +1850,12 @@ class ROMSSimulation(Simulation):
                 f"components:\n{problem_list}\n"
                 "Re-run the step with --clobber to start over."
             )
+            if not self.use_pio:
+                msg += (
+                    f" Note that --clobber deletes {self.fs_manager.temp_output_dir}, "
+                    "which holds the interrupted attempt's unjoined outputs, "
+                    "including its restart pieces; move it aside first to keep them."
+                )
             raise CstarExpectationFailed(msg)
 
         msg = f"Attached previously staged simulation {self.name!r}"
@@ -1879,6 +1933,14 @@ class ROMSSimulation(Simulation):
             )
             return
 
+        # an executable this build replaces takes its record with it, so a
+        # record never outlives the build it describes
+        self._namelist_schema = None
+        try:
+            (build_dir / BUILD_RECORD_NAME).unlink(missing_ok=True)
+        except OSError as e:
+            self.log.warning(f"Could not remove the previous ROMS build record: {e}")
+
         if (build_dir / "Compile").is_dir():
             _run_cmd(
                 "make compile_clean",
@@ -1890,7 +1952,7 @@ class ROMSSimulation(Simulation):
         self._ensure_makefile(build_dir)
 
         mode_clause = ""
-        if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
+        if is_flag_enabled(ENV_CSTAR_DEBUG_BUILD_MODE):
             mode_clause = "BUILD_MODE=debug "
 
         cstar_sysmgr = get_sysmgr()
@@ -1916,9 +1978,90 @@ class ROMSSimulation(Simulation):
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
+        self._namelist_schema = self._select_namelist_schema()
+        self._write_build_record(build_dir, self._namelist_schema)
+
+    def _write_build_record(
+        self, build_dir: Path, schema: type[RomsNamelistBase]
+    ) -> None:
+        """Record beside the compiled executable the namelist schema it was built for.
+
+        `attach()` reads it back, so a resumed run writes the namelist the
+        executable reads even after a C-Star upgrade adds a schema that its
+        ucla-roms pin (a branch, or a commit hash that cannot be resolved to a
+        release) would now select. A failed write is logged, not raised; a resume
+        then selects the schema from the pin, as for a build by an earlier C-Star.
+
+        Parameters
+        ----------
+        build_dir : Path
+            The directory holding the compiled executable.
+        schema : type[RomsNamelistBase]
+            The namelist schema selected for the build.
+        """
+        codebase_copy = self.codebase.working_copy
+        record = {
+            "namelist_schema": schema.__name__,
+            "ucla_roms_ref": self.codebase.source.checkout_target,
+            "ucla_roms_commit": (
+                codebase_copy.checkout_hash if codebase_copy is not None else ""
+            ),
+        }
+        path = build_dir / BUILD_RECORD_NAME
+        try:
+            path.write_text(json.dumps(record, indent=2) + "\n")
+        except OSError as e:
+            self.log.warning(
+                f"Could not record the namelist schema of the ROMS build at {path}: {e}"
+            )
+
+    def _attach_namelist_schema(self, build_dir: Path) -> None:
+        """Adopt the namelist schema recorded by `build()` for the executable in `build_dir`.
+
+        A build by an earlier C-Star has no record, and a record that cannot be
+        read is warned about; either way the schema is then selected from the
+        ucla-roms pin, as before the record existed.
+
+        Parameters
+        ----------
+        build_dir : Path
+            The directory holding the compiled executable.
+
+        Raises
+        ------
+        ValueError
+            If the record names a schema this C-Star does not have.
+        """
+        self._namelist_schema = None
+        path = build_dir / BUILD_RECORD_NAME
+        if not path.exists():
+            self.log.debug(
+                f"No build record at {path}; selecting the namelist schema "
+                "from the ucla-roms ref"
+            )
+            return
+        try:
+            name = json.loads(path.read_text())["namelist_schema"]
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            self.log.warning(
+                f"Could not read the namelist schema the ROMS executable was built "
+                f"for from {path} ({e!r}); selecting it from the ucla-roms ref instead"
+            )
+            return
+        schema = namelist_schema_named(name)
+        if schema is None:
+            raise ValueError(
+                f"it was built for namelist schema {name!r} (recorded in {path}), "
+                "which this C-Star does not have. If a newer C-Star built it, "
+                "upgrade cstar-ocean; otherwise the executable must be rebuilt"
+            )
+        self._namelist_schema = schema
 
     def _validate_build_flags(self, build_dir: Path) -> None:
-        """Ensure the staged `cppdefs.opt` agrees with `use_pio` and `auto_tiling`.
+        """Ensure the staged `cppdefs.opt` agrees with the simulation's build flags.
+
+        Checks `use_pio` (`PARALLEL_IO`), `auto_tiling` (`MPI_MASKING`) and the
+        presence of `cdr_forcing` (`CDR_FORCING`).
 
         Shared by `build()` (before compiling) and `attach()` (before adopting
         a previously compiled executable), so a resumed run fails as loudly
@@ -1962,6 +2105,18 @@ class ROMSSimulation(Simulation):
                 f"auto_tiling is True but 'MPI_MASKING' is not defined in "
                 f"{cppdefs}. Either add '#define MPI_MASKING' to cppdefs.opt or "
                 "set partitioning.auto_tiling to false."
+            ),
+        )
+        self._validate_cppdef_flag(
+            build_dir,
+            define="CDR_FORCING",
+            enabled=self.cdr_forcing is not None,
+            error_if_missing=(
+                f"CDR forcing is given but 'CDR_FORCING' is not defined in "
+                f"{cppdefs}, so ROMS would stage the CDR forcing file and never "
+                "read it. Build with CDR forcing enabled (in a forge blueprint, "
+                "set cdr.mode, e.g. upscaled; otherwise add '#define CDR_FORCING' "
+                "to cppdefs.opt) or remove the CDR forcing."
             ),
         )
 
@@ -2183,8 +2338,8 @@ class ROMSSimulation(Simulation):
         # property also derives per-dataset grid/initial-condition paths,
         # which for a non-`use_pio` simulation require partitioning -- the
         # very step this check must run before.
-        nml, schema, checkout_target = self._read_raw_namelist()
-        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
+        nml, schema, chosen_by = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, chosen_by)
         year, month, day = nml.reference_date_settings.reference_date
         namelist_reference_date = datetime(year, month, day)
 
@@ -2264,8 +2419,8 @@ class ROMSSimulation(Simulation):
         if not self._active_cppdefs_for_precheck().get("cdr_lite", False):
             return
 
-        nml, schema, checkout_target = self._read_raw_namelist()
-        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
+        nml, schema, chosen_by = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, chosen_by)
         # Only the 0.9.0+ schema has the group; a build old enough to lack it
         # cannot compute the sensitivities online either.
         settings = getattr(nml, "cdr_lite_settings", None)
@@ -2305,15 +2460,15 @@ class ROMSSimulation(Simulation):
 
         Creates the run, logs and output directories, writes the ROMS namelist
         (which validates the runtime settings), rotates a previous attempt's
-        job script and ROMS stdout, and links the executable into the run
-        directory. Idempotent apart from rotating a previous attempt's
-        namelist, script and log files to `.1`, `.2`, ...
+        ROMS stdout, and links the executable into the run directory.
+        Idempotent apart from rotating a previous attempt's namelist and log
+        files to `.1`, `.2`, ...
 
         Parameters
         ----------
         job_name : str, optional
-            The name of the job, which also sets the job script and output file
-            names. Defaults to the simulation name.
+            The name of the job, which also sets the output file name
+            (`<job_name>.out`). Defaults to the simulation name.
 
         Returns
         -------
@@ -2365,14 +2520,11 @@ class ROMSSimulation(Simulation):
         rotate_file(runtime_settings_file)
         self.roms_runtime_settings.write(runtime_settings_file)
 
-        script_name = job_name or self.name
-        safe_name = slugify(script_name)
-        script_path = run_path / f"{safe_name}.sh"
+        safe_name = slugify(job_name or self.name)
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
-        # rotate out a previous attempt's job script and ROMS stdout, same as
-        # the namelist above, so they survive as `.1`, `.2`, ...
-        rotate_file(script_path)
+        # rotate out a previous attempt's ROMS stdout, same as the namelist
+        # above, so it survives as `.1`, `.2`, ...
         rotate_file(output_file)
 
         # symlink roms exe into run dir to simplify running by hand for troubleshooting.
@@ -2394,40 +2546,64 @@ class ROMSSimulation(Simulation):
         )
         return LaunchPlan(
             command=roms_exec_cmd,
-            cpus=n_procs,
             run_path=run_path,
-            script_path=script_path,
             output_file=output_file,
             runtime_settings_file=runtime_settings_file,
         )
 
-    def run(
-        self,
-        account_key: str | None = None,
-        walltime: str | None = None,
-        queue_name: str | None = None,
-        job_name: str | None = None,
-    ) -> "ExecutionHandler":
-        """Execute the ROMS simulation.
+    @staticmethod
+    def check_launch_location() -> None:
+        """Refuse a launch outside a scheduler job on a system that has a scheduler.
+
+        ROMS always runs as a local process of the calling process. On a system
+        with a scheduler, outside any scheduler job (a login node, say), that
+        would run the model where it does not belong. On a cluster C-Star does
+        not recognise, whose generic context has no scheduler while the machine
+        shows one, the launch may be in the same place but C-Star cannot be sure,
+        so it warns once instead. The answer depends only on the process and the
+        system, so a caller can ask before it builds a simulation.
+
+        Raises
+        ------
+        CstarError
+            If the system has a scheduler, the process is not inside a scheduler
+            job, and `CSTAR_ALLOW_LOGIN_NODE_RUN` is not set to `1`.
+        """
+        cstar_sysmgr = get_sysmgr()
+        if in_scheduler_job(os.environ) or is_flag_enabled(
+            ENV_CSTAR_ALLOW_LOGIN_NODE_RUN
+        ):
+            return
+        if cstar_sysmgr.scheduler is not None:
+            raise CstarError(
+                f"Refusing to launch ROMS outside a scheduler job on {cstar_sysmgr.name}, "
+                "which has a scheduler. Submit it with 'cstar blueprint submit "
+                "<blueprint>', run it inside an allocation, or set "
+                f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run it here anyway."
+            )
+        selection = cstar_sysmgr.selection
+        if family := selection.unsupported_scheduler(os.environ):
+            warn_once(
+                "ROMS will run outside a scheduler job on a machine with a "
+                f"{family} scheduler, which the system {selection.describe()} "
+                "cannot submit to. If this is a login node, stop it and run it inside "
+                "an allocation (salloc, qsub -I, or your own batch script). Set "
+                f"{ENV_CSTAR_SYSTEM} to the system's name if C-Star lists it, or "
+                f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run here without this "
+                f"warning (see {DOCS_MACHINES_URL})."
+            )
+
+    def run(self, job_name: str | None = None) -> "ExecutionHandler":
+        """Execute the ROMS simulation as a local process.
 
         Prepares the launch (see `prepare_launch`) and runs the compiled ROMS
-        executable using the configured environment. If a job scheduler is
-        available, the simulation is submitted as a scheduled job; otherwise,
-        it runs as a local process.
+        executable using the configured environment.
 
         Parameters
         ----------
-        account_key : str, optional
-            The user's account key on the system (required if using a job scheduler).
-        queue_name : str, optional
-            The name of the scheduler queue to submit the job to. Defaults to the
-            system's primary queue.
-        walltime : str, optional
-            The maximum allowed execution time for a scheduler job in HH:MM:SS format.
-            Defaults to the queue's max walltime if a scheduler is used.
         job_name : str, optional
-            The name of the job submitted to the scheduler, which also sets
-            the output file name `job_name.out`.
+            The name of the run, which also sets the output file name
+            (`<job_name>.out`). Defaults to the simulation name.
 
         Returns
         -------
@@ -2437,83 +2613,43 @@ class ROMSSimulation(Simulation):
 
         Raises
         ------
+        CstarError
+            If the system has a scheduler and the process is not inside a
+            scheduler job (see `check_launch_location`).
         ValueError
-            - If the preconditions of `prepare_launch` are not met.
-            - If `account_key` is required but not provided for scheduled jobs.
+            If the preconditions of `prepare_launch` are not met.
         RuntimeError
             If ROMS fails to start or encounters an execution error.
 
         Notes
         -----
-        - If no scheduler is available, ROMS runs as a local process using
-          MPI (`mpiexec` or equivalent).
+        - ROMS runs as a local process using MPI (`mpiexec` or equivalent).
         - The number of time steps is computed based on `start_date` and `end_date`
           if they are set; otherwise, a default of 1 time step is used.
 
         Examples
         --------
-        Running locally:
         >>> execution = simulation.run()
         >>> execution.status
         'RUNNING'
-
-        Running with a scheduler:
-        >>> execution = simulation.run(account_key="ABC123", job_name="roms_simulation")
-        >>> execution.status
-        'QUEUED'
 
         See Also
         --------
         pre_run : Prepares the input data before running.
         post_run : Handles output processing after execution.
         """
+        self.check_launch_location()
         plan = self.prepare_launch(job_name)
 
-        cstar_sysmgr = get_sysmgr()
-
-        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
-            queue_name = cstar_sysmgr.scheduler.primary_queue_name
-        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
-            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
-
-        ## 2: RUN ROMS
-
         self.log.info(f"Running {plan.command}")
-        # If this simulation is already in a scheduler job, don't create a new one, just run it locally.
-        if (
-            cstar_sysmgr.scheduler is not None
-            and not cstar_sysmgr.scheduler.in_active_allocation
-        ):
-            if account_key is None:
-                raise ValueError(
-                    "please call Simulation.run() with a value for account_key"
-                )
-
-            job_instance = create_scheduler_job(
-                commands=plan.command,
-                job_name=job_name,
-                cpus=plan.cpus,
-                account_key=account_key,
-                run_path=plan.run_path,
-                script_path=plan.script_path,
-                queue_name=queue_name,
-                walltime=walltime,
-                output_file=plan.output_file,
-            )
-
-            job_instance.submit()
-            self._execution_handler = job_instance
-            return job_instance
-
-        else:  # cstar_sysmgr.scheduler is None
-            romsprocess = LocalProcess(
-                commands=plan.command,
-                run_path=plan.run_path,
-                output_file=plan.output_file,
-            )
-            self._execution_handler = romsprocess
-            romsprocess.start()
-            return romsprocess
+        romsprocess = LocalProcess(
+            commands=plan.command,
+            run_path=plan.run_path,
+            output_file=plan.output_file,
+        )
+        self._execution_handler = romsprocess
+        romsprocess.start()
+        return romsprocess
 
     def post_run(self) -> None:
         """Perform post-processing steps after the ROMS simulation run.
@@ -2594,12 +2730,15 @@ class ROMSSimulation(Simulation):
                 logger=self.log,
             )
 
-        nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
         unique_wildcards = {
             str(Path(fname.stem).with_suffix(".*.nc")) for fname in files
         }
 
-        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+        # `run` launched ROMS, so `prepare_launch` has checked the rank count
+        n_procs = self.discretization.n_procs_tot
+        assert n_procs is not None
+
+        with ThreadPoolExecutor(max_workers=_join_workers(n_procs)) as executor:
             # list() exhausts the returned iterator, which is needed to surface any errors
             # that were raised in the threaded join operations
             list(executor.map(_spatial_join, unique_wildcards))

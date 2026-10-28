@@ -1,6 +1,6 @@
 import asyncio
 import errno
-import json
+import logging
 import shutil
 import textwrap
 import threading
@@ -21,26 +21,24 @@ from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
-    PersistenceMode,
-    _mode_detect,
     anchor_blueprint_file,
     anchor_relative_path,
     deserialize,
     deserialize_all,
     load_blueprint,
+    model_to_yaml,
     read_blueprint_raw,
     read_document,
-    read_json_to_raw,
     read_raw,
     read_yaml_to_raw,
     rebase_paths,
-    render_model,
     serialize,
 )
 from cstar.orchestration.state import StateRepository
+from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
 
 
-def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
+def test_serialization_aliased_fields(tmp_path: Path) -> None:
     """Verify that an aliased field is serialized and deserialized."""
     exp_value = "foo"
 
@@ -50,9 +48,9 @@ def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
     model = FakeModel(the_value=exp_value)
     assert model.value == exp_value
 
-    serialize_to = tmp_path / "fake.json"
+    serialize_to = tmp_path / "fake.yaml"
 
-    serialize(serialize_to, model, mode=PersistenceMode.auto)
+    serialize(serialize_to, model)
     reloaded = deserialize(serialize_to, FakeModel)
 
     assert reloaded.value == model.value
@@ -196,7 +194,7 @@ def test_serialization_workplan_happy_path(
     assert workplan.name == "test-workplan"
     assert workplan.steps[0].name == "Test Step"
     assert not workplan.steps[0].depends_on
-    assert workplan.steps[0].application == Application.ROMS_MARBL
+    assert workplan.steps[0].application == Application.UCLA_ROMS
     assert workplan.steps[0].blueprint_overrides == {}
     assert workplan.steps[0].workflow_overrides["segment_length"] in {16, 16.0}
     slurm_overrides = t.cast(
@@ -345,83 +343,169 @@ def test_serialization_workplan_steps_with_directives(
     assert wp2.steps[-1].directives == wp.steps[-1].directives
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [
-        PersistenceMode.json,
-        PersistenceMode.yaml,
-    ],
-)
-def test_serialization_handle(mode: PersistenceMode) -> None:
+def test_serialization_handle() -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
     pid, job_name, run_id = "test-pid", "abc123", "fake-run-id"
     handle = SlurmHandle(pid=pid, name=job_name, run_id=run_id)
 
-    persist_as = StateRepository.sentinel_path(handle, mode=mode)
+    persist_as = StateRepository.sentinel_path(handle)
 
-    # confirm the parametrized serialization mode is supported
-    nbytes = serialize(
-        persist_as,
-        handle,
-        mode,
-    )
+    nbytes = serialize(persist_as, handle)
     assert nbytes > 0
 
     print(f"Task persisted to: {persist_as}")
     print(persist_as.read_text(encoding="utf-8"))
 
     # confirm the output from `serialize` is valid and can be deserialized
-    dhandle: SlurmHandle = deserialize(
-        persist_as,
-        SlurmHandle,
-        mode,
-    )
+    dhandle: SlurmHandle = deserialize(persist_as, SlurmHandle)
 
     assert dhandle.name == handle.name
     assert dhandle.pid == handle.pid
     assert dhandle.run_id == run_id
 
 
-def test_serializaton_json_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
-    """Verify a json-serialized file contains a schema reference."""
-    target = tmp_path / "output.json"
-
-    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
-
-    assert serialize(target, bp, mode=PersistenceMode.auto)
-
-    content = target.read_text()
-    assert '"$schema":"http' in content
-    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
-
-
 def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
-    """Verify a YAML-serialized file contains a schema reference."""
+    """Verify a YAML-serialized file contains a schema reference, and that it
+    names the version the file is written at: the build's, for an older blueprint.
+    """
     target = tmp_path / "output.yaml"
+    current = PlotterBlueprint.model_fields["schema_version"].default
 
     bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+    assert bp.schema_version != current, "the fixture must be an older blueprint"
 
-    assert serialize(target, bp, mode=PersistenceMode.auto)
+    assert serialize(target, bp)
 
     content = target.read_text()
     assert "# yaml-language-server: $schema=" in content
-    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
+    assert f"{bp.application}_schema.{current}.json" in content
+    assert f"schema_version: {current}" in content
+    assert bp.schema_version == "2.0.0", "writing leaves the model unchanged"
 
 
-def test_mode_detect_unknown_extension_defaults_to_yaml(
+def test_unknown_extension_reads_as_yaml(
     plotter_v2_0_0_bp: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify an unrecognized extension falls back to YAML without printing to stdout."""
+    """Verify a file with an unrecognized extension reads as YAML without printing
+    to stdout.
+    """
     target = tmp_path / "workplan_original.bak"
     bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
-    assert serialize(target, bp, mode=PersistenceMode.yaml)
+    assert serialize(target, bp)
     capsys.readouterr()
 
-    assert _mode_detect(target) == PersistenceMode.yaml
-    assert deserialize(target, PlotterBlueprint, mode=PersistenceMode.auto) == bp
+    # written at the build's version, which is newer than the fixture's
+    current = PlotterBlueprint.model_fields["schema_version"].default
+    assert deserialize(target, PlotterBlueprint) == bp.model_copy(
+        update={"schema_version": current}
+    )
     assert capsys.readouterr().out == ""
+
+
+def _plotter_document(version: str, **extra: t.Any) -> dict[str, t.Any]:
+    """Describe a plotter blueprint document of `version`."""
+    return {
+        "name": "plotter",
+        "application": "plotter",
+        "schema_version": version,
+        "description": "plot outputs",
+        "input_dir": "/data/out",
+        "variables": ["ALK"],
+        "time_indices": [-1],
+        "s_indices": [0],
+        "grid_file_path": "/data/grid.nc",
+        **extra,
+    }
+
+
+def _newer_plotter_version() -> str:
+    """Name a minor version of the plotter schema newer than this build's."""
+    major, minor, _ = PlotterBlueprint.model_fields["schema_version"].default.split(".")
+    return f"{major}.{int(minor) + 1}.0"
+
+
+@pytest.mark.parametrize("read", [deserialize, load_blueprint])
+def test_a_newer_minor_blueprint_without_new_keys_loads(
+    tmp_path: Path, read: Callable[[Path, type[PlotterBlueprint]], PlotterBlueprint]
+) -> None:
+    """Verify a blueprint a newer minor release wrote loads when it holds nothing
+    this build does not know, keeps its version, and is written back at it, with
+    a `$schema` header naming that version.
+    """
+    newer = _newer_plotter_version()
+    path = tmp_path / "newer.yaml"
+    path.write_text(yaml.safe_dump(_plotter_document(newer)))
+
+    bp = read(path, PlotterBlueprint)
+
+    assert bp.schema_version == newer
+    assert bp.unknown_keys == ()
+    target = tmp_path / "out.yaml"
+    assert serialize(target, bp)
+    content = target.read_text()
+    assert f"schema_version: {newer}" in content
+    assert f"plotter_schema.{newer}.json" in content
+
+
+@pytest.mark.parametrize("read", [deserialize, load_blueprint])
+def test_a_newer_minor_blueprint_with_a_new_key_is_refused(
+    tmp_path: Path, read: Callable[[Path, type[PlotterBlueprint]], PlotterBlueprint]
+) -> None:
+    """Verify a blueprint a newer minor release wrote with a key this build does
+    not know is refused with the upgrade message, labelled by its application and
+    naming the key.
+    """
+    newer = _newer_plotter_version()
+    path = tmp_path / "newer.yaml"
+    path.write_text(yaml.safe_dump(_plotter_document(newer, future_field=1)))
+
+    with pytest.raises(CstarSchemaTooNewError) as caught:
+        read(path, PlotterBlueprint)
+
+    assert caught.value.application == "plotter"
+    assert caught.value.unknown == ("future_field",)
+    assert str(caught.value).startswith(f"plotter schema {newer} is newer")
+    assert "sets future_field" in str(caught.value)
+
+
+def test_a_newer_major_blueprint_is_refused(tmp_path: Path) -> None:
+    """Verify a blueprint of a newer major is refused whatever it holds."""
+    path = tmp_path / "newer.yaml"
+    path.write_text(yaml.safe_dump(_plotter_document("99.0.0")))
+
+    with pytest.raises(CstarSchemaTooNewError, match="plotter schema 99.0.0"):
+        deserialize(path, PlotterBlueprint)
+
+
+def test_a_blueprint_tolerated_with_unknown_keys_will_not_be_written() -> None:
+    """Verify a blueprint read with unknown keys ignored refuses `model_to_yaml`."""
+    newer = _newer_plotter_version()
+
+    bp = PlotterBlueprint.model_validate(
+        _plotter_document(newer, future_field=1), context={TOLERATE_UNKNOWN: True}
+    )
+
+    assert bp.unknown_keys == ("future_field",)
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean to write"):
+        model_to_yaml(bp)
+
+
+def test_model_to_yaml_stamps_an_older_blueprint_with_the_builds_version() -> None:
+    """Verify a blueprint read from an older version is written at the build's
+    version, in the `schema_version` key and the `$schema` header alike.
+    """
+    current = PlotterBlueprint.model_fields["schema_version"].default
+    bp = PlotterBlueprint.model_validate(_plotter_document("2.0.0"))
+    assert bp.schema_version == "2.0.0"
+
+    content = model_to_yaml(bp)
+
+    assert f"schema_version: {current}" in content
+    assert f"plotter_schema.{current}.json" in content
+    assert "plotter_schema.2.0.0.json" not in content
+    assert bp.schema_version == "2.0.0", "writing leaves the model unchanged"
 
 
 @pytest.fixture
@@ -475,10 +559,12 @@ def person_json(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize(
     "source_fixture",
-    ["person_yaml", "person_yml"],
+    ["person_yaml", "person_yml", "person_json"],
 )
 def test_read_yaml_to_raw(request: pytest.FixtureRequest, source_fixture: str) -> None:
-    """Verify yaml parsing results in the expected dictionary."""
+    """Verify yaml parsing results in the expected dictionary, also for a
+    document written as JSON.
+    """
     person_doc = request.getfixturevalue(source_fixture)
     d = read_yaml_to_raw(person_doc)
 
@@ -496,46 +582,14 @@ def test_read_yaml_to_raw(request: pytest.FixtureRequest, source_fixture: str) -
     assert "Grits" in pets
 
 
-def test_read_json_to_raw(person_json: Path) -> None:
-    """Verify json parsing results in the expected dictionary."""
-    d = read_json_to_raw(person_json)
-
-    person = d.get("person", {})
-    assert person
-    assert person["name"] == "unit test"
-    assert person["age"] == 42
-
-    address = person.get("address", {})
-    assert address
-    assert address["street"] == "101 main st"
-
-    pets = person.get("pets", [])
-    assert "Waffles" in pets
-    assert "Grits" in pets
-
-
 @pytest.mark.parametrize(
-    ("source_fixture", "mode"),
-    [
-        pytest.param("person_yaml", PersistenceMode.yaml, id="mode:correct:yaml"),
-        pytest.param("person_yaml", PersistenceMode.auto, id="mode:auto:yaml"),
-        pytest.param("person_yaml", PersistenceMode.json, id="mode:fallback:yaml"),
-        pytest.param("person_yml", PersistenceMode.yaml, id="mode:correct:yml"),
-        pytest.param("person_yml", PersistenceMode.auto, id="mode:auto:yml"),
-        pytest.param("person_yml", PersistenceMode.json, id="mode:fallback:yml"),
-        pytest.param("person_json", PersistenceMode.json, id="mode:correct:json"),
-        pytest.param("person_json", PersistenceMode.auto, id="mode:auto:json"),
-        pytest.param("person_json", PersistenceMode.yaml, id="mode:fallback:json"),
-    ],
+    "source_fixture",
+    ["person_yaml", "person_yml", "person_json"],
 )
-def test_read_raw(
-    request: pytest.FixtureRequest, source_fixture: str, mode: PersistenceMode
-) -> None:
-    """Verify the automatic read mode selects the right reader and
-    failures are recovered by falling back to the alternate reader.
-    """
+def test_read_raw(request: pytest.FixtureRequest, source_fixture: str) -> None:
+    """Verify each document reads into the expected dictionary."""
     path = request.getfixturevalue(source_fixture)
-    d = read_raw(path, mode=mode)
+    d = read_raw(path)
 
     person = d.get("person", {})
     assert person
@@ -549,35 +603,6 @@ def test_read_raw(
     pets = person.get("pets", [])
     assert "Waffles" in pets
     assert "Grits" in pets
-
-
-def test_read_raw_no_auto(
-    person_yaml: Path,
-    person_json: Path,
-) -> None:
-    """Verify that auto-mode does not take precedence over supplied mode value.
-
-    This test renames the file(s) so auto-mode would fail.
-    """
-    renamed0 = person_yaml.rename(person_yaml.with_suffix(".stuff"))
-    d0 = read_raw(renamed0, mode=PersistenceMode.yaml)
-
-    renamed1 = person_json.rename(person_json.with_suffix(".other"))
-    d1 = read_raw(renamed1, mode=PersistenceMode.json)
-
-    for d in [d0, d1]:
-        person = d.get("person", {})
-        assert person
-        assert person["name"] == "unit test"
-        assert person["age"] == 42
-
-        address = person.get("address", {})
-        assert address
-        assert address["street"] == "101 main st"
-
-        pets = person.get("pets", [])
-        assert "Waffles" in pets
-        assert "Grits" in pets
 
 
 def test_read_raw_file_dne(tmp_path: Path) -> None:
@@ -652,7 +677,7 @@ async def test_deserialize_all_honours_supplied_semaphore(tmp_path: Path) -> Non
     lock = threading.Lock()
     state = {"in_flight": 0, "peak": 0}
 
-    def fake_try_deserialize(path, klass, mode=PersistenceMode.auto):
+    def fake_try_deserialize(path, klass):
         with lock:
             state["in_flight"] += 1
             state["peak"] = max(state["peak"], state["in_flight"])
@@ -798,6 +823,94 @@ def test_live_workplan_load_missing_file(tmp_path: Path) -> None:
     assert LiveWorkplan.try_load(tmp_path / "absent.yaml") is None
 
 
+def _newer_transformed_workplan(root: Path, *, key: str = "") -> Path:
+    """Write a transformed workplan as a newer minor release would, with `key`
+    (if any) set at the top level.
+    """
+    path = _write_transformed_workplan(root)
+    current = LiveWorkplan.model_fields["schema_version"].default
+    text = path.read_text()
+    assert f"schema_version: {current}" in text
+    major, minor, _ = current.split(".")
+    newer = f"{major}.{int(minor) + 1}.0"
+    text = text.replace(f"schema_version: {current}", f"schema_version: {newer}")
+    path.write_text(text + (f"{key}: true\n" if key else ""))
+    return path
+
+
+def test_live_workplan_load_reads_a_newer_minor_without_new_keys(
+    tmp_path: Path,
+) -> None:
+    """Verify a transformed workplan a newer minor release wrote loads, strictly,
+    when it holds nothing this build does not know, and is written at its version.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run")
+
+    workplan = LiveWorkplan.load(path)
+
+    assert (
+        workplan.schema_version != LiveWorkplan.model_fields["schema_version"].default
+    )
+    assert workplan.unknown_keys == ()
+    assert serialize(tmp_path / "again.yaml", workplan)
+    assert (
+        f"schema_version: {workplan.schema_version}"
+        in (tmp_path / "again.yaml").read_text()
+    )
+
+
+def test_live_workplan_load_refuses_a_newer_minor_with_a_new_key(
+    tmp_path: Path,
+) -> None:
+    """Verify a strict load of a transformed workplan with a key this build does
+    not know is refused naming the key, and that `try_load` yields `None`.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run", key="future_field")
+
+    with pytest.raises(CstarSchemaTooNewError, match="sets future_field") as caught:
+        LiveWorkplan.load(path)
+
+    assert caught.value.unknown == ("future_field",)
+    assert LiveWorkplan.try_load(path) is None
+
+
+def test_live_workplan_load_tolerant_ignores_a_new_key_and_will_not_write_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a tolerant load keeps the workplan for display with a warning that
+    names the key, and that serializing it is refused.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run", key="future_field")
+
+    with caplog.at_level(logging.WARNING):
+        workplan = LiveWorkplan.load(path, tolerant=True)
+    tried = LiveWorkplan.try_load(path, tolerant=True)
+
+    assert workplan.unknown_keys == ("future_field",)
+    assert tried is not None
+    assert any(
+        "future_field" in r.getMessage() and str(path) in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+    )
+    target = tmp_path / "again.yaml"
+    with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+        serialize(target, workplan)
+    assert not target.exists()
+
+
+async def test_live_workplan_load_all_is_tolerant(tmp_path: Path) -> None:
+    """Verify the batch loader, which lists workplans, loads one holding a key a
+    newer release wrote.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run", key="future_field")
+
+    (result,) = await LiveWorkplan.load_all([path], limit=1)
+
+    assert result is not None
+    assert result.unknown_keys == ("future_field",)
+
+
 async def test_live_workplan_load_all_returns_none_for_unreadable(
     tmp_path: Path,
 ) -> None:
@@ -861,7 +974,7 @@ def test_read_document_drops_the_schema_key(tmp_path: Path) -> None:
     path.write_text("$schema: https://example.org/s.json\nvalue: 1\n")
 
     assert read_document(path) == {"value": 1}
-    assert read_document(str(path), PersistenceMode.yaml) == {"value": 1}
+    assert read_document(str(path)) == {"value": 1}
     with pytest.raises(FileNotFoundError):
         read_document(tmp_path / "absent.yaml")
 
@@ -1156,10 +1269,7 @@ def test_load_blueprint_reports_every_stranded_location(
     assert "'b.nc'" in message
 
 
-@pytest.mark.parametrize("suffix", [".yaml", ".json"])
-def test_anchor_blueprint_file_rewrites_the_file_in_place(
-    tmp_path: Path, suffix: str
-) -> None:
+def test_anchor_blueprint_file_rewrites_the_file_in_place(tmp_path: Path) -> None:
     """Verify every relative location, found or not, becomes absolute in the file,
     and nothing else about the document changes.
     """
@@ -1176,18 +1286,12 @@ def test_anchor_blueprint_file_rewrites_the_file_in_place(
             ]
         },
     }
-    path = tmp_path / f"bp{suffix}"
-    path.write_text(
-        json.dumps(document) if suffix == ".json" else yaml.safe_dump(document)
-    )
+    path = tmp_path / "bp.yaml"
+    path.write_text(yaml.safe_dump(document))
 
     anchor_blueprint_file(path, base_dir)
 
-    written = (
-        json.loads(path.read_text())
-        if suffix == ".json"
-        else yaml.safe_load(path.read_text())
-    )
+    written = yaml.safe_load(path.read_text())
     assert [r["location"] for r in written["grid"]["data"]] == [
         (base_dir / "here.nc").as_posix(),
         (base_dir / "missing.nc").as_posix(),
@@ -1267,19 +1371,6 @@ class _Doc(BaseModel):
     count: int = Field(default=3)
 
 
-def test_render_model_yaml_and_json() -> None:
-    """Verify a model renders as YAML (defaults excluded) or JSON text."""
-    model = _Doc(name="y")
-
-    assert yaml.safe_load(render_model(model)) == {"name": "y"}
-    assert yaml.safe_load(render_model(model, PersistenceMode.yaml)) == {"name": "y"}
-    assert json.loads(render_model(model, PersistenceMode.json)) == {
-        "name": "y",
-        "count": 3,
-    }
-
-
-def test_render_model_rejects_auto() -> None:
-    """Verify `auto` is refused, since there is no path to detect a mode from."""
-    with pytest.raises(ValueError, match="mode"):
-        render_model(_Doc(), PersistenceMode.auto)
+def test_model_to_yaml_excludes_defaults() -> None:
+    """Verify a model renders as YAML with its defaults excluded."""
+    assert yaml.safe_load(model_to_yaml(_Doc(name="y"))) == {"name": "y"}

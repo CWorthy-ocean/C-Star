@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import socket
 import textwrap
 import typing as t
 import uuid
@@ -19,20 +20,26 @@ from cstar.applications.hello_world import (
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
+from cstar.entrypoint.runner import execution_facts
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
-from cstar.orchestration.manifest import STEP_RECORD_NAME, read_step_record
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    ExecutionFacts,
+    read_step_record,
+)
 from cstar.orchestration.models import BlueprintIdentity, Workplan, WorkplanState
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ORCH_DELAYS,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.manager import AnvilEnvSettings
+from cstar.system.scheduler import SlurmQOS, SlurmScheduler
 
 
 @pytest.fixture
@@ -108,7 +115,7 @@ def heterogeneous_workplan_path(
     hw_single_step_wp : Path
         Path to a workplan that contains a single hello_world step.
     single_step_workplan : Path
-        Path to a workplan that contains a single roms_marbl/sleep step.
+        Path to a workplan that contains a single ucla_roms/sleep step.
 
     Returns
     -------
@@ -166,10 +173,9 @@ async def test_hello_world_runner_happy_path(
     bp_path.write_text(bp_content)
 
     request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
-    job_cfg = get_job_config()
     svc_cfg = get_service_config(log_level="INFO")
 
-    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
+    runner = HelloWorldRunner(request, svc_cfg)
 
     await runner.execute()
 
@@ -186,7 +192,7 @@ async def test_hello_world_workplan(
     hello_world_bp_content: str,
     fill_workplan_template: Callable[[dict[str, t.Any]], str],
 ) -> None:
-    """Test deserialization of a workplan containing a non ROMS-MARBL application.
+    """Test deserialization of a workplan containing a non UCLA-ROMS application.
 
     Consider moving to a parametrized test that executes the same evaluation on all
     known application types.
@@ -252,17 +258,20 @@ async def test_hello_world_workplan(
 
 def test_hello_world_workplan_scheduling(
     hw_single_step_wp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test the execution of a workplan containing a non ROMS-MARBL application.
+    """Test the execution of a workplan containing a non UCLA-ROMS application.
 
     Parameters
     ----------
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the hello_world application.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -293,6 +302,7 @@ def test_hello_world_workplan_scheduling(
 
 def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify an unrecognized `--clobber` step value fails fast as a CLI usage
     error (rather than a generic failure) and lists the valid step names.
@@ -302,10 +312,12 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the
         hello_world application.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -335,6 +347,7 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
 
 def test_heterogeneous_workplan(
     heterogeneous_workplan_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test the execution of a workplan containing multiple applications.
 
@@ -342,12 +355,14 @@ def test_heterogeneous_workplan(
     ----------
     heterogeneous_workplan_path : Path
         The path to the workplan containing a step relying on the hello_world application
-        and a step relying on the ROMS-MARBL application.
+        and a step relying on the UCLA-ROMS application.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
         ENV_CSTAR_SLURM_ACCOUNT: "abc123",
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -378,6 +393,7 @@ def test_heterogeneous_workplan(
 
 def test_hw_runner_bp_only(
     hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that a blueprint containing the sample application is executed
     correctly by the `cstar blueprint run` command.
@@ -386,10 +402,12 @@ def test_hw_runner_bp_only(
     ----------
     hello_world_bp_path : Path
         A fixture that stores an HW blueprint and returns the path.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env: dict[str, str] = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -417,6 +435,45 @@ def test_hw_runner_bp_only(
         assert result.exit_code == 0
 
 
+def test_hello_world_blueprint_runs_without_slurm_settings(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a step that submits no scheduler job starts on a SLURM system whose
+    required account and queue are unset, as a local-launcher step does on an
+    HPC login node before the user has run `cstar init`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        A fixture that stores an HW blueprint and returns the path.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to unset the SLURM settings.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_QUEUE, raising=False)
+    scheduler = SlurmScheduler(
+        queues=[SlurmQOS(name="wholenode", query_name="wholenode")],
+        primary_queue_name="wholenode",
+    )
+    with (
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            AnvilEnvSettings,
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=scheduler),
+        ),
+    ):
+        result = CliRunner().invoke(
+            app_run_blueprint, [str(hello_world_bp_path)], color=False
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Hello," in result.stdout
+
+
 @pytest.mark.parametrize("run_from_workplan_dir", [True, False])
 def test_hello_world_workplan_relative_blueprint_path(
     tmp_path: Path,
@@ -425,7 +482,7 @@ def test_hello_world_workplan_relative_blueprint_path(
     run_from_workplan_dir: bool,
 ) -> None:
     """Verify a step whose `blueprint` is a path relative to the workplan file
-    is launched with the absolute path, whether `cstar workplan run` is
+    is launched with the absolute path, whether `cstar workplan submit` is
     invoked from the workplan's directory or from elsewhere.
 
     Parameters
@@ -433,7 +490,8 @@ def test_hello_world_workplan_relative_blueprint_path(
     tmp_path : Path
         Temporary directory for the workplan, blueprint and run outputs
     monkeypatch : pytest.MonkeyPatch
-        Fixture used to change the working directory
+        Fixture used to change the working directory and to shorten the
+        orchestrator's polling delays
     hello_world_bp_content : str
         Fixture providing the content of a minimal hello-world blueprint
     run_from_workplan_dir : bool
@@ -463,9 +521,9 @@ def test_hello_world_workplan_relative_blueprint_path(
         monkeypatch.chdir(elsewhere)
         wp_arg = wp_path.as_posix()
 
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -500,9 +558,7 @@ def test_hello_world_workplan_relative_blueprint_path(
 
 def _hw_runner(bp_path: Path) -> HelloWorldRunner:
     request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
-    return HelloWorldRunner(
-        request, get_service_config(log_level="INFO"), get_job_config()
-    )
+    return HelloWorldRunner(request, get_service_config(log_level="INFO"))
 
 
 @pytest.mark.parametrize("run_id", ["", "run-1234"])
@@ -546,15 +602,159 @@ async def test_runner_writes_step_record(
     assert record.errors == []
 
 
+def _leave_slurm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove SLURM's variables, so a test also passes inside an allocation."""
+    for name in [k for k in os.environ if k.startswith("SLURM_")]:
+        monkeypatch.delenv(name)
+
+
+@pytest.mark.asyncio
+async def test_runner_records_a_local_execution(
+    hello_world_bp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a step run outside SLURM records that it ran locally, with no allocation."""
+    _leave_slurm(monkeypatch)
+    runner = _hw_runner(hello_world_bp_path)
+
+    await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.execution == ExecutionFacts(
+        scheduler="local", host=socket.gethostname(), pid=os.getpid()
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_records_its_slurm_allocation(
+    hello_world_bp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a step run in a SLURM job records the allocation the job was granted."""
+    _leave_slurm(monkeypatch)
+    for name, value in {
+        "SLURM_JOB_ID": "4242",
+        "SLURM_JOB_NUM_NODES": "2",
+        "SLURM_NTASKS": "16",
+        "SLURM_CPUS_ON_NODE": "8",
+        "SLURM_JOB_PARTITION": "debug",
+        "SLURM_JOB_ACCOUNT": "m1234",
+    }.items():
+        monkeypatch.setenv(name, value)
+    runner = _hw_runner(hello_world_bp_path)
+
+    await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.execution == ExecutionFacts(
+        scheduler="slurm",
+        job_id="4242",
+        host=socket.gethostname(),
+        pid=os.getpid(),
+        nodes=2,
+        tasks=16,
+        cpus=8,
+        partition="debug",
+        account="m1234",
+    )
+
+
+def test_execution_facts_outside_slurm() -> None:
+    """Verify variables of an allocation do not count without a job id."""
+    facts = execution_facts({"SLURM_NTASKS": "4", "SLURM_JOB_PARTITION": "debug"})
+
+    assert facts == ExecutionFacts(
+        scheduler="local", host=socket.gethostname(), pid=os.getpid()
+    )
+
+
+def test_execution_facts_accept_the_older_job_id_spelling() -> None:
+    facts = execution_facts({"SLURM_JOBID": "77"})
+
+    assert (facts.scheduler, facts.job_id) == ("slurm", "77")
+
+
+def test_execution_facts_leave_unreported_values_empty() -> None:
+    """Verify a job that reports no partition or counts records none."""
+    facts = execution_facts({"SLURM_JOB_ID": "77"})
+
+    assert facts == ExecutionFacts(
+        scheduler="slurm", job_id="77", host=socket.gethostname(), pid=os.getpid()
+    )
+
+
+@pytest.mark.parametrize("value", ["abc", "2(x3)", "1.5"])
+def test_execution_facts_count_an_unparseable_value_as_zero(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify the record of what ran a step never fails the step: a count SLURM
+    reports in a form this build cannot read is logged at debug and left at zero.
+    """
+    environ = {"SLURM_JOB_ID": "77", "SLURM_NTASKS": value, "SLURM_CPUS_ON_NODE": "4"}
+
+    with caplog.at_level(logging.DEBUG, logger="cstar.entrypoint.runner"):
+        facts = execution_facts(environ)
+
+    assert (facts.tasks, facts.cpus) == (0, 4)
+    assert [r.getMessage() for r in caplog.records if "SLURM_NTASKS" in r.message] == [
+        f"Ignoring SLURM_NTASKS={value!r}: it is not a count"
+    ]
+    assert {r.levelno for r in caplog.records if "SLURM_NTASKS" in r.message} == {
+        logging.DEBUG
+    }
+
+
+@pytest.mark.asyncio
+async def test_runner_records_the_blueprint_file_it_ran(tmp_path: Path) -> None:
+    """Verify the record names the blueprint the runner loaded relative to the
+    step root when it lies there, as a file written by a step's directives does,
+    and names none when it lies elsewhere.
+    """
+    step_root = tmp_path / "step"
+    inside = step_root / "work" / "hello.ovrd.yaml"
+    outside = tmp_path / "hello.yaml"
+    inside.parent.mkdir(parents=True)
+    for path in (inside, outside):
+        blueprint = HelloWorldBlueprint(
+            name="hello",
+            description="says hello",
+            target="world",
+            working_dir=step_root,
+        )
+        assert serialize(path, blueprint)
+
+    for path, expected in ((inside, "work/hello.ovrd.yaml"), (outside, "")):
+        runner = _hw_runner(path)
+        await runner.execute()
+
+        record = read_step_record(step_root)
+        assert record is not None
+        assert record.blueprint_file == expected
+
+
+def test_runner_records_no_blueprint_file_for_a_remote_blueprint(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a blueprint fetched from a URL is not recorded as a file."""
+    runner = _hw_runner(hello_world_bp_path)
+    root = runner.blueprint.effective_working_dir
+
+    with mock.patch.object(
+        type(runner),
+        "blueprint_uri",
+        new_callable=mock.PropertyMock,
+        return_value="https://example.org/blueprints/hello.yaml",
+    ):
+        assert runner._blueprint_file(root) == ""
+
+
 @pytest.mark.asyncio
 async def test_runner_records_the_workplan_step_name(
     hello_world_bp_path: Path,
 ) -> None:
     """Verify a request that names its workplan step is recorded under that name."""
     request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint, step="A")
-    runner = HelloWorldRunner(
-        request, get_service_config(log_level="INFO"), get_job_config()
-    )
+    runner = HelloWorldRunner(request, get_service_config(log_level="INFO"))
 
     await runner.execute()
 

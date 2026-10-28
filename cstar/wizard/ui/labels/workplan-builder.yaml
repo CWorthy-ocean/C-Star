@@ -54,7 +54,7 @@ sections:
     required: false
   recipes.chunk:
     title: Chunk a run in time
-    desc: Split a roms_marbl run (a step or a blueprint) into chained steps, one per window; each writes only end_date and continues from the previous restart.
+    desc: Split a ucla_roms run (a step or a blueprint) into chained steps, one per window; each writes only end_date and continues from the previous restart.
     required: false
   recipes.ramp:
     title: Spin-up ramp
@@ -62,11 +62,11 @@ sections:
     required: false
   recipes.forge:
     title: Forge inputs, then run
-    desc: A forge step followed by a deferred roms_marbl step that runs what it generates.
+    desc: A forge step followed by a deferred ucla_roms step that runs what it generates.
     required: false
   recipes.upscale:
     title: Upscale a nested run
-    desc: For each pair of nested levels, an upscaler step and a re-run of the parent that uses its output. Levels must not be time chunks.
+    desc: Not yet supported. Build the upscaled rerun by hand, as in the nesting and upscaling tutorial.
     required: false
   review.diagnostics:
     title: Checks
@@ -74,7 +74,7 @@ sections:
     required: false
   review.run:
     title: Run
-    desc: Save, check and run the workplan with the C-Star CLI.
+    desc: Save, check and submit the workplan with the C-Star CLI.
     required: false
   review.report:
     title: What loading changed
@@ -148,7 +148,7 @@ fields:
   step.source:
     label: Blueprint from
   step.catalog_roms:
-    label: Catalog roms_marbl blueprint
+    label: Catalog ucla_roms blueprint
   step.catalog_forge:
     label: Catalog forge blueprint
   step.path:
@@ -205,7 +205,7 @@ fields:
   step.cs_kind:
     label: Carbonate sensitivities from
     symbol: carbonate-sensitivity-from
-    hint: A source step must be a ROMS-MARBL run with the gas-exchange output on. Several sources are joined with ";".
+    hint: A source step must be a UCLA-ROMS run with MARBL and the gas-exchange output on. Several sources are joined with ";".
   step.num_cpus:
     label: CPUs
     symbol: num_cpus
@@ -229,12 +229,12 @@ fields:
   # --- Recipes ---------------------------------------------------------------
   base.kind:
     label: Start from
-    hint: A blueprint is turned into the base step for you; a forge blueprint adds the forge step and chunks the roms_marbl step it generates.
+    hint: A blueprint is turned into the base step for you; a forge blueprint adds the forge step and chunks the ucla_roms step it generates.
   base.step:
     label: Step
-    hint: Only roms_marbl steps can be a base; an existing base step stays in the workplan.
+    hint: Only ucla_roms steps can be a base; an existing base step stays in the workplan.
   base.catalog_roms:
-    label: Catalog roms_marbl blueprint
+    label: Catalog ucla_roms blueprint
   base.catalog_forge:
     label: Catalog forge blueprint
   base.path:
@@ -280,7 +280,7 @@ fields:
     label: Forge blueprint path
   upscale_levels:
     label: Levels, innermost first
-    hint: Pick the roms_marbl steps in order, innermost grid first.
+    hint: Pick the ucla_roms steps in order, innermost grid first.
 
   pinned:
     label: Keep preview visible
@@ -331,6 +331,6 @@ fields:
   buttons.check:
     label: Check
   buttons.run:
-    label: Run
+    label: Submit
   buttons.revert:
     label: revert

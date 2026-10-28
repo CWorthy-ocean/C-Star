@@ -23,14 +23,15 @@ from cstar.applications.hello_world import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )
-from cstar.applications.roms_marbl.app import RomsMarblApplication, RomsMarblRunner
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.app import UclaRomsApplication, UclaRomsRunner
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
 )
+from cstar.base.exceptions import CstarError
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import (
@@ -39,6 +40,7 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN,
     ARG_RESUME,
     ARG_STEP,
+    ARG_VERBOSE,
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
@@ -46,6 +48,7 @@ from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
     AttemptStatus,
+    StepRecord,
     read_run_manifest,
     read_step_record,
 )
@@ -171,8 +174,8 @@ def test_blueprint_run_remote_blueprint(
     serve_remote_files[bp_path] = bp_templates_dir / "roms_marbl/blueprint.2.0.0.yaml"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
@@ -243,8 +246,8 @@ def test_blueprint_run_auto_migrates_2_1_0_blueprint(
     mock_sim_instance.name = "test simulation"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
 
@@ -275,12 +278,12 @@ def test_blueprint_run_auto_migrates_2_1_0_blueprint(
     mock_exec_runner.assert_called_once()
 
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
-    current = get_application(RomsMarblApplication.name).schema_version
-    migrated_path = next(state_home.rglob(f"{bp_path.stem}_{current}*"))
+    current = get_application(UclaRomsApplication.name).schema_version
+    migrated_path = next(state_home.rglob(f"{bp_path.stem}-*_{current}*"))
     migrated = yaml.safe_load(migrated_path.read_text())
     assert "model_params" not in migrated
     # serialize() excludes model defaults, so validate to see effective values
-    bp = RomsMarblBlueprint.model_validate(migrated)
+    bp = UclaRomsBlueprint.model_validate(migrated)
     assert bp.schema_version == current
     assert bp.partitioning.use_pio is False
     assert bp.namelist_overrides["time_stepping"]["dt"] == time_step
@@ -297,7 +300,7 @@ def test_blueprint_run_disable_migration_outdated_rejected(
     monkeypatch.setenv(ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON)
     bp_path, _ = _write_2_1_0_blueprint(complete_blueprint_path, tmp_path)
 
-    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+    with mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -325,8 +328,8 @@ def test_blueprint_run_disable_migration_current_blueprint_ok(
     mock_sim_instance.name = "test simulation"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
 
@@ -368,8 +371,8 @@ def test_blueprint_run_current_blueprint_not_persisted(
     mock_sim_instance.name = "test simulation"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
 
@@ -399,7 +402,7 @@ def test_blueprint_run_current_blueprint_not_persisted(
 
     mock_exec_runner.assert_called_once()
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
-    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}_*"))
+    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}-*"))
 
 
 def test_blueprint_run_invalid_blueprint_exits_nonzero(
@@ -416,7 +419,7 @@ def test_blueprint_run_invalid_blueprint_exits_nonzero(
     bp_path = tmp_path / "blueprint_invalid.yaml"
     bp_path.write_text(yaml.safe_dump(data))
 
-    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+    with mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -449,9 +452,9 @@ def test_blueprint_run_apply_directive_dne(
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
-        "cstar.applications.roms_marbl.app.RomsMarblRunner.execute",
+        "cstar.applications.ucla_roms.app.UclaRomsRunner.execute",
         return_value=RunnerResult(
-            RunnerRequest(bp_path, RomsMarblBlueprint),
+            RunnerRequest(bp_path, UclaRomsBlueprint),
             RunnerState(ExecutionStatus.COMPLETED),
         ),
     ) as mock_exec:
@@ -483,7 +486,7 @@ def test_blueprint_run_apply_directive_empty(
     directive_file_path = tmp_path / "directive-dne.json"
     directive_file_path.touch()
 
-    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()):
+    with mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()):
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -514,14 +517,14 @@ def directive_run_harness(
     ------
     tuple[str, LiveStep, Path, mock.Mock]
         The blueprint path, the step, its directive file path, and the mock
-        tracking calls to `RomsMarblRunner.execute`.
+        tracking calls to `UclaRomsRunner.execute`.
     """
     bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
     _, step_dir, _ = mocked_simulation_outputs
 
     temp_step = LiveStep(
         name="step-for-testing",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path,
         working_dir=tmp_path,
         directives={
@@ -534,8 +537,8 @@ def directive_run_harness(
     mock_sim_instance.name = "test simulation"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
@@ -549,7 +552,7 @@ def directive_run_harness(
             return_value=mock_sim_instance,
         ),
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             side_effect=modify_runner,
             autospec=True,
@@ -642,7 +645,7 @@ def test_blueprint_run_restore_directive_file_runtime_error_fails_cleanly(
     assert not missing_directive_path.exists()
 
     with (
-        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
+        mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec,
         mock.patch(
             "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
             mock.Mock(side_effect=RuntimeError("no run context available")),
@@ -778,6 +781,103 @@ def test_blueprint_run_deferred_blueprint_unresolvable(
     assert "Unable to resolve deferred blueprint" in result.stdout
 
 
+def _write_newer_step_record(step_root: Path) -> None:
+    """Write a step record stamped with a schema major newer than this build reads."""
+    current = StepRecord.model_fields["schema_version"].default
+    newer = f"{int(current.split('.')[0]) + 1}.0.0"
+    step_root.mkdir(parents=True, exist_ok=True)
+    (step_root / STEP_RECORD_NAME).write_text(f"schema_version: {newer}\n")
+
+
+def _assert_refused_for_upgrade(result: t.Any) -> None:
+    """Assert the CLI refused the input with the upgrade guidance, not a traceback."""
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 1
+    assert "Upgrade cstar-ocean" in result.stdout
+
+
+def test_blueprint_run_deferred_blueprint_newer_record_refused(
+    tmp_path: Path,
+) -> None:
+    """A deferred blueprint whose producer's record was written by a newer
+    cstar is refused with the upgrade guidance, not a traceback.
+    """
+    producer = LiveStep(
+        name="producer",
+        application="hello_world",
+        blueprint=(tmp_path / "unused.yaml").as_posix(),
+        working_dir=tmp_path / "producer",
+    )
+    producer.fsm.output_dir.mkdir(parents=True, exist_ok=True)
+    _write_newer_step_record(producer.fsm.root_dir)
+
+    live_plan = LiveWorkplan(
+        name="deferred-run",
+        description="a live workplan providing producer-step context",
+        steps=[producer],
+    )
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(return_value=live_plan),
+    ):
+        result = CliRunner().invoke(app, ["step://producer"], color=False)
+
+    _assert_refused_for_upgrade(result)
+    assert "Unable to resolve deferred blueprint" in result.stdout
+
+
+def test_blueprint_run_directive_newer_record_refused(
+    tmp_path: Path,
+    package_path: Path,
+    mock_run_id: str,
+) -> None:
+    """A `continue-from` directive whose source step's record was written by a
+    newer cstar is refused with the upgrade guidance, not a traceback, and the
+    runner never starts.
+    """
+    bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
+    producer = LiveStep(
+        name="producer",
+        application=Application.UCLA_ROMS.value,
+        blueprint=bp_path,
+        working_dir=tmp_path / "producer",
+    )
+    _write_newer_step_record(producer.fsm.root_dir)
+
+    consumer = LiveStep(
+        name="consumer",
+        application=Application.UCLA_ROMS.value,
+        blueprint=bp_path,
+        working_dir=tmp_path / "consumer",
+        depends_on=["producer"],
+        directives={"continue-from": {"step": "producer"}},
+    )
+    directive_path = prepare_directive_file(consumer)
+
+    live_plan = LiveWorkplan(
+        name="continue-run",
+        description="a live workplan providing source-step context",
+        steps=[producer, consumer],
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(return_value=live_plan),
+        ),
+        mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec,
+    ):
+        result = CliRunner().invoke(
+            app,
+            [bp_path, ARG_DIRECTIVES_URI_LONG, directive_path.as_posix()],
+            color=False,
+        )
+
+    _assert_refused_for_upgrade(result)
+    mock_exec.assert_not_called()
+
+
 def test_blueprint_run_resume_non_resumable_app_fails_fast(
     complete_blueprint_path: Path,
     flatten_cli_output: Callable[[str], str],
@@ -787,8 +887,8 @@ def test_blueprint_run_resume_non_resumable_app_fails_fast(
     runner is never invoked.
     """
     with (
-        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
-        mock.patch.object(RomsMarblApplication, "resumable", False),
+        mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec,
+        mock.patch.object(UclaRomsApplication, "resumable", False),
     ):
         runner = CliRunner()
         result = runner.invoke(
@@ -799,7 +899,7 @@ def test_blueprint_run_resume_non_resumable_app_fails_fast(
 
     assert result.exit_code == 2
     stderr_flat = flatten_cli_output(result.stderr)
-    assert "roms_marbl" in stderr_flat
+    assert "ucla_roms" in stderr_flat
     assert "does not support" in stderr_flat
     mock_exec.assert_not_called()
 
@@ -811,7 +911,7 @@ def test_blueprint_run_resume_and_clobber_fails_fast(
     """Verify `--resume` combined with `--clobber` fails fast with a usage
     error, and the runner is never invoked.
     """
-    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+    with mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -826,6 +926,46 @@ def test_blueprint_run_resume_and_clobber_fails_fast(
     mock_exec.assert_not_called()
 
 
+def test_blueprint_run_runner_error_exits_cleanly(
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a `CstarError` raised while the runner executes is reported as a
+    message with exit code 1, not a traceback.
+    """
+    error = "The runner could not start"
+    with mock.patch.object(
+        HelloWorldRunner, "execute", mock.AsyncMock(side_effect=CstarError(error))
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.output
+    assert f"Unable to run the blueprint: {error}" in flatten_cli_output(result.output)
+    assert not isinstance(result.exception, CstarError)
+
+
+def test_blueprint_run_runner_construction_error_exits_cleanly(
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a `CstarError` raised while the runner is constructed (a launch
+    refused on a login node is raised there) is reported as a message with exit
+    code 1, not a traceback.
+    """
+    refusal = "Refusing to launch ROMS outside a scheduler job"
+    with mock.patch.object(
+        HelloWorldRunner, "__init__", mock.Mock(side_effect=CstarError(refusal))
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.output
+    flat = flatten_cli_output(result.output)
+    assert f"Unable to run the blueprint: {refusal}" in flat
+    assert not isinstance(result.exception, CstarError)
+
+
 def test_blueprint_run_resume_reaches_runner_request(
     complete_blueprint_path: Path,
 ) -> None:
@@ -836,20 +976,20 @@ def test_blueprint_run_resume_reaches_runner_request(
     mock_sim_instance.name = "test simulation"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
 
     with (
-        mock.patch.object(RomsMarblApplication, "resumable", True),
+        mock.patch.object(UclaRomsApplication, "resumable", True),
         mock.patch.object(
             ROMSSimulation,
             "from_blueprint",
             return_value=mock_sim_instance,
         ),
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             side_effect=modify_runner,
             autospec=True,
@@ -882,8 +1022,8 @@ def test_blueprint_run_pre_run_reaches_runner_request(
     mock_sim_instance.name = "test simulation"
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
 
@@ -894,7 +1034,7 @@ def test_blueprint_run_pre_run_reaches_runner_request(
             return_value=mock_sim_instance,
         ),
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             side_effect=modify_runner,
             autospec=True,
@@ -917,6 +1057,93 @@ def test_blueprint_run_pre_run_reaches_runner_request(
     assert mock_request_cls.call_args.kwargs["pre_run"] is True
 
 
+@pytest.mark.parametrize("clobber", [False, True])
+def test_blueprint_run_clobber_reaches_runner_request(
+    complete_blueprint_path: Path,
+    clobber: bool,
+) -> None:
+    """Verify `--clobber` reaches the runner via a `RunnerRequest` with
+    `clobber=True`, and its absence with `clobber=False`.
+
+    Parameters
+    ----------
+    complete_blueprint_path : Path
+        The path to a valid blueprint.
+    clobber : bool
+        Whether `--clobber` is passed.
+    """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            UclaRomsRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.cli.blueprint.run.RunnerRequest",
+            wraps=RunnerRequest,
+        ) as mock_request_cls,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), *([ARG_CLOBBER] * clobber)],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_exec_runner.assert_called_once()
+    mock_request_cls.assert_called_once()
+    assert mock_request_cls.call_args.kwargs["clobber"] is clobber
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_blueprint_run_verbose_reaches_the_migration(
+    complete_blueprint_path: Path,
+    verbose: bool,
+) -> None:
+    """Verify `--verbose`, wherever it appears relative to the blueprint path,
+    selects the detailed display of the blueprint's migration.
+
+    Parameters
+    ----------
+    complete_blueprint_path : Path
+        The path to a valid blueprint.
+    verbose : bool
+        Whether `--verbose` is passed (after the path).
+    """
+    with (
+        mock.patch(
+            "cstar.cli.blueprint.run.localize_and_migrate",
+            return_value=(complete_blueprint_path, False),
+        ) as mock_migrate,
+        mock.patch.object(UclaRomsRunner, "execute", autospec=True),
+        mock.patch.object(ROMSSimulation, "from_blueprint"),
+    ):
+        CliRunner().invoke(
+            app,
+            [complete_blueprint_path.as_posix(), *([ARG_VERBOSE] * verbose)],
+            color=False,
+        )
+
+    mock_migrate.assert_called_once()
+    assert mock_migrate.call_args.kwargs["verbose"] is verbose
+
+
 def test_blueprint_run_pre_run_and_resume_fails_fast(
     complete_blueprint_path: Path,
     flatten_cli_output: Callable[[str], str],
@@ -924,7 +1151,7 @@ def test_blueprint_run_pre_run_and_resume_fails_fast(
     """Verify `--pre-run` combined with `--resume` fails fast with a usage
     error, and the runner is never invoked.
     """
-    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+    with mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -948,8 +1175,8 @@ def test_blueprint_run_pre_run_non_pre_runnable_app_fails_fast(
     runner is never invoked.
     """
     with (
-        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
-        mock.patch.object(RomsMarblApplication, "pre_runnable", False),
+        mock.patch.object(UclaRomsRunner, "execute", mock.AsyncMock()) as mock_exec,
+        mock.patch.object(UclaRomsApplication, "pre_runnable", False),
     ):
         runner = CliRunner()
         result = runner.invoke(
@@ -960,7 +1187,7 @@ def test_blueprint_run_pre_run_non_pre_runnable_app_fails_fast(
 
     assert result.exit_code == 2
     stderr_flat = flatten_cli_output(result.stderr)
-    assert "roms_marbl" in stderr_flat
+    assert "ucla_roms" in stderr_flat
     assert "does not support" in stderr_flat
     mock_exec.assert_not_called()
 

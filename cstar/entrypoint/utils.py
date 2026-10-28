@@ -1,15 +1,15 @@
 import typing as t
 
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME
+
 ARG_CLOBBER: t.Final[str] = "--clobber"
 ARG_CLOBBER_HELP: t.Final[str] = (
     "Set this flag to remove any pre-existing files in the working directory."
 )
 ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "Name of a step whose prior state should be cleared and re-executed on "
-    "rerun, or 'all' to clobber every step. Repeatable. Accepts the step "
-    "name or its slugified form. This option is the only workplan-level "
-    "clobber control; the CSTAR_CLOBBER_WORKING_DIR environment variable is "
-    "ignored (with a warning) by workplan runs."
+    "rerun, or 'all' to clobber every step. A step still queued or running is "
+    "cancelled first. Repeatable. Accepts the step name or its slugified form."
 )
 ARG_RUN_ID: t.Final[str] = "--run-id"
 """Option naming an execution of a workplan."""
@@ -55,8 +55,54 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
     "workplan without this flag (same run-id) to attach to the prepared "
     "directories and launch."
 )
+ARG_RESUME_BLUEPRINT_SUBMIT_HELP: t.Final[str] = (
+    "Re-enter the prior run of this blueprint (see --run-id) and resume its failed "
+    "step in place. An application that supports resume continues from its last "
+    "usable restart; any other is re-run from scratch with a warning. Cannot be "
+    "combined with --clobber or --pre-run."
+)
+ARG_PRE_RUN_BLUEPRINT_SUBMIT_HELP: t.Final[str] = (
+    "Perform every stage before the model launch -- stage inputs, clone and "
+    "compile, generate and validate the namelist -- without launching the model. "
+    "The step runs locally even on scheduler systems, so this is suitable for a "
+    "login node. Submit the blueprint again without this flag (same run-id) to "
+    "attach to the prepared directory and launch."
+)
 
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
+ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
+
+ARG_YES: t.Final[str] = "--yes"
+"""Option that accepts every prompt without user interaction."""
+
+ARG_OWN: t.Final[str] = "--own"
+ARG_OWN_HELP: t.Final[str] = (
+    "Record the attached run as owned: verbs that write into its directory may."
+)
+ARG_READ_ONLY: t.Final[str] = "--read-only"
+ARG_READ_ONLY_HELP: t.Final[str] = (
+    "Record the attached run as read-only: nothing writes into its directory."
+)
+ARG_TO: t.Final[str] = "--to"
+ARG_TO_HELP: t.Final[str] = (
+    "Put the run at <DIR>/<run-id> instead of the project's runs area."
+)
+ARG_MODE: t.Final[str] = "--mode"
+ARG_MODE_HELP: t.Final[str] = (
+    "copy the run (default), link it, move it (copy, check, remove the source), "
+    "or materialize a linked run as a copy."
+)
+ARG_INCLUDE: t.Final[str] = "--include"
+ARG_INCLUDE_HELP: t.Final[str] = (
+    "Also take what is not taken by default: builds (compile-time code, runtime "
+    "code and cloned codebases), temp-output (per-rank output pieces), or all "
+    "(the whole directory). Repeatable."
+)
+
+ARG_AS: t.Final[str] = "--as"
+ARG_AS_HELP: t.Final[str] = (
+    "Attach the run under this run-id instead of the one its manifest names."
+)
 
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"
 ARG_DIRECTIVES_URI_SHORT: t.Final[str] = "-d"
@@ -94,7 +140,7 @@ ARG_FORMAT_HELP: t.Final[str] = "Pass the desired output format."
 
 ARG_NO_REFRESH: t.Final[str] = "--no-refresh"
 ARG_NO_REFRESH_HELP: t.Final[str] = (
-    "Read the run as last recorded without refreshing its manifest."
+    "Show the run's status without updating any of its records."
 )
 
 ARG_REPAIR: t.Final[str] = "--repair"
@@ -110,10 +156,35 @@ ARG_ALL_HELP: t.Final[str] = (
     "and namelists). Launchers regenerate them, so they are skipped by default."
 )
 
+ARG_SHARED: t.Final[str] = "--shared"
+ARG_SHARED_HELP: t.Final[str] = (
+    "List the runs in the project's runs area (`<project>/cstar/runs`, under "
+    f"`{ENV_CSTAR_PROJECT_HOME}`, which defaults to `$PROJECT`) instead of the "
+    "runs started on this machine."
+)
+
+ARG_ALL_CLEAN_HELP: t.Final[str] = (
+    "Remove everything: the data, state, cache and config directories. The data "
+    "directory holds run output. The shared source-data cache and the user "
+    "catalog are kept."
+)
+ARG_ALL_RUNS_HELP: t.Final[str] = (
+    "List the runs started on this machine and every other run whose manifest is "
+    "in the data home or the project's runs area. Scans those directories."
+)
+
 ARG_VERIFY: t.Final[str] = "--verify"
 ARG_VERIFY_HELP: t.Final[str] = (
-    "Also compare each product's recorded sha256 with the file, reading every "
-    "such product in full; products recorded without one are skipped."
+    "Also compare each product's recorded digest with the file (a bounded read "
+    "for netCDF files, the whole file otherwise); products recorded without one "
+    "are skipped."
+)
+
+ARG_RECORD_DIGESTS: t.Final[str] = "--record-digests"
+ARG_RECORD_DIGESTS_HELP: t.Final[str] = (
+    "Compute and record a digest for every product that has none (nc-sample-v2 "
+    "for netCDF files, sha256 otherwise), writing the step records and the "
+    "manifest; a run tracked here must be owned."
 )
 
 ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"

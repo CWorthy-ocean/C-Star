@@ -12,34 +12,24 @@ from cstar.applications.core import (
     RunnerRequest,
     get_app_for_blueprint,
 )
-from cstar.base.env import (
-    ENV_CSTAR_CLI_VERBOSE,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_LOG_LEVEL,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import CstarError
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import get_logger
 from cstar.base.utils import utc_now
 from cstar.cli.common import (
+    DEFAULT_LOG_LEVEL_CHOICE,
     SCHEMA_ERRORS,
-    cb_pipeline,
+    LogLevelOption,
     format_validation_errors,
     localize_and_migrate,
     report_schema_error,
-    set_env,
-    set_flag,
-    update_loggers,
 )
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
     ARG_DIRECTIVES_URI_LONG,
     ARG_DIRECTIVES_URI_SHORT,
-    ARG_LOGLEVEL_HELP,
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
     ARG_PRE_RUN,
     ARG_PRE_RUN_HELP,
     ARG_RESUME,
@@ -61,7 +51,8 @@ if t.TYPE_CHECKING:
 
 CMD_NAME: t.Final[str] = "run"
 CMD_HELP: t.Final[str] = (
-    "Execute a blueprint in a local worker service. Pass --resume to continue "
+    "Execute a blueprint here, in the foreground, and wait for it. Use `cstar "
+    "blueprint submit` to run it as a scheduler job. Pass --resume to continue "
     "a prior attempt lost or interrupted mid-run, in place, without needing a "
     "workplan or run-id."
 )
@@ -97,6 +88,8 @@ def path_callback(
     if necessary, and stores the updated blueprint in the context for later
     use. An up-to-date blueprint is used as-is; set `CSTAR_DISABLE_MIGRATION`
     to fail instead of migrating when the blueprint is not current.
+    `--verbose` (an option, so already in `ctx.params`) selects the detailed
+    display of a planned migration.
 
     Parameters
     ----------
@@ -122,7 +115,9 @@ def path_callback(
         log.info(msg)
 
     try:
-        localized_path, _ = localize_and_migrate(path)
+        localized_path, _ = localize_and_migrate(
+            path, verbose=ctx.params.get("verbose", False)
+        )
         return str(localized_path)
     except SCHEMA_ERRORS as ex:
         report_schema_error(path, ex)
@@ -208,24 +203,10 @@ def run(
             callback=path_callback,
         ),
     ],
-    log_level: t.Annotated[
-        LogLevelChoices,
-        typer.Option(
-            ARG_LOGLEVEL_LONG,
-            ARG_LOGLEVEL_SHORT,
-            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
-            help=ARG_LOGLEVEL_HELP,
-            envvar=ENV_CSTAR_LOG_LEVEL,
-        ),
-    ] = LogLevelChoices.INFO,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL_CHOICE,
     clobber: t.Annotated[
         bool,
-        typer.Option(
-            ARG_CLOBBER,
-            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
-            help=ARG_CLOBBER_HELP,
-            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
-        ),
+        typer.Option(ARG_CLOBBER, help=ARG_CLOBBER_HELP),
     ] = False,
     directive_uri: t.Annotated[
         str | None,
@@ -241,8 +222,6 @@ def run(
         typer.Option(
             ARG_VERBOSE,
             help=ARG_VERBOSE_HELP,
-            callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
-            envvar=ENV_CSTAR_CLI_VERBOSE,
         ),
     ] = False,
     resume: t.Annotated[
@@ -258,7 +237,9 @@ def run(
         typer.Option(ARG_STEP, help=ARG_STEP_HELP),
     ] = "",
 ) -> None:
-    """Execute a blueprint in a local worker service.
+    """Execute a blueprint here, in the foreground, and wait for it.
+
+    Use `cstar blueprint submit` to run it as a scheduler job.
 
     Pass `--resume` to continue a prior attempt lost or interrupted mid-run:
     the run continues in place, from the blueprint's working directory,
@@ -296,7 +277,6 @@ def run(
         )
 
     name = f"{app_config.name}_runner"
-    job_cfg = get_job_config()
     service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value, name=name)
 
     msg = f"Executing {app_config.name!r} blueprint in a {type(app_config.runner).__name__} service"
@@ -308,15 +288,28 @@ def run(
         raise typer.Exit(code=1)
 
     if directive_uri:
-        uri = DirectiveConfig.apply_directives(directive_uri, uri)
+        try:
+            uri = DirectiveConfig.apply_directives(directive_uri, uri)
+        except CstarError as ex:
+            print(f"Unable to apply directives: {ex}")
+            raise typer.Exit(code=1) from ex
 
     request = RunnerRequest(
-        uri, app_config.blueprint, resume=resume, pre_run=pre_run, step=step
+        uri,
+        app_config.blueprint,
+        resume=resume,
+        pre_run=pre_run,
+        clobber=clobber,
+        step=step,
     )
 
-    runner = app_config.runner(request, service_cfg, job_cfg)
-    started_at = utc_now()
-    asyncio.run(runner.execute())
+    try:
+        runner = app_config.runner(request, service_cfg)
+        started_at = utc_now()
+        asyncio.run(runner.execute())
+    except CstarError as ex:
+        print(f"Unable to run the blueprint: {ex}")
+        raise typer.Exit(code=1) from ex
 
     # a workplan step (always passed `--step`) is recorded by the orchestrator's
     # manifest instead

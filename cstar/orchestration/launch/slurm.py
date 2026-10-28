@@ -5,14 +5,10 @@ import typing as t
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
-from cstar.base.env import (
-    ENV_CSTAR_RUNID,
-    ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import WALLTIME_RE, _run_cmd
+from cstar.base.utils import WALLTIME_RE, _run_cmd, utc_now
 from cstar.execution.file_system import rotate_file
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
@@ -24,8 +20,11 @@ from cstar.execution.scheduler_job import (
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
+    cancel_prior_attempt,
     is_foreign_handle,
+    prior_of_this_run,
     resolve_prior_attempt,
+    waits_on_replaced_dependency,
 )
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
@@ -174,9 +173,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     supports_foreign_dependencies: t.ClassVar[bool] = True
     """A SLURM job can depend on a job submitted by another run."""
 
-    POST_SUBMIT_DELAY: t.Final[float] = float(
-        get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
-    )
+    POST_SUBMIT_DELAY: t.Final[float] = 1.0
     """Delay after a submission to ensure status for a SLURM job can be queried."""
 
     @staticmethod
@@ -403,6 +400,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         msg = f"Submitting command `{short_command}...` for step `{step.name}`."
         log.debug(msg)
         job.submit()
+        # stamped before the delay below, which can run to seconds
+        submitted_at = utc_now()
 
         if job.id:
             # introduce slight delay so `sacct` queries can locate this job
@@ -415,6 +414,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 run_id=run_id,
                 launcher_name=SlurmLauncher.name,
                 pre_run=step.pre_run,
+                submitted_at=submitted_at,
             )
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
@@ -465,6 +465,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         cls,
         step: "LiveStep",
         dependencies: list[SlurmHandle],
+        *,
+        run_uuid: str,
     ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
@@ -474,15 +476,25 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
+        run_uuid : str
+            The uuid of the run's manifest; see `Launcher.launch`.
 
         Returns
         -------
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If a prior attempt still in progress is replaced and cannot be
+            cancelled (see `cancel_prior_attempt`).
         """
         state_repo = StateRepository()
 
-        prior_handle = await state_repo.get_sentinel(step.name, SlurmHandle)
+        prior_handle = prior_of_this_run(
+            await state_repo.get_sentinel(step.name, SlurmHandle), run_uuid
+        )
         submit_fn = SlurmLauncher._submit
         last_status: Status = Status.Unsubmitted
         reuse_prior: bool = False
@@ -495,7 +507,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 last_status,
                 prior_pre_run=prior_handle.pre_run,
                 prior_foreign=is_foreign_handle(prior_handle, cls.name),
+                replaced_dependency=waits_on_replaced_dependency(
+                    prior_handle, dependencies
+                ),
             )
+            if not reuse_prior and Status.is_in_progress(last_status):
+                await cancel_prior_attempt(cls, step, prior_handle)
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)

@@ -4,8 +4,11 @@ A run directory should keep working after it is copied or moved as a unit, which
 holds only while the files that describe it refer to each other by relative
 path. These functions find what does not: absolute paths written into emitted
 files, symlinks with an absolute or missing target, steps without a directory,
-products a step record lists that the run no longer holds as recorded, and
-leftovers no step of the workplan accounts for.
+products a step record lists that the run no longer holds as recorded, inputs an
+attempt carried that differ from the manifest or are gone, and leftovers no step
+of the workplan accounts for. An absolute path that names the run itself is
+listed but does not fail the check: the transformed workplan and the blueprints
+that record one are rebased when they are read.
 
 Every function is pure apart from reading the file system, except
 `repair_symlinks`, which rewrites links and nothing else. Launch artifacts are
@@ -21,23 +24,30 @@ from enum import StrEnum, auto
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind
+from cstar.base.digest import KNOWN_SCHEMES
 from cstar.base.log import get_logger
-from cstar.base.utils import _get_sha256_hash
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
     StateDirectoryManager,
     symlink_relative,
 )
-from cstar.orchestration.manifest import RUN_MANIFEST_NAME, STEP_RECORD_NAME
-from cstar.orchestration.orchestration import Status
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    STEP_RECORD_NAME,
+    carried_digest,
+    product_digest,
+    transformed_workplans,
+)
+from cstar.orchestration.orchestration import LiveWorkplan, Status
+from cstar.orchestration.serialization import read_document
 from cstar.orchestration.state import StateRepository
+from cstar.roms.file_system import RomsFileSystemManager
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterator
 
     from cstar.orchestration.manifest import RunManifest
-    from cstar.orchestration.orchestration import LiveWorkplan
 
 log = get_logger(__name__)
 
@@ -57,9 +67,6 @@ LAUNCH_FILES: t.Final[tuple[str, ...]] = (
 )
 """Globs, relative to a step directory, of the files a launcher regenerates at launch."""
 
-TRANSFORMED_WORKPLAN_GLOB: t.Final[str] = "*_transformed.yaml"
-"""Glob, relative to a run directory, of the transformed workplan C-Star writes there."""
-
 _PATH_CHARS_AFTER: t.Final[str] = r"""[^\s'"`,;<>()\[\]{}]*"""
 """The characters that continue a path once its leading prefix has matched."""
 
@@ -68,33 +75,46 @@ class FindingKind(StrEnum):
     """The ways a run directory can fail to be self-contained."""
 
     ABSOLUTE_PATH = auto()
-    """An emitted file names an absolute path under the run (or the data home)."""
+    """An emitted file names an absolute path under the data home, outside the run."""
+    RUN_PATH = auto()
+    """An emitted file names an absolute path inside the run (see `is_run_path`)."""
     ABSOLUTE_LINK = auto()
     """A symlink has an absolute target inside the run; `repair_symlinks` rewrites it."""
     EXTERNAL_LINK = auto()
     """A symlink targets a place outside the run, by absolute or climbing relative path."""
     DANGLING_LINK = auto()
     """A symlink's target does not exist."""
+    CODEBASE_LINK = auto()
+    """A symlink inside a step's cloned codebases has no target: the codebase's
+    repository commits it (ucla-roms holds a libtool link to a library C-Star
+    never builds)."""
     MISSING_STEP_DIR = auto()
     """A step of the transformed workplan has no `tasks/<slug>` directory."""
     PRODUCT_MISSING = auto()
     """A product the step record lists is not in the run."""
     PRODUCT_SIZE = auto()
     """A product's size differs from the one its step record lists."""
-    HASH_MISMATCH = auto()
-    """A product's content differs from the sha256 its step record lists (`--verify`)."""
+    DIGEST_MISMATCH = auto()
+    """A product's content differs from the digest its step record lists, or cannot be read to compare (`--verify`)."""
+    INPUT_MISMATCH = auto()
+    """A file an attempt carried differs from the digest the manifest records for it."""
     RECORD_MISSING = auto()
     """A step the manifest says is done has no step record."""
     ATTEMPT_OPEN = auto()
     """The latest attempt has not finished: the run is unfinished, or was copied before it was."""
+    INPUT_MISSING = auto()
+    """An attempt's directory, or a file it carried, is not in the run; older attempts may be deleted by hand."""
 
     @property
     def informational(self) -> bool:
         """Whether the finding is reported without making the run fail the check."""
         return self in {
+            FindingKind.RUN_PATH,
+            FindingKind.CODEBASE_LINK,
             FindingKind.EXTERNAL_LINK,
             FindingKind.RECORD_MISSING,
             FindingKind.ATTEMPT_OPEN,
+            FindingKind.INPUT_MISSING,
         }
 
 
@@ -126,6 +146,27 @@ class Orphans:
         return bool(self.step_dirs or self.sentinels)
 
 
+@dataclass
+class DigestTally:
+    """What comparing the products with their recorded digests found, product by product."""
+
+    matched: int = 0
+    """Products whose content matches the recorded digest."""
+    differed: int = 0
+    """Products whose content differs from the recorded digest, or cannot be read."""
+    no_digest: int = 0
+    """Products recorded without a digest."""
+    foreign: dict[str, int] = field(default_factory=dict)
+    """Products recorded with a scheme this build does not compute, by scheme."""
+    not_compared: int = 0
+    """Products missing, resized or not a regular file: the first two are findings."""
+
+    @property
+    def compared(self) -> int:
+        """The products whose content was compared with their recorded digest."""
+        return self.matched + self.differed
+
+
 @dataclass(frozen=True)
 class RunCheckReport:
     """Everything `check_run` found in a run directory."""
@@ -138,6 +179,9 @@ class RunCheckReport:
     """The leftovers no step accounts for; informational."""
     skipped: tuple[str, ...] = ()
     """Why each check that could not run was skipped."""
+    verification: DigestTally | None = None
+    """What the digest comparison found; `None` unless it was asked for and the
+    run has a manifest."""
 
     @property
     def problems(self) -> tuple[Finding, ...]:
@@ -254,6 +298,68 @@ def _relative_to_prefix(text: str, prefixes: tuple[Path, ...]) -> Path | None:
     )
 
 
+def recorded_run_root(run_root: Path) -> Path | None:
+    """The run root the run's transformed workplan recorded when it was written.
+
+    It is read from the file as written: `LiveWorkplan.load` rebases it with
+    the rest of the document.
+
+    Parameters
+    ----------
+    run_root : Path
+        The run directory.
+
+    Returns
+    -------
+    Path | None
+        `None` when the run has no readable transformed workplan, or one written
+        before the root was recorded.
+    """
+    for path in transformed_workplans(run_root):
+        try:
+            recorded = read_document(path).get(LiveWorkplan.ROOT_FIELD)
+        except Exception as ex:  # an unreadable workplan is reported by the caller
+            log.debug("Unable to read the recorded root of %s: %s", path, ex)
+            continue
+        if isinstance(recorded, str) and os.path.isabs(recorded):
+            return Path(recorded)
+
+    return None
+
+
+def is_run_path(text: str, run_root: Path, recorded_root: Path | None) -> bool:
+    """Whether an absolute path names the run itself, wherever the run now is.
+
+    A path inside the run directory, or inside the root the run's files were
+    written under (the source of a copy), names the run's own files. The
+    transformed workplan and the blueprints that hold such paths are rebased
+    when they are read, so they keep working when the run is moved; a path
+    anywhere else does not move with the run. A path spelled through a symlink
+    to the run, as through a data home on a scratch file system, is resolved
+    before it is compared.
+
+    Parameters
+    ----------
+    text : str
+        An absolute path found in a file of the run.
+    run_root : Path
+        The run directory as given.
+    recorded_root : Path | None
+        The run root the transformed workplan recorded (see `recorded_run_root`).
+
+    Returns
+    -------
+    bool
+    """
+    roots = (run_root, *((recorded_root,) if recorded_root else ()))
+    prefixes = tuple(dict.fromkeys(p for r in roots for p in _prefixes(r)))
+    if _relative_to_prefix(text, prefixes) is not None:
+        return True
+
+    # the recorded root is resolved, while a file may name the run through an alias
+    return _relative_to_prefix(os.path.realpath(text), prefixes) is not None
+
+
 def _absolute_path_pattern(run_root: Path) -> re.Pattern[str]:
     """Compile the pattern matching an absolute path under the run or the data home.
 
@@ -282,8 +388,9 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
 
     Only the emitted files that refer to other files are scanned: each step's
     `output/*.yaml`, `blueprints/B_*.yaml` and `work/cstar_generated_roms.nml`,
-    and the run's `*_transformed.yaml`. With `all_files`, the launch artifacts
-    that launchers regenerate are scanned too.
+    and the run's transformed workplans. With `all_files`, the launch artifacts
+    that launchers regenerate are scanned too. A path that names the run itself
+    (see `is_run_path`) is a `RUN_PATH` finding, any other an `ABSOLUTE_PATH` one.
 
     Parameters
     ----------
@@ -295,13 +402,15 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
     Returns
     -------
     list[Finding]
-        One `ABSOLUTE_PATH` finding per occurrence, ordered by file and line.
+        One `ABSOLUTE_PATH` or `RUN_PATH` finding per occurrence, ordered by
+        file and line.
     """
     root = run_root.resolve()
     pattern = _absolute_path_pattern(run_root)
+    recorded = recorded_run_root(root)
     globs = (*REFERENCE_FILES, *(LAUNCH_FILES if all_files else ()))
 
-    candidates = [*root.glob(TRANSFORMED_WORKPLAN_GLOB)]
+    candidates = transformed_workplans(root)
     for step_dir in _step_dirs(root):
         candidates.extend(p for g in globs for p in step_dir.glob(g))
 
@@ -313,16 +422,15 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
             log.debug("Skipping unreadable file %s: %s", file, ex)
             continue
 
-        findings.extend(
-            Finding(
-                FindingKind.ABSOLUTE_PATH,
-                file,
-                number,
-                match.group().rstrip(".:"),
-            )
-            for number, line in enumerate(lines, start=1)
-            for match in pattern.finditer(line)
-        )
+        for number, line in enumerate(lines, start=1):
+            for match in pattern.finditer(line):
+                text = match.group().rstrip(".:")
+                kind = (
+                    FindingKind.RUN_PATH
+                    if is_run_path(text, run_root, recorded)
+                    else FindingKind.ABSOLUTE_PATH
+                )
+                findings.append(Finding(kind, file, number, text))
 
     return findings
 
@@ -333,8 +441,9 @@ def find_bad_symlinks(run_root: Path) -> list[Finding]:
     A link is reported once: as dangling when its target does not exist, else as
     absolute when its target is an absolute path inside the run, or external when
     its target lies outside the run, as an absolute path or as a relative one that
-    climbs out of it. Links are never followed, so a link into the run cannot cause
-    a cycle.
+    climbs out of it. A dangling link inside a step's cloned codebases is the
+    codebase's own and is reported as such. Links are never followed, so a link
+    into the run cannot cause a cycle.
 
     Parameters
     ----------
@@ -344,10 +453,15 @@ def find_bad_symlinks(run_root: Path) -> list[Finding]:
     Returns
     -------
     list[Finding]
-        `DANGLING_LINK`, `ABSOLUTE_LINK` and `EXTERNAL_LINK` findings ordered by link.
+        `DANGLING_LINK`, `CODEBASE_LINK`, `ABSOLUTE_LINK` and `EXTERNAL_LINK`
+        findings ordered by link.
     """
     root = run_root.resolve()
     prefixes = _prefixes(run_root)
+    # a standalone blueprint run stages its codebases under the run root itself
+    codebases = tuple(
+        RomsFileSystemManager(d).codebases_dir for d in (root, *_step_dirs(root))
+    )
     findings: list[Finding] = []
 
     for directory, dirnames, filenames in os.walk(root):
@@ -358,7 +472,11 @@ def find_bad_symlinks(run_root: Path) -> list[Finding]:
 
             target = os.readlink(link)
             if not link.exists():
-                kind = FindingKind.DANGLING_LINK
+                kind = (
+                    FindingKind.CODEBASE_LINK
+                    if any(link.is_relative_to(c) for c in codebases)
+                    else FindingKind.DANGLING_LINK
+                )
             elif _relative_to_prefix(target, prefixes) is not None:
                 kind = FindingKind.ABSOLUTE_LINK
             elif os.path.isabs(target) or not Path(
@@ -402,7 +520,11 @@ def find_missing_step_dirs(run_root: Path, workplan: "LiveWorkplan") -> list[Fin
 
 
 def find_product_findings(
-    run_root: Path, manifest: "RunManifest", *, verify: bool
+    run_root: Path,
+    manifest: "RunManifest",
+    *,
+    verify: bool,
+    tally: DigestTally | None = None,
 ) -> list[Finding]:
     """Compare the products the step records list with the run directory.
 
@@ -418,16 +540,23 @@ def find_product_findings(
     manifest : RunManifest
         The run's manifest, with the step records folded in.
     verify : bool
-        Whether to compare the content of each product that records a sha256.
+        Whether to compare the content of each product that records a digest (a
+        record that predates digests has its sha256 folded into one). A netCDF
+        file is read in part, as its digest was computed; any other file is read
+        whole.
+    tally : DigestTally | None
+        With `verify`, each recorded product is counted here by what the
+        comparison found: matched, differed, or why it was not compared.
 
     Returns
     -------
     list[Finding]
-        `PRODUCT_MISSING`, `PRODUCT_SIZE` and `HASH_MISMATCH` findings in step and
+        `PRODUCT_MISSING`, `PRODUCT_SIZE` and `DIGEST_MISMATCH` findings in step and
         product order, `RECORD_MISSING` for each done step without a record, and
         `ATTEMPT_OPEN` when the latest attempt has not finished.
     """
     findings: list[Finding] = []
+    counts = tally if tally is not None else DigestTally()
 
     for entry in manifest.steps:
         step_dir = run_root / entry.working_dir
@@ -445,6 +574,7 @@ def find_product_findings(
                 found = file.stat()
             except FileNotFoundError:
                 findings.append(Finding(FindingKind.PRODUCT_MISSING, file))
+                counts.not_compared += 1
                 continue
             regular = stat.S_ISREG(found.st_mode)
             if product.known_kind is ArtifactKind.log:
@@ -454,16 +584,74 @@ def find_product_findings(
             if product.size_bytes and regular and differs:
                 text = f"{found.st_size} bytes, recorded {product.size_bytes}"
                 findings.append(Finding(FindingKind.PRODUCT_SIZE, file, path=text))
-            elif (
-                verify
-                and product.sha256
-                and regular
-                and (digest := _get_sha256_hash(file)) != product.sha256
-            ):
-                findings.append(Finding(FindingKind.HASH_MISMATCH, file, path=digest))
+                counts.not_compared += 1
+            elif not verify:
+                continue
+            elif not regular:
+                counts.not_compared += 1
+            elif not (wanted := product.digest):
+                counts.no_digest += 1
+            elif (scheme := wanted.partition(":")[0]) not in KNOWN_SCHEMES:
+                counts.foreign[scheme] = counts.foreign.get(scheme, 0) + 1
+            else:
+                try:
+                    digest = product_digest(file, scheme=scheme)
+                except Exception as ex:  # a file that cannot be read cannot be verified
+                    digest = f"unreadable: {ex}"
+                if digest == wanted:
+                    counts.matched += 1
+                else:
+                    counts.differed += 1
+                    findings.append(
+                        Finding(FindingKind.DIGEST_MISMATCH, file, path=digest)
+                    )
 
     if manifest.attempts and manifest.attempts[-1].finished_at is None:
         findings.append(Finding(FindingKind.ATTEMPT_OPEN, run_root / RUN_MANIFEST_NAME))
+
+    return findings
+
+
+def find_input_findings(run_root: Path, manifest: "RunManifest") -> list[Finding]:
+    """Compare the inputs each attempt carried with the run directory.
+
+    Only the files the manifest lists are read, and `attempts/` is not walked: a
+    carried file is a workplan, variables or a blueprint, small by construction.
+    An attempt directory that is gone is one finding, not one per file, since an
+    older attempt may be deleted by hand. An attempt that carried nothing has no
+    directory and nothing to compare.
+
+    Parameters
+    ----------
+    run_root : Path
+        The run directory.
+    manifest : RunManifest
+        The run's manifest.
+
+    Returns
+    -------
+    list[Finding]
+        `INPUT_MISSING` for each attempt directory, or carried file, that is not
+        in the run, and `INPUT_MISMATCH` for each carried file whose content
+        differs from the manifest, in attempt and file order.
+    """
+    findings: list[Finding] = []
+
+    for attempt in manifest.attempts:
+        if not attempt.directory:
+            continue
+
+        directory = run_root / attempt.directory
+        if not directory.is_dir():
+            findings.append(Finding(FindingKind.INPUT_MISSING, directory))
+            continue
+
+        for relative, digest in attempt.carried.items():
+            file = directory / relative
+            if not file.is_file():
+                findings.append(Finding(FindingKind.INPUT_MISSING, file))
+            elif (found := carried_digest(file)) != digest:
+                findings.append(Finding(FindingKind.INPUT_MISMATCH, file, path=found))
 
     return findings
 
@@ -654,7 +842,9 @@ def check_run(
     The step and orphan checks need the transformed workplan, and the sentinel
     check needs the run-id too: one is only trustworthy when the run was found
     through tracking. The product checks need the run's manifest, with the step
-    records folded in. A check that cannot run is named in `skipped`.
+    records folded in, and so do the carried-input checks, which are not gated by
+    `verify`: the files they read are small. A check that cannot run is named in
+    `skipped`; with `verify`, what the comparison found is in `verification`.
 
     Parameters
     ----------
@@ -669,7 +859,7 @@ def check_run(
     manifest : RunManifest | None
         The run's manifest, when it could be read.
     verify : bool
-        Whether to compare the content of products that record a sha256.
+        Whether to compare the content of products that record a digest.
 
     Returns
     -------
@@ -683,6 +873,7 @@ def check_run(
     ]
     orphans = Orphans()
     skipped: list[str] = []
+    tally = DigestTally() if verify and manifest is not None else None
 
     if workplan is None:
         skipped.append("step directories and orphans: no transformed workplan")
@@ -690,19 +881,23 @@ def check_run(
         findings.extend(find_missing_step_dirs(run_root, workplan))
         if run_id is None:
             orphans = Orphans(step_dirs=orphan_task_dirs(run_root, workplan))
-            skipped.append("orphaned sentinels: they are found by run-id")
+            skipped.append(
+                "orphaned sentinels: sentinel files live in the state home under "
+                "a tracked run's run-id, so a run checked by its directory has none"
+            )
         else:
             orphans = find_orphans(run_root, run_id, workplan)
 
     if manifest is None:
-        skipped.append("products: no run manifest")
+        skipped.append("products and carried inputs: no run manifest")
     else:
-        findings.extend(find_product_findings(run_root, manifest, verify=verify))
-        if verify and not any(
-            p.sha256 for e in manifest.steps if e.record for p in e.record.products
-        ):
-            skipped.append("hash verification: no product records a hash")
+        findings.extend(
+            find_product_findings(run_root, manifest, verify=verify, tally=tally)
+        )
+        findings.extend(find_input_findings(run_root, manifest))
 
     order = {kind: i for i, kind in enumerate(FindingKind)}
     findings.sort(key=lambda f: (order[f.kind], f.file, f.line or 0))
-    return RunCheckReport(run_root.resolve(), tuple(findings), orphans, tuple(skipped))
+    return RunCheckReport(
+        run_root.resolve(), tuple(findings), orphans, tuple(skipped), tally
+    )

@@ -8,31 +8,66 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from rich.console import ConsoleRenderable
 from rich.table import Column, Table
 from rich.text import Text
 
-from cstar.base.env import max_concurrency
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.base.log import get_logger
+from cstar.base.utils import MAX_CONCURRENCY
 from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
-from cstar.entrypoint.utils import ARG_FORMAT, ARG_FORMAT_HELP, ARG_SIZE, ARG_SIZE_HELP
-from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
+from cstar.entrypoint.utils import (
+    ARG_ALL,
+    ARG_ALL_RUNS_HELP,
+    ARG_FORMAT,
+    ARG_FORMAT_HELP,
+    ARG_SHARED,
+    ARG_SHARED_HELP,
+    ARG_SIZE,
+    ARG_SIZE_HELP,
+)
+from cstar.execution.file_system import DirectoryManager
+from cstar.orchestration.index import (
+    ManifestRecord,
+    Origin,
+    default_index,
+    untracked_locations,
+    where_kept,
+    where_tracked,
+)
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import (
-    KEY_RUN_NAME,
     UNKNOWN_SIZE,
     TrackingRepository,
     WorkplanRun,
 )
 
+if t.TYPE_CHECKING:
+    from cstar.orchestration.index import RunRecord
+
 log = get_logger(__name__)
 app = typer.Typer()
+
+_TRecord = t.TypeVar("_TRecord", bound="RunRecord")
 
 ALIAS = "list"
 """Alternate name under which the `ls` command is also registered."""
 HELP_SHORT = "List runs started by a user."
 HELP_ALIASED = f"{HELP_SHORT} (alias: {ALIAS})"
+HELP_LONG = f"""\
+{HELP_ALIASED}
+
+Lists the runs started on this machine. {ARG_ALL} also lists the runs that only
+a manifest names, in the data home and in the project's runs area, and
+{ARG_SHARED} lists the project's runs area alone; both scan the run directories
+and add a `where` column: `local` for a run started here, `local, untracked`
+for one in the data home that was not, `project` for a run kept in the project
+area and `project, linked` for a link there to a run kept elsewhere. A run
+attached from elsewhere is listed with the runs started here, as `attached`, or
+`attached, read-only` when nothing may write into it. The disk space of a run
+that was not started here is not known.
+"""
 FIELD_NAMES: t.TypeAlias = t.Literal[
     "run-id",
     "name",
@@ -42,10 +77,14 @@ FIELD_NAMES: t.TypeAlias = t.Literal[
 """Fields available for use in listing, filtering, and sorting operations."""
 FORMATS: t.TypeAlias = t.Literal["table", "csv", "json"]
 """Output format options."""
-EXCLUSIONS: set[str] = {"raw_size", "raw_start", "format"}
-"""View fields excluded from rendered outputs."""
+UNWRAPPED_FORMATS: t.Final[frozenset[FORMATS]] = frozenset({"csv", "json"})
+"""Machine-readable formats, printed without wrapping lines at the console width."""
+NOT_MEASURED: t.Final[str] = "not measured"
+"""Table text for the size of a run whose disk usage has not been measured."""
 INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 """View fields included in the rendered outputs."""
+WHERE_INCLUSIONS: set[str] = INCLUSIONS | {"where"}
+"""View fields included when the listing says where each run is kept."""
 UNKNOWN_NAME: t.Final[str] = "unknown"
 """Constant value used by the system when a name cannot be retrieved."""
 
@@ -74,12 +113,25 @@ class ItemView(BaseModel):
     format: FORMATS
     """The output format this view will be rendered with."""
 
+    where: str = Field(default="")
+    """Where the run is kept; listed only when the command looks beyond the runs started here."""
+
+    tracked: bool = Field(default=True)
+    """Whether this machine tracks the run: only then can its disk usage be measured."""
+
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def size(self) -> str:
-        """The size as a string for display (includes units)."""
-        if self.raw_size == UNKNOWN_SIZE and self.format == "table":
-            return f'Run "cstar run status {self.run_id} {ARG_SIZE}"'
+    def size(self) -> str | None:
+        """The size as a string for display (includes units).
+
+        `None` in machine formats when the disk usage has not been measured.
+        """
+        if self.raw_size == UNKNOWN_SIZE:
+            if self.format != "table":
+                return None
+            if not self.tracked:
+                return NOT_MEASURED
+            return f"{NOT_MEASURED} (cstar run status {self.run_id} {ARG_SIZE})"
 
         return f"{self.raw_size}MB"
 
@@ -99,9 +151,9 @@ async def adapt_runs_to_views(
 ) -> Sequence[ItemView]:
     """Build the raw dataset that will be rendered in the view.
 
-    A run's name is taken from its recorded metadata when present; otherwise
-    its transformed workplan is loaded to resolve the name, and a run whose
-    workplan cannot be loaded is shown as "unknown".
+    A run's name is the one its manifest holds; for a run whose name is not
+    known that way, its transformed workplan is loaded to resolve the name, and
+    a run whose workplan cannot be found or loaded is shown as "unknown".
 
     Parameters
     ----------
@@ -118,11 +170,14 @@ async def adapt_runs_to_views(
     Sequence[ItemView]
         One view per run, in input order.
     """
-    missing = {
-        r.trx_workplan_path
-        for r in runs
-        if KEY_RUN_NAME not in r.metadata and r.trx_workplan_path not in plan_cache
-    }
+    missing: set[Path] = set()
+    trx_paths: dict[str, Path] = {}
+    for r in runs:
+        if r.name or (path := r.try_trx_workplan_path()) is None:
+            continue
+        trx_paths[r.run_id] = path
+        if path not in plan_cache:
+            missing.add(path)
     if missing:
         await load_workplans(sorted(missing), plan_cache)
 
@@ -130,12 +185,14 @@ async def adapt_runs_to_views(
     unresolved: list[str] = []
 
     for run in runs:
-        name = (run.metadata.get(KEY_RUN_NAME) or "").removesuffix(
-            LEGACY_TRANSFORMED_NAME_SUFFIX
-        )
+        name = run.name
 
         if not name:
-            plan = plan_cache.get(run.trx_workplan_path)
+            plan = (
+                plan_cache.get(trx_paths[run.run_id])
+                if run.run_id in trx_paths
+                else None
+            )
             name = plan.name if plan else UNKNOWN_NAME
 
         if name == UNKNOWN_NAME:
@@ -148,6 +205,7 @@ async def adapt_runs_to_views(
                 raw_size=run.size_mb,
                 raw_start=run.start_at,
                 format=format,
+                where=where_tracked(run),
             )
         )
 
@@ -160,13 +218,83 @@ async def adapt_runs_to_views(
     return views
 
 
-def table_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
+def find_other_runs(
+    runid_filter: str, tracked: Sequence[WorkplanRun], *, shared_only: bool
+) -> list[ManifestRecord]:
+    """Find the runs to list that this machine does not track.
+
+    Scans the run directories, once per process.
+
+    Parameters
+    ----------
+    runid_filter : str
+        The case-folded run-id prefix to match.
+    tracked : Sequence[WorkplanRun]
+        Every run tracked on this machine that the listing is of, before any
+        filter but the run-id prefix drops one.
+    shared_only : bool
+        Whether to list the project's runs area alone, with no regard to what
+        is tracked.
+
+    Returns
+    -------
+    list[ManifestRecord]
+        The runs in the index, the user's own before the project's.
+    """
+    locations = [
+        loc
+        for loc in default_index().locations()
+        if loc.run_id.casefold().startswith(runid_filter)
+    ]
+    if shared_only:
+        locations = [loc for loc in locations if loc.origin is Origin.project]
+    else:
+        locations = untracked_locations(locations, tracked)
+    return [ManifestRecord(loc) for loc in locations]
+
+
+def adapt_locations_to_views(
+    records: Sequence[ManifestRecord], format: FORMATS
+) -> list[ItemView]:
+    """Build the views of runs that this machine does not track.
+
+    Parameters
+    ----------
+    records : Sequence[ManifestRecord]
+        The runs to adapt for display.
+    format : FORMATS
+        The output format the views will be rendered with.
+
+    Returns
+    -------
+    list[ItemView]
+        One view per run, in input order. A run's disk usage is not known.
+    """
+    return [
+        ItemView(
+            run_id=record.run_id,
+            name=record.location.name or UNKNOWN_NAME,
+            raw_size=UNKNOWN_SIZE,
+            raw_start=record.start_at,
+            format=format,
+            where=where_kept(record.location),
+            tracked=False,
+        )
+        for record in records
+    ]
+
+
+def table_formatter(
+    data: Iterable[ItemView], *, with_where: bool = False
+) -> ConsoleRenderable:
     """Display run information as a table.
 
     Parameters
     ----------
     data : Iterable[ItemView]
         The run views to render.
+    with_where : bool
+        Whether to add a column saying where each run is kept.
 
     Returns
     -------
@@ -180,24 +308,26 @@ def table_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
         Column("start time", justify="center", style="cyan"),
         row_styles=["", "dim"],
     )
+    if with_where:
+        table.add_column("where", justify="left", style="green")
 
     for datum in data:
-        table.add_row(
-            datum.run_id,
-            datum.name,
-            datum.size,
-            datum.start,
-        )
+        cells = [datum.run_id, datum.name, datum.size, datum.start]
+        table.add_row(*cells, *([datum.where] if with_where else []))
     return table
 
 
-def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
+def csv_formatter(
+    data: Iterable[ItemView], *, with_where: bool = False
+) -> ConsoleRenderable:
     """Display run information as CSV.
 
     Parameters
     ----------
     data : Iterable[ItemView]
         The run views to render.
+    with_where : bool
+        Whether to add a column saying where each run is kept.
 
     Returns
     -------
@@ -206,10 +336,11 @@ def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     """
     output = io.StringIO()
 
-    renderables = (x.model_dump(exclude=EXCLUSIONS) for x in data)
+    fields = WHERE_INCLUSIONS if with_where else INCLUSIONS
+    renderables = (x.model_dump(include=fields) for x in data)
     writer = csv.DictWriter(
         output,
-        fieldnames=sorted(INCLUSIONS),
+        fieldnames=sorted(fields),
         quoting=csv.QUOTE_STRINGS,
     )
 
@@ -220,20 +351,25 @@ def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     return Text(document)
 
 
-def json_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
+def json_formatter(
+    data: Iterable[ItemView], *, with_where: bool = False
+) -> ConsoleRenderable:
     """Display run information as JSON.
 
     Parameters
     ----------
     data : Iterable[ItemView]
         The run views to render.
+    with_where : bool
+        Whether to add a field saying where each run is kept.
 
     Returns
     -------
     ConsoleRenderable
         A JSON document with the runs under a top-level "data" key.
     """
-    container = {"data": [x.model_dump(include=INCLUSIONS) for x in data]}
+    fields = WHERE_INCLUSIONS if with_where else INCLUSIONS
+    container = {"data": [x.model_dump(include=fields) for x in data]}
     document = json.dumps(container)
 
     return Text(document)
@@ -243,6 +379,8 @@ def filter_size(
     runs: Sequence[WorkplanRun],
     lt_filter: int | None = None,
     gt_filter: int | None = None,
+    *,
+    unmeasured: Sequence[str] = (),
 ) -> list[WorkplanRun]:
     """Filter runs by their recorded disk usage.
 
@@ -257,6 +395,9 @@ def filter_size(
         The maximum disk usage (in MB) to include in results.
     gt_filter : int | None
         The minimum disk usage (in MB) to include in results.
+    unmeasured : Sequence[str]
+        The run-ids of listed runs that are not in `runs` and whose usage is
+        not known, which are never filtered out either; named in the warning.
 
     Returns
     -------
@@ -267,7 +408,7 @@ def filter_size(
         return list(runs)
 
     results: list[WorkplanRun] = []
-    warn_unsized: list[str] = []
+    warn_unsized: list[str] = list(unmeasured)
 
     for run in runs:
         size = run.size_mb
@@ -294,10 +435,10 @@ def filter_size(
 
 
 def filter_time(
-    runs: Sequence[WorkplanRun],
+    runs: Sequence[_TRecord],
     lt_filter: datetime.datetime | None = None,
     gt_filter: datetime.datetime | None = None,
-) -> list[WorkplanRun]:
+) -> list[_TRecord]:
     """Filter runs by their start time.
 
     Bounds are inclusive and are normalized to UTC before comparison; a
@@ -305,7 +446,7 @@ def filter_time(
 
     Parameters
     ----------
-    runs : Sequence[WorkplanRun]
+    runs : Sequence[RunRecord]
         The runs to filter.
     lt_filter : datetime.datetime | None
         The latest start time to include in results.
@@ -314,13 +455,13 @@ def filter_time(
 
     Returns
     -------
-    list[WorkplanRun]
+    list[RunRecord]
         The runs within the requested bounds, in input order.
     """
     if not lt_filter and not gt_filter:
         return list(runs)
 
-    results: list[WorkplanRun] = []
+    results: list[_TRecord] = []
     for run in runs:
         if lt_filter and run.start_at.astimezone(datetime.UTC) > lt_filter.astimezone(
             datetime.UTC
@@ -366,7 +507,7 @@ formatters = {
 }
 
 
-@app.command(name="ls", help=HELP_ALIASED)
+@app.command(name="ls", help=HELP_LONG, short_help=HELP_ALIASED)
 def ls_runs(
     context: typer.Context,
     sort: t.Annotated[
@@ -424,32 +565,76 @@ def ls_runs(
             ),
         ),
     ] = False,
+    shared: t.Annotated[
+        bool,
+        typer.Option(ARG_SHARED, help=ARG_SHARED_HELP),
+    ] = False,
+    all_runs: t.Annotated[
+        bool,
+        typer.Option(ARG_ALL, help=ARG_ALL_RUNS_HELP),
+    ] = False,
 ) -> None:
     """List all runs started by a user."""
     plan_cache: dict[Path, LiveWorkplan] = {}
 
+    # both flags: every run there is
+    only_shared = shared and not all_runs
+    if only_shared and DirectoryManager.project_runs_home() is None:
+        msg = (
+            "There is no project's runs area to list: set "
+            f"{ENV_CSTAR_PROJECT_HOME} (or $PROJECT), whose <project>/cstar/runs "
+            "directory holds the shared runs."
+        )
+        raise typer.BadParameter(msg, param_hint=ARG_SHARED)
+
+    scan = shared or all_runs
+
     async def _pipeline() -> Sequence[ItemView]:
         """List, filter, optionally re-measure, and adapt runs for display."""
-        async with TrackingRepository.bound(max_concurrency()) as repo:
-            runs = await repo.list_latest_runs(runid_filter)
+        tracked: list[WorkplanRun] = []
+        if not only_shared:
+            async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
+                tracked = list(await repo.list_latest_runs(runid_filter))
 
-        filtered = filter_time(list(runs), time_lt_filter, time_gt_filter)
+        others = (
+            filter_time(
+                find_other_runs(runid_filter, tracked, shared_only=only_shared),
+                time_lt_filter,
+                time_gt_filter,
+            )
+            if scan
+            else []
+        )
+
+        filtered = filter_time(tracked, time_lt_filter, time_gt_filter)
 
         if refresh_usage:
-            paths = {r.trx_workplan_path for r in filtered}
+            paths = {
+                path
+                for r in filtered
+                if (path := r.try_trx_workplan_path()) is not None
+            }
             await load_workplans(sorted(paths), plan_cache)
             await refresh_disk_usage(filtered, plan_cache)
 
-        filtered = filter_size(filtered, size_lt_filter, size_gt_filter)
+        filtered = filter_size(
+            filtered,
+            size_lt_filter,
+            size_gt_filter,
+            unmeasured=[record.run_id for record in others],
+        )
 
-        return await adapt_runs_to_views(filtered, plan_cache, format)
+        return [
+            *await adapt_runs_to_views(filtered, plan_cache, format),
+            *adapt_locations_to_views(others, format),
+        ]
 
     views = asyncio.run(_pipeline())
 
     sorted_views = sorters[sort](views, reverse)
-    content = formatters[format](sorted_views)
+    content = formatters[format](sorted_views, with_where=scan)
 
-    console.print(content)
+    console.print(content, soft_wrap=format in UNWRAPPED_FORMATS)
 
 
 # `list` is an alias for `ls`: the same command under a second name, hidden

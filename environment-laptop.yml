@@ -2,9 +2,9 @@ name: cstar-env
 channels:
   - conda-forge
 dependencies:
-  - python>=3.12,<3.14
+  - python>=3.12,<3.15
   - pip
-  - roms-tools>=5.2.1,<6
+  - roms-tools>=5.3.0,<6
   # forge application runtime dependencies
   - jinja2
   - pandas
@@ -16,7 +16,6 @@ dependencies:
   - numba
   - fsspec
   - kerchunk
-  - nest-asyncio
   - ujson
   - fastparquet
   - xarray>=2026.9
@@ -29,6 +28,7 @@ dependencies:
   # toolchain: provided by modules on HPC
   - compilers
   - cmake
+  - pkg-config   # ParallelIO's CMake configure needs it (find_package(PkgConfig))
   - mpich
   # mpicc / mpifort flavors needed to ensure we get the matching compilers on macos
   - mpich-mpicc

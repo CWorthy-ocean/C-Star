@@ -1,14 +1,20 @@
 """Tests for the versioned ROMS namelist schemas in `cstar.roms.namelist`."""
 
+import logging
 from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from cstar.roms.namelist import (
+    NAMELIST_SCHEMA_REGISTRY,
+    NEWEST_KNOWN_UCLA_ROMS,
     CdrLiteOutputSettings,
     CdrLiteSettings,
+    CdrLiteSettingsV0_12_0,
+    ExtractDataSettingsV0_12_0,
     MarblBiogeochemistrySettingsV0_11_0,
     ParamSettings,
     ParamSettingsV0_4_0,
@@ -21,6 +27,11 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
+    VSpongeSettingsV0_13_0,
+    _parse_semver,
+    format_roms_version,
     is_commit_hash,
     namelist_schema_for_ref,
     release_ref_for_remote,
@@ -32,6 +43,8 @@ V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.
 V0_7_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_7_0.nml"
 V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
 V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
+V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
+V0_13_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -92,11 +105,31 @@ def test_namelist_schema_for_ref_post_0_9_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.11.0", "v0.11.0", "0.12.0", "12.0.0"],
+    ["0.11.0", "v0.11.0", "0.11.4"],
 )
 def test_namelist_schema_for_ref_post_0_11_0(checkout_target):
-    """Refs at or above 0.11.0 select `RomsNamelistV0_11_0`."""
+    """Refs in `[0.11.0, 0.12.0)` select `RomsNamelistV0_11_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_11_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.12.0", "v0.12.0", "0.12.4"],
+)
+def test_namelist_schema_for_ref_post_0_12_0(checkout_target):
+    """Refs in `[0.12.0, 0.13.0)` select `RomsNamelistV0_12_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_12_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.13.0", "v0.13.0"],
+)
+def test_namelist_schema_for_ref_post_0_13_0(checkout_target):
+    """Refs at or above 0.13.0 select `RomsNamelistV0_13_0` (newer releases
+    too, with a warning: see the newer-than-known tests below).
+    """
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_13_0
 
 
 @pytest.mark.parametrize(
@@ -115,7 +148,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_13_0
 
 
 def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
@@ -162,24 +195,207 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_13_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     """A hash that resolves to a non-release tag (or fails to resolve) falls
     back to the latest schema with the use-at-your-own-risk warning.
     """
-    with mock.patch(
-        "cstar.roms.namelist._describe_nearest_tag", return_value=("not-semver", 0)
+    with (
+        mock.patch(
+            "cstar.roms.namelist._describe_nearest_tag", return_value=("not-semver", 0)
+        ),
+        pytest.warns(UserWarning, match="use at your own risk"),
     ):
-        with pytest.warns(UserWarning, match="use at your own risk"):
-            schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_11_0
+        schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+    assert schema is RomsNamelistV0_13_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_13_0
+
+
+NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
+BUNDLED_MODEL_SPECS = sorted(
+    (Path(__file__).parents[3] / "catalog" / "bundled" / "specs" / "ModelSpec").glob(
+        "*.yaml"
+    )
+)
+
+
+def _newer_than_known_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "cstar.roms.namelist" and NEWER_THAN_KNOWN in r.getMessage()
+    ]
+
+
+def test_newest_known_ucla_roms_not_behind_registry():
+    """Adding a namelist tier bumps `NEWEST_KNOWN_UCLA_ROMS`: a release the
+    registry has a tier for must never warn that C-Star does not know it.
+    """
+    last_lower = NAMELIST_SCHEMA_REGISTRY[-1][0]
+    assert last_lower is not None
+    assert last_lower <= NEWEST_KNOWN_UCLA_ROMS
+
+
+def test_bundled_model_specs_are_found():
+    """The parametrization below is not silently empty."""
+    assert BUNDLED_MODEL_SPECS
+
+
+@pytest.mark.parametrize("spec", BUNDLED_MODEL_SPECS, ids=lambda p: p.stem)
+def test_bundled_model_specs_pin_known_releases(spec: Path):
+    """Adopting a ucla-roms release as a bundled ModelSpec bumps
+    `NEWEST_KNOWN_UCLA_ROMS`, so the shipped models never warn.
+    """
+    roms = yaml.safe_load(spec.read_text())["code"]["roms"]
+    version = _parse_semver(str(roms.get("commit") or roms.get("branch")))
+    if version is not None:
+        assert version <= NEWEST_KNOWN_UCLA_ROMS
+
+
+def test_format_roms_version():
+    assert format_roms_version((0, 12, 0)) == "0.12.0"
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        (*NEWEST_KNOWN_UCLA_ROMS[:2], NEWEST_KNOWN_UCLA_ROMS[2] + 1),
+        (NEWEST_KNOWN_UCLA_ROMS[0], NEWEST_KNOWN_UCLA_ROMS[1] + 1, 0),
+        (NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0),
+    ],
+    ids=["patch", "minor", "major"],
+)
+def test_namelist_schema_for_ref_newer_than_known_release_warns(
+    version: tuple[int, int, int], caplog: pytest.LogCaptureFixture
+):
+    """A release tag above `NEWEST_KNOWN_UCLA_ROMS` selects the latest schema
+    with one warning and one log line naming the tag, the schema and the newest
+    known release.
+    """
+    tag = format_roms_version(version)
+    newest = format_roms_version(NEWEST_KNOWN_UCLA_ROMS)
+    last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
+    with (
+        caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"),
+        pytest.warns(UserWarning) as record,
+    ):
+        schema = namelist_schema_for_ref(f"v{tag}")
+
+    assert schema is last_cls
+    assert len(record) == 1
+    message = str(record[0].message)
+    assert f"ucla-roms release v{tag} is {NEWER_THAN_KNOWN} ({newest})" in message
+    assert last_cls.__name__ in message
+    assert record[0].filename == __file__
+    assert _newer_than_known_records(caplog) == [message]
+
+
+def test_namelist_schema_for_ref_newer_than_known_logs_once_per_release(
+    caplog: pytest.LogCaptureFixture,
+):
+    """Logging ignores warning filters and the wizard reselects the schema on
+    every rebuild, so each too-new release is logged once, however it is
+    spelled; the warning repeats.
+    """
+    major = NEWEST_KNOWN_UCLA_ROMS[0] + 1
+    with (
+        caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"),
+        pytest.warns(UserWarning, match=NEWER_THAN_KNOWN) as record,
+    ):
+        namelist_schema_for_ref(f"{major}.0.0")
+        namelist_schema_for_ref(f"v{major}.0.0")
+        namelist_schema_for_ref(f"{major}.0.1")
+    assert len(record) == 3
+    assert len(_newer_than_known_records(caplog)) == 2
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    [
+        format_roms_version(NEWEST_KNOWN_UCLA_ROMS),
+        f"v{format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}",
+        format_roms_version(NAMELIST_SCHEMA_REGISTRY[-1][0]),  # type: ignore[arg-type]
+    ],
+)
+def test_namelist_schema_for_ref_known_release_in_last_range_is_silent(
+    checkout_target: str, recwarn: pytest.WarningsRecorder, caplog
+):
+    """A release inside the last range, up to the newest known one, selects
+    the latest schema without any warning or log line.
+    """
+    with caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"):
+        schema = namelist_schema_for_ref(checkout_target)
+    assert schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
+    assert len(recwarn) == 0
+    assert not _newer_than_known_records(caplog)
+
+
+def test_namelist_schema_for_ref_hash_at_newer_than_known_release_warns(
+    caplog: pytest.LogCaptureFixture,
+):
+    """A commit hash whose nearest release tag is newer than the newest known
+    release gets the same warning, naming both the hash and the tag.
+    """
+    tag = format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0))
+    with (
+        mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=(tag, 0)),
+        caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"),
+        pytest.warns(UserWarning) as record,
+    ):
+        schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+
+    assert schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
+    assert len(record) == 1
+    message = str(record[0].message)
+    assert f"commit {'a' * 40!r} (release {tag}) is {NEWER_THAN_KNOWN}" in message
+    assert _newer_than_known_records(caplog) == [message]
+
+
+def test_namelist_schema_for_ref_hash_ahead_of_newer_than_known_release_warns_twice():
+    """A commit after a too-new release warns about both: the commits since
+    the tag, and the tag being newer than C-Star knows.
+    """
+    tag = format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0))
+    with (
+        mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=(tag, 3)),
+        pytest.warns(UserWarning) as record,
+    ):
+        namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+
+    messages = [str(w.message) for w in record]
+    assert len(messages) == 2
+    assert f"3 commit(s) after release {tag}" in messages[0]
+    assert NEWER_THAN_KNOWN in messages[1]
+
+
+def test_namelist_schema_for_ref_hash_at_known_release_is_silent(recwarn):
+    """A commit hash on the newest known release does not warn."""
+    with mock.patch(
+        "cstar.roms.namelist._describe_nearest_tag",
+        return_value=(format_roms_version(NEWEST_KNOWN_UCLA_ROMS), 0),
+    ):
+        namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+    assert len(recwarn) == 0
+
+
+def test_release_ref_for_remote_newer_than_known_tag_warns_on_selection():
+    """Without a clone, the hash resolves to its tag silently; selecting the
+    schema for that tag then warns that the release is newer than known.
+    """
+    tag = format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0))
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag", return_value=(tag, 0)
+    ):
+        ref = release_ref_for_remote("/some/repo", "a" * 40)
+    assert ref == tag
+    with pytest.warns(UserWarning, match=f"release {tag} is {NEWER_THAN_KNOWN}"):
+        namelist_schema_for_ref(ref)
 
 
 @pytest.mark.parametrize(
@@ -242,7 +458,7 @@ def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
     with pytest.warns(
         UserWarning,
         match=rf"Could not resolve .*{'a' * 40}.* latest known namelist schema "
-        rf"\({RomsNamelistV0_11_0.__name__}\)",
+        rf"\({RomsNamelistV0_13_0.__name__}\)",
     ):
         ref = release_ref_for_remote(
             "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
@@ -252,12 +468,14 @@ def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
 
 def test_release_ref_for_remote_unparseable_tag_warns_and_keeps_hash():
     """A resolution that yields a tag C-Star cannot parse falls back too."""
-    with mock.patch(
-        "cstar.roms.namelist._describe_remote_nearest_tag",
-        return_value=("1.2.3-rc1", 0),
+    with (
+        mock.patch(
+            "cstar.roms.namelist._describe_remote_nearest_tag",
+            return_value=("1.2.3-rc1", 0),
+        ),
+        pytest.warns(UserWarning, match="Could not resolve"),
     ):
-        with pytest.warns(UserWarning, match="Could not resolve"):
-            ref = release_ref_for_remote("/some/repo", "a" * 40)
+        ref = release_ref_for_remote("/some/repo", "a" * 40)
     assert ref == "a" * 40
 
 
@@ -526,6 +744,164 @@ def test_roms_namelist_v0_9_0_does_not_write_constant_fe():
     assert "constant_fe_value" not in written
 
 
+def test_roms_namelist_v0_12_0_round_trip(tmp_path):
+    """`RomsNamelistV0_12_0.read` parses the 0.12.0 fixture, whose time
+    interpolation is switched off, and a read -> write -> read round trip
+    reproduces the same model.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_12_0_NAMELIST)
+    assert isinstance(nml.cdr_lite_settings, CdrLiteSettingsV0_12_0)
+    assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation is False
+    assert isinstance(nml.extract_data_settings, ExtractDataSettingsV0_12_0)
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert "cdr_carbonate_sensitivity_time_interpolation = .false." in out.read_text()
+    assert RomsNamelistV0_12_0.read(out) == nml
+
+
+def test_roms_namelist_v0_11_0_rejects_v0_12_0_fixture():
+    """`RomsNamelistV0_11_0` is strict: ucla-roms before 0.12.0 stops on the
+    time-interpolation key, so the 0.11.0 schema rejects it and never writes it.
+    """
+    with pytest.raises(
+        ValidationError, match="cdr_carbonate_sensitivity_time_interpolation"
+    ):
+        RomsNamelistV0_11_0.read(V0_12_0_NAMELIST)
+    written = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST).to_f90nml_dict()
+    assert (
+        "cdr_carbonate_sensitivity_time_interpolation"
+        not in written["cdr_lite_settings"]
+    )
+
+
+def test_roms_namelist_v0_12_0_time_interpolation_defaults_and_always_written():
+    """A 0.11.0 namelist without the key still validates under
+    `RomsNamelistV0_12_0`, defaulting to interpolation on (what earlier
+    releases always did), and the written namelist carries it.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_11_0_NAMELIST)
+    assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation is True
+    written = nml.to_f90nml_dict()["cdr_lite_settings"]
+    assert written["cdr_carbonate_sensitivity_time_interpolation"] is True
+
+
+def test_roms_namelist_v0_13_0_round_trip(tmp_path):
+    """`RomsNamelistV0_13_0.read` parses the 0.13.0 fixture, whose sponge is on
+    currents only, and a read -> write -> read round trip reproduces the same
+    model.
+    """
+    nml = RomsNamelistV0_13_0.read(V0_13_0_NAMELIST)
+    assert isinstance(nml.v_sponge_settings, VSpongeSettingsV0_13_0)
+    assert nml.v_sponge_settings.v_sponge_trc == 0.0
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert "v_sponge_trc = 0.0" in out.read_text()
+    assert RomsNamelistV0_13_0.read(out) == nml
+
+
+def test_roms_namelist_v0_12_0_rejects_v0_13_0_fixture():
+    """`RomsNamelistV0_12_0` is strict: ucla-roms before 0.13.0 stops on
+    `v_sponge_trc`, so the 0.12.0 schema rejects it and never writes it.
+    """
+    with pytest.raises(ValidationError, match="v_sponge_trc"):
+        RomsNamelistV0_12_0.read(V0_13_0_NAMELIST)
+    written = RomsNamelistV0_12_0.read(V0_12_0_NAMELIST).to_f90nml_dict()
+    assert "v_sponge_trc" not in written["v_sponge_settings"]
+
+
+def test_roms_namelist_v0_13_0_v_sponge_trc_defaults_and_always_written():
+    """A 0.12.0 namelist without the key still validates under
+    `RomsNamelistV0_13_0`, defaulting to -1 (tracers get `v_sponge`, what earlier
+    releases always did), and the written namelist carries it.
+    """
+    nml = RomsNamelistV0_13_0.read(V0_12_0_NAMELIST)
+    assert nml.v_sponge_settings.v_sponge_trc == -1.0
+    assert nml.to_f90nml_dict()["v_sponge_settings"]["v_sponge_trc"] == -1.0
+
+
+@pytest.mark.parametrize("value", [-1.0, -5.0, 0.0, 400.0])
+def test_roms_namelist_v0_13_0_v_sponge_trc_has_no_bounds(value):
+    """ROMS reads any value (negative means "same as `v_sponge`"), so the schema
+    bounds none.
+    """
+    assert (
+        VSpongeSettingsV0_13_0(v_sponge=1.0, v_sponge_trc=value).v_sponge_trc == value
+    )
+
+
+_TWO_CHILDREN = {
+    "do_extract": True,
+    "output_period_extract": 3600.0,
+    "nrpf_extract": 24,
+    "extract_file": ["a.nc", "b.nc"],
+    "n_chd": [90, 50],
+    "theta_s_chd": [5.0, 6.0],
+    "theta_b_chd": [2.0, 3.0],
+    "hc_chd": [250.0, 300.0],
+    "extract_root_name": ["child_a", "child_b"],
+}
+
+
+def test_extract_v0_12_0_accepts_one_entry_per_child(tmp_path):
+    """From 0.12.0 the per-child extraction keys take one entry per child (PR
+    #395); the arrays survive a write -> read round trip, and a single value
+    stays a single value.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_12_0_NAMELIST)
+    assert nml.extract_data_settings.extract_file == "sample_edata.nc"
+    nml.extract_data_settings = ExtractDataSettingsV0_12_0(**_TWO_CHILDREN)
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    reread = RomsNamelistV0_12_0.read(out)
+    assert reread.extract_data_settings.n_chd == [90, 50]
+    assert reread.extract_data_settings.extract_root_name == ["child_a", "child_b"]
+    assert reread == nml
+
+
+@pytest.mark.parametrize(
+    "key", ["n_chd", "theta_s_chd", "theta_b_chd", "hc_chd", "extract_root_name"]
+)
+def test_extract_v0_12_0_needs_every_child_entry(key):
+    """ROMS stops when a child after the first lacks its own vertical-grid
+    entry (only child 1 has defaults); a list `extract_root_name` must also
+    cover every child.
+    """
+    with pytest.raises(ValidationError, match=f"{key} has 1 entries for 2 child"):
+        ExtractDataSettingsV0_12_0(**{**_TWO_CHILDREN, key: _TWO_CHILDREN[key][:1]})
+
+
+def test_extract_v0_12_0_rules_apply_only_when_extracting():
+    """ROMS checks the per-child layout only with `do_extract` on; a single
+    `extract_root_name` is fine for several children (only PARALLEL_IO builds
+    need one per child, which the schema cannot see).
+    """
+    off = {**_TWO_CHILDREN, "do_extract": False, "n_chd": 90}
+    assert ExtractDataSettingsV0_12_0(**off).n_chd == 90
+    shared_root = {**_TWO_CHILDREN, "extract_root_name": "child"}
+    assert ExtractDataSettingsV0_12_0(**shared_root).extract_root_name == "child"
+
+
+def test_extract_v0_12_0_rejects_more_than_max_children_and_blank_files():
+    many = [f"c{i}.nc" for i in range(9)]
+    with pytest.raises(ValidationError, match="extract_file has 9 entries"):
+        ExtractDataSettingsV0_12_0(
+            **{**_TWO_CHILDREN, "do_extract": False, "extract_file": many}
+        )
+    with pytest.raises(ValidationError, match="blank entry"):
+        ExtractDataSettingsV0_12_0(**{**_TWO_CHILDREN, "extract_file": ["a.nc", " "]})
+
+
+def test_extract_before_0_12_0_rejects_several_children():
+    """Earlier releases read one child; the 0.11.0 schema rejects arrays."""
+    data = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST).model_dump()
+    data["extract_data_settings"] = _TWO_CHILDREN
+    with pytest.raises(ValidationError, match="extract_file"):
+        RomsNamelistV0_11_0.model_validate(data)
+
+
 def test_constant_fe_value_must_not_be_negative():
     """ROMS stops on a negative `constant_Fe_value`: the schema rejects it on
     construction and on assignment, and accepts zero.
@@ -708,6 +1084,23 @@ class TestUnknownOverrideKeys:
         assert any("use_constant_fe" in v for v in violations)
         assert any("constant_fe_value" in v for v in violations)
 
+    def test_carbonate_sensitivity_time_interpolation_key(self):
+        """Known from 0.12.0 on; unknown to `RomsNamelistV0_11_0`."""
+        key = "cdr_carbonate_sensitivity_time_interpolation"
+        overrides = {"cdr_lite_settings": {key: False}}
+        assert RomsNamelistV0_12_0.unknown_override_keys(overrides) == []
+        violations = RomsNamelistV0_11_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert key in violations[0]
+
+    def test_v_sponge_trc_key(self):
+        """Known from 0.13.0 on; unknown to `RomsNamelistV0_12_0`."""
+        overrides = {"v_sponge_settings": {"v_sponge_trc": 0.0}}
+        assert RomsNamelistV0_13_0.unknown_override_keys(overrides) == []
+        violations = RomsNamelistV0_12_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert "v_sponge_trc" in violations[0]
+
 
 # ---------------------------------------------------------------------------
 # ParamSettings / ParamSettingsV0_4_0 -- passive CDR tracer counts
@@ -739,6 +1132,8 @@ def test_param_settings_rejects_cdr_tracer_counts():
         RomsNamelistV0_7_0,
         RomsNamelistV0_9_0,
         RomsNamelistV0_11_0,
+        RomsNamelistV0_12_0,
+        RomsNamelistV0_13_0,
     ],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):

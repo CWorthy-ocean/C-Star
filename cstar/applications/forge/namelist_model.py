@@ -5,7 +5,7 @@ Forge's run-time settings schema (``RunTimeSettings`` and its
 
 * :class:`RunTimeSettings` / :class:`RunTimeSettingsV0_5_0` validate and type
   forge's run-time settings dict — the YAML vocabulary (``tcline``, ``np_xi``,
-  ``analytical`` …). Defaults live in each ModelSpec's ``model.yaml``
+  ``analytical`` …). Defaults live in each ModelSpec file
   (``model_settings``), merged with the catalog's Domain/Forcing/Output specs —
   not here: fields are required so an incomplete settings dict fails loudly;
   only the runtime-filled fields (grid file, IC file, s-coord, forcing paths,
@@ -44,6 +44,8 @@ from pydantic import (
 
 from cstar.roms.namelist import (
     UCLA_ROMS_0_11_0,
+    UCLA_ROMS_0_12_0,
+    UCLA_ROMS_0_13_0,
     ForcingFiles,
     Gamma2Settings,
     LateralViscSettings,
@@ -56,6 +58,8 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -66,6 +70,12 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.precheck import NamelistConsistencyError as NamelistConsistencyError
 from cstar.roms.precheck import applies_to as _output_precheck_applies_to
+from cstar.roms.precheck import (
+    averages_end_on_marbl_step_applies_to as _averages_end_on_marbl_step_applies_to,
+)
+from cstar.roms.precheck import (
+    check_averages_end_on_marbl_step as _check_averages_end_on_marbl_step,
+)
 from cstar.roms.precheck import (
     check_output_streams_divide_rst as _check_output_streams_divide_rst,
 )
@@ -617,14 +627,63 @@ def cppdefs_for_precheck(
     return result
 
 
-def check_output_streams_divide_rst(settings: Any, cppdefs: Any = None) -> None:
+def check_output_streams_divide_rst(
+    settings: Any,
+    cppdefs: Any = None,
+    *,
+    settings_cls: type[_RunTimeSettingsCommon] | None = None,
+) -> None:
     """Forge-side entry to ``cstar.roms.precheck.check_output_streams_divide_rst``.
 
     The general ucla-roms output-stream / restart-rollover precheck lives in
     C-Star; this keeps the resolver and executor on one forge-side import path
-    alongside the forge-shaped helpers above.
+    alongside the forge-shaped helpers above. ``settings_cls`` (the pinned
+    tier) selects the namelist schema whose rows apply (the ``sflx`` gate grew
+    in ucla-roms 0.13.0); ``None`` checks against the newest one.
     """
-    _check_output_streams_divide_rst(settings, cppdefs)
+    _check_output_streams_divide_rst(
+        settings,
+        cppdefs,
+        schema=(
+            None
+            if settings_cls is None
+            else _NAMELIST_SCHEMA_BY_RUN_TIME_SETTINGS[settings_cls]
+        ),
+    )
+
+
+def check_marbl_step_averages(
+    settings: Mapping[str, Any],
+    *,
+    settings_cls: type[_RunTimeSettingsCommon],
+    roms_ref: str | None,
+) -> None:
+    """Raise ``NamelistConsistencyError`` if an averaged MARBL output stream of
+    forge's ``settings`` would not end on a MARBL step, which ucla-roms >= 0.13.0
+    refuses at startup.
+
+    Forge-vocabulary shim over
+    :func:`cstar.roms.precheck.check_averages_end_on_marbl_step` (the single
+    home for this rule), gated on ``roms_ref`` by
+    :func:`cstar.roms.precheck.averages_end_on_marbl_step_applies_to`: a branch
+    counts as the latest release, and an unresolved commit hash is not checked
+    (``configure_build`` checks the release it resolves to). The ``cdr_output``
+    and ``bgc`` streams are translated through ``settings_cls``'s Cfg classes
+    (:func:`canonical_output_sections_for_precheck`); ``dt`` and
+    ``marbl_timestep`` already are the real Fortran keys. Raises pydantic's
+    ``ValidationError`` for a malformed output section.
+    """
+    if not _averages_end_on_marbl_step_applies_to(roms_ref):
+        return
+    canonical = canonical_output_sections_for_precheck(dict(settings), settings_cls)
+    canonical["time_stepping"] = {"dt": (settings.get("time_stepping") or {}).get("dt")}
+    canonical["marbl_biogeochemistry_settings"] = {
+        "marbl_timestep": (settings.get("marbl_bgc") or {}).get("marbl_timestep")
+    }
+    _check_averages_end_on_marbl_step(
+        canonical,
+        cppdefs_for_precheck(settings.get("cppdefs"), settings.get("upscale_output")),
+    )
 
 
 class TsOutputCfg(_SettingsSection):
@@ -1070,7 +1129,28 @@ class CdrLiteOutputCfgV0_9_0(_CdrLiteOutputCfgCommon):
     wrt_gas_exchange: bool = False
 
 
-class CdrLiteCfg(_SettingsSection):
+_BOOL_ADAPTER: TypeAdapter[bool] = TypeAdapter(bool)
+
+
+def _carbonate_sensitivity_hold_requested(value: Any) -> bool:
+    """Whether a ``cdr_lite.cdr_carbonate_sensitivity_time_interpolation`` value
+    asks to hold each ddic_dco2/ddic_dalk record instead of interpolating.
+
+    The one parse rule for the version gate (:class:`CdrLiteCfg`) and the
+    CDR-lite consistency check (:func:`check_cdr_lite_sections`): ``None`` means
+    unset, a value pydantic reads as a bool asks for a hold when it is False
+    (interpolation, the default, is what earlier releases always do), and
+    anything else unparseable is not the default, so it counts as requested.
+    """
+    if value is None:
+        return False
+    try:
+        return not _BOOL_ADAPTER.validate_python(value)
+    except ValidationError:
+        return True
+
+
+class _CdrLiteCfgCommon(_SettingsSection):
     """``cdr_lite`` settings -- ucla-roms >= 0.9.0's optional
     ``&CDR_LITE_SETTINGS`` group, read only under the ``CDR_LITE`` cppkey.
     Turning ``cdr_online_carbonate_sensitivity`` on makes the resolver compile
@@ -1081,12 +1161,58 @@ class CdrLiteCfg(_SettingsSection):
     that way only for ``bgc_mode: cdr_lite`` (no MARBL), and not at all
     otherwise.
 
-    The bundled ModelSpecs do not declare this section, so
-    ``&CDR_LITE_SETTINGS`` is written at the default (off) -- what
+    The bundled ModelSpecs before 0.12 do not declare this section, so
+    ``&CDR_LITE_SETTINGS`` is written at the defaults -- what
     ``bgc_mode: cdr_lite`` runs with.
     """
 
-    cdr_online_carbonate_sensitivity: bool = False
+    cdr_online_carbonate_sensitivity: bool = Field(default=False)
+
+
+class CdrLiteCfg(_CdrLiteCfgCommon):
+    """``cdr_lite`` settings for 0.9.0 <= ucla-roms < 0.12.0, which always
+    interpolates the carbonate sensitivities in time.
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # CdrLiteCfgV0_12_0's switch: _reject_carbonate_sensitivity_hold is its gate.
+        return ("cdr_carbonate_sensitivity_time_interpolation",)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_carbonate_sensitivity_hold(cls, data: Any) -> Any:
+        """Fail loudly on a requested hold rather than letting ``extra="ignore"``
+        drop it: the run would interpolate the sensitivities anyway. A value
+        asking for interpolation passes (a shared spec may carry it) and is
+        dropped.
+        """
+        if isinstance(data, dict) and _carbonate_sensitivity_hold_requested(
+            data.get("cdr_carbonate_sensitivity_time_interpolation")
+        ):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_12_0)
+            raise ValueError(
+                "cdr_lite.cdr_carbonate_sensitivity_time_interpolation=False "
+                f"requires ucla-roms >= {version}; the pinned ucla-roms release "
+                "always interpolates ddic_dco2/ddic_dalk in time."
+            )
+        return data
+
+
+class CdrLiteCfgV0_12_0(_CdrLiteCfgCommon):
+    """``cdr_lite`` settings for ucla-roms >= 0.12.0: adds
+    ``cdr_carbonate_sensitivity_time_interpolation`` (PR #396). Off, ROMS holds
+    each ddic_dco2/ddic_dalk record read from the forcing files until the next
+    one starts; it has no effect with the online sensitivities, and the group is
+    read only under ``CDR_LITE``, so :func:`check_cdr_lite_sections` rejects a
+    hold outside ``bgc_mode: cdr_lite`` with file-based sensitivities.
+
+    Deliberate default (like :class:`MarblBgcCfgV0_11_0`): blueprints and
+    ModelSpecs written before the key existed bypass the resolver and hit
+    ``model_validate`` directly; the value is the ucla-roms reference one.
+    """
+
+    cdr_carbonate_sensitivity_time_interpolation: bool = Field(default=True)
 
 
 class CdrGasExchOutputCfg(_SettingsSection):
@@ -1277,12 +1403,15 @@ def check_cdr_lite_sections(
     each of which sets ``cppdefs["cdr_lite"]`` from the result.
 
     Raises ``ValueError`` for each combination ucla-roms 0.9.0 aborts on at
-    init, all reported together: the online sensitivity without MARBL;
+    init, or that would silently not take effect, all reported together: the
+    online sensitivity without MARBL;
     ``cdr_lite_output.wrt_gas_exchange`` without ``CDR_LITE``; the CDR-lite
     output stream or the online sensitivity with no CDR tracers
     (``param.nt_cdr_oae + param.nt_cdr_dor == 0``); and, on a tier that models
     ``cdr_lite`` (``settings_cls``), CDR tracers in a build without ``CDR_LITE``
-    ("Forcing type not supported").
+    ("Forcing type not supported"); and ``cdr_carbonate_sensitivity_time_interpolation``
+    switched off (ucla-roms >= 0.12.0) where ROMS never reads it, i.e. outside
+    ``bgc_mode == "cdr_lite"`` or with the online sensitivity.
 
     Under ``bgc_mode == "cdr_lite"`` the tracer counts are derived from the CDR
     forcing during generation, so this pre-generation check cannot require them:
@@ -1329,6 +1458,24 @@ def check_cdr_lite_sections(
             '"Forcing type not supported" for CDR tracers without it. Use '
             f'bgc_mode "cdr_lite" or enable {online_flag} (MARBL).'
         )
+    interp_flag = "cdr_lite.cdr_carbonate_sensitivity_time_interpolation"
+    if _carbonate_sensitivity_hold_requested(
+        (run_time_settings.get("cdr_lite") or {}).get(
+            "cdr_carbonate_sensitivity_time_interpolation"
+        )
+    ):
+        if online:
+            problems.append(
+                f"{interp_flag}=False has no effect with {online_flag}=True: "
+                "ucla-roms computes the sensitivities each step instead of "
+                "reading them from forcing files."
+            )
+        elif bgc_mode != "cdr_lite":
+            problems.append(
+                f"{interp_flag}=False has no effect without CDR_LITE reading "
+                "the sensitivities from forcing files, which Forge builds for "
+                'bgc_mode "cdr_lite" only.'
+            )
     if problems:
         raise ValueError(" ".join(problems))
     return needed
@@ -1377,7 +1524,7 @@ class RandomOutputCfg(_SettingsSection):
     nrpf: int = Field(serialization_alias="nrpf_random")
 
 
-class SurfFluxCfg(_SettingsSection):
+class _SurfFluxCfgCommon(_SettingsSection):
     wrt_smflx: bool
     wrt_stflx: bool
     wrt_rstflx: bool
@@ -1385,6 +1532,62 @@ class SurfFluxCfg(_SettingsSection):
     sflx_avg: bool
     output_period: float = Field(serialization_alias="output_period_sflx")
     nrpf: int = Field(serialization_alias="nrpf_sflx")
+
+
+class SurfFluxCfg(_SurfFluxCfgCommon):
+    """``surf_flux`` settings for ucla-roms < 0.13.0, which reads ``wrt_rstflx``
+    but writes no restoring flux (its output code was commented out until PR
+    #407).
+    """
+
+    @model_validator(mode="after")
+    def _reject_restoring_flux(self) -> SurfFluxCfg:
+        """Fail loudly on ``wrt_rstflx: true``, which this release ignores."""
+        if self.wrt_rstflx:
+            version = ".".join(str(part) for part in UCLA_ROMS_0_13_0)
+            raise ValueError(
+                f"surf_flux.wrt_rstflx requires ucla-roms >= {version}; the pinned "
+                "ucla-roms release writes no restoring flux. Turn it off, or pin a "
+                "newer release."
+            )
+        return self
+
+
+class SurfFluxCfgV0_13_0(_SurfFluxCfgCommon):
+    """``surf_flux`` settings for ucla-roms >= 0.13.0, which writes the surface
+    restoring fluxes with ``wrt_rstflx`` (PR #407); :func:`check_restoring_flux_output`
+    keeps it to builds that restore something.
+    """
+
+
+def check_restoring_flux_output(
+    surf_flux: Mapping[str, Any],
+    *,
+    sal_restore: bool,
+    settings_cls: type[_RunTimeSettingsCommon],
+) -> None:
+    """Reject ``surf_flux.wrt_rstflx`` in a build with no restoring term, which
+    ucla-roms >= 0.13.0 stops on at startup.
+
+    ucla-roms writes one field per compiled-in restoring term: heat
+    (QCORRECTION), salt (SFLX_CORR) and DIC/ALK (CFLX_CORR with MARBL), each only
+    with BULK_FRC. Forge's cppdefs template always defines BULK_FRC and never
+    QCORRECTION or CFLX_CORR, so its one restoring term is the salt one, which
+    ``cppdefs.sal_restore`` switches on. Releases before 0.13.0 refuse the
+    switch in their own :class:`SurfFluxCfg`, so they are not checked here.
+    Shared by the resolver, :func:`validate_run_time_sections` and the
+    executor's ``configure_build``, like :func:`check_constant_fe`.
+    """
+    if not issubclass(settings_cls, RunTimeSettingsV0_13_0):
+        return
+    if surf_flux.get("wrt_rstflx") and not sal_restore:
+        raise ValueError(
+            "surf_flux.wrt_rstflx is set but the build restores nothing "
+            "(cppdefs.sal_restore=False): ucla-roms writes the surface restoring "
+            "fluxes of the restoring terms it compiles in, and stops at startup "
+            "without one. Add a surface forcing of type 'restoring' with 'sss' in "
+            "restoring_forces, or turn wrt_rstflx off."
+        )
 
 
 class PipeFrcCfg(_SettingsSection):
@@ -1444,11 +1647,70 @@ class BottomDragCfg(_SettingsSection):
     zob: float
 
 
-class VSpongeCfg(_SettingsSection):
+class _VSpongeCfgCommon(_SettingsSection):
     v_sponge: float
 
 
-_BOOL_ADAPTER: TypeAdapter[bool] = TypeAdapter(bool)
+def _v_sponge_trc_requested(value: Any) -> bool:
+    """Whether a ``v_sponge.v_sponge_trc`` value asks for a tracer sponge of its
+    own, which only ucla-roms >= 0.13.0 reads.
+
+    ``None`` (unset) and any negative value mean "the same as ``v_sponge``",
+    what every earlier release does. A value >= 0 is requested, and so is one
+    that does not parse as a number (including NaN): it is not a "same as
+    ``v_sponge``" value.
+    """
+    if value is None:
+        return False
+    try:
+        return not float(value) < 0
+    except (TypeError, ValueError):
+        return True
+
+
+class VSpongeCfg(_VSpongeCfgCommon):
+    """``v_sponge`` settings for ucla-roms < 0.13.0, whose sponge gives tracers
+    the same diffusivity as momentum (``v_sponge``).
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # VSpongeCfgV0_13_0's tracer diffusivity: _reject_v_sponge_trc is its gate.
+        return ("v_sponge_trc",)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_v_sponge_trc(cls, data: Any) -> Any:
+        """Fail loudly on a requested ``v_sponge_trc`` rather than letting
+        ``extra="ignore"`` drop it: the tracers would get ``v_sponge`` anyway. An
+        unset or negative value means "same as ``v_sponge``", which is what this
+        release does, so it passes (a shared spec may carry it) and is dropped.
+        """
+        if isinstance(data, dict) and _v_sponge_trc_requested(data.get("v_sponge_trc")):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_13_0)
+            raise ValueError(
+                f"v_sponge.v_sponge_trc={data['v_sponge_trc']!r} requires "
+                f"ucla-roms >= {version}; the pinned ucla-roms release gives "
+                "tracers the same sponge diffusivity as momentum (v_sponge). "
+                "Use a negative value for that, or pin a newer release."
+            )
+        return data
+
+
+class VSpongeCfgV0_13_0(_VSpongeCfgCommon):
+    """``v_sponge`` settings for ucla-roms >= 0.13.0: adds ``v_sponge_trc``, the
+    sponge's maximum tracer diffusivity (m2/s). 0 gives a sponge on currents
+    only, a negative value the same as ``v_sponge``, a positive one its own
+    strength. Momentum always uses ``v_sponge``; ``v_sponge_trc`` is inert
+    exactly when ``v_sponge`` is (both are read only with the SPONGE cppkey).
+
+    Deliberate default (like :class:`MarblBgcCfgV0_11_0`): blueprints and
+    ModelSpecs written before the key existed bypass the resolver and hit
+    ``model_validate`` directly; the value is the ucla-roms reference one. No
+    bound: ROMS reads any value.
+    """
+
+    v_sponge_trc: float = Field(default=-1.0)
 
 
 def _constant_fe_requested(value: Any) -> bool:
@@ -1549,18 +1811,23 @@ class _RunTimeSettingsCommon(_SettingsSection):
     Not meant to be used directly: the version-varying sections (``param``,
     ``ocean_vars``, ``particles``) are typed as the loose common models here,
     ``marbl_bgc`` as the pre-0.11.0 :class:`MarblBgcCfg` (retyped by
-    :class:`RunTimeSettingsV0_11_0`), and version-varying
+    :class:`RunTimeSettingsV0_11_0`), ``v_sponge`` and ``surf_flux`` as the pre-0.13.0
+    :class:`VSpongeCfg` and :class:`SurfFluxCfg` (retyped by
+    :class:`RunTimeSettingsV0_13_0`), and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
-    :class:`RunTimeSettingsV0_9_0`) are simply absent here; use
+    :class:`RunTimeSettingsV0_9_0` and retyped by :class:`RunTimeSettingsV0_12_0`)
+    are simply absent here; use
     :class:`RunTimeSettings` (ucla-roms < 0.4.0), :class:`RunTimeSettingsV0_4_0`
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
     (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
     (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
-    (0.9.0 <= ucla-roms < 0.11.0), or :class:`RunTimeSettingsV0_11_0`
-    (>= 0.11.0), or select one with :func:`run_time_settings_for_ref`.
+    (0.9.0 <= ucla-roms < 0.11.0), :class:`RunTimeSettingsV0_11_0`
+    (0.11.0 <= ucla-roms < 0.12.0), :class:`RunTimeSettingsV0_12_0`
+    (0.12.0 <= ucla-roms < 0.13.0), or :class:`RunTimeSettingsV0_13_0`
+    (>= 0.13.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -1706,7 +1973,8 @@ class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
 
 
 class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.11.0, typed + validated.
+    """Forge's run-time settings dict for 0.11.0 <= ucla-roms < 0.12.0, typed +
+    validated.
 
     Mirrors C-Star's ``RomsNamelistV0_11_0(RomsNamelistV0_9_0)``. Types
     ``marbl_bgc`` as :class:`MarblBgcCfgV0_11_0`, which adds the constant-iron
@@ -1715,6 +1983,36 @@ class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
     """
 
     marbl_bgc: MarblBgcCfgV0_11_0
+
+
+class RunTimeSettingsV0_12_0(RunTimeSettingsV0_11_0):
+    """Forge's run-time settings dict for 0.12.0 <= ucla-roms < 0.13.0, typed +
+    validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_12_0(RomsNamelistV0_11_0)``. Types
+    ``cdr_lite`` as :class:`CdrLiteCfgV0_12_0`, which adds
+    ``cdr_carbonate_sensitivity_time_interpolation`` (``&CDR_LITE_SETTINGS``,
+    ucla-roms PR #396) with its default, so a blueprint saved before it existed
+    still validates. ``extract_data`` keeps one child: 0.12.0 also reads up to
+    8 (PR #395), which C-Star's namelist schema accepts but Forge does not
+    generate.
+    """
+
+    cdr_lite: CdrLiteCfgV0_12_0 = Field(default_factory=CdrLiteCfgV0_12_0)
+
+
+class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.13.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_13_0(RomsNamelistV0_12_0)``. Types
+    ``v_sponge`` as :class:`VSpongeCfgV0_13_0`, which adds ``v_sponge_trc``
+    (``&V_SPONGE_SETTINGS``) with its default, so a blueprint saved before it
+    existed still validates, and ``surf_flux`` as :class:`SurfFluxCfgV0_13_0`,
+    which accepts ``wrt_rstflx``.
+    """
+
+    v_sponge: VSpongeCfgV0_13_0
+    surf_flux: SurfFluxCfgV0_13_0
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -1729,6 +2027,8 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
     RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
     RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
+    RomsNamelistV0_12_0: RunTimeSettingsV0_12_0,
+    RomsNamelistV0_13_0: RunTimeSettingsV0_13_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -1922,14 +2222,18 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
         :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
         :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
-        :class:`RunTimeSettingsV0_11_0` for ucla-roms >= 0.11.0.
+        :class:`RunTimeSettingsV0_11_0` for 0.11.0 <= ucla-roms < 0.12.0;
+        :class:`RunTimeSettingsV0_12_0` for 0.12.0 <= ucla-roms < 0.13.0;
+        :class:`RunTimeSettingsV0_13_0` for ucla-roms >= 0.13.0.
 
     Warns
     -----
     UserWarning
         Propagated unchanged from :func:`cstar.roms.namelist.namelist_schema_for_ref`
         when `roms_ref` isn't a release tag (branch name, commit hash, or
-        unparseable) — the latest known schema is used in that case.
+        unparseable), or is a release newer than
+        :data:`cstar.roms.namelist.NEWEST_KNOWN_UCLA_ROMS` — the latest known
+        schema is used in both cases.
     """
     # Falsy covers "" as well as None: a hand-edited blueprint can carry
     # commit=null + branch="", and callers pass `commit or branch` — an empty
@@ -2262,6 +2566,28 @@ def validate_run_time_sections(
             )
         except ValueError as exc:
             errors.append(str(exc))
+    # And the restoring-flux output vs the restoring terms (surf_flux vs cppdefs).
+    if "surf_flux" in settings and "cppdefs" in settings:
+        try:
+            check_restoring_flux_output(
+                settings["surf_flux"] or {},
+                sal_restore=bool((settings["cppdefs"] or {}).get("sal_restore", False)),
+                settings_cls=settings_cls,
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+    # And the averaged MARBL streams vs the MARBL timestep (output sections vs
+    # marbl_bgc, time_stepping and cppdefs), which ucla-roms >= 0.13.0 checks at
+    # startup: surfaced here so a stored blueprint fails before generation.
+    if "cppdefs" in settings:
+        try:
+            check_marbl_step_averages(
+                settings, settings_cls=settings_cls, roms_ref=roms_ref
+            )
+        except NamelistConsistencyError as exc:
+            errors.append(str(exc))
+        except ValidationError:
+            pass  # a malformed section is already reported by the loop above
     return errors
 
 

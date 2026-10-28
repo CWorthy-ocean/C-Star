@@ -1,7 +1,7 @@
 """The forge C-Star application: wires ``ForgeBlueprint`` into a real,
 C-Star-discoverable application via :class:`ForgeRunner` + :class:`ForgeApplication`
 (see ``cstar.orchestration.models.Blueprint`` /
-https://c-star.readthedocs.io/en/latest/custom_applications.html).
+https://c-star.readthedocs.io/en/latest/developers/custom_applications.html).
 
 Not part of the "forge application" boundary that ``tests/test_forge_app_boundary.py``
 guards -- like ``runtime.py``, this module is **host-resolution glue**: it reaches
@@ -10,15 +10,15 @@ to resolve the host, which the guarded ``cstar.applications.forge`` modules that
 implement blueprint processing itself must never do.
 
 Discovered by ``cstar.applications.core.get_application`` as a built-in application,
-the same way ``roms_marbl`` is: ``get_application`` imports the in-tree
+the same way ``ucla_roms`` is: ``get_application`` imports the in-tree
 ``cstar.applications.forge`` package, whose ``__init__.py`` imports this module so its
 :func:`register_application` decorator runs. No entry point or environment variable is
 involved.
 
-Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates ROMS-MARBL inputs and
-emits the downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- it
-does not chain into actually running the ROMS-MARBL simulation. That is the existing
-``roms_marbl`` application's job, consuming the blueprint forge just produced. See
+Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates UCLA-ROMS inputs and
+emits the downstream ``ucla_roms`` blueprint (``B_{name}.yaml``), then stops -- it
+does not chain into actually running the UCLA-ROMS simulation. That is the existing
+``ucla_roms`` application's job, consuming the blueprint forge just produced. See
 ``docs/developers/forge_internals.rst`` for the producer/consumer boundary between the two
 applications.
 """
@@ -71,7 +71,7 @@ INPUT_ARTIFACTS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] =
 )
 """The stem of each generated input NetCDF (`input_data/<domain>_<stem>.nc`), as
 `fnmatch` globs in precedence order, with its kind and starting metadata. The `cdr`
-stem is `input_data.CDR_FORCING_NETCDF_STEM`, spelled out here because importing
+stem is `input_generator.CDR_FORCING_NETCDF_STEM`, spelled out here because importing
 that module is too heavy for registration."""
 
 
@@ -94,7 +94,7 @@ def input_products(executor: ForgeExecutor) -> list[Product]:
     """
     # Deferred: this package's import (registration) must stay light.
     from cstar.applications.forge.executor import BLUEPRINTS_DIR_NAME
-    from cstar.applications.forge.input_data import netcdf_filename_component
+    from cstar.applications.forge.input_generator import netcdf_filename_component
 
     root = executor.run_output_dir.resolve()
     prefix = f"{netcdf_filename_component(executor.name)}_"
@@ -130,7 +130,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
 
     @t.override
     async def run(self) -> RunnerResult[ForgeBlueprint]:
-        """Generate ROMS-MARBL inputs and emit the downstream ``roms_marbl`` blueprint.
+        """Generate UCLA-ROMS inputs and emit the downstream ``ucla_roms`` blueprint.
 
         Delegates to ``cstar.applications.forge.runtime.process`` (host-resolution glue) ->
         ``forge_blueprint_engine.process_forge_blueprint`` -> the ``ForgeExecutor``
@@ -166,7 +166,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
             return self.result
 
         self.log.debug(
-            f"Forge blueprint emitted: {executor.path_roms_marbl_blueprint()}"
+            f"Forge blueprint emitted: {executor.path_ucla_roms_blueprint()}"
         )
         # reporting never changes the outcome: the declared patterns still
         # list the files at shutdown, without the sidecar metadata
@@ -195,7 +195,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
 
     @t.override
     def emitted_blueprint(self, blueprint: ForgeBlueprint) -> EmittedBlueprint:
-        """Describe the `roms_marbl` blueprint a forge run of `blueprint` publishes.
+        """Describe the `ucla_roms` blueprint a forge run of `blueprint` publishes.
 
         Parameters
         ----------
@@ -205,16 +205,16 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         Returns
         -------
         EmittedBlueprint
-            The predicted `roms_marbl` blueprint.
+            The predicted `ucla_roms` blueprint.
         """
         # Deferred: this package's import (registration) must stay light, and
         # these pull in roms_tools/xarray/dask.
-        from cstar.applications.forge.input_data import netcdf_basename
-        from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL_APP
+        from cstar.applications.forge.input_generator import netcdf_basename
+        from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS_APP
 
         return EmittedBlueprint(
             filename=emitted_blueprint_filename(blueprint.name),
-            application=ROMS_MARBL_APP,
+            application=UCLA_ROMS_APP,
             producer=producer_ref(blueprint),
             cpus_needed=blueprint.n_procs,
             single_node=False,
@@ -236,7 +236,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         Returns
         -------
         Sequence[ArtifactSpec]
-            The published `roms_marbl` blueprint, the generated input NetCDF files,
+            The published `ucla_roms` blueprint, the generated input NetCDF files,
             the rendered build configuration and the run log.
         """
         # Deferred like `emitted_blueprint`: these pull in roms_tools/xarray/dask.
@@ -246,7 +246,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
             INPUT_DATA_DIR_NAME,
             RUN_TIME_DIR_NAME,
         )
-        from cstar.applications.forge.input_data import netcdf_filename_component
+        from cstar.applications.forge.input_generator import netcdf_filename_component
 
         fs = JobFileSystemManager(Path("/"))
         output = fs.output_dir.relative_to(fs.root_dir)

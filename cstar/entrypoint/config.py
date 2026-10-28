@@ -1,35 +1,8 @@
 import logging
-import typing as t
-from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import parse_log_level_name
-from cstar.system.environment import SlurmSettingsBase
-from cstar.system.manager import get_sysmgr
-
-JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
-
-
-def _generate_job_name() -> str:
-    """Generate a unique job name based on the current date and time."""
-    now_utc = datetime.now(UTC)
-    formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
-    return f"cstar_worker_{formatted_now_utc}"
-
-
-class JobConfig(BaseModel):
-    """Configuration required to submit HPC jobs."""
-
-    account_id: t.Annotated[str, Field(frozen=True)]
-    """HPC account used for billing."""
-    walltime: t.Annotated[str, Field(frozen=True)]
-    """Maximum walltime allowed for job."""
-    priority: t.Annotated[str, Field(frozen=True)]
-    """Job priority."""
-    job_name: t.Annotated[str, Field(frozen=True)] = _generate_job_name()
-    """User-friendly job name."""
 
 
 class ServiceConfiguration(BaseModel):
@@ -93,26 +66,3 @@ def get_service_config(
         health_check_log_threshold=10,
         name=name,
     )
-
-
-def get_job_config() -> JobConfig:
-    """Create and configure a `JobConfig` instance from environment variables.
-
-    Returns
-    -------
-    JobConfig
-    """
-    account_id, walltime, priority = "", "", ""
-
-    if klass := get_sysmgr().environment.settings_klass:
-        try:
-            system_env = klass()
-            if isinstance(system_env, SlurmSettingsBase):
-                account_id = system_env.SLURM_ACCOUNT
-                walltime = system_env.SLURM_MAX_WALLTIME
-                priority = system_env.SLURM_QUEUE
-        except ValidationError as ex:
-            msg = "Environment settings for the system could not be loaded."
-            raise CstarExpectationFailed(msg) from ex
-
-    return JobConfig(account_id=account_id, walltime=walltime, priority=priority)

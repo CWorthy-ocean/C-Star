@@ -4,11 +4,18 @@ import os
 import platform as platform
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum, auto
 from pathlib import Path
-from typing import ClassVar, Final, Protocol, override
+from typing import TYPE_CHECKING, ClassVar, Final, Protocol, override
 
 from pydantic import Field
 
+from cstar.base.env import (
+    ENV_CSTAR_SYSTEM,
+    get_env_item,
+    load_user_config,
+    load_user_config_for_repair,
+)
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.system.environment import (
@@ -26,14 +33,27 @@ from cstar.system.scheduler import (
     SlurmScheduler,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
+    visible_scheduler,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 log = get_logger(__name__)
 
+DOCS_MACHINES_URL: Final[str] = (
+    "https://c-star.readthedocs.io/en/latest/deployments/machines.html"
+)
+"""The documentation page on the systems C-Star knows and what to do on any other."""
+
 
 class HostNameEvaluator:
-    """Container of host-specific names used to determine the system name that will be
-    used by C-Star.
+    """The system detector: names the machine from what it reports (Lmod, a
+    registered context's own test, the platform), ignoring `CSTAR_SYSTEM`.
+
+    Only `detect_system` reads it. Everything else that names the system C-Star
+    runs on asks `selected_system_name` (or `select_system`, for how it was
+    chosen), so the setting and the generic fallback apply there too.
     """
 
     lmod_settings: Final[LmodEnvSettings]
@@ -62,6 +82,11 @@ class HostNameEvaluator:
         return value.casefold()
 
     @property
+    def node_name(self) -> str:
+        """Return the network name of this machine; empty when it has none."""
+        return platform.node()
+
+    @property
     def _diagnostic(self) -> str:
         """Return a string useful for diagnosing failures to identify the name."""
         attributes = [
@@ -75,7 +100,8 @@ class HostNameEvaluator:
 
     @property
     def name(self) -> str:
-        """Determine the system name that will be used by C-Star.
+        """Determine the detected system name (not necessarily the one C-Star uses;
+        see `selected_system_name`).
 
         Prioritizes the LMOD-based system name. When LMOD-specific environment
         variables are not present, the name is determiend by the OS.
@@ -178,27 +204,6 @@ def register_sys_context(
     return _inner()
 
 
-def get_system_context() -> SystemContext:
-    """Retrieve a system context from the context registry.
-
-    Returns
-    -------
-    _SystemContext
-        The context matching the supplied name.
-
-    Raises
-    ------
-    CStarError
-        If the supplied name has not been registered.
-    """
-    namer = HostNameEvaluator()
-
-    if klass := CTX_REGISTRY.get(namer.name):
-        return klass()
-
-    raise CstarError(f"Unknown system requested: {namer.name}")
-
-
 def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
     """Return a sequence containing all registered context types.
 
@@ -207,6 +212,229 @@ def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
     Sequence[type[_SystemContext]]
     """
     return list(CTX_REGISTRY.values())
+
+
+def registered_names() -> list[str]:
+    """Return the names of the registered system contexts, sorted."""
+    return sorted(CTX_REGISTRY)
+
+
+class SystemSource(StrEnum):
+    """How the system context C-Star uses was chosen."""
+
+    SETTING = auto()
+    """`CSTAR_SYSTEM` (or `cstar init`, for its own walkthrough) named it."""
+    DETECTED = auto()
+    """C-Star detected a registered system."""
+    FALLBACK = auto()
+    """C-Star detected a cluster it does not know and uses the platform's generic
+    context."""
+
+
+@dataclass(frozen=True, slots=True)
+class SystemSelection:
+    """The system context C-Star uses on this machine, and how it was chosen."""
+
+    context: type[SystemContext]
+    """The context in use."""
+    source: SystemSource
+    """How the context was chosen."""
+    detected: str = ""
+    """The unrecognised system that was detected (its Lmod name, else the
+    machine's network name), when `source` is `SystemSource.FALLBACK`."""
+
+    def describe(self) -> str:
+        """Name the context for display, saying how it was chosen unless detected."""
+        name = self.context.name
+        if self.source is SystemSource.SETTING:
+            return f"{name} (set by {ENV_CSTAR_SYSTEM})"
+        if self.source is SystemSource.FALLBACK:
+            return f"{name} (generic; {self.detected!r} is not a registered system)"
+        return name
+
+    def unsupported_scheduler(self, environ: "Mapping[str, str]") -> str:
+        """Name the scheduler this machine shows that the context cannot submit to.
+
+        A system C-Star detected is trusted to describe its own scheduler, or to
+        have none. A context it fell back to, or one `CSTAR_SYSTEM` names, is
+        asked only when it has no scheduler: the generic context pinned to stop
+        the fallback warning must not stop the login-node warning as well.
+
+        Parameters
+        ----------
+        environ : Mapping[str, str]
+            The process's environment variables.
+
+        Returns
+        -------
+        str
+            The scheduler family (see `visible_scheduler`) when the context was not
+            detected, has no scheduler, and the machine shows one; else empty.
+        """
+        if (
+            self.source is SystemSource.DETECTED
+            or self.context.create_scheduler() is not None
+        ):
+            return ""
+        return visible_scheduler(environ)
+
+
+def registered_context(name: str) -> type[SystemContext]:
+    """Look up a registered system context by name, ignoring case and surrounding
+    whitespace.
+
+    Raises
+    ------
+    CstarError
+        If no context is registered under the name; the message lists those that
+        are.
+    """
+    if klass := CTX_REGISTRY.get(name.strip().casefold()):
+        return klass
+    raise CstarError(
+        f"{name!r} is not a registered system; {ENV_CSTAR_SYSTEM} must name one of: "
+        f"{', '.join(registered_names())}."
+    )
+
+
+def detect_system() -> SystemSelection:
+    """Choose the system context from what the machine reports, ignoring
+    `CSTAR_SYSTEM`.
+
+    The detected name (see `HostNameEvaluator.name`) is used when it is
+    registered, then any context that recognises the machine itself, then the
+    generic context for the platform. The generic context is a fallback when
+    Lmod named an unregistered system, or is present without naming one: either
+    marks a cluster C-Star does not know rather than a workstation.
+
+    Raises
+    ------
+    CstarError
+        If the detected system is not registered and the platform has no generic
+        context.
+    OSError
+        If no system name can be determined at all.
+    """
+    namer = HostNameEvaluator()
+    detected = namer.name
+    generic = namer.platform_hostname
+    if detected != generic and (klass := CTX_REGISTRY.get(detected)):
+        return SystemSelection(klass, SystemSource.DETECTED)
+    # an Lmod name C-Star does not know may still be a system that matches by its own test
+    if klass := next((k for k in get_registered_sys_contexts() if k.is_match()), None):
+        return SystemSelection(klass, SystemSource.DETECTED)
+    if klass := CTX_REGISTRY.get(generic):
+        if detected != generic:
+            return SystemSelection(klass, SystemSource.FALLBACK, detected)
+        if namer.lmod_settings.CMD:
+            unnamed = namer.node_name or "unknown"
+            return SystemSelection(klass, SystemSource.FALLBACK, unnamed)
+        return SystemSelection(klass, SystemSource.DETECTED)
+    raise CstarError(
+        f"C-Star does not recognise the system {detected!r} and has no generic "
+        f"context for this platform ({namer.platform_hostname or 'unknown'}); set "
+        f"{ENV_CSTAR_SYSTEM} to one of: {', '.join(registered_names())}."
+    )
+
+
+def select_system() -> SystemSelection:
+    """Choose the system context C-Star uses on this machine.
+
+    `CSTAR_SYSTEM` wins over detection (see `detect_system`).
+
+    Raises
+    ------
+    CstarError
+        If `CSTAR_SYSTEM` names an unregistered system, or detection finds an
+        unregistered system on a platform with no generic context.
+    OSError
+        If `CSTAR_SYSTEM` is unset and no system name can be determined at all.
+    """
+    if requested := get_env_item(ENV_CSTAR_SYSTEM).value.strip():
+        return SystemSelection(registered_context(requested), SystemSource.SETTING)
+    return detect_system()
+
+
+def selected_system_name() -> str:
+    """Return the name of the system C-Star uses on this machine.
+
+    The one way to ask "which system is this": `CSTAR_SYSTEM` (exported, or saved
+    in the configuration file), else detection, else the platform's generic context
+    (see `select_system`). The configuration file is loaded first, so library and
+    notebook use sees a saved setting as the CLI does.
+
+    Raises
+    ------
+    CstarError
+        If the configuration file is refused, `CSTAR_SYSTEM` names an
+        unregistered system, or detection finds an unregistered system on a
+        platform with no generic context.
+    OSError
+        If no system name can be determined at all.
+    """
+    load_user_config()
+    return select_system().context.name
+
+
+def get_system_context() -> SystemContext:
+    """Return the system context C-Star uses on this machine (see `select_system`).
+
+    Raises
+    ------
+    CstarError
+        If `CSTAR_SYSTEM` names an unregistered system, or detection finds an
+        unregistered system on a platform with no generic context.
+    OSError
+        If no system name can be determined at all.
+    """
+    return select_system().context()
+
+
+def system_label() -> str:
+    """Name the system context in use for display (see `SystemSelection.describe`).
+
+    Never raises: a display must not fail on a misconfigured system, so it shows
+    why the system could not be determined instead. A configuration file the
+    loader refuses is skipped, as `cstar env` skips it.
+    """
+    load_user_config_for_repair()
+    try:
+        return select_system().describe()
+    except (CstarError, OSError) as ex:
+        return f"not determined: {ex}"
+
+
+_WARNED_SYSTEM: set[str] = set()
+"""The system warnings already logged by this process."""
+
+
+def warn_once(message: str) -> None:
+    """Log a warning about the system unless this process already logged it."""
+    if message not in _WARNED_SYSTEM:
+        _WARNED_SYSTEM.add(message)
+        log.warning(message)
+
+
+def warn_fallback(selection: SystemSelection) -> None:
+    """Log, once per process, that C-Star fell back to the generic context.
+
+    Parameters
+    ----------
+    selection : SystemSelection
+        The selection; nothing is logged unless its source is
+        `SystemSource.FALLBACK`.
+    """
+    if selection.source is not SystemSource.FALLBACK:
+        return
+    name = selection.context.name
+    warn_once(
+        f"C-Star does not recognise the system {selection.detected!r} and uses the "
+        f"generic {name} context: it submits no jobs, and builds with the compilers "
+        f"and MPI of your conda environment. Set {ENV_CSTAR_SYSTEM} to the system's "
+        f"name if C-Star lists it, or run `cstar env set {ENV_CSTAR_SYSTEM} {name}` "
+        "to keep the generic context without this warning; to submit jobs here, "
+        f"register the system (see {DOCS_MACHINES_URL})."
+    )
 
 
 class AnvilEnvSettings(SlurmSettingsBase):
@@ -580,6 +808,20 @@ class EljaSystemContext(SystemContext):
         return os.getenv("SLURM_CLUSTER_NAME", "") == EljaEnvSettings.CLUSTER_IDENTIFIER
 
 
+class ExpanseEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Expanse* system.
+
+    Expanse requires a project (account) on every job; an unset queue submits to
+    the primary `compute` partition.
+    """
+
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class ExpanseSystemContext(SystemContext):
@@ -604,6 +846,12 @@ class ExpanseSystemContext(SystemContext):
             requires_task_distribution=True,
             documentation=cls.docs,
         )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return ExpanseEnvSettings
 
 
 @register_sys_context
@@ -656,6 +904,25 @@ class MacOSSystemContext(SystemContext):
         return None
 
 
+class PerlmutterEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Perlmutter* system.
+
+    NOTE: Perlmutter charges a job without an account to the user's default
+    project; an unset queue submits to the primary `regular` QOS.
+    """
+
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow an empty account.
+    """
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class PerlmutterSystemContext(SystemContext):
@@ -685,10 +952,18 @@ class PerlmutterSystemContext(SystemContext):
             max_cpus_per_node=128,
         )
 
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return PerlmutterEnvSettings
+
 
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 
+    _selection: Final[SystemSelection]
+    """The system context chosen for this machine, and how it was chosen."""
     _context: Final[SystemContext]
     """A context object configured for the current system."""
     _environment: Final[CStarEnvironment]
@@ -699,10 +974,24 @@ class CStarSystemManager:
     def __init__(self) -> None:
         """Initialize the CStarSystemManager.
 
-        Initialize the system manager by determining the system name and initializing
-        the environment and scheduler based on that name.
+        Initialize the system manager by choosing the system context (see
+        `select_system`) and initializing the environment and scheduler from it,
+        warning once per process when C-Star fell back to the generic context. The
+        user's configuration file is loaded first, so library and notebook use sees
+        it as the CLI does.
+
+        Raises
+        ------
+        CstarUserConfigError
+            If the configuration file names settings it may not set.
+        CstarError
+            If `CSTAR_SYSTEM` names an unregistered system, or detection finds an
+            unregistered system on a platform with no generic context.
         """
-        self._context = get_system_context()
+        load_user_config()
+        self._selection = select_system()
+        warn_fallback(self._selection)
+        self._context = self._selection.context()
         self._environment = CStarEnvironment(
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
@@ -722,6 +1011,11 @@ class CStarSystemManager:
             The system name
         """
         return self._context.name
+
+    @property
+    def selection(self) -> SystemSelection:
+        """Get the system context chosen for this machine, and how it was chosen."""
+        return self._selection
 
     @property
     def environment(self) -> CStarEnvironment:

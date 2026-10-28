@@ -2,16 +2,22 @@
 
 import os
 import re
+import typing as t
 from collections.abc import Callable, Generator
+from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLI_VERBOSE,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_DISABLE_MIGRATION,
+    ENV_CSTAR_PROJECT_HOME,
+    REMOVED_SETTINGS,
+)
+from cstar.execution.file_system import StateDirectoryManager
+from cstar.tests.unit_tests.orchestration.manifest_runs import (
+    BuiltRun,
+    build_manifest_run,
 )
 
 _ANSI_CODES = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -88,18 +94,75 @@ def squash_cli_output() -> Callable[[str], str]:
 
 @pytest.fixture(autouse=True)
 def clean_flag_env() -> Generator[None]:
-    """Remove CLI flag environment variables that may leak in from the shell.
+    """Remove settings exported in the shell that would change CLI test behavior.
 
-    The CLI reads these flags via `envvar=` and the environment, so a value
-    exported by a prior CLI run (`set_flag` never unsets them) would silently
-    change test behavior. Tests opt back in with their own `mock.patch.dict`.
+    A value of `CSTAR_DISABLE_MIGRATION` changes what the commands do, and an
+    exported removed setting adds a warning to stderr. Tests opt back in with
+    their own `mock.patch.dict`.
     """
     with mock.patch.dict(os.environ):
-        for flag in (
-            ENV_CSTAR_CLI_DRY_RUN,
-            ENV_CSTAR_CLI_VERBOSE,
-            ENV_CSTAR_CLOBBER_WORKING_DIR,
-            ENV_CSTAR_DISABLE_MIGRATION,
-        ):
+        for flag in (ENV_CSTAR_DISABLE_MIGRATION, *REMOVED_SETTINGS):
             os.environ.pop(flag, None)
         yield
+
+
+@pytest.fixture
+def readonly_blueprint(tmp_path: Path, hello_world_bp_content: str) -> Generator[Path]:
+    """A hello-world blueprint in a directory its user cannot write to.
+
+    Like a blueprint in a shared catalog, the directory takes no new file; it is
+    made writable again when the test ends.
+    """
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    blueprint = catalog / "helloworld.yaml"
+    blueprint.write_text(hello_world_bp_content)
+    catalog.chmod(0o555)
+    try:
+        yield blueprint
+    finally:
+        catalog.chmod(0o755)
+
+
+@pytest.fixture
+def project_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the project home at a temporary directory; return its runs area.
+
+    The area does not exist until a test puts a run in it.
+    """
+    project = (tmp_path / "project").resolve()
+    monkeypatch.setenv(ENV_CSTAR_PROJECT_HOME, str(project))
+    return project / "cstar" / "runs"
+
+
+@pytest.fixture
+def build_run(hello_world_bp_path: Path) -> Callable[..., BuiltRun]:
+    """Build a run directory that only its manifest names; see `build_manifest_run`."""
+
+    def build(root: Path, run_id: str, **kwargs: t.Any) -> BuiltRun:
+        return build_manifest_run(root, run_id, hello_world_bp_path, **kwargs)
+
+    return build
+
+
+@pytest.fixture
+def local_run(build_run: Callable[..., BuiltRun]) -> Callable[..., BuiltRun]:
+    """Build a run only its manifest names in the data home."""
+
+    def build(run_id: str, **kwargs: t.Any) -> BuiltRun:
+        root = StateDirectoryManager.workplan_runs_dir() / run_id
+        return build_run(root, run_id, **kwargs)
+
+    return build
+
+
+@pytest.fixture
+def project_run(
+    build_run: Callable[..., BuiltRun], project_runs: Path
+) -> Callable[..., BuiltRun]:
+    """Build a run in the project's runs area."""
+
+    def build(run_id: str, **kwargs: t.Any) -> BuiltRun:
+        return build_run(project_runs / run_id, run_id, **kwargs)
+
+    return build

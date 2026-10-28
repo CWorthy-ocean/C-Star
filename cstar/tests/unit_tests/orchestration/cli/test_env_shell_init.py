@@ -255,13 +255,21 @@ def test_function_changes_directory(
 def test_function_accepts_every_cd_spelling(
     run_session: t.Callable[..., Session], command: str
 ) -> None:
-    """Verify each spelling changes directory the same way and prints nothing on
-    stderr: none of them is deprecated.
+    """Verify each spelling changes directory the same way; the deprecated
+    `workplan` spellings print one line on stderr naming `cstar run cd` and the
+    removal release, and `cstar run cd` prints nothing there.
     """
     session = run_session(command)
 
     assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
-    assert session.proc.stderr == ""
+    group = command.split()[1]
+    if group == "run":
+        assert session.proc.stderr == ""
+    else:
+        assert session.proc.stderr == (
+            f"`cstar {group} cd` is deprecated and stops working in cstar-ocean "
+            "0.20.0; use `cstar run cd` instead.\n"
+        )
 
 
 def test_function_does_not_leak_the_pinned_log_level(

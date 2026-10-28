@@ -13,12 +13,13 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from cstar.base.feature import (
-    ENV_FF_SLURM_DISABLE_MT,
-    is_feature_enabled,
-)
+from cstar.base.env import ENV_CSTAR_SLURM_DISABLE_MT
+from cstar.base.exceptions import CstarError
+from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
+from cstar.system.environment import SlurmSettingsBase
 from cstar.system.manager import get_sysmgr
 from cstar.system.scheduler import (
     PBSScheduler,
@@ -356,9 +357,9 @@ def create_scheduler_job(
     run_path: str | Path | None = None,
     job_name: str | None = None,
     output_file: str | Path | None = None,
-    queue_name: str | None = None,
+    queue_name: str = "",
     send_email: bool | None = True,
-    walltime: str | None = None,
+    walltime: str = "",
     depends_on: Iterable[str] = (),
 ) -> "SchedulerJob":
     """Create a scheduler job for either SLURM or PBS based on the system's active
@@ -397,11 +398,13 @@ def create_scheduler_job(
     output_file : str or Path, optional
         The file path for job output. Defaults to an auto-generated filename in the run path.
     queue_name : str, optional
-        The name of the queue to submit the job to. Defaults to the scheduler's primary queue.
+        The name of the queue to submit the job to. When empty, the scheduler's
+        primary queue, unless the system requires a queue to be set.
     send_email : bool, optional
         Whether to send email notifications about job status. Defaults to True.
     walltime : str, optional
-        The maximum walltime for the job, in the format "HH:MM:SS". Defaults to the queue's maximum.
+        The maximum walltime for the job, in the format "HH:MM:SS". When empty,
+        the queue's maximum.
     depends_on: Iterable[str], optional
         An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
 
@@ -414,10 +417,13 @@ def create_scheduler_job(
     ------
     TypeError
         If the active scheduler is not SLURM or PBS.
+    CstarError
+        If the system requires a SLURM account or queue and it is empty.
     """
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
-    scheduler = get_sysmgr().scheduler
+    sysmgr = get_sysmgr()
+    scheduler = sysmgr.scheduler
 
     if isinstance(scheduler, SlurmScheduler):
         job_type = SlurmJob
@@ -425,6 +431,21 @@ def create_scheduler_job(
         job_type = PBSJob
     else:
         raise TypeError(f"Unsupported scheduler type: {type(scheduler).__name__}")
+
+    klass = sysmgr.environment.settings_klass
+    if klass is not None and issubclass(klass, SlurmSettingsBase):
+        supplied = {
+            ENV_CSTAR_SLURM_ACCOUNT: account_key,
+            ENV_CSTAR_SLURM_QUEUE: queue_name,
+        }
+        required = klass.required_settings()
+        if missing := [n for n, v in supplied.items() if n in required and not v]:
+            msg = (
+                f"Unable to submit a job: {' and '.join(missing)} must be set on "
+                "this system. Run `cstar init` to save your SLURM settings, or "
+                "export them in your shell."
+            )
+            raise CstarError(msg)
 
     return job_type(
         scheduler=scheduler,
@@ -514,9 +535,9 @@ class SchedulerJob(ExecutionHandler, ABC):
         run_path: str | Path | None = None,
         job_name: str | None = None,
         output_file: str | Path | None = None,
-        queue_name: str | None = None,
+        queue_name: str = "",
         send_email: bool | None = True,
-        walltime: str | None = None,
+        walltime: str = "",
         depends_on: Iterable[str] = (),
     ):
         """Initialize a SchedulerJob instance.
@@ -555,13 +576,13 @@ class SchedulerJob(ExecutionHandler, ABC):
         output_file : str or Path, optional
             The file path for job output. Defaults to an auto-generated file in the run path.
         queue_name : str, optional
-            The name of the queue to which the job will be submitted. Defaults to the scheduler's
-            primary queue.
+            The name of the queue to which the job will be submitted. When empty, the
+            scheduler's primary queue.
         send_email : bool, optional
             Whether to send email notifications about job status. Defaults to True.
         walltime : str, optional
-            The maximum walltime for the job, in the format "HH:MM:SS". If not provided,
-            it defaults to the queue's maximum walltime.
+            The maximum walltime for the job, in the format "HH:MM:SS". When empty, the
+            queue's maximum walltime.
         depends_on: Iterable[str], optional
             An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
 
@@ -593,29 +614,27 @@ class SchedulerJob(ExecutionHandler, ABC):
         self._output_file = (
             Path(output_file) if output_file is not None else output_file
         )
-        self._queue_name = (
-            scheduler.primary_queue_name if queue_name is None else queue_name
-        )
+        self._queue_name = queue_name or scheduler.primary_queue_name
         self._walltime = walltime
 
         self.depends_on = depends_on
 
-        if (walltime is None) and (self.queue.max_walltime is None):
+        if not walltime and (self.queue.max_walltime is None):
             raise ValueError(
                 "Cannot create scheduler job: walltime parameter not provided "
-                + f"and C-Star cannot default to the max walltime for the queue {queue_name!r} "
-                + " as it cannot be determined"
+                + "and C-Star cannot default to the max walltime for the queue "
+                + f"{self.queue_name!r} as it cannot be determined"
             )
         elif self.queue.max_walltime is None:
             self.log.warning(
-                f"Unable to determine the maximum allowed walltime for chosen queue {queue_name!r}. "
+                f"Unable to determine the maximum allowed walltime for chosen queue {self.queue_name!r}. "
                 f"If your chosen walltime {walltime!r} exceeds the (unknown) limit, this job may be "
                 "rejected by your system's job scheduler."
             )
-        elif walltime is None:
+        elif not walltime:
             self.log.warning(
                 "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
-                + f"for queue {queue_name!r}, {self.queue.max_walltime!r}"
+                + f"for queue {self.queue_name!r}, {self.queue.max_walltime!r}"
             )
             self._walltime = self.queue.max_walltime
         else:
@@ -629,7 +648,7 @@ class SchedulerJob(ExecutionHandler, ABC):
             if walltime_delta > max_walltime_delta:
                 raise ValueError(
                     f"Selected walltime {walltime} exceeds maximum "
-                    + f"walltime for selected queue {queue_name}: "
+                    + f"walltime for selected queue {self.queue_name}: "
                     + f"{self.queue.max_walltime}"
                 )
 
@@ -1072,7 +1091,7 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         if self.account_key:
             scheduler_script += f"\n#SBATCH --account={self.account_key}"
-        if is_feature_enabled(ENV_FF_SLURM_DISABLE_MT):
+        if is_flag_enabled(ENV_CSTAR_SLURM_DISABLE_MT):
             scheduler_script += "\n#SBATCH --hint=nomultithread"
 
         # scheduler_script += "\n#SBATCH --mem-per-cpu=3900"
@@ -1243,7 +1262,9 @@ class PBSJob(SchedulerJob):
         scheduler_script = "#PBS -S /bin/bash"
         scheduler_script += f"\n#PBS -N {self.job_name}"
         scheduler_script += f"\n#PBS -o {self.output_file}"
-        scheduler_script += f"\n#PBS -A {self.account_key}"
+        if self.account_key:
+            # unset, PBS charges the default project (e.g. NCAR's `PBS_ACCOUNT`)
+            scheduler_script += f"\n#PBS -A {self.account_key}"
         # PBS has no day form; fold a `D-HH:MM:SS` request into hours
         walltime = "{:02d}:{:02d}:{:02d}".format(*parse_walltime(self.walltime or ""))
         scheduler_script += f"\n#PBS -l select={self.nodes}:ncpus={self.cpus_per_node},walltime={walltime}"

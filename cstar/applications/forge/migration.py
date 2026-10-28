@@ -16,7 +16,7 @@ models (for their ``model_fields``) -- which is safe in that direction since
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, Final
 
 from cstar.applications.forge.blueprint import (
     _COMPOSITION_SPEC_KINDS,
@@ -27,6 +27,7 @@ from cstar.applications.forge.blueprint import (
     sanitize_name,
 )
 from cstar.applications.forge.namelist_model import normalize_legacy_sections
+from cstar.base.adapter import SchemaAdapter
 
 LEGACY_DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
     "~/cstar/_forge_bp_runs",
@@ -118,7 +119,8 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     Note: a migrated file's *recorded* ``provenance.content_hash`` was computed
     without ``domain.grid_name`` in the hashed data, so it no longer matches the
     recomputed hash post-migration -- ``verify_content_hash`` only warns on a
-    mismatch, and re-saving via ``to_yaml`` recomputes the hash.
+    mismatch, and any write (``to_yaml``, or C-Star's generic ``serialize``)
+    recomputes the hash.
     """
     data = dict(data or {})
     version = data.get("forge_blueprint_version")
@@ -232,10 +234,9 @@ def migrate_forcing_inputs(
     """Migrate the pre-v8 forcing-input shapes IN PLACE (idempotent).
 
     Shared by :func:`migrate_forge_blueprint_data` (where ``initial_conditions``
-    lives inside ``forcing``) and by the wizard's ForcingSpec loader (where a
-    catalog ``Forcing.yaml`` keeps ``initial_conditions`` and ``forcing`` as
-    top-level siblings and is otherwise never migrated) -- one function, so
-    the two entry points cannot drift.
+    lives inside ``forcing``) and :class:`ForcingSpecAdapterV1V2` (where a
+    ForcingSpec keeps ``initial_conditions`` and ``forcing`` as top-level
+    siblings) -- one function, so the two entry points cannot drift.
 
     * ``initial_conditions.bgc_source`` (a single source dict) is rewrapped as a
       one-item ``bgc_sources`` list; absent/``None`` becomes ``[]``. Both keys
@@ -333,3 +334,91 @@ def migrate_forcing_inputs(
                 bgc_sources.append({k: v for k, v in b.items() if k in bgc_keys})
             section["bgc_sources"] = bgc_sources
             forcing["boundary"] = section
+
+
+SPEC_SCHEMA_1_0_0: Final[str] = "1.0.0"
+SPEC_SCHEMA_2_0_0: Final[str] = "2.0.0"
+
+
+class ForcingSpecAdapterV1V2(SchemaAdapter):
+    """ForcingSpec ``1.0.0`` -> ``2.0.0``: the pre-v8 forcing-input shapes
+    (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) are
+    rewritten by :func:`migrate_forcing_inputs`.
+    """
+
+    @classmethod
+    def application(cls) -> str:
+        return "ForcingSpec"
+
+    @classmethod
+    def source(cls) -> str:
+        return SPEC_SCHEMA_1_0_0
+
+    @classmethod
+    def target(cls) -> str:
+        return SPEC_SCHEMA_2_0_0
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, Any]) -> dict[str, Any]:
+        migrate_forcing_inputs(model.get("initial_conditions"), model.get("forcing"))
+        return model
+
+
+class OutputSpecAdapterV1V2(SchemaAdapter):
+    """OutputSpec ``1.0.0`` -> ``2.0.0``: the pre-ucla-roms-0.9.0 section
+    ``cdr_tracer_output`` is renamed ``cdr_lite_output``
+    (:func:`~cstar.applications.forge.namelist_model.normalize_legacy_sections`).
+    """
+
+    @classmethod
+    def application(cls) -> str:
+        return "OutputSpec"
+
+    @classmethod
+    def source(cls) -> str:
+        return SPEC_SCHEMA_1_0_0
+
+    @classmethod
+    def target(cls) -> str:
+        return SPEC_SCHEMA_2_0_0
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, Any]) -> dict[str, Any]:
+        normalize_legacy_sections(model)
+        return model
+
+
+class ModelSpecAdapterV1V2(SchemaAdapter):
+    """ModelSpec ``1.0.0`` -> ``2.0.0``: the same rename as
+    :class:`OutputSpecAdapterV1V2`, inside ``model_settings``.
+    """
+
+    @classmethod
+    def application(cls) -> str:
+        return "ModelSpec"
+
+    @classmethod
+    def source(cls) -> str:
+        return SPEC_SCHEMA_1_0_0
+
+    @classmethod
+    def target(cls) -> str:
+        return SPEC_SCHEMA_2_0_0
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(settings := model.get("model_settings"), dict):
+            normalize_legacy_sections(settings)
+        return model
+
+
+SPEC_MIGRATIONS: Final[tuple[type[SchemaAdapter], ...]] = (
+    ForcingSpecAdapterV1V2,
+    OutputSpecAdapterV1V2,
+    ModelSpecAdapterV1V2,
+)
+"""The catalog spec migrations, read by ``cstar.catalog.spec_schema``. A spec
+field rename adds an adapter here and bumps its kind's major in
+``SPEC_SCHEMA_VERSIONS``. Each adapter must leave content already at its target
+unchanged: catalog readers return content without ``schema_version``, and
+``build_forge_blueprint`` reads what it is given as unversioned."""

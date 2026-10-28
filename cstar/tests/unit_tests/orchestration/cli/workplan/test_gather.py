@@ -1,4 +1,9 @@
+import shutil
+import typing as t
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from typer.testing import CliRunner
@@ -7,6 +12,11 @@ from cstar.cli.workplan.gather import app, collect_links
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.tracking import (
+    Access,
+    TrackingRepository,
+    WorkplanRun,
+)
 
 
 def _make_two_step_workplan(tmp_path: Path) -> tuple[LiveStep, LiveStep, LiveWorkplan]:
@@ -59,7 +69,10 @@ def _output_dir(step: Step) -> Path:
 
 
 def _dest_dir() -> Path:
-    return StateDirectoryManager.user_dir()
+    """The `gathered_output` directory of the run the `executed_workplan` fixture records."""
+    run = TrackingRepository().get_workplan_run_sync("fake-run-id")
+    assert run is not None
+    return StateDirectoryManager.user_view_dir(run.output_path)
 
 
 def test_cli_workplan_gather_happy_path(
@@ -339,9 +352,11 @@ def test_cli_workplan_gather_dest_is_not_a_directory(
         assert dest.is_symlink()
 
 
-def test_cli_workplan_gather_unknown_run_id() -> None:
+def test_cli_workplan_gather_unknown_run_id(
+    flatten_cli_output: Callable[[str], str],
+) -> None:
     """Verify that an unknown run-id produces an error mentioning it cannot
-    be located.
+    be found.
     """
     runner = CliRunner()
     unknown_run_id = "run-id-dne"
@@ -349,5 +364,105 @@ def test_cli_workplan_gather_unknown_run_id() -> None:
     result = runner.invoke(app, [unknown_run_id], color=False)
 
     assert result.exit_code != 0
-    assert "unable to locate" in result.stderr.lower()
-    assert unknown_run_id in result.stderr
+    assert f"unknown run-id: {unknown_run_id}" in flatten_cli_output(result.stderr)
+
+
+def _attach(
+    run_id: str, where: Path, access: Access | None
+) -> AbstractContextManager[t.Any]:
+    """Replace the tracking lookup so `run_id` is a run attached from elsewhere.
+
+    Parameters
+    ----------
+    run_id : str
+        The run-id of the run `executed_workplan` recorded.
+    where : Path
+        The directory the run was attached from.
+    access : Access | None
+        The access to record; `None` records none.
+
+    Returns
+    -------
+    AbstractContextManager[Any]
+        The patch, to be entered around the command.
+    """
+    recorded = TrackingRepository().get_workplan_run_sync(run_id)
+    assert recorded is not None
+    # the attached directory holds the run's transformed workplan, as a copy would
+    shutil.copy(recorded.trx_workplan_path, where / recorded.trx_workplan_path.name)
+    update: dict[str, t.Any] = {"output_path": where, "attached": True}
+    if access is not None:
+        update["access"] = access
+    attached: WorkplanRun = recorded.model_copy(update=update)
+    return mock.patch(
+        "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+        mock.AsyncMock(return_value=attached),
+    )
+
+
+@pytest.mark.parametrize("access", [None, Access.owned])
+def test_cli_workplan_gather_attached_run_is_gathered_into_its_own_directory(
+    executed_workplan: tuple[Path, Workplan, str],
+    tmp_path: Path,
+    access: Access | None,
+) -> None:
+    """Verify the links of a run attached from a directory outside the data home
+    are built in that directory, not under the data home.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    access : Access | None
+        The access the record holds; `None` for a record that says nothing.
+    """
+    _, wp, fake_run_id = executed_workplan
+    where = tmp_path / "colleague" / "their-run"
+    where.mkdir(parents=True)
+    output = _output_dir(wp.steps[0])
+    output.mkdir(parents=True)
+    src = output / "only.nc"
+    src.write_text("data")
+
+    with _attach(fake_run_id, where, access):
+        result = CliRunner().invoke(
+            app, [fake_run_id], color=False, catch_exceptions=False
+        )
+
+    assert result.exit_code == 0
+    dest = where / "gathered_output"
+    assert (dest / "only.nc").is_symlink()
+    assert (dest / "only.nc").resolve() == src.resolve()
+    assert not _dest_dir().exists()
+
+
+def test_cli_workplan_gather_refuses_a_run_attached_read_only(
+    executed_workplan: tuple[Path, Workplan, str],
+    tmp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify gather writes nothing into a run attached read-only, and exits 2.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, wp, fake_run_id = executed_workplan
+    where = tmp_path / "colleague" / "their-run"
+    where.mkdir(parents=True)
+    output = _output_dir(wp.steps[0])
+    output.mkdir(parents=True)
+    (output / "only.nc").write_text("data")
+
+    attach = _attach(fake_run_id, where, Access.read_only)
+    held = sorted(where.iterdir())  # the transformed workplan the attachment holds
+    with attach:
+        result = CliRunner().invoke(app, [fake_run_id], color=False)
+
+    assert result.exit_code == 2
+    text = flatten_cli_output(result.stderr)
+    assert "is attached read-only" in text
+    assert "--own" in text
+    assert sorted(where.iterdir()) == held
+    assert not _dest_dir().exists()

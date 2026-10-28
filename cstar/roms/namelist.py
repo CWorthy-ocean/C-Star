@@ -26,9 +26,16 @@ subclasses:
 - :class:`RomsNamelistV0_9_0` — the schema for ucla-roms **>= 0.9.0, < 0.11.0**.
   Replaces ``&CDR_TRACER_OUTPUT_SETTINGS`` with ``&CDR_LITE_OUTPUT_SETTINGS``
   (ucla-roms PR #372) and adds ``&CDR_LITE_SETTINGS``.
-- :class:`RomsNamelistV0_11_0` — the schema for ucla-roms **>= 0.11.0**. Adds
-  ``use_constant_Fe``/``constant_Fe_value`` to ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``
-  (ucla-roms PR #391) on top of 0.9.0.
+- :class:`RomsNamelistV0_11_0` — the schema for ucla-roms **>= 0.11.0, < 0.12.0**.
+  Adds ``use_constant_Fe``/``constant_Fe_value`` to
+  ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` (ucla-roms PR #391) on top of 0.9.0.
+- :class:`RomsNamelistV0_12_0` — the schema for ucla-roms **>= 0.12.0, < 0.13.0**.
+  Adds ``cdr_carbonate_sensitivity_time_interpolation`` to ``&CDR_LITE_SETTINGS``
+  (ucla-roms PR #396) and lets the ``&EXTRACT_DATA_SETTINGS`` per-child keys
+  take one entry per child, up to 8 (PR #395), on top of 0.11.0.
+- :class:`RomsNamelistV0_13_0` — the schema for ucla-roms **>= 0.13.0**. Adds
+  ``v_sponge_trc`` to ``&V_SPONGE_SETTINGS`` (the sponge's tracer diffusivity),
+  on top of 0.12.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -64,15 +71,21 @@ import f90nml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cstar.base.gitutils import _describe_nearest_tag, _describe_remote_nearest_tag
+from cstar.base.log import get_logger
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+log = get_logger(__name__)
 
 # Fortran array bounds declared in ROMS src/marbl_driver.F90 for the namelist
 # string lists (pinned ucla-roms commit). A list longer than these would
 # overflow the declared array at run time.
 MARBL_TRACERS_TO_WRITE_MAX = 40
 MARBL_DIAGNOSTICS_TO_WRITE_MAX = 64
+# ucla-roms >= 0.12.0: `max_extract_chd` in src/param.F90, the length of the
+# &EXTRACT_DATA_SETTINGS per-child arrays.
+EXTRACT_CHILDREN_MAX = 8
 
 
 def _namelist_str_list(
@@ -359,13 +372,23 @@ class FrcOutputSettings(_NmlGroup):
     """Number of time records in forcing files"""
 
 
-class ExtractDataSettings(_NmlGroup):
+class _ExtractDataSettingsCommon(_NmlGroup):
+    """The ``&EXTRACT_DATA_SETTINGS`` keys every release reads as one value;
+    the per-child keys are on :class:`ExtractDataSettings` (one child) and
+    :class:`ExtractDataSettingsV0_12_0` (up to 8).
+    """
+
     do_extract: bool
     """Generate boundary files for a nested domain"""
     output_period_extract: float
     """How often to output these files"""
     nrpf_extract: int
     """Number of time records per file"""
+
+
+class ExtractDataSettings(_ExtractDataSettingsCommon):
+    """``&EXTRACT_DATA_SETTINGS`` for ucla-roms < 0.12.0: one child domain."""
+
     extract_file: str
     """File path containing nesting info"""
     n_chd: int
@@ -378,6 +401,82 @@ class ExtractDataSettings(_NmlGroup):
     """`hc` of nested domain"""
     extract_root_name: str = "child"
     """Root name (filename prefix) for extracted child boundary files"""
+
+
+_EXTRACT_PER_CHILD_KEYS: Final = (
+    "extract_file",
+    "n_chd",
+    "theta_s_chd",
+    "theta_b_chd",
+    "hc_chd",
+    "extract_root_name",
+)
+
+
+class ExtractDataSettingsV0_12_0(_ExtractDataSettingsCommon):
+    """``&EXTRACT_DATA_SETTINGS`` for ucla-roms >= 0.12.0: boundary data for up to
+    :data:`EXTRACT_CHILDREN_MAX` child domains (ucla-roms PR #395).
+
+    The per-child keys take one entry per child, in the same order; the children
+    are the ``extract_file`` entries. A single value sets child 1 only, as before,
+    and is written back as a single value, so a one-child namelist is unchanged.
+    Checked here, when ``do_extract`` is on, are the rules ROMS stops on in every
+    build: each child after the first has its own ``N_chd``, ``theta_s_chd``,
+    ``theta_b_chd`` and ``hc_chd`` (only child 1 has defaults), and no array is
+    longer than ``max_extract_chd``. The rules that depend on ``PARALLEL_IO``
+    (a distinct ``extract_root_name`` per child with it, one ``N_chd`` for all
+    children without it) are left to ROMS.
+    """
+
+    do_extract: bool
+    """Generate boundary files for nested domains"""
+    extract_file: str | list[str]
+    """File path(s) containing nesting info"""
+    n_chd: int | list[int]
+    """Number of vertical levels in nested domain(s)"""
+    theta_s_chd: float | list[float]
+    """`theta_s` of nested domain(s)"""
+    theta_b_chd: float | list[float]
+    """`theta_b` of nested domain(s)"""
+    hc_chd: float | list[float]
+    """`hc` of nested domain(s)"""
+    extract_root_name: str | list[str] = Field(default="child")
+    """Output file root(s) (PARALLEL_IO)"""
+
+    @model_validator(mode="after")
+    def _check_children(self) -> Self:
+        """Reject a per-child layout ROMS stops on at startup (see the class
+        docstring), reporting every problem at once.
+        """
+        entries = {key: _as_list(getattr(self, key)) for key in _EXTRACT_PER_CHILD_KEYS}
+        problems = [
+            f"{key} has {len(values)} entries; ucla-roms reads at most "
+            f"{EXTRACT_CHILDREN_MAX} (max_extract_chd)"
+            for key, values in entries.items()
+            if len(values) > EXTRACT_CHILDREN_MAX
+        ]
+        n_children = len(entries["extract_file"])
+        if self.do_extract and n_children > 1:
+            if any(not str(f).strip() for f in entries["extract_file"]):
+                problems.append(
+                    "extract_file has a blank entry; each child domain needs its "
+                    "nesting file"
+                )
+            problems.extend(
+                f"{key} has {len(entries[key])} entries for {n_children} child "
+                "domains (extract_file); give one per child"
+                for key in ("n_chd", "theta_s_chd", "theta_b_chd", "hc_chd")
+                if len(entries[key]) != n_children
+            )
+            roots = entries["extract_root_name"]
+            if isinstance(self.extract_root_name, list) and len(roots) != n_children:
+                problems.append(
+                    f"extract_root_name has {len(roots)} entries for {n_children} "
+                    "child domains (extract_file); give one per child"
+                )
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
 
 
 class SpongeTuneSettings(_NmlGroup):
@@ -597,6 +696,19 @@ class CdrLiteSettings(_NmlGroup):
     equal xco2_air in the forcing files."""
 
 
+class CdrLiteSettingsV0_12_0(CdrLiteSettings):
+    """``&CDR_LITE_SETTINGS`` for ucla-roms >= 0.12.0: adds the time-interpolation
+    switch for the carbonate sensitivities read from forcing files (ucla-roms
+    PR #396). Its default, on, is what earlier releases always did.
+    """
+
+    cdr_carbonate_sensitivity_time_interpolation: bool = Field(default=True)
+    """Applies to ddic_dco2/ddic_dalk read from frcfiles: if .true. (default),
+    they are interpolated linearly in time between the two bracketing records;
+    if .false., each record is held until the next one starts. It has no effect
+    with the online option."""
+
+
 class CdrLiteOutputSettings(_NmlGroup):
     """``&CDR_LITE_OUTPUT_SETTINGS`` for ucla-roms >= 0.9.0 (PR #372).
 
@@ -747,6 +859,17 @@ class VSpongeSettings(_NmlGroup):
     """Maximum viscosity in sponge layer (m2/s)"""
 
 
+class VSpongeSettingsV0_13_0(VSpongeSettings):
+    """``&V_SPONGE_SETTINGS`` for ucla-roms >= 0.13.0: adds the sponge's tracer
+    diffusivity. A negative value, its default, gives tracers ``v_sponge`` (what
+    earlier releases always did). Read only with the SPONGE cppkey, like
+    ``v_sponge``. Negative values are valid, so there is no bound.
+    """
+
+    v_sponge_trc: float = Field(default=-1.0)
+    """Maximum tracer diffusivity in sponge layer (m2/s); 0 for a sponge on currents only, negative for the same as v_sponge"""
+
+
 class SssCorrection(_NmlGroup):
     dsssdt: float
     """SSS correction co-efficient as piston velocity (cm/day)"""
@@ -878,9 +1001,13 @@ class RomsNamelistBase(BaseModel):
     :class:`RomsNamelistV0_7_0` for ucla-roms >= 0.7.0, < 0.9.0, which adds the
     two CDR tracer / gas-exchange output groups, :class:`RomsNamelistV0_9_0`
     for ucla-roms >= 0.9.0, < 0.11.0, which renames the CDR tracer output group
-    to ``&CDR_LITE_OUTPUT_SETTINGS``, or :class:`RomsNamelistV0_11_0` for
-    ucla-roms >= 0.11.0, which adds the constant-iron keys to
-    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``) or select one automatically with
+    to ``&CDR_LITE_OUTPUT_SETTINGS``, :class:`RomsNamelistV0_11_0` for
+    ucla-roms >= 0.11.0, < 0.12.0, which adds the constant-iron keys to
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, :class:`RomsNamelistV0_12_0` for
+    ucla-roms >= 0.12.0, < 0.13.0, which adds the carbonate-sensitivity
+    time-interpolation key and per-child extraction keys, or
+    :class:`RomsNamelistV0_13_0` for ucla-roms >= 0.13.0, which adds the sponge
+    tracer diffusivity ``v_sponge_trc``) or select one automatically with
     :func:`namelist_schema_for_ref`.
     """
 
@@ -1137,7 +1264,7 @@ class RomsNamelistV0_9_0(RomsNamelistV0_6_0):
 
 
 class RomsNamelistV0_11_0(RomsNamelistV0_9_0):
-    """The ROMS namelist schema for ucla-roms >= 0.11.0.
+    """The ROMS namelist schema for ucla-roms >= 0.11.0, < 0.12.0.
 
     Adds `use_constant_Fe`/`constant_Fe_value` to `&MARBL_BIOGEOCHEMISTRY_SETTINGS`
     (ucla-roms PR #391) on top of the 0.9.0 schema; otherwise unchanged. Both
@@ -1146,6 +1273,36 @@ class RomsNamelistV0_11_0(RomsNamelistV0_9_0):
     """
 
     marbl_biogeochemistry_settings: MarblBiogeochemistrySettingsV0_11_0
+
+
+class RomsNamelistV0_12_0(RomsNamelistV0_11_0):
+    """The ROMS namelist schema for ucla-roms >= 0.12.0, < 0.13.0.
+
+    On top of the 0.11.0 schema: `&CDR_LITE_SETTINGS` gains
+    `cdr_carbonate_sensitivity_time_interpolation` (ucla-roms PR #396, see
+    :class:`CdrLiteSettingsV0_12_0`), always written, which is why earlier
+    releases (which stop on unknown namelist keys) keep the 0.11.0 schema; and
+    the `&EXTRACT_DATA_SETTINGS` per-child keys take one entry per child (PR
+    #395, see :class:`ExtractDataSettingsV0_12_0`), which earlier releases reject
+    as too many values.
+    """
+
+    extract_data_settings: ExtractDataSettingsV0_12_0
+    cdr_lite_settings: CdrLiteSettingsV0_12_0 = Field(
+        default_factory=CdrLiteSettingsV0_12_0
+    )
+
+
+class RomsNamelistV0_13_0(RomsNamelistV0_12_0):
+    """The ROMS namelist schema for ucla-roms >= 0.13.0.
+
+    Adds `v_sponge_trc` to `&V_SPONGE_SETTINGS` (see
+    :class:`VSpongeSettingsV0_13_0`) on top of the 0.12.0 schema. It is always
+    written, which is why earlier releases (which stop on unknown namelist keys)
+    keep the 0.12.0 schema.
+    """
+
+    v_sponge_settings: VSpongeSettingsV0_13_0
 
 
 # ---- Schema version selection ----
@@ -1158,19 +1315,22 @@ UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
 UCLA_ROMS_0_7_0: Final[tuple[int, int, int]] = (0, 7, 0)
 UCLA_ROMS_0_9_0: Final[tuple[int, int, int]] = (0, 9, 0)
 UCLA_ROMS_0_11_0: Final[tuple[int, int, int]] = (0, 11, 0)
+UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
+UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.12.0):
+# Recipe for the next breaking namelist release (e.g. 0.14.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
+#        UCLA_ROMS_0_14_0: Final[tuple[int, int, int]] = (0, 14, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
+#        (UCLA_ROMS_0_13_0, UCLA_ROMS_0_14_0, RomsNamelistV0_13_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_12_0, None, RomsNamelistV0_12_0),
+#        (UCLA_ROMS_0_14_0, None, RomsNamelistV0_14_0),
+#   4. Bump NEWEST_KNOWN_UCLA_ROMS (below) to the new release.
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
         tuple[int, int, int] | None, tuple[int, int, int] | None, type[RomsNamelistBase]
@@ -1183,8 +1343,18 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_6_0, UCLA_ROMS_0_7_0, RomsNamelistV0_6_0),
     (UCLA_ROMS_0_7_0, UCLA_ROMS_0_9_0, RomsNamelistV0_7_0),
     (UCLA_ROMS_0_9_0, UCLA_ROMS_0_11_0, RomsNamelistV0_9_0),
-    (UCLA_ROMS_0_11_0, None, RomsNamelistV0_11_0),
+    (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
+    (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
+    (UCLA_ROMS_0_13_0, None, RomsNamelistV0_13_0),
 )
+
+# The newest ucla-roms release whose namelist C-Star has been checked against.
+# A release tag above it still selects the last registry entry, but warns: that
+# release may write or expect a namelist key C-Star does not model. Bump it
+# with every new tier (recipe step 4 above) and also for a release that changes
+# no namelist key (a patch release such as 0.12.1), once checked. Never below the last entry's
+# lower bound.
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_13_0
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:
@@ -1241,6 +1411,51 @@ def _warn_commit_ahead_of_release(
     )
 
 
+def format_roms_version(version: tuple[int, int, int]) -> str:
+    """A ucla-roms version tuple as its release tag, e.g. ``(0, 12, 0)`` -> ``"0.12.0"``."""
+    return ".".join(str(part) for part in version)
+
+
+_LOGGED_NEWER_THAN_KNOWN: set[tuple[int, int, int]] = set()
+"""Releases already logged by :func:`_warn_newer_than_known`: logging is not
+silenced by warning filters, and the wizard reselects the schema on every
+rebuild, so each release is logged once per process."""
+
+
+def _warn_newer_than_known(
+    checkout_target: str,
+    release_tag: str | None,
+    version: tuple[int, int, int],
+    cls: type[RomsNamelistBase],
+) -> None:
+    """Warn that a ucla-roms release is newer than the newest one C-Star knows.
+
+    Emitted as a `UserWarning` on every call (reported at the caller of
+    :func:`namelist_schema_for_ref`) and logged once per release `version`
+    (``0.14.0``, ``v0.14.0`` and a hash on that tag log once between them).
+    `release_tag` is the tag a commit-hash `checkout_target` resolved to, or
+    `None` when `checkout_target` is itself the tag.
+    """
+    tag = release_tag or checkout_target
+    pinned = (
+        f"ucla-roms commit {checkout_target!r} (release {release_tag})"
+        if release_tag
+        else f"ucla-roms release {checkout_target}"
+    )
+    message = (
+        f"{pinned} is newer than the newest release this C-Star knows "
+        f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}); using the latest "
+        f"namelist schema C-Star has ({cls.__name__}). If {tag} changed the "
+        f"namelist, ROMS may stop on the generated namelist or run on the "
+        f"default of a key it lacks. Upgrade C-Star, or pin a ucla-roms release "
+        f"at or below {format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}."
+    )
+    warnings.warn(message, UserWarning, stacklevel=3)
+    if version not in _LOGGED_NEWER_THAN_KNOWN:
+        _LOGGED_NEWER_THAN_KNOWN.add(version)
+        log.warning(message)
+
+
 def namelist_schema_for_ref(
     checkout_target: str | None, repo_path: str | Path | None = None
 ) -> type[RomsNamelistBase]:
@@ -1270,8 +1485,19 @@ def namelist_schema_for_ref(
         (`None`, a branch name, an unresolvable hash, or an unparsable
         string), a `UserWarning` is emitted and the last (most recent)
         registry entry's class is returned.
+
+    Warns
+    -----
+    UserWarning
+        If `checkout_target` is not a release tag (see above), if a commit
+        hash is ahead of its release tag, or if the release `checkout_target`
+        names or resolves to is newer than :data:`NEWEST_KNOWN_UCLA_ROMS`: the
+        last registry entry's class is used for it, but that release may have
+        namelist changes C-Star does not model. The newer-release warning is
+        also logged, once per release per process.
     """
     version = _parse_semver(checkout_target) if checkout_target is not None else None
+    release_tag: str | None = None
 
     if (
         version is None
@@ -1281,10 +1507,12 @@ def namelist_schema_for_ref(
     ):
         described = _describe_nearest_tag(repo_path, checkout_target)
         if described is not None:
-            tag, commits_ahead = described
-            version = _parse_semver(tag)
+            release_tag, commits_ahead = described
+            version = _parse_semver(release_tag)
             if version is not None and commits_ahead:
-                _warn_commit_ahead_of_release(checkout_target, tag, commits_ahead)
+                _warn_commit_ahead_of_release(
+                    checkout_target, release_tag, commits_ahead
+                )
 
     last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
     if version is None:
@@ -1298,12 +1526,29 @@ def namelist_schema_for_ref(
             stacklevel=2,
         )
         return last_cls
+    # A parsed version implies a `checkout_target`; the second test narrows its
+    # type. NEWEST_KNOWN_UCLA_ROMS is never below the last entry's lower bound,
+    # so a newer release always selects the last entry.
+    if version > NEWEST_KNOWN_UCLA_ROMS and checkout_target is not None:
+        _warn_newer_than_known(checkout_target, release_tag, version, last_cls)
+        return last_cls
     for lower, upper, cls in NAMELIST_SCHEMA_REGISTRY:
         if (lower is None or version >= lower) and (upper is None or version < upper):
             return cls
     # Unreachable given a well-formed, contiguous registry with an
     # open-ended last entry, but keeps mypy happy about the return type.
     return last_cls
+
+
+def namelist_schema_named(name: str) -> type[RomsNamelistBase] | None:
+    """The registered namelist schema class called `name`, or `None` when this C-Star has none by that name.
+
+    Reads back a schema recorded by its class name (e.g. ``"RomsNamelistV0_12_0"``),
+    such as the one a compiled ROMS executable was built for.
+    """
+    return next(
+        (cls for _, _, cls in NAMELIST_SCHEMA_REGISTRY if cls.__name__ == name), None
+    )
 
 
 @functools.cache
@@ -1357,7 +1602,7 @@ def release_ref_for_remote(location: str, checkout_target: str) -> str:
     warnings.warn(
         f"Could not resolve ucla-roms commit {checkout_target!r} in {location} to "
         f"a release tag; using the latest known namelist schema "
-        f"({NAMELIST_SCHEMA_REGISTRY[-1][2].__name__}). If the roms_marbl step "
+        f"({NAMELIST_SCHEMA_REGISTRY[-1][2].__name__}). If the ucla_roms step "
         f"refuses the namelist, pin a release tag (or use a branch pin).",
         UserWarning,
         stacklevel=2,

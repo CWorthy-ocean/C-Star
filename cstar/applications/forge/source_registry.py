@@ -71,9 +71,13 @@ WOA23_SALINITY_URL = (
 # ``longitude``/``latitude``/``depth`` and stores ``month`` as an integer index 1-12;
 # roms-tools still reads earlier files but logs a "predates v2.1" warning, and the
 # oldest ones lack the ``temp_WOA``/``salt_WOA`` fields that density-space BGC
-# interpolation and SSS restoring need. The version is not derivable from the Drive
-# id, so both constants are literal — bump them together.
-UNIFIED_BGC_VERSION = "v2_1"
+# interpolation and SSS restoring need. v2.1a (2026-10) corrects a unit error in v2.1
+# and keeps its layout, so the roms-tools v2.1 reader applies as is;
+# it was uploaded as a new version of the same Drive file, so the id is unchanged.
+# The version is not derivable from the Drive id, so both constants are literal —
+# bump them together. Every version bump re-downloads the 10 GB file on every host
+# (see the filename below), so bump only for a file whose content changed.
+UNIFIED_BGC_VERSION = "v2_1a"
 UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgdcef"
 # Versioned filename so bumping the URL actually re-downloads: the handler skips the
 # download when the target path already exists, so an unversioned name would leave
@@ -145,7 +149,7 @@ UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 #                  (SourceSpec.constants), or roms-tools' own auto-downloaded river-BGC
 #                  default -- either way, nothing for Forge to stage.
 #   - "ESPER":     BGC fields derived from physics T/S via PyESPER at generation time
-#                  (SourceSpec.esper_method/esper_equation); see input_data.py's ESPER
+#                  (SourceSpec.esper_method/esper_equation); see input_generator.py's ESPER
 #                  handling, which already recognizes this by name, not by dataset lookup.
 #                  With SourceSpec.esper_salinity_conditioning the resolver notes the
 #                  one staged file it needs (WOA_SALINITY) instead of the source itself.

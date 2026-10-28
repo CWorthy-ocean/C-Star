@@ -75,10 +75,11 @@ def all_applications() -> list[str]:
     """
     return [
         "plotter",
-        "roms_marbl",
+        "ucla_roms",
         "hello_world",
         "nest_ic",
         "upscaler",
+        "cdr_metrics",
     ]
 
 

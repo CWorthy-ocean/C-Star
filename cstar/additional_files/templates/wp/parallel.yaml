@@ -1,14 +1,15 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.2.0.json
+schema_version: '1.2.0'
 name: parallel-workplan
 description: A workplan that executes all tasks immediately in parallel
 steps:
 - name: Step A_1
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 - name: Step A_2
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 - name: Step A_3
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 state: draft

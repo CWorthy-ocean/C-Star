@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -16,21 +17,27 @@ from unittest import mock
 import dotenv
 import pytest
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.deprecation import _WARNED
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_CONFIG_REPORTED,
     ENV_CSTAR_DATA_HOME,
-    ENV_CSTAR_ORCH_LOCAL_DELAY,
+    ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    ENV_CSTAR_SYSTEM,
+    FLAG_ON,
+    USER_CONFIG_FILENAME,
+    load_user_config,
 )
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
-from cstar.base.log import get_logger
+from cstar.base.log import _WARNED_LOG_LEVELS, get_logger
 from cstar.base.utils import additional_files_dir
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
@@ -43,17 +50,21 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.index import default_index
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
-from cstar.roms.namelist import release_ref_for_remote
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.namelist import _LOGGED_NEWER_THAN_KNOWN, release_ref_for_remote
+from cstar.system.manager import _WARNED_SYSTEM
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
     StubSimulation,
 )
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 ################################################################################
 # Network guard
@@ -125,6 +136,153 @@ def _clear_release_ref_cache() -> Generator[None]:
     release_ref_for_remote.cache_clear()
     yield
     release_ref_for_remote.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_newer_release_log() -> Generator[None]:
+    """Forget which too-new ucla-roms refs were logged around each unit test.
+
+    The newer-than-known release warning is logged once per ref per process,
+    so one test's log line would otherwise hide the next one's.
+    """
+    _LOGGED_NEWER_THAN_KNOWN.clear()
+    yield
+    _LOGGED_NEWER_THAN_KNOWN.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_system_warnings() -> Generator[None]:
+    """Forget which system warnings were logged around each unit test.
+
+    `warn_once` warns once per message per process (the generic-context fallback,
+    a launch on an unrecognised cluster's login node), so one test's warning
+    would otherwise hide the next one's.
+    """
+    _WARNED_SYSTEM.clear()
+    yield
+    _WARNED_SYSTEM.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_deprecation_warnings() -> Generator[None]:
+    """Forget which deprecations were announced around each unit test.
+
+    `deprecated` warns once per message per process, so one test's warning
+    would otherwise hide the next one's.
+    """
+    _WARNED.clear()
+    yield
+    _WARNED.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_log_level_warnings() -> Generator[None]:
+    """Forget which unrecognised log levels were reported around each unit test.
+
+    `parse_log_level_name` reports a bad level once per process, so one test's
+    report would otherwise hide the next one's.
+    """
+    _WARNED_LOG_LEVELS.clear()
+    yield
+    _WARNED_LOG_LEVELS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _restore_log_levels() -> Generator[None]:
+    """Put the root logger and every existing logger back to the level each had
+    before the unit test.
+
+    The CLI root callback and the commands' ``--log-level`` option reset every
+    logger to defer to the root logger and set the root's level, which would
+    otherwise leak into the tests that follow. Handlers are left alone: a root
+    logger without them makes `get_logger` reset its level. Only a level that
+    changed is set back, because each `setLevel` clears every logger's cache.
+    """
+    root_level = logging.root.level
+    levels = [
+        (logger, logger.level)
+        for logger in logging.root.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    ]
+    yield
+    if logging.root.level != root_level:
+        logging.root.setLevel(root_level)
+    for logger, level in levels:
+        if logger.level != level:
+            logger.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def _clear_default_run_index() -> Generator[None]:
+    """Forget the process's shared run index around each unit test.
+
+    `default_index` scans the run directories once per process, so what one test
+    left in its data home would otherwise decide what the next one finds.
+    """
+    default_index.cache_clear()
+    yield
+    default_index.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_project_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove the project home from the environment of each unit test.
+
+    The run index reads the project's runs area, so a machine that sets
+    `CSTAR_PROJECT_HOME` or `PROJECT` would otherwise show its real runs to the
+    test. A test that wants a project area sets one itself.
+    """
+    monkeypatch.delenv(ENV_CSTAR_PROJECT_HOME, raising=False)
+    # the variable that `CSTAR_PROJECT_HOME` defaults to
+    monkeypatch.delenv("PROJECT", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_system_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove `CSTAR_SYSTEM` from the environment of each unit test.
+
+    The setting overrides system detection, so a developer's shell that sets it
+    would otherwise change which context every test builds. A test that wants a
+    chosen system sets one itself.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SYSTEM, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _allow_login_node_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let ROMS launch in each unit test, whatever the host.
+
+    On a cluster's login node `ROMSSimulation.check_launch_location` would
+    otherwise refuse every test that builds a UCLA-ROMS runner or calls `run`. A
+    test of the refusal requests `login_node`, which clears the flag.
+    """
+    monkeypatch.setenv(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, FLAG_ON)
+
+
+@pytest.fixture
+def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+    """Put the process outside any scheduler job on a system with a scheduler."""
+    for name in (
+        "SLURM_JOB_ID",
+        "SLURM_JOBID",
+        "PBS_JOBID",
+        ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            new_callable=mock.PropertyMock,
+            return_value=mock.MagicMock(),
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.name",
+            new_callable=mock.PropertyMock,
+            return_value="fake_hpc",
+        ),
+    ):
+        yield
 
 
 def _tagged_git_repo(repo: Path, tags: Sequence[str | None]) -> list[str]:
@@ -2140,6 +2298,48 @@ def templates_dir() -> Path:
     return additional_files_dir() / "templates"
 
 
+TEMPLATE_BLUEPRINT_PLACEHOLDER: str = (
+    "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+)
+"""The blueprint path written into the template workplans."""
+TEMPLATE_WORKING_DIR_DEFAULT: str = "working_dir: ."
+"""The working directory line in the template blueprint."""
+
+
+@pytest.fixture
+def create_host_workplan(templates_dir: Path) -> Callable[[str, Path, Path, str], Path]:
+    """Return a function that hosts a copy of the template blueprint in a template workplan.
+
+    The function takes the template workplan name (`fanout`, `linear`, `parallel` or
+    `single_step`), the path whose name the blueprint copy takes, a working directory
+    and a run id. It writes the blueprint (with its `working_dir` set to the working
+    directory) and a copy of the workplan (pointing at that blueprint) under
+    `<working_dir>/<run_id>`, and returns the path of the workplan.
+    """
+
+    def _create(template: str, bp_path: Path, working_dir: Path, run_id: str) -> Path:
+        run_dir = working_dir / run_id
+        bp_target_path = run_dir / bp_path.name
+
+        bp_content = (templates_dir / "bp" / "blueprint.yaml").read_text()
+        bp_content = bp_content.replace(
+            TEMPLATE_WORKING_DIR_DEFAULT, f"working_dir: {working_dir}"
+        )
+        bp_target_path.parent.mkdir(parents=True, exist_ok=True)
+        bp_target_path.write_text(bp_content)
+
+        wp_content = (templates_dir / "wp" / f"{template}.yaml").read_text()
+        wp_content = wp_content.replace(
+            TEMPLATE_BLUEPRINT_PLACEHOLDER, bp_target_path.as_posix()
+        )
+        wp_path = run_dir / f"{template}-host.yaml"
+        wp_path.write_text(wp_content)
+
+        return wp_path
+
+    return _create
+
+
 @pytest.fixture
 def wp_templates_dir(templates_dir: Path) -> Path:
     """Return the path to the `Workplan` templates directory contained in the package
@@ -2286,12 +2486,12 @@ def create_mocked_simulation_outputs(
 
         wp = deserialize(trx_wp_path, LiveWorkplan)
 
-        # simulate a run occurring
+        # simulate a run occurring: the run directory holds the transformed workplan
+        shutil.copy(trx_wp_path, container_dir / f"{wp_path.stem}_transformed.yaml")
+        write_identity(container_dir, run_id, workplan=wp_path)
         repo = TrackingRepository()
         await repo.put_workplan_run(
             WorkplanRun(
-                workplan_path=wp_path,
-                trx_workplan_path=trx_wp_path,
                 output_path=container_dir,
                 run_id=run_id,
             )
@@ -2333,7 +2533,7 @@ def create_mocked_simulation_outputs(
 def preprocessable_roms_step(
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Step:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------
@@ -2360,7 +2560,7 @@ def preprocessable_roms_livestep(
     preprocessable_roms_step: Step,
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> LiveStep:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------
@@ -2430,13 +2630,36 @@ def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
 
 
 @pytest.fixture(autouse=True)
-def mock_local_delay() -> float:
+def isolate_user_config(
+    mock_xdg_dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path]:
+    """Point the configuration-file loader at the temporary config home and forget
+    what an earlier test loaded.
+
+    The loader resolves the file from the environment, which a test that patches
+    the environment with ``clear=True`` would turn back into the developer's real
+    ``~/.config/cstar/config.env``; pinning the path keeps every test on its own
+    file. Tests write the returned path to exercise the loader.
+    """
+    path = mock_xdg_dirs[ENV_CSTAR_CONFIG_HOME] / USER_CONFIG_FILENAME
+    monkeypatch.setattr("cstar.base.env.user_config_path", lambda: path)
+    # the loader exports it after reporting skipped lines; restore it afterwards
+    monkeypatch.delenv(ENV_CSTAR_CONFIG_REPORTED, raising=False)
+    load_user_config.cache_clear()
+    yield path
+    load_user_config.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def mock_local_delay(monkeypatch: pytest.MonkeyPatch) -> float:
     """Set a tiny delay between status queries made by the local launcher during unit tests.
 
     NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
     """
     delay = 0.1
-    os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
+    monkeypatch.setattr(
+        "cstar.orchestration.launch.local.PROXY_POLL_DELAY", delay, raising=True
+    )
     return delay
 
 

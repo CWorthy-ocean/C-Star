@@ -16,10 +16,12 @@ from pydantic import (
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
     Transform,
     get_app_for_blueprint,
     get_application,
 )
+from cstar.base.application_names import canonical_application
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin, get_logger
@@ -34,8 +36,20 @@ from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
     resolve_compute_environment,
 )
+from cstar.orchestration.index import (
+    HandleKind,
+    RunHandle,
+    parse_run_handle,
+    resolve_run,
+    run_uri,
+)
 from cstar.orchestration.launch.common import is_foreign_handle
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    product_paths,
+    require_recorded_files,
+)
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -65,6 +79,7 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
+    from cstar.orchestration.index import RunRecord
     from cstar.orchestration.orchestration import Launcher
 
 log = get_logger(__name__)
@@ -471,11 +486,29 @@ def anchor_blueprint_path(step: _TStep, base_dir: Path) -> _TStep:
     return step.model_copy(update={"blueprint_path": anchored})
 
 
+def _anchored_directory(text: str, base_dir: Path | None) -> str:
+    """Spell the run directory a reference names as an absolute path when it can.
+
+    A `~` is expanded; a relative path is resolved against `base_dir` when given,
+    and otherwise left as authored.
+    """
+    expanded = os.path.expanduser(text)
+    if base_dir is None:
+        return expanded
+    anchored = anchor_relative_path(expanded, base_dir)
+    return expanded if anchored is None else str(anchored)
+
+
 def fill_runs(
     runs: Mapping[str, RunRef],
     fill_transform: TemplateFillTransform | None,
+    base_dir: Path | None = None,
 ) -> dict[str, RunRef]:
-    """Fill the `{{name}}` placeholders in the run-ids of external runs.
+    """Fill the `{{name}}` placeholders in the run references of external runs.
+
+    A reference that names a run directory is made absolute: `~` is expanded and
+    a relative path is resolved against `base_dir`, once its placeholders are
+    filled.
 
     Parameters
     ----------
@@ -483,16 +516,20 @@ def fill_runs(
         The external runs of a workplan, keyed by alias.
     fill_transform : TemplateFillTransform | None
         The transform used to fill placeholders.
+    base_dir : Path | None
+        The directory of the workplan file a relative run directory is relative
+        to; when omitted, such a path is left as authored.
 
     Returns
     -------
     dict[str, RunRef]
-        Copies of `runs` with filled run-ids.
+        Copies of `runs` with filled run references.
 
     Raises
     ------
     CstarExpectationFailed
-        If a run-id contains a placeholder and no transform was supplied.
+        If a run reference contains a placeholder and no transform was supplied,
+        or names no run (it is empty once filled, or is `run://` without a uuid).
     """
     filled: dict[str, RunRef] = {}
     for alias, run in runs.items():
@@ -506,6 +543,15 @@ def fill_runs(
             raise CstarExpectationFailed(msg)
         else:
             run_id = run.run_id
+
+        try:
+            handle = parse_run_handle(run_id)
+        except ValueError as ex:
+            msg = f"Run alias {alias!r} does not name a run: {ex}"
+            raise CstarExpectationFailed(msg) from ex
+        if handle.kind is HandleKind.path:
+            run_id = _anchored_directory(handle.value, base_dir)
+
         filled[alias] = RunRef.model_validate({**run.model_dump(), "run_id": run_id})
     return filled
 
@@ -537,6 +583,8 @@ async def resolve_external_runs(
     workplan: Workplan,
     fill_transform: TemplateFillTransform | None,
     launcher: "Callable[[], Launcher[t.Any]]",
+    *,
+    base_dir: Path | None = None,
 ) -> "ExternalRuns":
     """Build the registry of a workplan's external runs and refresh their steps.
 
@@ -545,17 +593,20 @@ async def resolve_external_runs(
     workplan : Workplan
         The workplan declaring `runs`.
     fill_transform : TemplateFillTransform | None
-        The transform used to fill placeholders in run-ids.
+        The transform used to fill placeholders in run references.
     launcher : Callable[[], Launcher[t.Any]]
         Supplies the launcher used to query status; called only when the
         workplan depends on a step of an external run, so a workplan without
         external dependencies never builds a launcher.
+    base_dir : Path | None
+        The directory of the workplan file, which a relative run directory is
+        resolved against.
 
     Returns
     -------
     ExternalRuns
     """
-    external = ExternalRuns(fill_runs(workplan.runs, fill_transform))
+    external = ExternalRuns(fill_runs(workplan.runs, fill_transform, base_dir))
     if refs := external_dependencies(workplan):
         await external.refresh(refs, launcher())
     return external
@@ -579,12 +630,40 @@ class _Probe(t.NamedTuple):
     """Whether that launcher can wait on an in-progress handle of another run."""
 
 
+def _run_gone(path: str) -> bool:
+    """Whether a pinned run directory no longer holds a run at all.
+
+    A directory that is gone, or holds no manifest, is a run that was moved or
+    removed since it was pinned. One that holds a manifest, of another run or
+    unreadable, is not: the pin then names the wrong place, which is an error.
+
+    Parameters
+    ----------
+    path : str
+        The pinned run directory.
+
+    Returns
+    -------
+    bool
+    """
+    root = Path(os.path.abspath(Path(path).expanduser()))
+    try:
+        return not root.is_dir() or not (root / RUN_MANIFEST_NAME).exists()
+    except OSError:
+        return False
+
+
 class ExternalRuns:
     """The registry of other workplan runs a workplan refers to.
 
     Every lookup of an external run, step or handle goes through here. Records
     and workplans are read lazily and cached per alias; nothing is ever written
     (a sentinel written here would land in the current run's state directory).
+
+    A run is named by its run-id, `run://<uuid>` or its directory. One tracked
+    on this machine is asked its status through a launcher; one known only by its
+    manifest, or attached from elsewhere, can be depended on for the steps its
+    manifest records as done.
     """
 
     def __init__(self, runs: Mapping[str, RunRef]) -> None:
@@ -593,10 +672,12 @@ class ExternalRuns:
         Parameters
         ----------
         runs : Mapping[str, RunRef]
-            The external runs keyed by alias, with run-ids already filled.
+            The external runs keyed by alias, with references already filled
+            (see `fill_runs`).
         """
         self._runs = dict(runs)
-        self._records: dict[str, WorkplanRun] = {}
+        self._records: dict[str, RunRecord] = {}
+        self._handles: dict[str, RunHandle] = {}
         self._workplans: dict[str, LiveWorkplan] = {}
         self._probes: dict[StepRef, _Probe] = {}
         self._errors: dict[StepRef, str] = {}
@@ -616,8 +697,22 @@ class ExternalRuns:
         run_id = self._runs[ref.run].run_id if ref.run in self._runs else "?"
         return f"step {ref.step!r} of run {run_id!r} (alias {ref.run!r})"
 
-    def record(self, alias: str) -> WorkplanRun:
-        """Return the tracking record of the run declared as `alias`.
+    def _handle(self, alias: str) -> RunHandle:
+        """Return the handle the run declared as `alias` is resolved by.
+
+        The directory a scheduled workplan pinned, else what the reference says.
+        """
+        run = self._declared(alias)
+        if run.path:
+            return RunHandle(HandleKind.path, run.path)
+        try:
+            return parse_run_handle(run.run_id)
+        except ValueError as ex:
+            msg = f"Run alias {alias!r} does not name a run ({run.run_id!r}): {ex}"
+            raise CstarError(msg) from ex
+
+    def record(self, alias: str) -> "RunRecord":
+        """Return the record of the run declared as `alias`.
 
         Parameters
         ----------
@@ -626,29 +721,76 @@ class ExternalRuns:
 
         Returns
         -------
-        WorkplanRun
-            The record matching the run's `start_at` when pinned, otherwise
-            the latest record of the run-id.
+        RunRecord
+            The run's tracking record when it is tracked on this machine (the one
+            matching the run's `start_at` when pinned, otherwise the latest of
+            the run-id), else the record its manifest makes. A run pinned by
+            uuid must be that run.
 
         Raises
         ------
         CstarError
-            If the alias is undeclared or no record exists for the run.
+            If the alias is undeclared or the run cannot be found. A run pinned
+            to a directory that is gone, or holds no run any more, is looked
+            for by its pinned uuid, with a warning; the alias is then pinned by
+            uuid. A directory that holds another run is an error.
         """
         if alias not in self._records:
             run = self._declared(alias)
+            handle = self._handle(alias)
             try:
-                found = TrackingRepository().get_workplan_run_sync(
-                    run.run_id, run_date=run.start_at
-                )
-            except ValueError as ex:
-                msg = f"Run alias {alias!r} has an invalid run-id {run.run_id!r}: {ex}"
-                raise CstarError(msg) from ex
-            if found is None:
-                msg = f"No run record found for alias {alias!r} (run-id {run.run_id!r})"
-                raise CstarError(msg)
-            self._records[alias] = found
+                record = resolve_run(handle, uuid=run.id, start_at=run.start_at)
+            except CstarError as ex:
+                if not (run.path and run.id and _run_gone(run.path)):
+                    msg = f"Run alias {alias!r} ({run.run_id!r}): {ex}"
+                    raise CstarError(msg) from ex
+                handle = RunHandle(HandleKind.uuid, run.id)
+                record = self._resolve_by_uuid(alias, run, ex)
+            self._records[alias] = record
+            self._handles[alias] = handle
         return self._records[alias]
+
+    @staticmethod
+    def _resolve_by_uuid(
+        alias: str, run: RunRef, pinned_error: CstarError
+    ) -> "RunRecord":
+        """Find by its uuid a run whose pinned directory cannot be resolved.
+
+        The run was copied or moved since the workplan pinned it, and is
+        looked for by the uuid the pin holds.
+
+        Parameters
+        ----------
+        alias : str
+            The run alias.
+        run : RunRef
+            The declared run, pinned to a directory and a uuid.
+        pinned_error : CstarError
+            Why the pinned directory failed.
+
+        Returns
+        -------
+        RunRecord
+
+        Raises
+        ------
+        CstarError
+            If the uuid names no run either.
+        """
+        log.warning(
+            f"Run alias {alias!r} pinned the directory {run.path!r}, which does "
+            f"not resolve: {pinned_error}; looking for the run by {run_uri(run.id)}"
+        )
+        try:
+            return resolve_run(
+                RunHandle(HandleKind.uuid, run.id), uuid=run.id, start_at=run.start_at
+            )
+        except CstarError as ex:
+            msg = (
+                f"Run alias {alias!r} ({run.run_id!r}): {ex} (its pinned "
+                f"directory {run.path!r} failed too: {pinned_error})"
+            )
+            raise CstarError(msg) from ex
 
     def workplan(self, alias: str) -> LiveWorkplan:
         """Return the transformed workplan recorded for the run declared as `alias`.
@@ -656,16 +798,18 @@ class ExternalRuns:
         Raises
         ------
         CstarError
-            If the run has no record or its workplan cannot be loaded.
+            If the run cannot be found, has no workplan (a standalone blueprint
+            run) or its workplan cannot be loaded.
         """
         if alias not in self._workplans:
             record = self.record(alias)
+            path = record.trx_workplan_path
             try:
-                self._workplans[alias] = LiveWorkplan.load(record.trx_workplan_path)
+                self._workplans[alias] = LiveWorkplan.load(path)
             except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
                 msg = (
                     f"Unable to load workplan for run-id {record.run_id!r} from "
-                    f"{str(record.trx_workplan_path)!r}: {ex}"
+                    f"{str(path)!r}: {ex}"
                 )
                 raise CstarError(msg) from ex
         return self._workplans[alias]
@@ -724,12 +868,66 @@ class ExternalRuns:
             )
             raise CstarError(msg) from ex
 
+    def _manifest_probe(
+        self,
+        ref: StepRef,
+        step: LiveStep,
+        record: "RunRecord",
+        launcher: "Launcher[t.Any]",
+    ) -> _Probe:
+        """Observe a step of a run known only by its manifest, or attached from elsewhere.
+
+        Such a run has no sentinel on this machine and no job a launcher could
+        ask about: the step is usable when its manifest says it is done. The
+        handle is built from the submission the manifest recorded, and no
+        launcher is asked to wait on it.
+
+        Raises
+        ------
+        CstarError
+            If the manifest does not record the step as done.
+        """
+        status = record.step_status(ref.step)
+        if status != Status.Done.name:
+            recorded = (
+                f"is recorded as {status}" if status else "has no recorded status"
+            )
+            msg = (
+                f"step {ref.step!r} of run {record.run_id!r} (alias {ref.run!r}) "
+                f"{recorded} in the manifest at {record.output_path}: a run not "
+                "tracked on this machine can be depended on for its done steps only"
+            )
+            raise CstarError(msg)
+
+        entry = record.manifest.step(ref.step)
+        handle = launcher.handle_klass().model_validate(
+            {
+                "pid": entry.job_id if entry else "",
+                "name": ref.step,
+                "run_id": record.run_id,
+                "launcher_name": entry.launcher if entry else "",
+                "status": Status.Done,
+            }
+        )
+        return _Probe(
+            step,
+            handle,
+            Status.Done,
+            launcher.name,
+            launcher.supports_foreign_dependencies,
+        )
+
     async def refresh(
         self,
         refs: Iterable[StepRef],
         launcher: "Launcher[t.Any]",
     ) -> None:
         """Query the current status of external steps.
+
+        A step of a run tracked on this machine is asked of the launcher through
+        the sentinel its run persisted. A step of a run known only by its
+        manifest, or attached from elsewhere, has neither: it is `Done` when the
+        manifest records it done and a problem otherwise.
 
         A step that cannot be resolved (missing or unreadable record, workplan
         or sentinel, or a failed status query) is recorded as a problem rather
@@ -747,8 +945,19 @@ class ExternalRuns:
             self._errors.pop(ref, None)
             try:
                 step = self.step(ref)
-                handle = self.handle(ref, launcher.handle_klass())
-                status = await launcher.query_status(handle)
+                record = self.record(ref.run)
+                if record.live:
+                    handle = self.handle(ref, launcher.handle_klass())
+                    status = await launcher.query_status(handle)
+                    probe = _Probe(
+                        step,
+                        handle,
+                        status,
+                        launcher.name,
+                        launcher.supports_foreign_dependencies,
+                    )
+                else:
+                    probe = self._manifest_probe(ref, step, record, launcher)
             except (CstarError, ValueError, OSError, yaml.YAMLError) as ex:
                 # a corrupt sentinel or workplan, or a failed query, is a
                 # problem with this reference rather than a crash
@@ -756,13 +965,7 @@ class ExternalRuns:
                 self._errors[ref] = str(ex)
                 continue
 
-            self._probes[ref] = _Probe(
-                step,
-                handle,
-                status,
-                launcher.name,
-                launcher.supports_foreign_dependencies,
-            )
+            self._probes[ref] = probe
 
         statuses = ", ".join(
             f"{ref}={p.status.name}" for ref, p in self._probes.items()
@@ -858,7 +1061,11 @@ class ExternalRuns:
         return msg
 
     def pinned(self) -> dict[str, RunRef]:
-        """Return the runs with `start_at` set to the resolved record's start.
+        """Return the runs pinned to the runs they resolved to.
+
+        A resolved alias holds the run's run-id, its uuid and the start of the
+        resolved record, plus the run directory when it was referenced by path.
+        Resolving it again then goes through that run without searching for it.
 
         Only the aliases that `refresh` resolved are pinned. An alias that no
         step refers to (or whose last refresh failed) is passed through as
@@ -870,14 +1077,21 @@ class ExternalRuns:
         dict[str, RunRef]
         """
         resolved = {ref.run for ref in self._probes}
-        return {
-            alias: (
-                run.model_copy(update={"start_at": self.record(alias).start_at})
-                if alias in resolved
-                else run
-            )
-            for alias, run in self._runs.items()
-        }
+        pins: dict[str, RunRef] = {}
+        for alias, run in self._runs.items():
+            if alias in resolved:
+                record = self.record(alias)
+                handle = self._handles[alias]
+                run = run.model_copy(
+                    update={
+                        "run_id": record.run_id,
+                        "id": record.uuid,
+                        "start_at": record.start_at,
+                        "path": handle.value if handle.kind is HandleKind.path else "",
+                    }
+                )
+            pins[alias] = run
+        return pins
 
 
 def lookup_step(workplan: LiveWorkplan, token: str) -> LiveStep:
@@ -1245,6 +1459,11 @@ class OverrideTransform(Transform[LiveStep]):
         bp_type = app.blueprint
 
         blueprint: Blueprint = load_blueprint(bp_path, bp_type)
+
+        # Report a file edited by hand before the override write records the hash
+        # of the content it holds: afterwards the edit could no longer be told.
+        if problem := blueprint.integrity_problem():
+            log.warning(problem)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
         update: dict[str, t.Any] = {
@@ -1929,7 +2148,8 @@ class ApplyOverridesDirective(OverrideDirective):
             If the blueprint's application differs from the one declared
             by the step.
         """
-        expected = self._config.get(self.KEY_APPLICATION)
+        # a transformed workplan written under an earlier name still carries it
+        expected = canonical_application(self._config.get(self.KEY_APPLICATION, ""))
         if expected and bp.application != expected:
             msg = (
                 f"Blueprint declares application {bp.application!r} but the "
@@ -2055,9 +2275,12 @@ class DirectiveConfig(BaseModel):
             msg = f"Workplan context could not be provided to directives for run: {run_id}"
             raise RuntimeError(msg)
 
-        wp_path = run.trx_workplan_path
         try:
+            wp_path = run.trx_workplan_path
             return LiveWorkplan.load(wp_path)
+        except CstarError as ex:
+            msg = f"Unable to locate the workplan for run-id {run_id!r}: {ex}"
+            raise RuntimeError(msg) from ex
         except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
             msg = f"Unable to load workplan for run-id {run_id!r} from {str(wp_path)!r}: {ex}"
             raise RuntimeError(msg) from ex
@@ -2152,8 +2375,9 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
     Raises
     ------
     CstarError
-        If the producing step cannot be found in the workplan, or a unique
-        blueprint file cannot be located in its output directory.
+        If the producing step cannot be found in the workplan, a unique
+        blueprint file can be located neither in its record nor in its output
+        directory, or the blueprint its record lists is missing.
     """
     workplan = DirectiveConfig.load_workplan()
     try:
@@ -2177,11 +2401,16 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
             raise CstarError(msg)
         return candidate
 
-    candidates = sorted(
-        path
-        for pattern in ("*.yml", "*.yaml", "*.json")
-        for path in output_dir.glob(pattern)
-    )
+    candidates = product_paths(producer.fsm.root_dir, ArtifactKind.emitted_blueprint)
+    if not candidates:
+        log.debug(
+            "The record of step %r lists no emitted blueprint; searching %s",
+            ref.from_step,
+            output_dir,
+        )
+        candidates = sorted(
+            path for pattern in ("*.yml", "*.yaml") for path in output_dir.glob(pattern)
+        )
     if not candidates:
         msg = f"Step {ref.from_step!r} did not produce a blueprint in: {output_dir}"
         raise CstarError(msg)
@@ -2194,6 +2423,7 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
         )
         raise CstarError(msg)
 
+    require_recorded_files(producer.fsm.root_dir, candidates)
     return candidates[0]
 
 

@@ -1,6 +1,7 @@
 import logging
 import pathlib
 import re
+import time
 import typing as t
 import uuid
 from collections.abc import Callable
@@ -9,7 +10,17 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.log import TRACE_LOG_LEVEL, get_logger, register_file_handler
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+from cstar.base.log import (
+    DEFAULT_LOG_LEVEL,
+    TRACE_LOG_LEVEL,
+    LoggingMixin,
+    LogLevelChoices,
+    get_logger,
+    parse_log_level_name,
+    register_file_handler,
+    reset_log_level,
+)
 
 LoggingFn: t.TypeAlias = Callable[[str], None]
 
@@ -153,6 +164,45 @@ def test_filehandler_no_dupes(
     assert len(matches) == 1
 
 
+@pytest.mark.parametrize("with_parent", [True, False])
+def test_stdout_no_dupes_under_parent_logger(
+    capsys: pytest.CaptureFixture[str],
+    with_parent: bool,
+) -> None:
+    """Verify a logger whose ancestor already prints to STDOUT (e.g. a LoggingMixin
+    class logger under its module's logger) writes each entry to STDOUT once.
+    """
+    parent_name = f"test_stdout_no_dupes_{uuid.uuid4().hex}"
+    if with_parent:
+        get_logger(parent_name, logging.INFO)
+    child = get_logger(f"{parent_name}.Child", logging.INFO)
+
+    msg = uuid.uuid4().hex
+    child.info(msg)
+
+    assert capsys.readouterr().out.count(msg) == 1
+
+
+def test_filehandler_keeps_local_time_when_converter_is_replaced(
+    request: pytest.FixtureRequest,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify C-Star's entries stay in local time after a dependency replaces the
+    class-wide `logging.Formatter.converter`, as copernicusmarine does on import.
+    """
+    monkeypatch.setattr(
+        logging.Formatter, "converter", staticmethod(lambda _: time.gmtime(0))
+    )
+    filename = tmp_path / f"{request.function.__name__}.log"
+    log = get_logger(request.function.__name__, logging.INFO, filename=filename)
+
+    log.info("stamped")
+
+    today = strftime("%Y\\-%m\\-%d")
+    assert re.search(rf"^{today} .* - stamped$", filename.read_text(), re.MULTILINE)
+
+
 @pytest.mark.parametrize(
     "filepath",
     [
@@ -288,3 +338,136 @@ def test_register_fh_dupe_level(
     update_level = logging.INFO
     fh1 = register_file_handler(log, filepath_sym, update_level, "%(msg)s")
     assert fh1.level != update_level
+
+
+@pytest.mark.parametrize("spelling", ["debug", "Debug", "dEBUG", " debug\n", "DEBUG"])
+def test_log_level_choice_matches_any_case(spelling: str) -> None:
+    """Verify a level name matches its member in any case, ignoring surrounding
+    whitespace.
+    """
+    assert LogLevelChoices(spelling) is LogLevelChoices.DEBUG
+
+
+@pytest.mark.parametrize("value", ["loud", "WARN", "FATAL", "NOTSET", "", 10])
+def test_log_level_choice_rejects_other_values(value: str | int) -> None:
+    """Verify a value that names no member, a stdlib alias or a number included,
+    is refused.
+    """
+    with pytest.raises(ValueError, match="is not a valid LogLevelChoices"):
+        LogLevelChoices(t.cast("str", value))
+
+
+@pytest.mark.parametrize(
+    ("choice", "expected"),
+    [
+        (LogLevelChoices.TRACE, TRACE_LOG_LEVEL),
+        (LogLevelChoices.DEBUG, logging.DEBUG),
+        (LogLevelChoices.INFO, logging.INFO),
+        (LogLevelChoices.WARNING, logging.WARNING),
+        (LogLevelChoices.ERROR, logging.ERROR),
+        (LogLevelChoices.CRITICAL, logging.CRITICAL),
+    ],
+)
+def test_parse_log_level_name_maps_every_choice(
+    choice: LogLevelChoices, expected: int
+) -> None:
+    """Verify every member of `LogLevelChoices` maps to its numeric level."""
+    assert parse_log_level_name(choice) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("debug", logging.DEBUG), ("TRACE", TRACE_LOG_LEVEL), ("Error", logging.ERROR)],
+)
+def test_parse_log_level_name_accepts_any_case(
+    name: str, expected: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify a level name is matched in any case, without a word on stderr."""
+    assert parse_log_level_name(name) == expected
+    assert capsys.readouterr().err == ""
+
+
+def test_parse_log_level_name_passes_numbers_through() -> None:
+    """Verify a numeric level is returned as it is."""
+    assert parse_log_level_name(7) == 7
+
+
+@pytest.mark.parametrize("name", ["loud", "WARN"])
+def test_parse_log_level_name_falls_back_for_unknown_names(
+    name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify a name outside `LogLevelChoices`, a stdlib alias included, answers
+    with the default level and names the accepted values on stderr.
+    """
+    assert parse_log_level_name(name) == DEFAULT_LOG_LEVEL == logging.INFO
+
+    assert capsys.readouterr().err == (
+        f"Ignoring log level {name!r}: use one of TRACE, DEBUG, INFO, WARNING, "
+        "ERROR, CRITICAL; logging at INFO.\n"
+    )
+
+
+def test_parse_log_level_name_reports_each_bad_value_once(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify a bad value is reported once per process, however many loggers ask
+    for it, and a different bad value is reported on its own.
+    """
+    assert parse_log_level_name("loud") == logging.INFO
+    assert parse_log_level_name("loud") == logging.INFO
+
+    assert len(capsys.readouterr().err.splitlines()) == 1
+
+    assert parse_log_level_name("louder") == logging.INFO
+    assert parse_log_level_name("loud") == logging.INFO
+
+    assert len(capsys.readouterr().err.splitlines()) == 1
+
+
+def test_get_logger_survives_a_bad_level_in_the_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify a logger created while the environment holds a bad level gets the
+    default level instead of failing the import that created it.
+    """
+    monkeypatch.setenv(ENV_CSTAR_LOG_LEVEL, "loud")
+
+    log = get_logger(f"test_bad_level_{uuid.uuid4().hex}")
+
+    assert log.level == logging.INFO
+    assert capsys.readouterr().err.count("Ignoring log level 'loud'") == 1
+
+
+def test_log_level_description_lists_every_choice() -> None:
+    """Verify the setting's description names every level the setting accepts."""
+    description = get_env_item(ENV_CSTAR_LOG_LEVEL).description
+
+    for choice in LogLevelChoices:
+        assert choice.value in description
+    assert "any case" in description
+
+
+def test_reset_log_level_reaches_module_and_class_loggers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `reset_log_level` leaves a module logger and a `LoggingMixin` class
+    logger under it deferring to the root logger, whatever level they were given.
+    """
+    monkeypatch.delenv(ENV_CSTAR_LOG_LEVEL, raising=False)
+    module_log = get_logger(f"test_reset_{uuid.uuid4().hex}", logging.WARNING)
+
+    class Thing(LoggingMixin):
+        pass
+
+    # the mixin names its logger after the class's module
+    Thing.__module__ = module_log.name
+    thing = Thing()
+    assert thing.log.name == f"{module_log.name}.Thing"
+    assert module_log.getEffectiveLevel() == logging.WARNING
+    assert thing.log.getEffectiveLevel() == DEFAULT_LOG_LEVEL
+
+    reset_log_level(LogLevelChoices.DEBUG)
+
+    assert module_log.getEffectiveLevel() == logging.DEBUG
+    assert thing.log.getEffectiveLevel() == logging.DEBUG
+    assert logging.getLogger().level == logging.DEBUG

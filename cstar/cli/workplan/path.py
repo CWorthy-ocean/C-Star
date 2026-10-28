@@ -5,13 +5,13 @@ import typer
 
 from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
-    RunRecordArgument,
+    RunHandleArgument,
     autocomplete_step_list,
+    get_run_record,
     preload_step,
     preload_workplan,
 )
 from cstar.orchestration.orchestration import LiveStep
-from cstar.orchestration.tracking import WorkplanRun
 
 if t.TYPE_CHECKING:
     from pathlib import Path
@@ -27,6 +27,7 @@ HELP_PATH_SHORT = "Print the directory of a workplan run or step."
 HELP_PATH_LONG = f"""\
 {HELP_PATH_SHORT}
 
+The run is named by its run-id, `run://<uuid>`, or the path of its directory.
 The path is the only output on stdout, so it composes with other commands,
 e.g. `dir=$(cstar run path <run-id>) && cd "$dir"`. Without a
 `step_name`, the directory is the run's output directory. Failures are
@@ -37,6 +38,7 @@ HELP_CD_SHORT = "Change the shell directory to a workplan run or step."
 HELP_CD_LONG = f"""\
 {HELP_CD_SHORT}
 
+The run is named by its run-id, `run://<uuid>`, or the path of its directory.
 Requires the shell function installed by `cstar env shell-init --install`: a
 process cannot change the directory of the shell that started it. Without the
 function, this command prints how to set it up and exits with a non-zero code.
@@ -111,7 +113,7 @@ def _target_directory(context: typer.Context, step_name: str) -> "Path":
     typer.Exit
         With code 1 if the directory does not exist.
     """
-    run = get_from_ctxmap(context, "run", WorkplanRun)
+    run = get_run_record(context)
 
     if step_name:
         step = get_from_ctxmap(context, "live_step", LiveStep)
@@ -132,7 +134,7 @@ def _target_directory(context: typer.Context, step_name: str) -> "Path":
 @app.command(name=COMMAND_PATH, help=HELP_PATH_LONG, short_help=HELP_PATH_SHORT)
 def workplan_path(
     context: typer.Context,
-    run_id: RunRecordArgument,
+    run_id: RunHandleArgument,
     step_name: OptionalStepArgument = "",
 ) -> None:
     """Print the directory of a workplan run or step."""
@@ -142,7 +144,7 @@ def workplan_path(
 @app.command(name=COMMAND_CD, help=HELP_CD_LONG, short_help=HELP_CD_SHORT)
 def workplan_cd(
     context: typer.Context,
-    run_id: RunRecordArgument,
+    run_id: RunHandleArgument,
     step_name: OptionalStepArgument = "",
 ) -> None:
     """Explain how to change the shell directory to a workplan run or step."""

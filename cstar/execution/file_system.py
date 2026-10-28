@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from requests import RequestException, request
 
+from cstar.base.application_names import canonical_application, legacy_names
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
@@ -80,6 +81,8 @@ class DirectoryManager:
     _PKG_SUBDIR: t.Literal["cstar"] = "cstar"
     _SOURCE_DATA_SUBDIR: t.Literal["source-data"] = "source-data"
     """The source-data cache's name under ``<root>/cstar``."""
+    _RUNS_SUBDIR: t.Literal["runs"] = "runs"
+    """The name, under ``<project home>/cstar``, of the project's runs area."""
     _LEGACY_SOURCE_DATA_SUBDIR: t.Literal["cstar-forge-data/source-data"] = (
         "cstar-forge-data/source-data"
     )
@@ -156,14 +159,44 @@ class DirectoryManager:
         return cls.xdg_dir(load_xdg_metadata().state)
 
     @classmethod
+    def project_home(cls) -> Path | None:
+        """Get the durable project directory, when one is configured.
+
+        The value of ``CSTAR_PROJECT_HOME``, which defaults to ``$PROJECT``.
+        Unlike the root of the source-data cache, it does not fall back to
+        scratch or the home directory: a project area is shared and durable, so
+        its absence means there is none.
+
+        Returns
+        -------
+        Path | None
+            The directory, or `None` when neither variable is set.
+        """
+        value = get_env_item(ENV_CSTAR_PROJECT_HOME).value
+        return Path(value).expanduser().resolve() if value else None
+
+    @classmethod
+    def project_runs_home(cls) -> Path | None:
+        """Get the project's runs area, ``<project home>/cstar/runs``.
+
+        Holds the runs a project keeps durable and shares. Does not create the
+        directory.
+
+        Returns
+        -------
+        Path | None
+            The directory, or `None` when there is no project home.
+        """
+        home = cls.project_home()
+        return home / cls._PKG_SUBDIR / cls._RUNS_SUBDIR if home else None
+
+    @classmethod
     def _source_data_paths(cls) -> tuple[Path, Path]:
         """Return the standard and legacy source-data cache paths, on the same root."""
-        root = Path(
-            get_env_item(ENV_CSTAR_PROJECT_HOME).value
-            or hpc_data_directory()
-            or Path.home()
+        root = (
+            cls.project_home()
+            or Path(hpc_data_directory() or Path.home()).expanduser().resolve()
         )
-        root = root.expanduser().resolve()
         return (
             root / cls._PKG_SUBDIR / cls._SOURCE_DATA_SUBDIR,
             root / cls._LEGACY_SOURCE_DATA_SUBDIR,
@@ -188,7 +221,12 @@ class DirectoryManager:
 
         A cache at the legacy ``<root>/cstar-forge-data/source-data`` is adopted:
         when it exists and the standard directory does not, the standard directory
-        is created as a relative symlink to it.
+        is created as a relative symlink to it. The link is computed between the
+        resolved paths, so it holds when ``<root>/cstar`` or the legacy directory
+        is itself behind a symlink.
+
+        A dangling link left by releases 0.16.0 and 0.16.1 (which computed it from
+        the unresolved paths) is replaced when the legacy cache exists.
 
         Raises
         ------
@@ -199,11 +237,22 @@ class DirectoryManager:
         """
         home, legacy = cls._source_data_paths()
         if home.is_symlink() and not home.exists():
-            msg = (
-                f"The source-data cache {home} links to {home.readlink()}, which "
-                "does not exist. Restore the target or remove the link."
-            )
-            raise CstarError(msg)
+            target = os.readlink(home)
+            # 0.16.0 and 0.16.1 linked with a lexical relpath that dangles when
+            # <root>/cstar or the legacy directory is behind a symlink.
+            if legacy.is_dir() and target == os.path.relpath(legacy, home.parent):
+                log.info(
+                    "Replacing dangling source-data link %s from an older release", home
+                )
+                # Another process repairing the same link may have removed it first.
+                home.unlink(missing_ok=True)
+            elif not home.exists():
+                # Checked again: another process may have relinked it meanwhile.
+                msg = (
+                    f"The source-data cache {home} links to {target}, which "
+                    "does not exist. Restore the target or remove the link."
+                )
+                raise CstarError(msg)
         if not home.exists() and legacy.is_dir():
             # Another process sharing the root may have linked it first.
             with contextlib.suppress(FileExistsError):
@@ -383,6 +432,11 @@ class StateDirectoryManager:
     _WORKPLAN_RUNS_NAME: t.ClassVar[t.Literal["workplan_runs"]] = "workplan_runs"
     """The name of the data-home directory holding workplan runs."""
 
+    _COMPOSED_WORKPLANS_NAME: t.ClassVar[t.Literal["composed_workplans"]] = (
+        "composed_workplans"
+    )
+    """The name of the state-home directory holding the workplans composed around single blueprints."""
+
     @classmethod
     def root_dir(cls) -> Path:
         """The root directory containing all job outputs.
@@ -421,6 +475,44 @@ class StateDirectoryManager:
         return root / cls._RUN_TRACKING_NAME
 
     @classmethod
+    def workplan_runs_dir(cls) -> Path:
+        """The data-home directory holding the workplan runs.
+
+        ``<data home>/workplan_runs``; each run is a directory of its run-id.
+
+        Returns
+        -------
+        Path
+        """
+        return DirectoryManager.data_home() / cls._WORKPLAN_RUNS_NAME
+
+    @classmethod
+    def composed_workplans_dir(cls) -> Path:
+        """The state-home directory holding the workplans composed around single blueprints.
+
+        ``<state home>/composed_workplans``; each blueprint's workplan is a file in
+        a directory of its own, so it never lands beside the blueprint.
+
+        Returns
+        -------
+        Path
+        """
+        return cls.root_dir() / cls._COMPOSED_WORKPLANS_NAME
+
+    @classmethod
+    def blueprint_runs_dir(cls) -> Path:
+        """The data-home directory holding the blueprint runs made outside a workplan.
+
+        ``<data home>/blueprint_runs``; each run is a directory of its name
+        under the directory of its application.
+
+        Returns
+        -------
+        Path
+        """
+        return DirectoryManager.data_home() / cls._BLUEPRINT_RUNS_NAME
+
+    @classmethod
     def data_dir(cls, run_id: str | None = None) -> Path:
         """The directory for data files used by a run.
 
@@ -435,7 +527,7 @@ class StateDirectoryManager:
         """
         data_home = DirectoryManager.data_home()
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
-        run_dir = data_home / cls._WORKPLAN_RUNS_NAME / run_id
+        run_dir = cls.workplan_runs_dir() / run_id
 
         legacy_dir = data_home / run_id
         if not run_dir.exists() and JobFileSystemManager(legacy_dir).tasks_dir.is_dir():
@@ -455,12 +547,15 @@ class StateDirectoryManager:
         ``<data home>/blueprint_runs/<application>/<name>``: where a blueprint
         that declares no ``working_dir`` is executed from. The application
         segment keeps a producer and the blueprint it emits apart when they
-        share a name (forge and its ``roms_marbl`` blueprint).
+        share a name (forge and its ``ucla_roms`` blueprint). A run made under
+        an earlier name of the application keeps its directory there, so
+        resuming or continuing it finds the earlier attempt.
 
         Parameters
         ----------
         application : str
-            The application the blueprint runs.
+            The application the blueprint runs, under its current or an
+            earlier name.
         name : str
             The blueprint name, slugified for use as a directory name.
 
@@ -468,8 +563,24 @@ class StateDirectoryManager:
         -------
         Path
         """
-        data_home = DirectoryManager.data_home()
-        return data_home / cls._BLUEPRINT_RUNS_NAME / application / slugify(name)
+        application = canonical_application(application)
+        runs_dir = cls.blueprint_runs_dir()
+        slug = slugify(name)
+        run_dir = runs_dir / application / slug
+        if run_dir.exists():
+            return run_dir
+
+        for legacy in legacy_names(application):
+            legacy_dir = runs_dir / legacy / slug
+            if legacy_dir.is_dir():
+                log.debug(
+                    "Using run directory %s, which predates the %s name",
+                    legacy_dir,
+                    application,
+                )
+                return legacy_dir
+
+        return run_dir
 
     @classmethod
     def user_dir(cls, run_id: str | None = None) -> Path:

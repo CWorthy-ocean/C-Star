@@ -11,7 +11,6 @@ from unittest import mock
 import pytest
 import requests
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (
@@ -36,6 +35,7 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
+from cstar.roms.file_system import RomsFileSystemManager
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_file_system_prepare(
     assert fs.output_dir.exists()
     assert fs.input_dir.exists()
     assert fs.temp_output_dir.exists()
-    assert fs._codebases_dir.exists()
+    assert fs.codebases_dir.exists()
     assert fs.root_dir.exists()
 
 
@@ -213,7 +213,58 @@ def test_blueprint_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     actual = StateDirectoryManager.blueprint_run_dir("roms_marbl", "NA 8x8 / Test")
 
-    assert actual == tmp_path / "blueprint_runs" / "roms_marbl" / "na-8x8-test"
+    assert actual == tmp_path / "blueprint_runs" / "ucla_roms" / "na-8x8-test"
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        pytest.param([], "ucla_roms/my-run", id="nothing-exists"),
+        pytest.param(["roms_marbl/my-run"], "roms_marbl/my-run", id="legacy-run-kept"),
+        pytest.param(
+            ["roms_marbl/my-run", "ucla_roms/my-run"],
+            "ucla_roms/my-run",
+            id="canonical-wins",
+        ),
+        pytest.param(
+            ["roms_marbl/other-run"], "ucla_roms/my-run", id="legacy-other-run-ignored"
+        ),
+    ],
+)
+@pytest.mark.parametrize("application", ["ucla_roms", "roms_marbl"])
+def test_blueprint_run_dir_legacy_application_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    application: str,
+    existing: list[str],
+    expected: str,
+) -> None:
+    """A run made under an earlier application name is found where it ran.
+
+    The application is canonicalised first, so the earlier name resolves
+    exactly as the current one.
+    """
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+    for rel_path in existing:
+        (tmp_path / "blueprint_runs" / rel_path).mkdir(parents=True)
+
+    actual = StateDirectoryManager.blueprint_run_dir(application, "My Run")
+
+    assert actual == tmp_path / "blueprint_runs" / expected
+
+
+def test_blueprint_run_dir_legacy_file_is_not_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stray file at the earlier location is not adopted as a run directory."""
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+    legacy_parent = tmp_path / "blueprint_runs" / "roms_marbl"
+    legacy_parent.mkdir(parents=True)
+    (legacy_parent / "my-run").write_text("not a directory")
+
+    actual = StateDirectoryManager.blueprint_run_dir("ucla_roms", "my-run")
+
+    assert actual == tmp_path / "blueprint_runs" / "ucla_roms" / "my-run"
 
 
 def test_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -807,6 +858,69 @@ class TestSourceDataHome:
         assert home.readlink() == Path("../cstar-forge-data/source-data")
         assert (home / "glorys.nc").read_text() == "data"
 
+    def _make_symlinked_home(self, tmp_path: Path) -> tuple[Path, Path]:
+        """A home directory and legacy cache behind different symlinks:
+        ``cstar`` and ``cstar-forge-data`` in the home directory are symlinks
+        into different directories elsewhere.
+
+        Returns the fake home and the (real) legacy source-data directory.
+        """
+        mount = tmp_path / "mnt" / "volume" / "group"
+        real_cstar = mount / "user" / "name" / "cstar"
+        real_cstar.mkdir(parents=True)
+        legacy = self._make_legacy(mount)
+        home = tmp_path / "linked-home"
+        home.mkdir()
+        (home / "cstar").symlink_to(real_cstar)
+        (home / "cstar-forge-data").symlink_to(mount / "cstar-forge-data")
+        return home, legacy
+
+    def test_ensure_adopts_legacy_cache_behind_symlinks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The link must resolve from the real ``cstar`` directory, not from the
+        symlink that points to it.
+        """
+        root, legacy = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(root)
+        assert home.exists()
+        assert home.is_symlink()
+        assert not home.readlink().is_absolute()
+        assert home.resolve() == legacy.resolve()
+        assert (home / "glorys.nc").read_text() == "data"
+
+        link_target = home.readlink()
+        assert DirectoryManager.ensure_source_data_home() == home
+        assert home.is_symlink()
+        assert home.readlink() == link_target
+        assert home.resolve() == legacy.resolve()
+
+    def test_ensure_repairs_dangling_link_from_old_relpath(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Releases 0.16.0 and 0.16.1 linked with a lexical relpath, which dangles
+        behind symlinked parents; that link is replaced instead of refused.
+        """
+        root, legacy = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+        standard = self._expected(root)
+        standard.symlink_to("../cstar-forge-data/source-data")
+        assert standard.is_symlink()
+        assert not standard.exists()
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == standard
+        assert home.is_dir()
+        assert home.is_symlink()
+        assert not home.readlink().is_absolute()
+        assert home.resolve() == legacy.resolve()
+        assert (home / "glorys.nc").read_text() == "data"
+
     def test_ensure_does_not_link_when_standard_dir_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -848,6 +962,43 @@ class TestSourceDataHome:
         assert standard.is_symlink()
         assert not (tmp_path / "unmounted").exists()
 
+    def test_ensure_refuses_other_dangling_link_when_legacy_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the exact link left by the old code is repaired; any other
+        dangling link is refused even when a legacy cache could be adopted.
+        """
+        root, _ = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+        standard = self._expected(root)
+        standard.symlink_to("../unmounted/source-data")
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert standard.readlink() == Path("../unmounted/source-data")
+
+    def test_ensure_refuses_old_relpath_link_without_legacy_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The old release's link text is repaired only when the legacy cache it
+        names exists; otherwise the link is refused, not replaced by an empty
+        directory.
+        """
+        scratch = tmp_path / "scratch"
+        standard = self._expected(scratch)
+        standard.parent.mkdir(parents=True)
+        standard.symlink_to("../cstar-forge-data/source-data")
+        monkeypatch.setenv("SCRATCH", str(scratch))
+        assert not (scratch / "cstar-forge-data").exists()
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert standard.readlink() == Path("../cstar-forge-data/source-data")
+
     def test_ensure_tolerates_losing_the_link_race(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -866,6 +1017,97 @@ class TestSourceDataHome:
 
         assert home == self._expected(scratch)
         assert home.is_dir()
+
+
+class TestProjectHome:
+    """The project directory and its runs area: ``CSTAR_PROJECT_HOME`` (default
+    ``$PROJECT``), and no fallback when neither is set.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in ("CSTAR_PROJECT_HOME", "PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+
+    def test_explicit_home_wins_over_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", str(tmp_path / "explicit"))
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        assert DirectoryManager.project_home() == (tmp_path / "explicit").resolve()
+        assert DirectoryManager.project_runs_home() == (
+            (tmp_path / "explicit").resolve() / "cstar" / "runs"
+        )
+
+    def test_project_variable_alone_is_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        assert DirectoryManager.project_home() == (tmp_path / "project").resolve()
+        assert DirectoryManager.project_runs_home() == (
+            (tmp_path / "project").resolve() / "cstar" / "runs"
+        )
+
+    def test_neither_variable_means_no_project(self) -> None:
+        """Scratch is no project area: only the source-data root falls back to it."""
+        assert DirectoryManager.project_home() is None
+        assert DirectoryManager.project_runs_home() is None
+
+    def test_home_is_expanded_and_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "home").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", "~/proj/../proj")
+
+        assert DirectoryManager.project_home() == (tmp_path / "home" / "proj").resolve()
+
+    def test_runs_home_creates_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        DirectoryManager.project_runs_home()
+
+        assert not (tmp_path / "project").exists()
+
+    def test_source_data_paths_keep_the_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The source-data cache sits beside the runs area, under the same root."""
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        runs = DirectoryManager.project_runs_home()
+        assert runs is not None
+        assert DirectoryManager.source_data_home() == runs.parent / "source-data"
+
+
+def test_run_directories_are_under_the_data_home() -> None:
+    """The workplan and blueprint runs live in two directories of the data home,
+    where `data_dir` and `blueprint_run_dir` put a run.
+    """
+    data_home = DirectoryManager.data_home()
+
+    assert StateDirectoryManager.workplan_runs_dir() == data_home / "workplan_runs"
+    assert StateDirectoryManager.blueprint_runs_dir() == data_home / "blueprint_runs"
+    assert StateDirectoryManager.data_dir("a-run").parent == (
+        StateDirectoryManager.workplan_runs_dir()
+    )
+    assert StateDirectoryManager.blueprint_run_dir(
+        "hello_world", "A Name"
+    ).parent.parent == (StateDirectoryManager.blueprint_runs_dir())
+
+
+def test_composed_workplans_are_under_the_state_home() -> None:
+    """The workplans composed around single blueprints live in the state home,
+    away from the blueprints, which may be in a read-only location.
+    """
+    assert StateDirectoryManager.composed_workplans_dir() == (
+        DirectoryManager.state_home() / "composed_workplans"
+    )
 
 
 class TestWriteLocalCopy:

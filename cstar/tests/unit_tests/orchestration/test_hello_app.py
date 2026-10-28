@@ -9,11 +9,7 @@ from cstar.applications.hello_world import (
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices
-from cstar.entrypoint.config import (
-    ServiceConfiguration,
-    get_job_config,
-    get_service_config,
-)
+from cstar.entrypoint.config import ServiceConfiguration, get_service_config
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Application
 from cstar.orchestration.serialization import deserialize, serialize
@@ -80,9 +76,8 @@ async def test_hello_world_runner_execute(
     """
     request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     svc_cfg = ServiceConfiguration()
-    job_cfg = get_job_config()
 
-    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
+    runner = HelloWorldRunner(request, svc_cfg)
     await runner.execute()
 
     assert runner.state is not None
@@ -113,9 +108,8 @@ async def test_hello_world_runner_execute_runner(
     """
     request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
     svc_cfg = ServiceConfiguration()
-    job_cfg = get_job_config()
 
-    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
+    runner = HelloWorldRunner(request, svc_cfg)
     await runner.execute()
 
     if not runner.state:
@@ -150,12 +144,11 @@ async def test_execute_runner_happy_path(
         Path to the hello world blueprint.
     """
     request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint)
-    job_cfg = get_job_config()
     svc_cfg = get_service_config(
         log_level=LogLevelChoices.INFO,
     )
 
-    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
+    runner = HelloWorldRunner(request, svc_cfg)
     await runner.execute()
 
     # Confirm the success disposition is set

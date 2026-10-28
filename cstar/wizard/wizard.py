@@ -13,8 +13,8 @@ Usage (in a Jupyter notebook)::
     # ... pick a model + domain, tweak fields, review the live YAML, Save ...
     cfg = wiz.config            # the current resolved ForgeBlueprint (or None if invalid)
 
-The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
-``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
+The wizard discovers Models from ``catalog/specs/ModelSpec/`` and Domains from
+``catalog/specs/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
 boundaries, partitioning, and dates. The live preview re-resolves on every change
 (using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
 is plain arithmetic on the grid size and builds none either.
@@ -30,10 +30,10 @@ import os
 import re
 import typing
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Final, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Final, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel
@@ -72,7 +72,6 @@ from cstar.applications.forge.blueprint import (
     TidalForcingItem,
     TidalSource,
 )
-from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
     CDR_OUTPUT_SECTIONS,
     MARBL_ONLY_OUTPUT_FLAGS,
@@ -97,11 +96,14 @@ from cstar.applications.forge.resolve import (
     read_cdr_forcing_yaml,
     with_cdr_lite_tracer_set,
 )
-from cstar.applications.forge.user_files import hash_netcdf_contents, short_digest
+from cstar.base.digest import hash_netcdf_contents, short_digest
 from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 WIZARD_TOOL: Final[str] = "wizard"
 """The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
@@ -853,7 +855,6 @@ def _overrides_nested(overrides: dict[Any, Any]) -> dict[str, Any]:
 # applies on top of a ModelSpec's model_settings (forge_blueprint_resolve.py).
 _RESOLVER_DERIVED_SECTIONS = (
     "time_stepping",
-    "v_sponge",
     "river_frc",
     "cdr_frc",
     "extract_data",
@@ -879,6 +880,9 @@ _CPPDEFS_DERIVED_LEAVES = frozenset(
     }
 )
 _TIDES_DERIVED_LEAVES = frozenset({"ntides"})
+# ``v_sponge.v_sponge`` is the domain's (grid-derived or explicit); ``v_sponge_trc``
+# is the model's.
+_V_SPONGE_DERIVED_LEAVES = frozenset({"v_sponge"})
 
 
 def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
@@ -889,7 +893,7 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
     every OUTPUT section/partial-output field (an OutputSpec's job), and the
     resolver-derived leaves within otherwise-kept sections (``param``'s grid/
     partitioning dims, ``cppdefs``'s domain/forcing/bgc-driven flags, ``tides``'s
-    ``ntides``). What remains is safe to bake into a new ModelSpec's
+    ``ntides``, ``v_sponge``'s ``v_sponge``). What remains is safe to bake into a new ModelSpec's
     ``model_settings`` and reusable across domains/forcing/output selections.
     """
     out = copy.deepcopy(effective)
@@ -906,6 +910,11 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
     if "tides" in out:
         for leaf in _TIDES_DERIVED_LEAVES:
             out["tides"].pop(leaf, None)
+    if "v_sponge" in out:
+        for leaf in _V_SPONGE_DERIVED_LEAVES:
+            out["v_sponge"].pop(leaf, None)
+        if not out["v_sponge"]:  # nothing model-owned left (ucla-roms < 0.13.0)
+            del out["v_sponge"]
     for sec, fields in PARTIAL_OUTPUT_SECTIONS.items():
         if sec in out:
             for f in fields:
@@ -916,23 +925,19 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
 def _split_forcing_data(
     d: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Split a raw ForcingSpec dict (as read from ``Forcing.yaml``) into the
+    """Split a raw ForcingSpec dict (as read from its catalog file) into the
     ``{initial_conditions, forcing}`` shape the forcing editor expects, plus the
     optional embedded ``cdr_forcing`` block (``None`` if absent). Strips
     ``description`` (not part of either). Shared by the round-trip verifier and
     ``_on_forcing_spec``/``_populate_from`` so CDR routes consistently everywhere
     a ForcingSpec is read.
 
-    Also migrates any pre-v8 forcing-input shapes in place (see
-    ``migrate_forcing_inputs``) -- a hand-authored or older catalog ``Forcing.yaml``
-    may still carry ``initial_conditions.bgc_source`` (singular) or a list-shaped
-    ``forcing.boundary``, neither of which the forcing editor understands; deep-
-    copied first so this never mutates the catalog's own parsed dict.
+    ``d`` is already at the current schema (``catalog.forcing_data``); deep-copied
+    first so this never mutates the catalog's own parsed dict.
     """
     d = copy.deepcopy(d)
     d.pop("description", None)
     cdr = d.pop("cdr_forcing", None)
-    migrate_forcing_inputs(d.get("initial_conditions"), d.get("forcing"))
     return d, cdr
 
 
@@ -1018,9 +1023,10 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # compiles only under MARBL come from namelist_model, which owns that fact
 # (MARBL_ONLY_OUTPUT_FLAGS, and the requires_marbl rows of CDR_OUTPUT_SECTIONS).
 # The rest are wizard-only: the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX
-# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state, and
+# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state,
 # cdr_lite_output needs CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite"
-# provide.
+# provide, and cdr_lite.cdr_carbonate_sensitivity_time_interpolation applies only
+# to the file-based sensitivities of bgc_mode "cdr_lite".
 _MARBL_ONLY = frozenset({"marbl"})
 _BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
     **dict.fromkeys(
@@ -1035,6 +1041,9 @@ _BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
     ("cppdefs", "nhy_forcing"): _MARBL_ONLY,
     ("cppdefs", "nox_forcing"): _MARBL_ONLY,
     ("cdr_lite", "cdr_online_carbonate_sensitivity"): _MARBL_ONLY,
+    ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation"): frozenset(
+        {"cdr_lite"}
+    ),
 }
 
 
@@ -1085,8 +1094,9 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
 # ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
-# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
-# that omits the key shows no widget for it.
+# ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``, ``pio-dev``) -- the editor
+# type-infers a checkbox from the composed bool, so a spec that omits the key shows no
+# widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1100,10 +1110,11 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "vertical_mixing",
             "tracer_diff2",
             "bottom_drag",
-            # v_sponge is deliberately absent: it's a first-class domain property
-            # with its own dedicated widget in "Domain-derived properties"
-            # (self.v_sponge), not a generic model-settings override -- see
-            # _ACCORDION_EXCLUDED_FIELDS.
+            # v_sponge's own field is a first-class domain property with a dedicated
+            # widget in "Domain-derived properties" (self.v_sponge), left out of this
+            # pane by _ACCORDION_EXCLUDED_FIELDS; the section shows only v_sponge_trc
+            # (ucla-roms >= 0.13.0), for ModelSpecs that declare it.
+            "v_sponge",
             "sponge_tune",
             "gamma2",
             "ubind",
@@ -1142,6 +1153,26 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("param", "cdr_frc", "cdr_lite"),
     ),
 )
+
+# Settings shown in the Model card (under the carbonate sensitivities) instead of
+# their Advanced pane: section -> fields. ``_MODEL_CARD`` names the card as a
+# "place" for ``_split_fields``. Display-only like the Output card: each widget stays
+# keyed by its real ``(section, field)``, so overrides, load-back and the "modified"
+# tracking are unaffected.
+_MODEL_CARD = "Model"
+_MODEL_CARD_FIELDS: dict[str, frozenset[str]] = {
+    "cdr_lite": frozenset({"cdr_carbonate_sensitivity_time_interpolation"}),
+}
+
+# Values the wizard puts over the ModelSpec's while the setting's widget is shown,
+# until the user edits it; a fresh session and a model pick seed them, a loaded
+# blueprint keeps its own values. The ModelSpec cannot carry these:
+# check_cdr_lite_sections refuses a carbonate-sensitivity hold outside bgc_mode
+# "cdr_lite". UCLA-ROMS writes the sensitivities time-averaged by default
+# (cdr_gas_exch_output.do_avg), and an averaged record is held, not interpolated.
+_WIZARD_SETTING_DEFAULTS: dict[tuple[str, str], Any] = {
+    ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation"): False,
+}
 
 # The Output card's placement of the output streams -- the one table the editor build,
 # the card's modified-count chip and the section retitling all read. ``_OUTPUT_CARD``
@@ -1582,7 +1613,7 @@ def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
     """Field filter ``(include, exclude)`` for a section shown in ``category_title``
-    (an Advanced pane title, or :data:`_OUTPUT_CARD`).
+    (an Advanced pane title, :data:`_OUTPUT_CARD` or :data:`_MODEL_CARD`).
 
     ``include=None`` means "all fields"; otherwise only those in ``include`` are
     shown. ``exclude`` is always dropped. Sections split across containers (``bgc`` /
@@ -1590,18 +1621,24 @@ def _split_fields(
     controls in the Output card and the rest under their feature pane. ``cppdefs`` is
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
     handful of compile-time flags it owns -- and ``param`` shows only
-    :data:`_PARAM_PANE_FIELDS`.
+    :data:`_PARAM_PANE_FIELDS`. The fields of :data:`_MODEL_CARD_FIELDS` show in the
+    Model card only.
     """
-    if section == "cppdefs":
-        return _CPPDEFS_PANE_FIELDS.get(category_title, frozenset()), frozenset()
-    if section == "param":
-        return _PARAM_PANE_FIELDS, frozenset()
+    model_card = _MODEL_CARD_FIELDS.get(section, frozenset())
+    if category_title == _MODEL_CARD:
+        return model_card, frozenset()
+    include: frozenset | None = None
+    exclude: frozenset = frozenset()
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
-    if parts is None:
-        return None, frozenset()
-    if category_title == _OUTPUT_CARD:
-        return frozenset(parts), frozenset()
-    return None, frozenset(parts)
+    if section == "cppdefs":
+        include = _CPPDEFS_PANE_FIELDS.get(category_title, frozenset())
+    elif section == "param":
+        include = _PARAM_PANE_FIELDS
+    elif parts is not None and category_title == _OUTPUT_CARD:
+        include = frozenset(parts)
+    elif parts is not None:
+        exclude = frozenset(parts)
+    return include, exclude | model_card
 
 
 def _in_output_card(section: str, field: str | None) -> bool:
@@ -1614,6 +1651,13 @@ def _in_output_card(section: str, field: str | None) -> bool:
         return False
     include, exclude = _split_fields(_OUTPUT_CARD, section)
     return (include is None or field in include) and field not in exclude
+
+
+def _in_model_card(section: str, field: str | None) -> bool:
+    """Whether the ``(section, field)`` setting is placed in the Model card (see
+    :data:`_MODEL_CARD_FIELDS`).
+    """
+    return field in _MODEL_CARD_FIELDS.get(section, frozenset())
 
 
 def _output_placement(
@@ -1672,8 +1716,9 @@ def _section_header_html(
 @dataclass(frozen=True)
 class _EditorKey:
     """What a built settings editor depends on: it is rebuilt when any of these
-    changes. A failed resolve knows all but ``settings_cls`` (see
-    ``ForgeBlueprintWizard._hide_stale_editor``).
+    changes. A failed resolve knows all of them but builds an unresolved editor
+    (see ``ForgeBlueprintWizard._show_unresolved_editor``), which the next valid
+    resolve replaces.
     """
 
     model: str | None
@@ -1681,13 +1726,16 @@ class _EditorKey:
     bgc_mode: str
     is_parent: bool
     is_child: bool
+    resolved: bool
+    """Built from the resolved settings, not the ModelSpec's Model card settings."""
 
 
 class _SettingsEditor:
     """A collapsible (Accordion) editor over the *editable* model_settings sections,
     consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`)
     plus the output streams the Output card shows (``output_box``, see
-    :data:`_OUTPUT_MAIN_SECTIONS`).
+    :data:`_OUTPUT_MAIN_SECTIONS`) and the few settings the Model card shows
+    (``model_box``, see :data:`_MODEL_CARD_FIELDS`).
 
     Each pane groups several namelist sections under a sub-header per section, so the
     grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR)
@@ -1729,7 +1777,8 @@ class _SettingsEditor:
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         # group -> {section: fields built there}. A group is an Advanced pane (by
-        # title) or one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE); a
+        # title), one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE) or
+        # the Model card (_MODEL_CARD); a
         # section split along PARTIAL_OUTPUT_SECTIONS (bgc/marbl_bgc) sits in a pane
         # and in the Output card, each holding only its own fields.
         self._group_fields: dict[str, dict[str, list[str | None]]] = {}
@@ -1758,6 +1807,12 @@ class _SettingsEditor:
             W, more_panes, [_OUTPUT_MORE_TITLE] * len(more_panes)
         )
         self.output_box = W.VBox([*main_blocks, self.more_streams])
+        # The Model card's few settings, bare: the card's own subsection titles them.
+        self.model_box = W.VBox(
+            self._build_group(
+                _MODEL_CARD, tuple(_MODEL_CARD_FIELDS), model_settings, headers=False
+            )
+        )
         # Before the on_edit observers attach, so locking one is never an edit.
         for key, why in self._forced_on.items():
             if key in self._widgets:
@@ -1796,10 +1851,13 @@ class _SettingsEditor:
         group: str,
         members: tuple[str, ...],
         model_settings: dict[str, Any],
+        *,
+        headers: bool = True,
     ) -> list[Any]:
         """Header + (note) + widgets blocks for each of ``members`` that has editable
-        fields, flat -- an Advanced pane's (``group`` is its title) or the Output
-        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`).
+        fields, flat -- an Advanced pane's (``group`` is its title), the Output
+        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`) or the Model
+        card's (:data:`_MODEL_CARD`, ``headers=False``: widgets only).
         """
         W = self.W
         place = _OUTPUT_CARD if group in _OUTPUT_GROUPS else group
@@ -1828,6 +1886,9 @@ class _SettingsEditor:
             if not fields:
                 continue
             self._group_fields.setdefault(group, {})[section] = fields
+            if not headers:
+                blocks.append(box)
+                continue
             sec_header = W.HTML(self.header_html(group, section))
             # Widget-level class: the CSS draws a bold divider above every
             # section header except the container's first (:first-child).
@@ -2635,15 +2696,10 @@ class _ForcingEditor:
     def __init__(self, W, forcing_inputs: dict[str, Any], on_change):
         self.W = W
         self.on_change = on_change
-        # Deep-copied so migration and every `.get(...)` below never mutate the
-        # caller's dict (a catalog-parsed ForcingSpec, or a resolved config's
-        # `_sources_to_inputs` reconstruction). `_split_forcing_data` already
-        # migrates a catalog Forcing.yaml before it reaches here, but a caller
-        # (e.g. the fresh-wizard-startup seed) may hand a raw catalog dict
-        # straight through -- migrating again is a no-op (idempotent) when it
-        # already has been.
+        # Deep-copied so no `.get(...)` below can mutate the caller's dict (a
+        # catalog-parsed ForcingSpec, or a resolved config's `_sources_to_inputs`
+        # reconstruction), both at the current schema.
         fi = copy.deepcopy(forcing_inputs) if forcing_inputs else {}
-        migrate_forcing_inputs(fi.get("initial_conditions"), fi.get("forcing"))
         # An explicit `None` (emitted by `_sources_to_inputs` for a loaded child
         # blueprint with no IC) means "seed as (none)"; a plain missing key (fresh-
         # wizard startup, which always supplies a real initial_conditions block)
@@ -4022,9 +4078,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.11.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.13.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.11-default"
+_DEFAULT_MODEL = "roms-marbl-0.13-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the
@@ -4205,7 +4261,6 @@ class ForgeBlueprintWizard:
         # Cache for the `widget` property -- built once, see `widget`.
         self._root: Any | None = None
 
-        models = list(self.catalog.model_names)
         domains = list(self.catalog.domain_names)
 
         # --- load / import an existing forge_blueprint.yaml ---
@@ -4242,15 +4297,26 @@ class ForgeBlueprintWizard:
         self._load_status_is_error = False
 
         # --- spec selectors ---
-        self.model_dd = W.Dropdown(
-            options=self._dd_options(models, "model"),
-            description="Model:",
-            value=(
-                _DEFAULT_MODEL
-                if _DEFAULT_MODEL in models
-                else (models[0] if models else None)
+        self.show_archived_models = W.Checkbox(
+            value=False,
+            description="Show archived",
+            indent=False,
+            tooltip=(
+                "Also list model specs marked archived (older ucla-roms releases). "
+                "They stay loadable; this only controls the dropdown."
             ),
+            layout=W.Layout(width="auto"),
+        )
+        self.model_dd = W.Dropdown(
+            options=self._model_dd_options(),
+            description="Model:",
             style={"description_width": "110px"},
+        )
+        models = self._dd_values(self.model_dd)
+        self.model_dd.value = (
+            _DEFAULT_MODEL
+            if _DEFAULT_MODEL in models
+            else (models[0] if models else None)
         )
         self.bgc_dd = W.Dropdown(
             options=list(get_args(BgcMode)),
@@ -4364,7 +4430,7 @@ class ForgeBlueprintWizard:
             indent=False,
             tooltip="Pick the MPI tiling at runtime from the land mask "
             "(ucla-roms >= 0.5.0 MPI_MASKING). Requires PIO -- forces it on and "
-            "locks it. In development.",
+            "locks it. Experimental.",
         )
         self.n_cores = W.IntText(
             value=1,
@@ -4708,7 +4774,7 @@ class ForgeBlueprintWizard:
             tooltip=(
                 "Where the carbonate sensitivity files come from. By default the "
                 "carbonate-sensitivity-from workplan directive supplies them from an "
-                "earlier ROMS-MARBL step at run time; attach a directory to put them "
+                "earlier UCLA-ROMS step at run time; attach a directory to put them "
                 "on the blueprint now."
             ),
         )
@@ -4738,11 +4804,24 @@ class ForgeBlueprintWizard:
                 self.cs_status,
             ]
         )
+        # The time-interpolation switch: the settings editor's own widget (its
+        # model_box), mounted on each editor rebuild, so it shows only where the
+        # ucla-roms release has the switch and the ModelSpec declares it -- on an
+        # invalid blueprint too (see _show_unresolved_editor).
+        self.cs_interp_box = W.VBox([])
+        self.cs_interp_note = W.HTML(
+            "<div class='forge-hint' style='margin-bottom:10px'>Leave this off if "
+            "your sensitivity files hold "
+            "time-averaged values; turn it on if they hold instantaneous values. "
+            "UCLA-ROMS writes the sensitivities time-averaged by default "
+            "(<code>wrt_cdr_gas_avg</code>), so the wizard starts with it off.</div>"
+        )
         self.cs_group = components.subsection(
             W,
             "model.carbonate",
             components.field_row(W, "cs_source_dd", self.cs_source_dd),
             self.cs_path_box,
+            self.cs_interp_box,
         )
 
         # --- CDR (Carbon Dioxide Removal) forcing -----------------------------
@@ -5024,6 +5103,9 @@ class ForgeBlueprintWizard:
         self.output_editor_box = W.VBox([])
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
+        # The _WIZARD_SETTING_DEFAULTS keys the wizard still owns: neither edited by
+        # the user nor set by a loaded blueprint (see _seed_wizard_defaults).
+        self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
         self._syncing = False  # True while pushing composed values into editor widgets
         # Reentrancy depth for _suspend()/_Suspender -- lets a programmatic backfill
         # (e.g. _populate_grid_widgets_from_grid) nest inside an already-suspended
@@ -5116,13 +5198,13 @@ class ForgeBlueprintWizard:
         )
 
         # --- run (invokes the C-Star CLI on the just-saved blueprint) ---
-        from cstar.system.manager import HostNameEvaluator
+        from cstar.system.manager import system_label
 
         self.run_warning = W.HTML(
             "<b style='color:#b58900'>⚠ Processing a blueprint can use substantial "
             "memory and CPU depending on grid size.</b> Run this from a compute node "
             "(or another host) with resources appropriate for your domain — this is "
-            f"not checked automatically. Detected host: <code>{HostNameEvaluator().name}</code>."
+            f"not checked automatically. System: <code>{html.escape(system_label())}</code>."
         )
         self.run_later_note = W.HTML(
             "<span style='color:#666'>ℹ To run this later, or on a different "
@@ -5254,6 +5336,7 @@ class ForgeBlueprintWizard:
         ):
             w.observe(self._rebuild, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
+        self.show_archived_models.observe(self._on_show_archived_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
         self.bgc_dd.observe(self._on_bgc_mode, names="value")
@@ -5332,7 +5415,12 @@ class ForgeBlueprintWizard:
         self._save_path_touched = True
 
     def _dd_options(
-        self, names: list[str], kind: str, *, prefix: list[str] | None = None
+        self,
+        names: list[str],
+        kind: str,
+        *,
+        prefix: list[str] | None = None,
+        archived: Collection[str] = (),
     ) -> list:
         """Badge dropdown ``options`` with their source layer when it isn't the
         top (writable) one -- ipywidgets-homogeneous.
@@ -5350,14 +5438,16 @@ class ForgeBlueprintWizard:
         ``dd.value`` is always the bare name/sentinel either way.
 
         A ``KeyError`` from ``entry_source`` (name absent, shouldn't happen for
-        names drawn from the same catalog) is treated as "no badge".
+        names drawn from the same catalog) is treated as "no badge". Names in
+        *archived* are labelled ``archived``, combined with the layer badge as
+        ``name (layer, archived)``.
         """
         prefix = prefix or []
         entry_source = getattr(self.catalog, "entry_source", None)
         top = getattr(self.catalog, "top", None)
         top_label = top.label if top is not None else None
 
-        badges: dict[str, str] = {}
+        badges: dict[str, list[str]] = {}
         if entry_source is not None:
             for name in names:
                 try:
@@ -5365,16 +5455,46 @@ class ForgeBlueprintWizard:
                 except KeyError:
                     continue
                 if source != top_label:
-                    badges[name] = source
+                    badges[name] = [source]
+        for name in names:
+            if name in archived:
+                badges.setdefault(name, []).append("archived")
 
         if not badges:
             return [*prefix, *names]
 
         options: list[Any] = [(p, p) for p in prefix]
         for name in names:
-            label = f"{name} ({badges[name]})" if name in badges else name
+            label = f"{name} ({', '.join(badges[name])})" if name in badges else name
             options.append((label, name))
         return options
+
+    def _visible_model_names(
+        self, archived: Collection[str], selected: str | None = None
+    ) -> list[str]:
+        """Catalog models ``model_dd`` lists: all of them when "Show archived"
+        is checked, otherwise the non-*archived* ones plus *selected* (so
+        unchecking never drops the current choice).
+        """
+        names = list(self.catalog.model_names)
+        if self.show_archived_models.value:
+            return names
+        return [n for n in names if n not in archived or n == selected]
+
+    def _model_dd_options(self, selected: str | None = None) -> list:
+        archived = self.catalog.archived_model_names
+        return self._dd_options(
+            self._visible_model_names(archived, selected),
+            "model",
+            archived=archived,
+        )
+
+    def _on_show_archived_change(self, _change):
+        """Re-option ``model_dd`` for the new checkbox state, keeping its value."""
+        with self._suspend():
+            selected = self.model_dd.value
+            self.model_dd.options = self._model_dd_options(selected)
+            self.model_dd.value = selected
 
     @staticmethod
     def _dd_values(dd) -> list:
@@ -5682,6 +5802,7 @@ class ForgeBlueprintWizard:
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
+        self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
         self.roms_ref.value = self._model_default_roms_ref()
         self.marbl_ref.value = self._model_default_marbl_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
@@ -5693,7 +5814,21 @@ class ForgeBlueprintWizard:
         if self._syncing or getattr(self, "_suspended", False):
             return
         self._overrides[(section, field)] = self.editor.read(section, field)
+        self._wizard_default_keys.discard((section, field))
         self._rebuild()
+
+    def _seed_wizard_defaults(self) -> None:
+        """Put each wizard-owned :data:`_WIZARD_SETTING_DEFAULTS` value in the
+        overrides layer while the editor shows its widget, and take it out while it
+        does not: the editor builds a widget only where the ucla-roms release has the
+        field, the ModelSpec declares it and the BGC mode reads it, so a default never
+        reaches a blueprint that would refuse it.
+        """
+        for key in self._wizard_default_keys:
+            if self.editor is not None and key in self.editor._widgets:
+                self._overrides[key] = _WIZARD_SETTING_DEFAULTS[key]
+            else:
+                self._overrides.pop(key, None)
 
     def _on_nest_domain(self, _change):
         """Prefill the child grid from a selected DomainSpec (and enable nesting)."""
@@ -5799,12 +5934,12 @@ class ForgeBlueprintWizard:
         """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
         ``use_pio``.
 
-        Single re-parse of ``model.yaml`` backing ``_model_default_*`` below and
+        Single re-parse of the ModelSpec file backing ``_model_default_*`` below and
         the spec-deviation check in ``_rebuild`` -- both need the same
         catalog-declared values to compare live widget state against.
         """
         try:
-            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
+            data = load_model_spec_data(self.catalog.model_path(self.model_dd.value))
             model = data["model"]
             roms = model.get("code", {}).get("roms", {}) or {}
             marbl = model.get("code", {}).get("marbl", {}) or {}
@@ -6009,7 +6144,7 @@ class ForgeBlueprintWizard:
         Reads ``self._gather()``/``self._active_overrides``/``self.catalog`` only --
         mutates nothing on the wizard. Compares ``content_hash()``, which covers
         exactly the results-affecting data (excludes identity/composition/
-        provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
+        provenance/working_dir -- see ``ForgeBlueprint._hashed_content``), so a
         match proves the saved spec is a safe substitute for what's currently
         composed/edited and the spec can be marked ``modified=False``.
         """
@@ -6024,7 +6159,7 @@ class ForgeBlueprintWizard:
                     k: v for k, v in overrides2.items() if not _is_output_key(*k)
                 }
             elif spec == "model":
-                kw["model_dir"] = self.catalog.model_dir(new_name)
+                kw["model_path"] = self.catalog.model_path(new_name)
                 # Let the saved spec speak for these: the resolver falls back to the
                 # ModelSpec when use_pio/bgc_mode are None (resolve.py:418-421) and to
                 # code.roms/code.marbl verbatim when roms_ref/marbl_ref are absent.
@@ -6033,7 +6168,13 @@ class ForgeBlueprintWizard:
                 # dropped them.
                 for k in ("use_pio", "bgc_mode", "roms_ref", "marbl_ref"):
                     kw.pop(k, None)
-                overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
+                # The wizard-only settings are not saved into the spec but stay on
+                # the live config, so they stay on both sides too.
+                overrides2 = {
+                    k: v
+                    for k, v in overrides2.items()
+                    if _is_output_key(*k) or k in _WIZARD_SETTING_DEFAULTS
+                }
             elif spec == "forcing":
                 # CDR is its own independently composable spec (CdrSpec, see
                 # self.cdr_mode_dd) -- picking a ForcingSpec never touches it, so
@@ -6219,7 +6360,7 @@ class ForgeBlueprintWizard:
         }
 
     def _on_domain(self, _change):
-        """Prefill from a cataloged Domain.yaml when one is selected."""
+        """Prefill from a cataloged DomainSpec when one is selected."""
         name = self.domain_dd.value
         if name == "<custom>":
             self._domain_seed = None
@@ -6241,7 +6382,7 @@ class ForgeBlueprintWizard:
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
             # Domain-derived properties: a picked catalog Domain replaces the
             # current grid entirely, so reset touched/derived state first, then
-            # restore only what the saved Domain.yaml actually carries --
+            # restore only what the saved DomainSpec actually carries --
             # absence means "derive fresh from the grid" (click "Derive from
             # grid", or the Save/Run safety net), mirroring
             # _domain_spec_data's save-only-when-touched symmetry. Leaves the
@@ -6284,7 +6425,7 @@ class ForgeBlueprintWizard:
             for key, picker in (("start_time", self.start), ("end_time", self.end)):
                 if data.get(key):
                     picker.value = datetime.fromisoformat(str(data[key])).date()
-            # model_name in Domain.yaml is provenance (the model in use when the
+            # model_name in a DomainSpec is provenance (the model in use when the
             # domain was saved), not a preference: picking a domain must not
             # override the user's Model selection, so it is deliberately NOT
             # restored here (unlike the load-a-full-blueprint path, where the
@@ -6292,7 +6433,7 @@ class ForgeBlueprintWizard:
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
             # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
-            # from a DomainSpec's Domain.yaml (only present if the spec was saved
+            # from a DomainSpec (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
             child = data.get("grid_kwargs_child")
             self.nest_enable.value = child is not None
@@ -6376,7 +6517,7 @@ class ForgeBlueprintWizard:
         src_w.value = str(src) if src in _TOPO_SOURCES else _NESTED_TOPO_INHERIT
 
     def _domain_spec_data(self) -> dict[str, Any]:
-        """Build a ``Domain.yaml``-shaped dict from the current widget state (the
+        """Build a DomainSpec-shaped dict from the current widget state (the
         domain-spec extractor for "save modified specs to catalog"). Includes
         topography and nesting -- both results-affecting -- so a saved DomainSpec
         actually round-trips (see ``_verify_spec_roundtrip``); ``register_domain``
@@ -7209,6 +7350,8 @@ class ForgeBlueprintWizard:
         """
         # Before any re-resolve below, so the first rebuilt config carries it.
         self._carried_provenance = cfg.provenance
+        # The file's values are the user's: no wizard default goes over them.
+        self._wizard_default_keys = set()
         # The file's own pinned ucla-roms ref selects the schema variant it was
         # authored against -- not the (possibly different) currently-selected
         # model's default. Computed once here and reused below when seeding
@@ -7220,6 +7363,8 @@ class ForgeBlueprintWizard:
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
+            if cfg.composition.model.name in self.catalog.archived_model_names:
+                self.show_archived_models.value = True
             if cfg.composition.model.name in self._dd_values(self.model_dd):
                 self.model_dd.value = cfg.composition.model.name
             self.grid_name.value = cfg.domain.grid_name
@@ -7479,7 +7624,7 @@ class ForgeBlueprintWizard:
 
     def _gather(self) -> dict[str, Any]:
         kw = dict(
-            model_dir=self.catalog.model_dir(self.model_dd.value),
+            model_path=self.catalog.model_path(self.model_dd.value),
             grid_name=self.grid_name.value,
             grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
@@ -7624,34 +7769,91 @@ class ForgeBlueprintWizard:
             return False, False
         return bool(self.nest_enable.value), bool(self.parent_enable.value)
 
-    def _hide_stale_editor(self) -> None:
-        """After a failed resolve, replace an editor built for another model or BGC
-        mode, or for another nesting role, with a placeholder (the next valid resolve
-        rebuilds it): it would keep showing streams that no longer apply, e.g. the
-        MARBL ones after a switch to ``cdr_lite`` that still lacks its CDR forcing, or
-        no child-grid extraction after "This grid is a parent" is ticked on an invalid
-        blueprint. Overrides are applied after the resolve, never fed to it, so no
-        failure comes from an editor value and nothing is lost; the user's record
-        stays. Everything in the key but ``settings_cls`` is known without a resolved
-        config; an editor still matching it stays.
+    def _show_editor(self, settings: dict[str, Any], key: _EditorKey) -> dict[str, Any]:
+        """Show ``settings``, with the active overrides over them, in the settings
+        editor for ``key``, building that editor first when the current one is for
+        another key; return the effective settings shown. A resolved editor fills the
+        Advanced panes, the Output card and the Model card; an unresolved one (see
+        ``_show_unresolved_editor``) only the Model card, with a placeholder in the
+        other two.
         """
-        key = self._editor_key
-        if key is None or (key.model, key.bgc_mode, key.is_parent, key.is_child) == (
+        if self.editor is None or self._editor_key != key:
+            self.editor = _SettingsEditor(
+                self.W,
+                settings,
+                on_edit=self._on_editor_edit,
+                settings_cls=key.settings_cls,
+                bgc_mode=key.bgc_mode,
+                is_parent=key.is_parent,
+                is_child=key.is_child,
+            )
+            self._editor_key = key
+            if key.resolved:
+                self.editor_box.children = [self.editor.accordion]
+                self.output_editor_box.children = [self.editor.output_box]
+            else:
+                placeholder = components.banner_widget(
+                    self.W,
+                    "info",
+                    "Settings for this selection appear once the blueprint is valid "
+                    "— see the status above.",
+                )
+                self.editor_box.children = [placeholder]
+                self.output_editor_box.children = [placeholder]
+            self.cs_interp_box.children = (
+                [self.editor.model_box, self.cs_interp_note]
+                if _MODEL_CARD in self.editor._group_fields
+                else []
+            )
+        self._seed_wizard_defaults()
+
+        effective = _apply_overrides(settings, self._active_overrides)
+        self._syncing = True
+        try:
+            self.editor.sync(effective)  # display effective; don't re-record as edits
+        finally:
+            self._syncing = False
+        return effective
+
+    def _show_unresolved_editor(self) -> None:
+        """After a failed resolve, replace an editor built for another model, BGC
+        mode, nesting role or ucla-roms tier with one built from the selected
+        ModelSpec's Model card settings alone (see :data:`_MODEL_CARD_FIELDS`), so
+        the Model card keeps its settings on an invalid blueprint: the carbonate
+        sensitivity switch shows as soon as ``cdr_lite`` is picked, before a CDR
+        forcing makes the blueprint valid. The Advanced panes and the Output card
+        show a placeholder until the next valid resolve rebuilds the editor: the old
+        one would keep showing streams that no longer apply, e.g. the MARBL ones
+        after a switch to ``cdr_lite``, or no child-grid extraction after "This grid
+        is a parent" is ticked. Overrides are applied after the resolve, never fed to
+        it, so no failure comes from an editor value and nothing is lost; the user's
+        record stays. An editor still matching the selection stays, resolved or not.
+        """
+        is_parent, is_child = self._nesting_role()
+        key = _EditorKey(
             self.model_dd.value,
+            _wizard_settings_cls_for_ref(self._effective_roms_ref()),
             self.bgc_dd.value,
-            *self._nesting_role(),
+            is_parent,
+            is_child,
+            resolved=False,
+        )
+        if self._editor_key is not None and (
+            replace(self._editor_key, resolved=False) == key
         ):
             return
-        placeholder = components.banner_widget(
-            self.W,
-            "info",
-            "Settings for this selection appear once the blueprint is valid — see "
-            "the status above.",
+        try:
+            spec = self.catalog.model_data(self.model_dd.value)["model_settings"]
+        except Exception:  # an unreadable spec: the failed resolve reports it
+            spec = {}
+        self._show_editor(
+            {
+                section: {f: v for f, v in spec[section].items() if f in fields}
+                for section, fields in _MODEL_CARD_FIELDS.items()
+                if section in spec
+            },
+            key,
         )
-        self.editor_box.children = [placeholder]
-        self.output_editor_box.children = [placeholder]
-        self.editor = None
-        self._editor_key = None
 
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
@@ -7676,7 +7878,7 @@ class ForgeBlueprintWizard:
             self.derived.value = "<i>Set start and end dates…</i>"
             self.download_link.value = ""
             self.download_link_review.value = ""
-            self._hide_stale_editor()
+            self._show_unresolved_editor()
             self._update_status(None)
             return
         try:
@@ -7691,7 +7893,7 @@ class ForgeBlueprintWizard:
             error = lines[0][:200]
             if len(lines) > 1 or len(lines[0]) > len(error):
                 error += " — full message in the preview below"
-            self._hide_stale_editor()
+            self._show_unresolved_editor()
             self._update_status(None, error=error)
             return
 
@@ -7720,29 +7922,15 @@ class ForgeBlueprintWizard:
         settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
         is_parent, is_child = self._nesting_role()
         key = _EditorKey(
-            self.model_dd.value, settings_cls, self.bgc_dd.value, is_parent, is_child
+            self.model_dd.value,
+            settings_cls,
+            self.bgc_dd.value,
+            is_parent,
+            is_child,
+            resolved=True,
         )
-        if self.editor is None or self._editor_key != key:
-            self.editor = _SettingsEditor(
-                self.W,
-                composed,
-                on_edit=self._on_editor_edit,
-                settings_cls=settings_cls,
-                bgc_mode=key.bgc_mode,
-                is_parent=is_parent,
-                is_child=is_child,
-            )
-            self._editor_key = key
-            self.editor_box.children = [self.editor.accordion]
-            self.output_editor_box.children = [self.editor.output_box]
-
+        effective = self._show_editor(composed, key)
         active_overrides = self._active_overrides
-        effective = _apply_overrides(composed, active_overrides)
-        self._syncing = True
-        try:
-            self.editor.sync(effective)  # display effective; don't re-record as edits
-        finally:
-            self._syncing = False
 
         # composition.*.modified: "did the user deviate from what the catalog spec
         # seeded" -- editing then reverting clears the flag. Model/output share the
@@ -8017,10 +8205,12 @@ class ForgeBlueprintWizard:
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
-        # Placement, not OutputSpec ownership: the two chips partition the overrides.
+        # Placement, not OutputSpec ownership: the two chips partition the overrides
+        # the Model card does not show.
         active = self._active_overrides
         n_output = sum(1 for key in active if _in_output_card(*key))
-        n_advanced = len(active) - n_output
+        n_model = sum(1 for key in active if _in_model_card(*key))
+        n_advanced = len(active) - n_output - n_model
         chips["output"].value = (
             components.chip(f"● {n_output} modified", "info")
             if n_output
@@ -8503,22 +8693,30 @@ class ForgeBlueprintWizard:
             )
             return
         try:
-            base_dir = self.catalog.model_dir(self.model_dd.value)
+            base_path = self.catalog.model_path(self.model_dd.value)
             owned = _model_owned_settings(self.config.model_settings)
+            base_settings = load_model_spec_data(base_path)["model"].get(
+                "model_settings", {}
+            )
             if not self.config.model_settings["cppdefs"].get("marbl", False):
                 # The resolver zeroes ntrc_bio for a run without MARBL; keep the
                 # base model's MARBL tracer count so the saved spec still works
                 # when bgc_mode is switched back to "marbl".
-                base_settings = load_model_spec_data(base_dir)["model"].get(
-                    "model_settings", {}
-                )
                 base_param = base_settings.get("param") or {}
                 if "ntrc_bio" in base_param:
                     owned.setdefault("param", {})["ntrc_bio"] = base_param["ntrc_bio"]
+            # The spec cannot carry a wizard-only setting (_WIZARD_SETTING_DEFAULTS),
+            # whoever set it: save the base value, which validates in every BGC
+            # mode, and keep the session's value as an override (below).
+            for section, field in _WIZARD_SETTING_DEFAULTS:
+                if field in (base_section := base_settings.get(section) or {}):
+                    owned.setdefault(section, {})[field] = base_section[field]
+                else:
+                    owned.get(section, {}).pop(field, None)
             self.catalog.register_model_from_settings(
                 name,
                 owned,
-                base_dir,
+                base_path,
                 description=self.description.value,
                 # Live widget values, using _gather()'s exact conventions (use_pio/
                 # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
@@ -8540,21 +8738,24 @@ class ForgeBlueprintWizard:
         ok = self._verify_spec_roundtrip("model", name)
         with self._suspend():
             old_value = self.model_dd.value
-            self.model_dd.options = self._dd_options(
-                list(self.catalog.model_names), "model"
-            )
+            self.model_dd.options = self._model_dd_options(old_value)
             self.model_dd.value = name if ok else old_value
             if ok:
                 active = self._active_overrides
                 self._overrides = {
                     k: v
                     for k, v in self._overrides.items()
-                    if k not in active or _is_output_key(*k)
+                    if k not in active
+                    or _is_output_key(*k)
+                    or k in _WIZARD_SETTING_DEFAULTS
                 }
         if ok:
             self._rebuild()
+            # A wizard-only setting held over the saved spec leaves it modified.
+            modified = self.config is None or self.config.composition.model.modified
+            note = "" if modified else " (now unmodified)"
             self.save_model_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+                f"<span style='color:#080'>Saved '{name}' ✓{note}.</span>"
             )
         else:
             self.save_model_status.value = (
@@ -8575,7 +8776,7 @@ class ForgeBlueprintWizard:
             )
             return
         if self._grid_file is not None:
-            # DomainSpec (catalog/DomainSpec/*.yaml) has no grid_file field --
+            # DomainSpec (catalog/specs/DomainSpec/*.yaml) has no grid_file field --
             # saving now would silently produce a geometry-less entry (grid_kwargs
             # is {} while attached). Detach first.
             self.save_domain_status.value = (
@@ -8723,7 +8924,7 @@ class ForgeBlueprintWizard:
         """Command the Run button invokes: ``cstar blueprint run <path>``.
 
         The same command the docs give for both pipeline steps, and the same one
-        the emitted ``roms_marbl`` blueprint is run with -- the button exposes no
+        the emitted ``ucla_roms`` blueprint is run with -- the button exposes no
         per-run flags, so the full-option ``cstar forge run`` passthrough buys it
         nothing. Resolving ``application: forge`` this way goes through C-Star's
         registry, which finds the app as the in-tree
@@ -8800,12 +9001,12 @@ class ForgeBlueprintWizard:
             for line in lines:
                 self.run_output.append_stdout(line)
             code = await proc.wait()
-            # On success the log above names the emitted roms_marbl blueprint (the
+            # On success the log above names the emitted ucla_roms blueprint (the
             # runner logs where it published it). Point at it rather than restating
             # a path this widget would have to derive for itself.
             self.run_status.value = (
                 "<span style='color:#080'>✓ finished</span> — run the emitted "
-                "ROMS-MARBL blueprint named in the log with <code>cstar blueprint "
+                "UCLA-ROMS blueprint named in the log with <code>cstar blueprint "
                 "run &lt;path&gt;</code>"
                 if code == 0
                 else f"<span style='color:#b00'>exited with code {code}</span>"
@@ -8873,7 +9074,9 @@ class ForgeBlueprintWizard:
         model_card = components.card(
             W,
             "model",
-            components.field_row(W, "model_dd", self.model_dd),
+            components.field_row(
+                W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
+            ),
             # bgc_dd is placed before roms_ref/marbl_ref's grid so marbl_ref
             # (only relevant once bgc mode is "marbl") reads after bgc_dd.
             components.field_row(W, "bgc_dd", self.bgc_dd),

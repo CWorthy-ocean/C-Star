@@ -13,8 +13,10 @@ from cstar.applications.core import (
     RunnerRequest,
     get_application,
 )
-from cstar.base.env import ENV_CSTAR_RUNID, max_concurrency
+from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import MAX_CONCURRENCY
 from cstar.cli.common import (
     cb_pipeline,
     checkmark,
@@ -23,10 +25,11 @@ from cstar.cli.common import (
     get_from_ctxmap,
     id_label,
     normalize_runid,
+    refuse_workplan_file,
     set_ctxmap,
     set_env,
 )
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_SIZE
 from cstar.execution.file_system import (
@@ -34,6 +37,13 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
+from cstar.orchestration.index import (
+    HandleKind,
+    ManifestRecord,
+    RunHandle,
+    parse_run_handle,
+    resolve_run,
+)
 from cstar.orchestration.models import Blueprint, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.tracking import (
@@ -44,11 +54,19 @@ from cstar.orchestration.tracking import (
 
 log = get_logger(__name__)
 
+KEY_RUN: t.Final[str] = "run"
+"""Context-map key under which the resolved run record is stored."""
+
+HELP_RUN_HANDLE: t.Final[str] = (
+    "A run-id, `run://<uuid>`, or the path of a run directory."
+)
+
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
+    from cstar.orchestration.index import RunRecord
     from cstar.orchestration.models import StepRef
     from cstar.orchestration.transforms import ExternalRuns
 
@@ -70,7 +88,7 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
     async def _bounded() -> Sequence[WorkplanRun]:
         """Retrieve the run list while limiting concurrent reads."""
-        async with TrackingRepository.bound(max_concurrency()) as repo:
+        async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
             return await repo.list_latest_runs(incomplete)
 
     run_list = asyncio.run(_bounded())
@@ -81,7 +99,15 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
         return [("run-id", "no results found")]
 
-    return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list]
+    def _hint(run: WorkplanRun) -> str:
+        """Describe a run by its workplan, or by nothing when none is known."""
+        try:
+            return f"Workplan path: {run.workplan_path}"
+        except CstarError as ex:
+            log.debug(str(ex))
+            return ""
+
+    return [(r.run_id, _hint(r)) for r in run_list]
 
 
 async def list_steps(run_id: str, incomplete: str) -> list[str]:
@@ -109,17 +135,20 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
     incomplete = incomplete.lower()
     repo = TrackingRepository()
 
-    if wp_run := await repo.get_workplan_run(run_id):
+    if wp_run := await repo.get_workplan_run(run_id, tolerant=True):
         try:
-            wp = LiveWorkplan.load(wp_run.trx_workplan_path)
+            wp_path = wp_run.trx_workplan_path
+            wp = LiveWorkplan.load(wp_path, tolerant=True)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
                 step_names = [s for s in step_names if s.lower().startswith(incomplete)]
 
             return step_names
+        except CstarError as ex:
+            log.debug(f"Workplan run has no transformed workplan: {ex}")
         except FileNotFoundError:
-            msg = f"Workplan run contains a dead path: {wp_run.trx_workplan_path} was not found"
+            msg = f"Workplan run contains a dead path: {wp_path} was not found"
             log.debug(msg)
     else:
         log.debug(f"No run for run-id {run_id!r} could be found.")
@@ -434,7 +463,6 @@ def preprocess_varfile(
 def create_xrunner(
     request: RunnerRequest[Blueprint],
     service_cfg: "ServiceConfiguration | None" = None,
-    job_cfg: "JobConfig | None" = None,
     log_level: int | str = "INFO",
 ) -> BlueprintRunner[Blueprint]:
     """Dynamically create a runner using the application to look up the
@@ -442,15 +470,11 @@ def create_xrunner(
 
     Parameters
     ----------
-    job_cfg : JobConfig
-        Configuration applied to the scheduler.
     service_cfg : ServiceConfiguration
         Configuration applied to the service.
     request : RunnerRequest
         A request specifying the blueprint to be executed.
     """
-    if job_cfg is None:
-        job_cfg = get_job_config()
     if service_cfg is None:
         service_cfg = get_service_config(
             log_level,
@@ -461,13 +485,162 @@ def create_xrunner(
         request.application
     )
     klass = app.runner
-    return klass(request, service_cfg, job_cfg)
+    return klass(request, service_cfg)
+
+
+def parse_handle(context: typer.Context, target: str) -> RunHandle:
+    """Read what the user typed to name a run.
+
+    A run-id is normalized as `normalize_runid` does, before anything looks for
+    it; a uuid and a path never are.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    target : str
+        The user-supplied run-id, `run://<uuid>`, or run directory.
+
+    Returns
+    -------
+    RunHandle
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target is not a run handle.
+    """
+    try:
+        handle = parse_run_handle(target)
+    except ValueError as ex:
+        raise typer.BadParameter(str(ex)) from ex
+
+    if handle.kind is not HandleKind.run_id:
+        return handle
+
+    try:
+        return RunHandle(handle.kind, normalize_runid(context, handle.value))
+    except ValueError as ex:
+        msg = f"{handle.value!r} is not a valid run-id: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+
+def lookup_run(handle: RunHandle, *, hint: str = "") -> "RunRecord":
+    """Resolve a handle to the run it names.
+
+    Parameters
+    ----------
+    handle : RunHandle
+        What the user named.
+    hint : str
+        Text appended to the message when no run is found.
+
+    Returns
+    -------
+    RunRecord
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the handle does not identify a run.
+    """
+    try:
+        return resolve_run(handle)
+    except CstarError as ex:
+        raise typer.BadParameter(f"{ex} {hint}".rstrip()) from ex
+
+
+def preload_run(context: typer.Context, target: str) -> str:
+    """Resolve a run handle then load the record of the run it names.
+
+    Stores the record in the context map as "run". The record is the tracking
+    record when the run is tracked on this machine, else the run's manifest.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    target : str
+        The user-supplied run-id, `run://<uuid>`, or run directory.
+
+    Returns
+    -------
+    str
+        The run-id of the run found, which is not the target when that names
+        the run by its uuid or its directory.
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target is not a run handle or names no run.
+    """
+    record = lookup_run(parse_handle(context, target))
+    set_ctxmap(context, KEY_RUN, record)
+
+    return record.run_id
+
+
+def get_run_record(context: typer.Context) -> "RunRecord":
+    """Retrieve the run record that `preload_run` or `preload_run_record` stored.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+
+    Returns
+    -------
+    RunRecord
+    """
+    run = get_from_ctxmap(context, KEY_RUN, object)
+    if not isinstance(run, WorkplanRun | ManifestRecord):
+        log.warning(
+            "Context map contains a run of an unexpected type: "
+            f"{run.__class__.__name__!r}"
+        )
+        raise typer.Exit(102)
+
+    return run
+
+
+def require_run_id(context: typer.Context, target: str) -> str:
+    """Refuse a run handle that is not a run-id.
+
+    For the commands that act on a run tracked on this machine: they read its
+    live state, or write into its directory.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    target : str
+        The user-supplied target.
+
+    Returns
+    -------
+    str
+        The target, unchanged.
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target is not a run-id.
+    """
+    if parse_handle(context, target).kind is not HandleKind.run_id:
+        msg = (
+            f"{target!r} is not a run-id: `cstar run {context.info_name}` acts on a "
+            "run tracked on this machine, named by its run-id; use "
+            f"`cstar run show {target}` to read that run."
+        )
+        raise typer.BadParameter(msg)
+
+    return target
 
 
 def preload_run_record(context: typer.Context, run_id: str) -> str:
     """Verify a run-id is valid then load the `WorkplanRun` record.
 
-    Stores the record in the context map as "run".
+    Looks in tracking only. Stores the record in the context map as "run".
 
     Parameters
     ----------
@@ -484,19 +657,21 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
     Raises
     ------
     typer.BadParameter
-        - Raised when the run-id is invalid or no `WorkplanRun` exists for it
+        - Raised when the run-id is invalid, no `WorkplanRun` exists for it, or
+          its record cannot be read (one a newer cstar-ocean wrote that this
+          build cannot read)
     """
     repo = TrackingRepository()
     try:
-        run = asyncio.run(repo.get_workplan_run(run_id))
-    except ValueError as ex:
+        run = asyncio.run(repo.get_workplan_run(run_id, tolerant=True))
+    except (ValueError, CstarError) as ex:
         raise typer.BadParameter(str(ex)) from ex
 
     if not run:
         msg = f"Unable to locate run with unknown run-id: {run_id}"
         raise typer.BadParameter(msg)
 
-    set_ctxmap(context, "run", run)
+    set_ctxmap(context, KEY_RUN, run)
 
     return run_id
 
@@ -504,15 +679,15 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
 def preload_workplan(context: typer.Context, run_id: str) -> str:
     """Load the transformed `Workplan` of a run whose record is already loaded.
 
-    NOTE: Requires the `WorkplanRun` to be in the context map as "run"; see
-    `preload_run_record`. Stores the workplan in the context map as "workplan".
+    NOTE: Requires the run record to be in the context map as "run"; see
+    `preload_run`. Stores the workplan in the context map as "workplan".
 
     Parameters
     ----------
     context : typer.Context
         The typer context.
     run_id : str
-        The user-supplied run-id.
+        The run-id of the loaded run.
 
     Returns
     -------
@@ -522,10 +697,15 @@ def preload_workplan(context: typer.Context, run_id: str) -> str:
     Raises
     ------
     typer.BadParameter
+        - Raised when the run has no transformed workplan, as a standalone
+          blueprint run does
         - Raised when the transformed workplan cannot be deserialized
     """
-    run = get_from_ctxmap(context, "run", WorkplanRun)
-    wp_path = run.trx_workplan_path
+    run = get_run_record(context)
+    try:
+        wp_path = run.trx_workplan_path
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
     wp = LiveWorkplan.try_load(wp_path)
     if not wp:
@@ -585,9 +765,49 @@ _HELP_RUN_ID: t.Final[str] = "The unique identifier of a specific workplan execu
 RunIdArgument = t.Annotated[
     str,
     typer.Argument(
+        help=HELP_RUN_HANDLE,
+        autocompletion=list_runs,
+        callback=cb_pipeline(
+            refuse_workplan_file,
+            preload_run,
+            set_env(ENV_CSTAR_RUNID),
+            preload_workplan,
+        ),
+    ),
+]
+"""Shared run argument: resolve the run handle, export the run-id of the run
+found to the environment, and preload its record and transformed workplan into
+the context map."""
+
+RunHandleArgument = t.Annotated[
+    str,
+    typer.Argument(
+        help=HELP_RUN_HANDLE,
+        autocompletion=list_runs,
+        callback=cb_pipeline(refuse_workplan_file, preload_run),
+    ),
+]
+"""Run argument that only preloads the run record into the context map."""
+
+RunRecordArgument = t.Annotated[
+    str,
+    typer.Argument(
+        help=_HELP_RUN_ID,
+        autocompletion=list_runs,
+        callback=cb_pipeline(require_run_id, preload_run_record),
+    ),
+]
+"""Run-id argument for the commands that read the live state of a tracked run;
+only preloads the `WorkplanRun` record into the context map."""
+
+TrackedRunIdArgument = t.Annotated[
+    str,
+    typer.Argument(
         help=_HELP_RUN_ID,
         autocompletion=list_runs,
         callback=cb_pipeline(
+            refuse_workplan_file,
+            require_run_id,
             normalize_runid,
             set_env(ENV_CSTAR_RUNID),
             preload_run_record,
@@ -595,18 +815,10 @@ RunIdArgument = t.Annotated[
         ),
     ),
 ]
-"""Shared run-id argument: normalize the value, export it to the environment,
-and preload the `WorkplanRun` and transformed workplan into the context map."""
-
-RunRecordArgument = t.Annotated[
-    str,
-    typer.Argument(
-        help=_HELP_RUN_ID,
-        autocompletion=list_runs,
-        callback=preload_run_record,
-    ),
-]
-"""Run-id argument that only preloads the `WorkplanRun` record into the context map."""
+"""Run-id argument for the commands that write into a tracked run's directory:
+normalize the run-id, export it to the environment, and preload the `WorkplanRun`
+and transformed workplan into the context map. A run reached by its uuid or its
+directory may not be the user's to write into."""
 
 
 async def load_workplans(
@@ -622,8 +834,7 @@ async def load_workplans(
         The cached copy of loaded workplans, keyed on their file path;
         updated in place with the successfully loaded workplans.
     """
-    limit = max_concurrency()
-    workplans = await LiveWorkplan.load_all(paths, limit=limit)
+    workplans = await LiveWorkplan.load_all(paths, limit=MAX_CONCURRENCY)
 
     failed: list[Path] = []
     for path, wp in zip(paths, workplans):
@@ -645,7 +856,9 @@ async def refresh_disk_usage(
     """Re-measure and persist per-step disk usage for a collection of runs.
 
     A run whose transformed workplan is not present in `plans` falls back to
-    the subdirectories of its tasks directory; a run with neither is skipped.
+    the subdirectories of its tasks directory; a run with neither is skipped,
+    and so is a run whose record holds keys a newer cstar-ocean wrote, which
+    this build does not write.
 
     Parameters
     ----------
@@ -654,14 +867,20 @@ async def refresh_disk_usage(
     plans : Mapping[Path, LiveWorkplan]
         Loaded workplans, keyed on their transformed workplan path.
     """
-    sem = asyncio.Semaphore(max_concurrency())
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
     by_id = {run.run_id: run for run in runs}
     step_dirs_by_run: dict[str, Mapping[str, Path]] = {}
     fallback: list[str] = []
     skipped: list[str] = []
+    newer: list[str] = []
 
     for run in runs:
-        if (plan := plans.get(run.trx_workplan_path)) is not None:
+        if run.unknown_keys:
+            newer.append(run.run_id)
+            continue
+        path = run.try_trx_workplan_path()
+        plan = plans.get(path) if path is not None else None
+        if plan is not None:
             step_dirs_by_run[run.run_id] = {s.name: s.working_dir for s in plan.steps}
             continue
 
@@ -688,6 +907,11 @@ async def refresh_disk_usage(
             "Disk usage was not refreshed for run(s) without a loadable workplan "
             f"or tasks directory: {', '.join(skipped)}"
         )
+    if newer:
+        log.warning(
+            "Disk usage was not refreshed for run(s) whose record a newer "
+            f"cstar-ocean wrote; upgrade cstar-ocean to refresh it: {', '.join(newer)}"
+        )
 
     if not step_dirs_by_run:
         return
@@ -702,7 +926,7 @@ async def refresh_disk_usage(
 
     # apply under each run's lock so a concurrently running orchestrator's
     # sentinel/size updates are not overwritten
-    async with TrackingRepository.bound(max_concurrency()) as repo:
+    async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
         await asyncio.gather(
             *(
                 repo.update_workplan_run(

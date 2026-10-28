@@ -19,9 +19,9 @@ RUN_START = datetime(2012, 1, 1, 12)
 RUN_END = datetime(2012, 1, 1, 13)
 MODEL_REFERENCE_DATE = datetime(2000, 1, 1)
 DT = 60.0
-MODEL_SPEC = "roms-marbl-0.11-default"
-PINNED_ROMS_REF = "0.11.0"
-# the ucla-roms ref the bundled ``roms-marbl-0.11-default`` ModelSpec pins
+MODEL_SPEC = "roms-marbl-0.13-default"
+PINNED_ROMS_REF = "0.13.0"
+# the ucla-roms ref the bundled ``roms-marbl-0.13-default`` ModelSpec pins
 ROMS_REF = os.environ.get("CSTAR_IT_ROMS_REF") or PINNED_ROMS_REF
 """The ucla-roms ref under test; ``CSTAR_IT_ROMS_REF`` is the weekly extended workflow's override."""
 
@@ -65,6 +65,29 @@ CDR_LITE_FORCING: dict[str, Any] = {
 one OAE release (an ALK/DIC tracer pair) and one DOR release (one DIC tracer), so a
 ``cdr_lite`` build has ``nt_cdr_oae == nt_cdr_dor == 1`` and five tracers. The resolver
 defaults each release's ``tracer_set`` to ``cdr_lite``."""
+
+MARBL_CDR_FORCING: dict[str, Any] = {
+    "start_time": RUN_START.isoformat(),
+    "end_time": RUN_END.isoformat(),
+    "releases": [
+        {
+            "name": "oae",
+            "lat": 60.0,
+            "lon": -5.0,
+            "depth": 10.0,
+            "hsc": 10.0,
+            "vsc": 10.0,
+            "times": [RUN_START.isoformat(), RUN_END.isoformat()],
+            "release_type": "tracer_perturbation",
+            "tracer_fluxes": {"ALK": [2.0e6, 2.0e6]},
+        }
+    ],
+}
+"""A ``simple``-mode CDR forcing over the run window, at the ``na-test-8x8`` grid centre,
+for a MARBL build: one OAE release that adds alkalinity only, so ``ALK_source >= 0`` and
+``DIC_source == 0``, which the CDR metrics' release sign check requires. The release has
+no ``tracer_set``, so it is a MARBL release (roms-tools' default) and every tracer flux
+left out is zero. With the forcing active, ucla-roms writes the ``_cdr`` output stream."""
 
 
 FORGE_CASES = {

@@ -1,0 +1,433 @@
+import typing as t
+import warnings
+from datetime import datetime
+
+from pydantic import (
+    Field,
+    HttpUrl,
+    PositiveInt,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+from pytimeparse import parse
+
+from cstar.base.application_names import legacy_names
+from cstar.base.utils import generate_schema_ref
+from cstar.orchestration.models import (
+    Blueprint,
+    ConfiguredBaseModel,
+    Dataset,
+    DocLocMixin,
+    PathFilter,
+)
+from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
+from cstar.system.migration import version_key
+
+APP_NAME: t.Literal["ucla_roms"] = "ucla_roms"
+
+SCHEMA_PUBLISHED_AS_APP_NAME: t.Final[str] = "3.3.0"
+"""The first blueprint schema version published under `APP_NAME`. Earlier
+versions were published under the application's earlier name, so a blueprint
+of an earlier version names that schema in its ``$schema`` header."""
+
+
+class ForcingConfiguration(ConfiguredBaseModel):
+    """Configuration of the forcing parameters of the model."""
+
+    boundary: Dataset
+    """Boundary forcing."""
+
+    surface: Dataset
+    """Surface forcing"""
+
+    tidal: Dataset | None = Field(default=None, validate_default=False)
+    """Tidal forcing."""
+
+    river: Dataset | None = Field(default=None, validate_default=False)
+    """River forcing."""
+
+    corrections: Dataset | None = Field(default=None, validate_default=False)
+    """Wind or other forcing corrections."""
+
+    carbonate_sensitivity: Dataset | None = Field(default=None, validate_default=False)
+    """Carbonate sensitivity forcing for CDR-lite runs (ucla-roms >= 0.9.0).
+
+    Surface fields ``ddic_dco2`` (beta) and ``ddic_dalk`` (eta) with their time
+    variables, read by a ``CDR_LITE`` build whose
+    ``cdr_lite_settings.cdr_online_carbonate_sensitivity`` is off: the
+    ``_cdrgas`` output of an earlier ROMS-MARBL run, either listed here or
+    supplied at run time by the ``carbonate-sensitivity-from`` directive.
+    """
+
+
+class CodeRepository(DocLocMixin):
+    """Reference to a remote code repository with optional path filtering
+    and point-in-time specification.
+    """
+
+    location: HttpUrl | str
+    """Location of the remote code repository."""
+
+    commit: str = Field(default="", validate_default=False)
+    """A specific commit to be used."""
+
+    branch: str = Field(default="", validate_default=False)
+    """A specific branch to be used."""
+
+    filter: PathFilter | None = Field(default=None, validate_default=False)
+    """A filter specifying the files to be retrieved and persisted from the repository."""
+
+    @property
+    def checkout_target(self) -> str:
+        """Return the commit if specified, else the branch"""
+        return self.commit or self.branch
+
+    @model_validator(mode="after")
+    def _model_validator(self) -> "CodeRepository":
+        """Perform validation on the model after field-level validation is complete.
+
+        - Ensure that one of commit or branch checkout target is supplied
+        """
+        if self.commit and self.branch:
+            msg = "Supply only one of commit hash or branch."
+            raise ValueError(msg)
+
+        if not self.commit and not self.branch:
+            msg = "Either the commit hash or branch must be supplied."
+            raise ValueError(msg)
+
+        return self
+
+
+class ROMSCompositeCodeRepository(ConfiguredBaseModel):
+    """Collection of repositories used to build, configure, and execute ROMS."""
+
+    roms: CodeRepository
+    """The baseline ROMS repository."""
+
+    run_time: CodeRepository
+    """Codebase used to modify the runtime behavior of ROMS."""
+
+    compile_time: CodeRepository
+    """Codebase used to modify base ROMS compilation."""
+
+    marbl: CodeRepository | None = Field(default=None, validate_default=False)
+    """Codebase used to add MARBL to the simulation."""
+
+    pio: CodeRepository | None = Field(default=None, validate_default=False)
+    """Codebase used to add the ParallelIO library to the simulation."""
+
+
+class ParameterSet(DocLocMixin):
+    """A base class for parameter sets exposed on a blueprint."""
+
+    hash: str | None = Field(default=None, init=False, validate_default=False)
+    """Hash used to verify the parameters are unchanged."""
+
+    @model_validator(mode="after")
+    def _model_validator(self) -> "ParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Ensure the dynamically added parameters meet the minimum naming standard.
+        """
+        if self.locked and not self.hash:
+            msg = "A locked parameter set must include a hash"
+            raise ValueError(msg)
+
+        return self
+
+
+class RuntimeParameterSet(ParameterSet):
+    """Parameters for the execution of the model.
+
+    These parameters can be varied (within bounds defined elsewhere in the blueprint, e.g. valid_start/end_date),
+    without changing the validity of the model solution.
+    """
+
+    start_date: datetime
+    """Start of data time range to be used in the simulation."""
+
+    end_date: datetime
+    """End of data time range to be used in the simulation."""
+
+    checkpoint_frequency: str = Field(
+        default="1d",
+        min_length=2,
+        pattern="([1-9][0-9]*)([hdwmy])",
+    )
+    """Time period between creation of checkpoint files.
+
+    Supply a string representing the desired time period, such as:
+    - every day: "1d"
+    - every week: "1w"
+    - every month: "1m" or "4w" or "31d"
+    - every 2.5 days: "2d 12h" or "60h"
+
+    A short time period will reduce data re-processing upon restart at the cost
+    of additional disk usage and compute used for checkpointing.
+    """
+
+    @field_validator("checkpoint_frequency", mode="after")
+    @classmethod
+    def _validate_checkpoint_frequency(
+        cls,
+        value: str,
+        _info: "ValidationInfo",
+    ) -> str:
+        """Verify a valid range string for the checkpoint frequency was supplied.
+
+        Parameters:
+            value : str
+                The value of the checkpoint frequency property
+            _info : ValidationInfo
+                Metadata for the current validation context
+        """
+        if not parse(value):
+            msg = "Invalid checkpoint frequency supplied."
+            raise ValueError(msg)
+        return value
+
+    @model_validator(mode="after")
+    def _validate_date_range(self) -> "RuntimeParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Named distinctly from `ParameterSet._model_validator` so the inherited
+        locked/hash check is not shadowed and both validators run.
+        """
+        if self.end_date <= self.start_date:
+            msg = "start_date must precede end_date"
+            raise ValueError(msg)
+
+        return self
+
+
+class PartitioningParameterSet(ParameterSet):
+    """Parameters for the partitioning of the model.
+
+    Namelist overrides of the processor grid (`np_xi`/`np_eta` in
+    `param_settings`) must agree with these parameters; the partitioning is
+    authoritative for the processor grid at runtime.
+    """
+
+    n_procs_x: PositiveInt | None = None
+    """Number of processes used to subdivide the domain on the x-axis."""
+
+    n_procs_y: PositiveInt | None = None
+    """Number of processes used to subdivide the domain on the y-axis."""
+
+    use_pio: bool = False
+    """Use the ParallelIO library for model input/output."""
+
+    auto_tiling: bool = False
+    """Automatically determine the tiling layout instead of using `n_procs_x`/`n_procs_y`.
+
+    NOTE: this feature is in development.
+    """
+
+    n_cores: PositiveInt | None = None
+    """Total number of cores to use when `auto_tiling` selects the tiling layout."""
+
+    @property
+    def dims(self) -> tuple[PositiveInt, PositiveInt] | None:
+        """The `(n_procs_x, n_procs_y)` pair, or `None` unless both are set."""
+        if self.n_procs_x is None or self.n_procs_y is None:
+            return None
+        return (self.n_procs_x, self.n_procs_y)
+
+    @model_validator(mode="after")
+    def _validate_partitioning(self) -> "PartitioningParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Named distinctly from `ParameterSet._model_validator` so the inherited
+        locked/hash check is not shadowed and both validators run.
+        """
+        violations: list[str] = []
+
+        if self.auto_tiling:
+            if not self.use_pio:
+                violations.append("auto_tiling requires use_pio to be true")
+            if self.n_cores is None and self.dims is None:
+                violations.append(
+                    "auto_tiling requires n_cores or both n_procs_x and n_procs_y"
+                )
+            if (
+                self.n_cores is not None
+                and (dims := self.dims) is not None
+                and self.n_cores != dims[0] * dims[1]
+            ):
+                violations.append(
+                    "n_cores must equal n_procs_x * n_procs_y when all are supplied"
+                )
+        else:
+            if self.dims is None:
+                violations.append(
+                    "n_procs_x and n_procs_y are required unless auto_tiling is enabled"
+                )
+            if self.n_cores is not None:
+                violations.append("n_cores is only accepted with auto_tiling")
+
+        if violations:
+            raise ValueError("; ".join(violations))
+
+        return self
+
+
+class UclaRomsBlueprint(Blueprint):
+    """Blueprint schema for running a UCLA-ROMS simulation."""
+
+    schema_version: str = "3.3.0"
+    """The blueprint schema version."""
+
+    @property
+    @t.override
+    def schema_ref(self) -> str:
+        """The URL of the published JSON schema the blueprint's ``$schema`` names.
+
+        A version older than `SCHEMA_PUBLISHED_AS_APP_NAME` names the schema
+        published under the application's earlier name.
+        """
+        try:
+            earlier = version_key(self.schema_version) < version_key(
+                SCHEMA_PUBLISHED_AS_APP_NAME
+            )
+        except ValueError:  # not a dotted version; the header is informational
+            earlier = False
+        if not earlier:
+            return super().schema_ref
+        return generate_schema_ref(legacy_names(APP_NAME)[0], self.schema_version)
+
+    application: str = APP_NAME
+    """The process type to be executed by the blueprint."""
+
+    valid_start_date: datetime
+    """Beginning of the time range for the available data."""
+
+    valid_end_date: datetime
+    """End of the time range for the available data."""
+
+    code: ROMSCompositeCodeRepository
+    """Code repositories used to build, configure, and execute the ROMS simulation."""
+
+    initial_conditions: Dataset = Field(min_length=1, max_length=1)
+    """File containing the starting conditions of the simulation."""
+
+    grid: Dataset = Field(min_length=1, max_length=1)
+    """File defining the grid geometry."""
+
+    forcing: ForcingConfiguration
+    """Forcing configuration."""
+
+    partitioning: PartitioningParameterSet
+    """User-defined partitioning parameters."""
+
+    runtime_params: RuntimeParameterSet
+    """User-defined runtime parameters."""
+
+    cdr_forcing: Dataset | None = Field(default=None)
+    """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
+
+    nesting_info: Dataset | None = Field(default=None)
+    """Location of nesting info input file for this run. Optional."""
+
+    namelist_overrides: dict[str, dict[str, t.Any]] = Field(default_factory=dict)
+    """Mapping of ROMS namelist group to key/value overrides.
+
+    These overrides are layered onto the runtime namelist LAST, after C-Star's
+    own derived settings, so they take precedence over anything C-Star would
+    otherwise compute; list values replace the existing list wholesale.
+
+    Group and key names are checked when the blueprint is validated: unknown
+    names are an error when `code.roms` pins a release version, and a warning
+    (against the best-guess schema) otherwise. Values are validated at runtime
+    against the namelist schema for the pinned ucla-roms version. See the
+    :class:`PartitioningParameterSet` documentation for potential conflicts
+    with the partitioning configuration.
+    """
+
+    @model_validator(mode="after")
+    def _model_validator(self) -> "UclaRomsBlueprint":
+        """Perform validation on the model after field-level validation is complete."""
+        if self.valid_end_date <= self.valid_start_date:
+            msg = "valid_start_date must precede valid_end_date"
+            raise ValueError(msg)
+
+        if self.runtime_params.end_date > self.valid_end_date:
+            msg = "end_date is outside the valid range"
+            raise ValueError(msg)
+
+        if self.runtime_params.start_date < self.valid_start_date:
+            msg = "start_date is outside the valid range"
+            raise ValueError(msg)
+
+        if self.code.pio is not None and not self.partitioning.use_pio:
+            msg = (
+                "A ParallelIO codebase was supplied, but PIO is not enabled "
+                "in the partitioning configuration for this blueprint"
+            )
+            raise ValueError(msg)
+
+        self._validate_namelist_overrides()
+
+        return self
+
+    def _validate_namelist_overrides(self) -> None:
+        """Check `namelist_overrides` names and partitioning consistency early.
+
+        Unknown group/key names are an error when `code.roms` pins a release
+        version (the namelist schema is then certain) and a warning otherwise,
+        where the latest schema is only a best guess. `np_xi`/`np_eta`
+        conflicts with `partitioning` are schema-independent and always an
+        error. Values are not checked here — the merge onto the real namelist
+        in `roms_runtime_settings` re-validates against the full schema.
+        """
+        if not self.namelist_overrides:
+            return
+
+        param_overrides = self.namelist_overrides.get("param_settings", {})
+        violations = [
+            f"namelist override {key!r} ({value!r}) conflicts with the "
+            f"blueprint partitioning ({expected!r})"
+            for key, expected in (
+                ("np_xi", self.partitioning.n_procs_x),
+                ("np_eta", self.partitioning.n_procs_y),
+            )
+            if (value := param_overrides.get(key)) is not None
+            and expected is not None
+            and value != expected
+        ]
+
+        ref = self.code.roms.checkout_target
+        pinned_release = _parse_semver(ref) is not None
+        if pinned_release:
+            schema = namelist_schema_for_ref(ref)
+            violations += schema.unknown_override_keys(self.namelist_overrides)
+        else:
+            with warnings.catch_warnings():
+                # suppress the unparseable-ref fallback warning; unknown names
+                # are reported below only if any are found
+                warnings.simplefilter("ignore", UserWarning)
+                schema = namelist_schema_for_ref(ref)
+            if unknown := schema.unknown_override_keys(self.namelist_overrides):
+                warnings.warn(
+                    f"namelist_overrides contain names not in {schema.__name__} "
+                    f"(assumed for unpinned ucla-roms ref {ref!r}): "
+                    + "; ".join(unknown),
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        if violations:
+            raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
+
+    @property
+    def cpus_needed(self) -> int:
+        """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
+        if self.partitioning.n_cores is not None:
+            return self.partitioning.n_cores
+
+        if (dims := self.partitioning.dims) is None:
+            msg = "partitioning must supply n_cores or both n_procs_x and n_procs_y"
+            raise ValueError(msg)
+
+        return dims[0] * dims[1]

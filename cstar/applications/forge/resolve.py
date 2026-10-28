@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
@@ -79,7 +80,9 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_marbl_only_outputs,
+    check_marbl_step_averages,
     check_output_streams_divide_rst,
+    check_restoring_flux_output,
     check_rst_period_divisible,
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
@@ -100,13 +103,18 @@ from cstar.applications.forge.source_registry import (
     resolve_source,
 )
 from cstar.base.utils import netcdf_format
-from cstar.roms.namelist import is_commit_hash
+from cstar.roms.namelist import is_commit_hash, roms_version_from_ref
+from cstar.roms.precheck import (
+    AVERAGES_END_ON_MARBL_STEP_MIN_ROMS,
+    is_whole_multiple,
+    marbl_step,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+    from cstar.roms.outputs import CarbonateSensitivityFile
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +143,7 @@ def _resolved_dataset(name: str, glorys_layout: str | None = None) -> ResolvedDa
 
 
 def _parse_source(block: Any) -> SourceSpec:
-    """A model.yaml ``source`` block: a bare name string or a dict.
+    """A ModelSpec ``source`` block: a bare name string or a dict.
 
     Forwards every ``SourceSpec`` field a source dict may carry -- ``path`` (a
     custom dataset path, or the required PyESPER package directory for an
@@ -191,7 +199,7 @@ def _normalize_user_file(
     if isinstance(value, dict):
         return UserProvidedFile(**value)
 
-    from cstar.applications.forge.user_files import hash_netcdf_contents
+    from cstar.base.digest import hash_netcdf_contents
 
     path = Path(value)
     if not path.exists():
@@ -218,7 +226,7 @@ def find_carbonate_sensitivity_files(
     """
     # Lazy: the file-name convention lives with the transforms, which pull in
     # the orchestration layer.
-    from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+    from cstar.roms.outputs import CarbonateSensitivityFile
 
     if not directory.is_dir():
         raise NotADirectoryError(f"not a directory: {directory}")
@@ -228,7 +236,7 @@ def find_carbonate_sensitivity_files(
         raise FileNotFoundError(
             f"carbonate_sensitivity: no joined {CarbonateSensitivityFile.LABEL} "
             f"files in {directory} ({len(found)} per-rank tile file(s) skipped). "
-            "Expected the output of a ROMS-MARBL run with cdr_gas_exch_output "
+            "Expected the output of a UCLA-ROMS run with MARBL and cdr_gas_exch_output "
             f"enabled, named <root>{CarbonateSensitivityFile.SUFFIX}."
             "<14-digit timestamp>.nc."
         )
@@ -376,10 +384,10 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 def _with_current_section_names(
     settings: dict[str, Any] | None, source: str
 ) -> dict[str, Any]:
-    """A deep copy of a settings dict entering the resolver (ModelSpec model
-    settings, OutputSpec, run-time overrides) with legacy section names renamed
+    """A deep copy of a settings dict entering the resolver (the run-time
+    overrides, which are not a spec file) with legacy section names renamed
     (:func:`normalize_legacy_sections`); warns once per ``source`` when it
-    renamed anything, since a spec still using them predates ucla-roms 0.9.0.
+    renamed anything, since settings still using them predate ucla-roms 0.9.0.
     """
     settings = copy.deepcopy(settings or {})
     if renamed := normalize_legacy_sections(settings):
@@ -393,27 +401,26 @@ def _with_current_section_names(
     return settings
 
 
-def load_model_spec_data(model_dir: str | Path) -> dict[str, Any]:
-    """Read a ModelSpec directory into a plain dict (no heavy deps).
+def load_model_spec_data(model_path: str | Path) -> dict[str, Any]:
+    """Read a ModelSpec file into a plain dict (no heavy deps).
 
-    A ModelSpec is a single ``model.yaml`` with two top-level sections: ``code``
+    A ModelSpec is a single YAML file with two top-level sections: ``code``
     (roms/marbl/pio + template refs) and ``model_settings`` (flat, mirrors
     ``ForgeBlueprint.model_settings`` 1:1 -- no separate compile/run-time defaults
-    files to resolve). Returns ``{"model_name": <dir name>, "model": <model.yaml dict>}``.
+    files to resolve). Returns ``{"model_name": <entry name>, "model": <file dict>}``,
+    the entry name being the catalog's (``spec_entry_name``): the file's stem; the
+    model is at the current ModelSpec schema (``read_model_spec``).
     """
-    model_dir = Path(model_dir)
-    model_path = model_dir / "model.yaml"
-    if not model_path.exists():
-        model_path = model_dir / "model.yml"  # legacy extension, still readable
-    model = yaml.safe_load(model_path.read_text())
-    # single-model file: sections at top level; else unwrap a single named block
-    if not any(k in model for k in ("code", "model_settings")):
-        if len(model) == 1:
-            model = next(iter(model.values()))
+    # Deferred, as cstar.catalog is not otherwise needed to resolve a blueprint.
+    from cstar.applications.forge.models import read_model_spec
+    from cstar.catalog.domain_catalog import spec_entry_name
 
+    model_path = Path(model_path)
+    model_name = spec_entry_name(model_path)
+    data = yaml.safe_load(model_path.read_text()) or {}
     return {
-        "model_name": model_dir.name,
-        "model": model,
+        "model_name": model_name,
+        "model": read_model_spec(data, model_name, model_path),
     }
 
 
@@ -622,9 +629,65 @@ def with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
     return cdr_spec.model_copy(update={"cdr_forcing": forcing})
 
 
+def _align_cdr_output_to_marbl_step(
+    settings: dict[str, Any], *, roms_ref: str | None
+) -> None:
+    """Move the averaged ``_cdr`` stream of ``settings`` onto MARBL steps.
+
+    For a stream Forge turns on itself: ucla-roms >= 0.13.0 stops at startup
+    unless ``cdr_output.output_period`` is a whole multiple of the MARBL timestep
+    it uses (see
+    :func:`~cstar.applications.forge.namelist_model.check_marbl_step_averages`). The period becomes the
+    shortest such multiple, not shorter than the period, that divides the stream's
+    file length (``nrpf * output_period``), and ``nrpf`` shrinks so each file
+    still covers that length, which keeps the restart-rollover precheck satisfied.
+    When no multiple fits, ``settings`` is left for the precheck to report.
+    Releases before 0.13.0 are left alone; aligning refuses nothing, so an
+    unresolved commit hash counts as the latest release.
+    """
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < AVERAGES_END_ON_MARBL_STEP_MIN_ROMS:
+        return
+    cdr_out = settings.get("cdr_output") or {}
+    if not cdr_out.get("do_avg") or cdr_out.get("monthly_averages"):
+        return
+    dt = (settings.get("time_stepping") or {}).get("dt")
+    marbl_timestep = (settings.get("marbl_bgc") or {}).get("marbl_timestep")
+    period = cdr_out.get("output_period")
+    nrpf = cdr_out.get("nrpf")
+    if dt is None or marbl_timestep is None or period is None or nrpf is None:
+        return
+    if dt <= 0 or period <= 0:
+        return
+    step = marbl_step(dt, marbl_timestep)
+    if is_whole_multiple(period, step):
+        return
+    file_length = nrpf * period
+    multiple = math.ceil(period / step)
+    while multiple * step <= file_length:
+        if is_whole_multiple(file_length, multiple * step):
+            cdr_out["output_period"] = multiple * step
+            cdr_out["nrpf"] = round(file_length / (multiple * step))
+            log.info(
+                "Writing the _cdr averages every %g s (%d per file) instead of every "
+                "%g s (%d per file): ucla-roms >= 0.13.0 averages only over whole "
+                "MARBL steps, here %g s (marbl_timestep %g s rounded down to a "
+                "multiple of dt %g s).",
+                cdr_out["output_period"],
+                cdr_out["nrpf"],
+                period,
+                nrpf,
+                step,
+                marbl_timestep,
+                dt,
+            )
+            return
+        multiple += 1
+
+
 def build_forge_blueprint(
     *,
-    model_dir: str | Path,
+    model_path: str | Path,
     grid_name: str,
     grid_kwargs: dict[str, Any],
     open_boundaries: dict[str, bool],
@@ -768,7 +831,7 @@ def build_forge_blueprint(
     ``grid_file``, if given, is a user-supplied pre-made grid netCDF used in place
     of one Forge would otherwise generate from ``grid_kwargs``. A ``str``/``Path``
     is normalized into a :class:`UserProvidedFile` by hashing the file's contents
-    (``cstar.applications.forge.user_files.hash_netcdf_contents``) -- the file must exist
+    (``cstar.base.digest.hash_netcdf_contents``) -- the file must exist
     at authoring time. A dict or ``UserProvidedFile`` carrying both ``location``
     and ``content_hash`` is trusted as-is (the wizard passes this to avoid
     rehashing on every rebuild). Either way, the grid is loaded once here
@@ -797,7 +860,7 @@ def build_forge_blueprint(
 
     ``carbonate_sensitivity``, if given, lists the carbonate sensitivity files a
     ``bgc_mode == "cdr_lite"`` build reads as surface forcing (the ``_cdrgas``
-    files of a ROMS-MARBL run). Normally it is left out: the
+    files of a UCLA-ROMS run with MARBL). Normally it is left out: the
     ``carbonate-sensitivity-from`` workplan directive supplies them at run time.
     Accepts a directory (scanned for joined ``_cdrgas`` files; an error if it has
     none), a single file path, a sequence of file paths (kept in order), a
@@ -868,7 +931,7 @@ def build_forge_blueprint(
             cdr_forcing_file=cdr_forcing_file_obj,
         )
 
-    spec = load_model_spec_data(model_dir)
+    spec = load_model_spec_data(model_path)
     model = spec["model"]
     model_name = spec["model_name"]
     if bgc_mode is None:
@@ -895,7 +958,12 @@ def build_forge_blueprint(
             "output_settings is required: ModelSpec no longer provides default output "
             "settings -- select or supply an OutputSpec (e.g. catalog.output_data(name))."
         )
-    inputs = forcing_inputs
+    # Specs read from the catalog arrive migrated; a caller that parsed its own
+    # spec file may not have, so the resolver guarantees the schema itself.
+    from cstar.catalog.spec_schema import read_spec
+
+    inputs = read_spec("ForcingSpec", forcing_inputs, "forcing_inputs")
+    output_settings = read_spec("OutputSpec", output_settings, "output_settings")
 
     # ----- optional user-provided grid file ----------------------------------
     # Normalize `grid_file` into a UserProvidedFile, then load the grid ONCE
@@ -976,13 +1044,14 @@ def build_forge_blueprint(
         v_sponge = _compute_v_sponge_default(grid_kwargs, loaded_grid)
 
     # ----- flat model_settings ----------------------------------------------
-    settings: dict[str, Any] = _with_current_section_names(
-        model.get("model_settings"), f"ModelSpec {model_name!r}"
-    )
+    settings: dict[str, Any] = copy.deepcopy(model.get("model_settings") or {})
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
-    settings["v_sponge"] = {"v_sponge": v_sponge}
+    # v_sponge is domain-owned (grid-derived or the caller's explicit value), so it
+    # replaces whatever the ModelSpec carries; the section's other keys
+    # (v_sponge_trc) are the ModelSpec's, kept for the overrides below.
+    settings["v_sponge"] = {**(settings.get("v_sponge") or {}), "v_sponge": v_sponge}
 
     # ----- schema selection inputs -------------------------------------------
     # The pinned ucla-roms ref decides which run-time settings tier applies (it
@@ -1017,7 +1086,7 @@ def build_forge_blueprint(
         # source of these statics. C-Star's orchestrator symlinks the real,
         # run-specific CDR forcing file to the fixed "cdr.nc" name at run time
         # (the same filename a generated/custom-file CDR run also opens -- see
-        # CDR_FORCING_NETCDF_STEM in input_data.py), so ROMS always opens "cdr.nc"
+        # CDR_FORCING_NETCDF_STEM in input_generator.py), so ROMS always opens "cdr.nc"
         # regardless of which CDR mode produced it.
         settings["cdr_frc"].update(
             {
@@ -1106,7 +1175,7 @@ def build_forge_blueprint(
 
     # ntides is Forcing-owned (no ModelSpec default): drive it from the tidal
     # forcing item's ntides, or 0 when there is no tidal forcing -- see
-    # input_data._generate_tidal_forcing, which re-derives the same value at
+    # input_generator._generate_tidal_forcing, which re-derives the same value at
     # generation time.
     _ntides = next(
         (
@@ -1127,7 +1196,7 @@ def build_forge_blueprint(
     if grid_kwargs_child is not None:
         extract = dict(settings.get("extract_data", {}))
         extract["do_extract"] = True
-        extract["extract_file"] = "nesting.nc"  # fixed convention (see input_data)
+        extract["extract_file"] = "nesting.nc"  # fixed convention (see input_generator)
         if "N" in grid_kwargs_child:
             extract["n_chd"] = grid_kwargs_child["N"]
         for src, dst in (
@@ -1143,9 +1212,7 @@ def build_forge_blueprint(
 
     # OutputSpec spec: deep-merge the output-settings selection over the model
     # defaults (before manual overrides, so a hand override still wins).
-    _deep_merge(
-        settings, _with_current_section_names(output_settings, "output_settings")
-    )
+    _deep_merge(settings, output_settings)
 
     # overrides win (mirror ForgeExecutor.configure_build precedence)
     if compile_time_overrides:
@@ -1153,11 +1220,13 @@ def build_forge_blueprint(
             settings["cppdefs"],
             compile_time_overrides.get("cppdefs", compile_time_overrides),
         )
-    if run_time_overrides:
-        _deep_merge(
-            settings,
-            _with_current_section_names(run_time_overrides, "run_time_overrides"),
-        )
+    current_run_time_overrides = (
+        _with_current_section_names(run_time_overrides, "run_time_overrides")
+        if run_time_overrides
+        else {}
+    )
+    if current_run_time_overrides:
+        _deep_merge(settings, current_run_time_overrides)
 
     # A child grid (has a parent) gets its boundaries from the parent's nesting.nc
     # extraction: no boundary tides and no sponge ub_tune. Force both off after the
@@ -1209,8 +1278,19 @@ def build_forge_blueprint(
     # After the version gate, so a pin too old for the mode is reported as such.
     if bgc_mode == "cdr_lite" and cdr_spec.mode == "upscaled":
         check_upscaled_cdr_lite_tracer_counts(settings.get("param") or {})
-    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
+    requested_cdr_output = bool(cdr_out.get("do_cdr_output"))
+    do_cdr_output = requested_cdr_output or implied_cdr_output
     cdr_out["do_cdr_output"] = do_cdr_output
+    # A _cdr stream Forge turns on itself averages over the OutputSpec's period,
+    # which nobody chose for this dt: move it onto MARBL steps rather than refuse
+    # it below. A stream or period the caller set is checked as given.
+    if (
+        implied_cdr_output
+        and not requested_cdr_output
+        and not {"output_period", "nrpf"}
+        & set(current_run_time_overrides.get("cdr_output") or {})
+    ):
+        _align_cdr_output_to_marbl_step(settings, roms_ref=effective_roms_ref)
     check_marbl_only_outputs(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
     if do_cdr_output:
         settings["cppdefs"]["cdr_forcing"] = True
@@ -1313,6 +1393,15 @@ def build_forge_blueprint(
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
 
+    # ----- restoring-flux output needs a restoring term ----------------------
+    # ucla-roms >= 0.13.0 stops at startup on wrt_rstflx without one; in a Forge
+    # build that is SSS restoring (cppdefs.sal_restore, derived above).
+    check_restoring_flux_output(
+        settings.get("surf_flux") or {},
+        sal_restore=settings["cppdefs"].get("sal_restore", False),
+        settings_cls=settings_cls,
+    )
+
     # ----- restart period consistency ----------------------------------------
     # Fail fast at authoring time (mirrors the executor's net for hand-edited
     # blueprints): restart writes must land on a timestep.
@@ -1359,6 +1448,7 @@ def build_forge_blueprint(
                 cppdefs_for_precheck(
                     settings.get("cppdefs", {}), settings.get("upscale_output", {})
                 ),
+                settings_cls=settings_cls,
             )
         except NamelistConsistencyError as exc:
             if exc.section == "extract_data_settings":
@@ -1374,12 +1464,18 @@ def build_forge_blueprint(
                     keys=exc.keys,
                 ) from exc
             raise
+    # Averaged MARBL streams vs the MARBL timestep (ucla-roms >= 0.13.0's
+    # check_avg_ends_on_marbl_step, precheck.F90): checked after do_cdr_output
+    # and dt are final, before any generation.
+    check_marbl_step_averages(
+        settings, settings_cls=settings_cls, roms_ref=effective_roms_ref
+    )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river) --------
     # A child grid (has a parent) receives its boundary values from the parent's
     # nesting.nc extraction, not from reanalysis boundary forcing -- the executor
     # already skips boundary-forcing generation for a child (grid_parent is not
-    # None, see ForgeExecutor/RomsMarblInputData). Skip building boundary items
+    # None, see ForgeExecutor/RomsInputGenerator). Skip building boundary items
     # here too (defense-in-depth, the wizard also clears this at the UI layer) --
     # done inside _build_forcing (not by zeroing sources.boundary afterward) so a
     # boundary-only source is never noted into resolved_datasets/datasets either.
@@ -1685,7 +1781,7 @@ def _build_forcing(
         if str(src.name).upper() in DERIVED_BGC_SOURCES:
             # ESPER itself is derived, but its salinity conditioning reads one staged
             # WOA23 file -- note *that* dataset so the executor stages it and
-            # input_data._resolve_source_block can look its path up.
+            # input_generator._resolve_source_block can look its path up.
             if str(src.name).upper() == "ESPER" and src.esper_salinity_conditioning:
                 resolved.setdefault("WOA_SALINITY", _resolved_dataset("WOA_SALINITY"))
             return
@@ -1697,7 +1793,7 @@ def _build_forcing(
             return
         # An explicit path (SourceSpec.path) bypasses staging entirely -- mirrors
         # topography_path semantics -- so the item is never noted into
-        # resolved_datasets/datasets (see input_data._resolve_source_block, which
+        # resolved_datasets/datasets (see input_generator._resolve_source_block, which
         # returns an explicit path verbatim without ever calling path_for_source).
         if src.path:
             return
@@ -1816,7 +1912,7 @@ def _build_code(
 
     roms = _repo("roms")
     if roms is None:
-        raise ValueError("ModelSpec model.yaml is missing a code.roms repository")
+        raise ValueError("The ModelSpec is missing a code.roms repository")
     if roms_ref:
         # User override: commit/branch/tag are all valid `git checkout` targets and
         # collapse to the same checkout_target downstream (C-Star CodeRepository), so
@@ -1828,7 +1924,7 @@ def _build_code(
         pio = _repo("pio")
         if pio is None:
             raise ValueError(
-                "use_pio=True but the ModelSpec model.yaml has no code.pio repository "
+                "use_pio=True but the ModelSpec has no code.pio repository "
                 "(Forge pins codebases for reproducibility)"
             )
     marbl = None
@@ -1836,7 +1932,7 @@ def _build_code(
         marbl = _repo("marbl")
         if marbl is None:
             raise ValueError(
-                'bgc_mode="marbl" but the ModelSpec model.yaml has no code.marbl '
+                'bgc_mode="marbl" but the ModelSpec has no code.marbl '
                 "repository (Forge pins codebases for reproducibility)"
             )
         if marbl_ref:

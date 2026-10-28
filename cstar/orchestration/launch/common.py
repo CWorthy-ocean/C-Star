@@ -1,13 +1,15 @@
 """Prior-attempt reuse logic shared by every launcher.
 
 Both `SlurmLauncher` and `LocalLauncher` reload a step's persisted sentinel
-handle when re-entering a run (`workplan run --run-id`), decide whether to
-reuse it or resubmit, and, on resubmission, rotate the prior log out of the
-way and annotate the fresh one. Centralizing that decision and the log
-wording here keeps the two launchers in lockstep and gives the logic a
-single owner and test surface.
+handle when re-entering a run (`workplan submit --run-id`), decide whether to
+reuse it or resubmit, cancel it when it is replaced while still in progress,
+and, on resubmission, rotate the prior log out of the way and annotate the
+fresh one. Centralizing that decision and the log wording here keeps the two
+launchers in lockstep and gives the logic a single owner and test surface.
 """
 
+import asyncio
+import time
 import typing as t
 from pathlib import Path
 
@@ -15,12 +17,21 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_RESUME
 from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME
-from cstar.orchestration.orchestration import Status
+from cstar.orchestration.orchestration import Status, Task
 
 if t.TYPE_CHECKING:
-    from cstar.orchestration.orchestration import LiveStep, ProcessHandle
+    from collections.abc import Sequence
+
+    from cstar.orchestration.orchestration import Launcher, LiveStep, ProcessHandle
 
 log = get_logger(__name__)
+
+_THandle = t.TypeVar("_THandle", bound="ProcessHandle")
+
+CANCEL_TIMEOUT: t.Final[float] = 90.0
+"""Seconds a cancelled prior attempt is given to end before its step is refused."""
+CANCEL_POLL_DELAY: t.Final[float] = 2.0
+"""Seconds between the status checks made while a cancelled prior attempt ends."""
 
 
 def is_foreign_handle(handle: "ProcessHandle", launcher_name: str) -> bool:
@@ -45,12 +56,85 @@ def is_foreign_handle(handle: "ProcessHandle", launcher_name: str) -> bool:
     return bool(handle.launcher_name) and handle.launcher_name != launcher_name
 
 
+def prior_of_this_run(
+    handle: "_THandle | None",
+    run_uuid: str,
+) -> "_THandle | None":
+    """Drop a persisted prior handle that belongs to another run of the same run-id.
+
+    Sentinels are kept by run-id, so a run started under the id of one whose
+    directory was removed or moved finds that run's handles. Adopting one
+    would report the step done without running it. A handle is another run's
+    when it records a manifest uuid other than `run_uuid`; one recording none
+    (written before the uuid was recorded, or when the manifest could not be
+    written) cannot be told apart and is kept.
+
+    Parameters
+    ----------
+    handle : ProcessHandle | None
+        The handle read from the step's sentinel, if any.
+    run_uuid : str
+        The uuid of the current run's manifest; empty when it could not be written.
+
+    Returns
+    -------
+    ProcessHandle | None
+        `handle`, or `None` when it belongs to another run.
+    """
+    if handle is None or not handle.run_uuid or not run_uuid:
+        return handle
+    if handle.run_uuid == run_uuid:
+        return handle
+
+    log.warning(
+        "Step %r has a sentinel from another run of %r (%s, not %s); "
+        "launching the step again.",
+        handle.name,
+        handle.run_id,
+        handle.run_uuid,
+        run_uuid,
+    )
+    return None
+
+
+def waits_on_replaced_dependency(
+    prior: "ProcessHandle",
+    dependencies: "Sequence[ProcessHandle]",
+) -> bool:
+    """Report whether a dependency was submitted after a step's prior attempt.
+
+    A queued attempt waits on the jobs its dependencies had when it was
+    submitted (a SLURM `afterok`, the pids a local proxy polls). A dependency
+    submitted since then replaced the job it waits on, which will not succeed
+    for it. A prior attempt with no recorded submission time predates every
+    one that has a record; a dependency with none cannot be told and is taken
+    as unchanged.
+
+    Parameters
+    ----------
+    prior : ProcessHandle
+        The handle read from the step's sentinel.
+    dependencies : Sequence[ProcessHandle]
+        The handles of the step's dependencies in this launch.
+
+    Returns
+    -------
+    bool
+    """
+    return any(
+        dep.submitted_at is not None
+        and (prior.submitted_at is None or dep.submitted_at > prior.submitted_at)
+        for dep in dependencies
+    )
+
+
 def resolve_prior_attempt(
     step: "LiveStep",
     prior_status: Status,
     *,
     prior_pre_run: bool = False,
     prior_foreign: bool = False,
+    replaced_dependency: bool = False,
 ) -> bool:
     """Decide whether a step's persisted prior handle should be reused.
 
@@ -69,12 +153,19 @@ def resolve_prior_attempt(
     prior_foreign : bool
         Whether the prior handle was created by another launcher (see
         `is_foreign_handle`), so its `prior_status` is only the persisted one.
+    replaced_dependency : bool
+        Whether a dependency was submitted after the prior attempt (see
+        `waits_on_replaced_dependency`). A prior attempt still queued then
+        waits on a job that no longer stands for the dependency, and is
+        replaced; one already running has passed its dependencies and is not.
 
     Returns
     -------
     bool
         `True` when the prior handle should be adopted in place of
-        submitting a new one.
+        submitting a new one. A prior attempt that is in progress and not
+        adopted must be cancelled before the step is submitted again (see
+        `cancel_prior_attempt`).
 
     Raises
     ------
@@ -129,6 +220,13 @@ def resolve_prior_attempt(
             log.debug("Prior run of %r in fail state. Re-running.", step.name)
             step.workflow_overrides[KEY_CLOBBER] = True
         reuse = False
+    elif prior_status is Status.Submitted and replaced_dependency:
+        log.debug(
+            "Prior run of %r is queued behind a dependency submitted since; "
+            "replacing it.",
+            step.name,
+        )
+        reuse = False
     elif Status.is_terminal(prior_status) or Status.is_in_progress(prior_status):
         # re-use the result from a run that terminated successfully, or adopt
         # a job that is still queued/running instead of submitting a
@@ -149,6 +247,72 @@ def resolve_prior_attempt(
         )
 
     return reuse
+
+
+async def cancel_prior_attempt(
+    launcher: "type[Launcher[_THandle]]",
+    step: "LiveStep",
+    handle: _THandle,
+) -> None:
+    """Cancel a step's prior attempt that is still in progress, before it is replaced.
+
+    Submitting the step again without this leaves two jobs sharing its working
+    directory, or a queued job that runs the step's old definition. The step is
+    submitted only once the attempt has ended, so the replacement cannot clear
+    the directory under it. An attempt created by another launcher cannot be
+    cancelled by `launcher` (a local pid is no SLURM job id, and vice versa); it
+    is named in a warning and left alone.
+
+    Parameters
+    ----------
+    launcher : type[Launcher]
+        The launcher replacing the attempt.
+    step : LiveStep
+        The step whose attempt is replaced.
+    handle : ProcessHandle
+        The handle of the prior attempt, read from the step's sentinel.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the attempt could not be cancelled, or did not end within
+        `CANCEL_TIMEOUT` seconds of being cancelled.
+    """
+    if is_foreign_handle(handle, launcher.name):
+        log.warning(
+            "Step %r has an attempt still %s under the %s launcher (job %s), "
+            "which the %s launcher cannot cancel; stop it yourself, as the step "
+            "is submitted again beside it.",
+            step.name,
+            handle.status.name,
+            handle.launcher_name,
+            handle.pid,
+            launcher.name,
+        )
+        return
+
+    cancelled = await launcher.cancel(Task(step=step, handle=handle))
+    deadline = time.monotonic() + CANCEL_TIMEOUT
+    while Status.is_in_progress(status := await launcher.query_status(handle)):
+        if cancelled.status is not Status.Cancelled:
+            msg = (
+                f"Could not cancel job {handle.pid} of step {step.name!r}, which "
+                f"is still {status.name}; cancel it yourself, then submit again"
+            )
+            raise CstarExpectationFailed(msg)
+        if time.monotonic() > deadline:
+            msg = (
+                f"Job {handle.pid} of step {step.name!r} was cancelled but is "
+                f"still {status.name} after {CANCEL_TIMEOUT:g}s; submit again "
+                "once it has ended"
+            )
+            raise CstarExpectationFailed(msg)
+        await asyncio.sleep(CANCEL_POLL_DELAY)
+
+    if cancelled.status is Status.Cancelled:
+        log.info(
+            "Cancelled job %s of step %r to submit it again.", handle.pid, step.name
+        )
 
 
 def build_attempt_log_header(

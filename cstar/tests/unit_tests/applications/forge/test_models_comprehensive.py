@@ -370,6 +370,35 @@ class TestLoadModelsYaml:
         assert spec.name == "my_model"
         assert spec.code.roms.branch == "main"
 
+    def test_load_archived_round_trips(self, tmp_path):
+        """A top-level archived key on model.yaml round-trips onto
+        ModelSpec.archived, and is False by default when absent.
+        """
+        base_yaml = {
+            "code": {
+                "roms": {
+                    "location": "https://github.com/test/roms.git",
+                    "commit": "x",
+                },
+                "templates_compile_time": {
+                    "directory": "templates/compile-time",
+                    "files": ["cppdefs.opt.j2"],
+                },
+                "templates_run_time": {
+                    "directory": "templates/run-time",
+                    "files": ["marbl_in"],
+                },
+            },
+            "model_settings": {"cppdefs": {}},
+        }
+        plain = self._write(tmp_path, base_yaml, filename="plain.yaml")
+        assert load_models_yaml(plain, "my_model").archived is False
+
+        archived = self._write(
+            tmp_path, {**base_yaml, "archived": True}, filename="archived.yaml"
+        )
+        assert load_models_yaml(archived, "my_model").archived is True
+
     def test_load_use_pio_round_trips(self, tmp_path):
         """A top-level use_pio key on model.yaml round-trips onto ModelSpec.use_pio
         (mirrors bgc_mode), and is False by default when absent.
@@ -429,7 +458,7 @@ class TestLoadModelsYaml:
         assert spec.code.roms.commit == "6588486"
 
     def test_load_missing_model_raises_keyerror(self, tmp_path):
-        yaml_path = self._write(tmp_path, {"other_model": {}})
+        yaml_path = self._write(tmp_path, {"other_model": {}, "another_model": {}})
         with pytest.raises(KeyError) as exc_info:
             load_models_yaml(yaml_path, "test_model")
         assert "test_model" in str(exc_info.value)

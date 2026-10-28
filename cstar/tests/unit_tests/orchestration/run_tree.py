@@ -33,8 +33,6 @@ class FakeRun:
     def record(self) -> WorkplanRun:
         """The tracking record of the run."""
         return WorkplanRun(
-            workplan_path=self.trx_path,
-            trx_workplan_path=self.trx_path,
             output_path=self.root,
             run_id=RUN_ID,
         )
@@ -81,6 +79,8 @@ def build_fake_run(blueprint: Path, scratch: Path) -> FakeRun:
     - `<step>/input` holds two absolute links inside the run (`abs_file` and
       `abs_dir`), a dangling absolute link, a dangling relative link, a relative
       link that works, and an absolute link to a file outside the run
+    - `<step>/input/codebases/roms/.libs/lib.la` is a dangling relative link,
+      as a cloned ucla-roms holds
     - `<root>/gathered_output/a.nc` is an absolute link into the run
     - the `run` step has no directory and `tasks/stale` belongs to no step
     - the run's state directory holds the sentinel of `Spin Up`, one that
@@ -136,6 +136,7 @@ def build_fake_run(blueprint: Path, scratch: Path) -> FakeRun:
     link(step / "input" / "rel_dangling", "../nothing")
     link(step / "input" / "rel_ok", "../output/a.nc")
     link(step / "input" / "abs_outside", elsewhere)
+    link(step / "input" / "codebases" / "roms" / ".libs" / "lib.la", "../lib.la")
     link(root / "gathered_output" / "a.nc", step / "output" / "a.nc")
     (root / "tasks" / "stale").mkdir()
 

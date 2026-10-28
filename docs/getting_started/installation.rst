@@ -1,0 +1,193 @@
+Installation
+============
+
+C-Star is published on `conda-forge <https://anaconda.org/conda-forge/cstar-ocean>`__
+as ``cstar-ocean``. One install gives you the ``cstar`` command line, the
+UCLA-ROMS application and Forge, the domain-generation application, including
+its wizard.
+
+Install with conda
+------------------
+
+Pick the variant that matches your machine:
+
+.. tab-set::
+
+   .. tab-item:: Laptop or workstation
+
+      ``cstar-ocean-standalone`` installs C-Star together with a complete
+      build toolchain (compilers, MPI, netCDF-Fortran, PnetCDF, CMake, rsync)
+      from conda-forge, so ROMS can be compiled without any system
+      dependencies:
+
+      .. code-block:: console
+
+         conda create -n cstar-env -c conda-forge cstar-ocean-standalone
+
+   .. tab-item:: HPC system
+
+      On a cluster that isn't in the :doc:`list of supported systems
+      <../deployments/machines>`, use the laptop or workstation install instead
+      (see :ref:`machines_unlisted`).
+
+      On a supported HPC system the compiler, MPI and netCDF toolchain comes
+      from the site's environment modules, so install just ``cstar-ocean``:
+
+      .. code-block:: console
+
+         conda create -n cstar-env -c conda-forge cstar-ocean
+
+      Do not install ``cstar-ocean-standalone`` or the conda ``compilers``
+      packages into an environment you will activate on a supported cluster.
+      They export ``CC``, ``CXX`` and ``FC`` on activation and put their own
+      ``mpif90`` ahead of the module toolchain on ``PATH``, which silently
+      hijacks ROMS builds that should use the cluster's compilers.
+
+Then activate the environment:
+
+.. code-block:: console
+
+   conda activate cstar-env
+
+.. _verify-install:
+
+Verify the installation
+-----------------------
+
+.. code-block:: console
+
+   cstar --version
+   cstar --help
+
+The first command prints the C-Star version, the versions of its companion
+packages and the newest ucla-roms release this C-Star knows; the second lists
+subcommands you may wish to explore in more detail.
+
+After installing
+----------------
+
+Run ``cstar init``
+   One guided command covers the rest of this section. On a cluster it asks
+   for your scheduler account, queue and default walltime, listing your SLURM
+   associations and partitions when it can. It shows where C-Star will put
+   run output, the shared source-data cache and your catalog entries, asks
+   whether to use them, and lets you change each if you answer no. It writes
+   those answers to the configuration file, offers to install the shell function behind ``cstar run cd``, offers to
+   register a Jupyter kernel for the environment, and ends with the two
+   dataset registrations below:
+
+   .. code-block:: console
+
+      cstar init
+
+   Every prompt defaults to the value already in effect, so run it again
+   whenever you want to review your setup. ``cstar init --yes`` accepts every
+   default without asking, for containers and scripts. Each step can also be
+   done on its own:
+
+   Configure C-Star for your cluster
+      The scheduler account and queue and the data locations live in the
+      configuration file, ``~/.config/cstar/config.env``, which ``cstar init``
+      writes. ``cstar env set`` changes one setting, or edit the file by hand;
+      ``cstar env show`` prints the active configuration and where each value
+      came from. See :doc:`configuration` and :doc:`../deployments/hpc`.
+
+   Register a Jupyter kernel
+      To use Jupyter notebooks with your C-Star environment, for your own
+      analysis or for the Jupyter version of the Forge wizard, activate the
+      environment and run:
+
+      .. code-block:: console
+
+         cstar env register-kernel
+
+      This custom registration mechanism helps ensure compatibility with HPC
+      Jupyter servers. The kernel launches through a wrapper that activates
+      the environment first, so shell commands inside notebooks see the same
+      ``PATH`` and variables you do. Run ``cstar env register-kernel --help``
+      for naming options.
+
+   Install the shell function
+      ``cstar run cd <run-id>`` can only change your shell's directory
+      through a small shell function. ``cstar env shell-init --install``
+      installs it for zsh or bash; see :ref:`workplan_run_cd`.
+
+Register for dataset access
+   Generating a new domain downloads forcing data from public archives. Most
+   sources need no account, but GLORYS ocean reanalysis (used for essentially
+   every domain) and TPXO tides require a free registration and a one-time
+   setup step. See :doc:`data_access`.
+
+Install from source
+-------------------
+
+Use this path if you plan to modify C-Star itself or need an unreleased
+version. Clone the repository:
+
+.. code-block:: console
+
+   git clone https://github.com/CWorthy-ocean/C-Star.git
+   cd C-Star
+
+Create the environment from the file that matches your machine. Both create
+an environment named ``cstar-env``; the laptop file bundles the same
+conda-forge toolchain that ``cstar-ocean-standalone`` provides.
+
+.. tab-set::
+
+   .. tab-item:: Laptop or workstation
+
+      .. code-block:: console
+
+         conda env create -f environment-laptop.yml
+         conda activate cstar-env
+
+   .. tab-item:: HPC system
+
+      .. code-block:: console
+
+         conda env create -f environment-hpc.yml
+         conda activate cstar-env
+
+Then install C-Star into it. An editable install picks up your edits to the
+checkout without reinstalling; the ``dev`` and ``docs`` extras add the test
+suite and documentation dependencies.
+
+.. tab-set::
+
+   .. tab-item:: Editable
+
+      .. code-block:: console
+
+         pip install -e .
+
+   .. tab-item:: Contributor (tests and docs)
+
+      .. code-block:: console
+
+         pip install -e ".[dev,docs]"
+
+   .. tab-item:: Fixed copy
+
+      .. code-block:: console
+
+         pip install .
+
+See :doc:`../contributing` for running the tests and building this
+documentation.
+
+Updating
+--------
+
+Released versions update with conda:
+
+.. code-block:: console
+
+   conda update -n cstar-env -c conda-forge cstar-ocean
+
+C-Star, ROMS-Tools and UCLA-ROMS are released together, and the conda
+packages pin versions that are known to work with one another. Installing
+a package from its GitHub ``main`` branch (``pip install
+git+https://github.com/CWorthy-ocean/C-Star.git@main``) gets you an
+unreleased change, but can pair versions that are not yet compatible; prefer
+tagged releases unless you need a specific fix.

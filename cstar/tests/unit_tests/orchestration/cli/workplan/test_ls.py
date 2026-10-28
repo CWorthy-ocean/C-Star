@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import logging
+import shutil
 import typing as t
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -11,14 +12,17 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from click.testing import Result
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+from typer.testing import CliRunner
 
 from cstar.cli.workplan.ls import (
     FIELD_NAMES,
     FORMATS,
     INCLUSIONS,
+    WHERE_INCLUSIONS,
     ItemView,
     adapt_runs_to_views,
     csv_formatter,
@@ -31,8 +35,21 @@ from cstar.cli.workplan.ls import (
     sorters,
     table_formatter,
 )
+from cstar.cli.workplan.ls import app as app_ls
+from cstar.orchestration.index import RunIndex
+from cstar.orchestration.manifest import Attempt, read_run_manifest, write_run_manifest
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
-from cstar.orchestration.tracking import KEY_RUN_NAME, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_RUN_UUID,
+    Access,
+    TrackingRepository,
+    WorkplanRun,
+)
+from cstar.tests.unit_tests.orchestration.manifest_runs import (
+    STARTED,
+    BuiltRun,
+    write_identity,
+)
 
 LS_LOGGER = "cstar.cli.workplan.ls"
 
@@ -41,48 +58,57 @@ T0 = datetime.datetime(2026, 9, 12, 3, 4, 0, tzinfo=UTC)
 """An arbitrary tz-aware reference time used to build test data."""
 
 
-def make_run(
-    run_id: str,
-    size: int | None = None,
-    name: str | None = None,
-    start: datetime.datetime | None = None,
-) -> WorkplanRun:
-    """Build a `WorkplanRun` with dummy paths for filter tests.
+MakeRun = t.Callable[..., WorkplanRun]
+"""The factory the `make_run` fixture is."""
+
+
+@pytest.fixture
+def make_run(tmp_path: Path) -> MakeRun:
+    """Provide a factory of `WorkplanRun` records for filter, adapter and ls tests.
+
+    The factory makes a run directory under `tmp_path` holding a manifest that
+    names the run and starts it, and a transformed workplan, so the record
+    derives its name, start and workplan paths as it would for a real run.
 
     Parameters
     ----------
-    run_id : str
-        The unique run identifier.
-    size : int | None
-        When supplied, stored as a single step's measured size; `None`
-        leaves `step_sizes` empty (i.e. unmeasured).
-    name : str | None
-        When supplied, stored in metadata under the run-name key.
-    start : datetime.datetime | None
-        When supplied, used as the run start time.
+    tmp_path : Path
+        Temporary directory the run directories are made in.
 
     Returns
     -------
-    WorkplanRun
+    MakeRun
+        `make_run(run_id, size=None, name=None, start=None, root=None)`: `size`
+        is a single step's measured size (unmeasured when `None`), `name` the
+        name the manifest holds (none by default, so the workplan is loaded),
+        `start` the start of the manifest's attempt, and `root` a run
+        directory to record without making it (to share one with another run).
     """
-    metadata: dict[str, str] = {}
 
-    if name is not None:
-        metadata[KEY_RUN_NAME] = name
+    def _make(
+        run_id: str,
+        size: int | None = None,
+        name: str | None = None,
+        start: datetime.datetime | None = None,
+        root: Path | None = None,
+    ) -> WorkplanRun:
+        if root is None:
+            root = tmp_path / run_id / "out"
+            write_identity(
+                root,
+                run_id,
+                workplan=tmp_path / f"{run_id}.yaml",
+                name=name or "",
+                start_at=start or STARTED,
+            )
+            (root / f"{run_id}_transformed.yaml").touch()
+        return WorkplanRun(
+            output_path=root,
+            run_id=run_id,
+            step_sizes={} if size is None else {"step": size},
+        )
 
-    step_sizes: dict[str, int] = {} if size is None else {"step": size}
-
-    kwargs: dict[str, t.Any] = {} if start is None else {"start_at": start}
-
-    return WorkplanRun(
-        workplan_path=Path(f"/tmp/{run_id}/workplan.yaml"),
-        trx_workplan_path=Path(f"/tmp/{run_id}/trx.yaml"),
-        output_path=Path(f"/tmp/{run_id}/out"),
-        run_id=run_id,
-        metadata=metadata,
-        step_sizes=step_sizes,
-        **kwargs,
-    )
+    return _make
 
 
 def make_view(
@@ -129,13 +155,12 @@ def test_itemview_size_shows_hint_for_unsized_table_rows() -> None:
     """Verify an uncomputed size renders the refresh hint in table format."""
     view = make_view(run_id="run-9", raw_size=-1, format="table")
 
-    assert "cstar run status run-9" in view.size
-    assert "--size" in view.size
+    assert view.size == "not measured (cstar run status run-9 --size)"
 
 
 @pytest.mark.parametrize("format", ["csv", "json"])
-def test_itemview_size_shows_raw_value_for_machine_formats(format: FORMATS) -> None:
-    """Verify an uncomputed size is not replaced by the hint in csv/json.
+def test_itemview_size_is_absent_for_unsized_machine_formats(format: FORMATS) -> None:
+    """Verify an uncomputed size is empty in csv/json, not the -1 sentinel.
 
     Parameters
     ----------
@@ -144,7 +169,7 @@ def test_itemview_size_shows_raw_value_for_machine_formats(format: FORMATS) -> N
     """
     view = make_view(raw_size=-1, format=format)
 
-    assert view.size == "-1MB"
+    assert view.size is None
 
 
 @pytest.mark.parametrize("format", ["table", "csv", "json"])
@@ -190,7 +215,7 @@ def test_itemview_start_renders_isoformat_for_machine_formats(
 # ---------------------------------------------------------------------------
 
 
-def test_filter_size_without_bounds_returns_copy_of_all_runs() -> None:
+def test_filter_size_without_bounds_returns_copy_of_all_runs(make_run: MakeRun) -> None:
     """Verify no bounds means no filtering and the input is not aliased."""
     runs = [make_run("a", size=1), make_run("b", size=2)]
 
@@ -214,6 +239,7 @@ def test_filter_size_without_bounds_returns_copy_of_all_runs() -> None:
     ],
 )
 def test_filter_size_bounds(
+    make_run: MakeRun,
     lt_filter: int | None,
     gt_filter: int | None,
     expected: list[str],
@@ -237,6 +263,7 @@ def test_filter_size_bounds(
 
 
 def test_filter_size_never_drops_unsized_runs(
+    make_run: MakeRun,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify unmeasured runs pass every filter and warn once."""
@@ -250,6 +277,7 @@ def test_filter_size_never_drops_unsized_runs(
 
 
 def test_filter_size_does_not_warn_when_all_runs_are_sized(
+    make_run: MakeRun,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify no warning is emitted when every run has a computed size."""
@@ -266,7 +294,7 @@ def test_filter_size_does_not_warn_when_all_runs_are_sized(
 # ---------------------------------------------------------------------------
 
 
-def test_filter_time_without_bounds_returns_copy_of_all_runs() -> None:
+def test_filter_time_without_bounds_returns_copy_of_all_runs(make_run: MakeRun) -> None:
     """Verify no bounds means no filtering and the input is not aliased."""
     runs = [make_run("a"), make_run("b")]
 
@@ -288,6 +316,7 @@ def test_filter_time_without_bounds_returns_copy_of_all_runs() -> None:
     ],
 )
 def test_filter_time_bounds(
+    make_run: MakeRun,
     lt_offset: int | None,
     gt_offset: int | None,
     expected: list[str],
@@ -319,7 +348,7 @@ def test_filter_time_bounds(
     assert [r.run_id for r in actual] == expected
 
 
-def test_filter_time_normalizes_mixed_offsets() -> None:
+def test_filter_time_normalizes_mixed_offsets(make_run: MakeRun) -> None:
     """Verify equal instants expressed in different zones compare as equal."""
     plus_two = datetime.timezone(datetime.timedelta(hours=2))
     run = make_run("a", start=T0.astimezone(plus_two))
@@ -447,7 +476,7 @@ def test_csv_formatter_writes_header_and_rows_in_order() -> None:
     assert [r["run_id"] for r in by_header] == ["r2", "r1"]
     assert by_header[0]["name"] == "beta"
     assert by_header[0]["size"] == "7MB"
-    assert by_header[1]["size"] == "-1MB"
+    assert by_header[1]["size"] == ""
     assert by_header[0]["start"] == "2026-09-12T03:04:00+00:00"
 
 
@@ -583,6 +612,7 @@ def stub_load_workplans(
 
 
 async def test_adapt_runs_builds_views_from_cached_workplans(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify names, sizes, start times, and format are threaded into views."""
@@ -605,9 +635,11 @@ async def test_adapt_runs_builds_views_from_cached_workplans(
     "name",
     ["Workplan 0", "Workplan 1", "Workplan 2"],
 )
-async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
-    """Verify that the name in the run metadata is used when the workplan can't be
-    loaded from disk.
+async def test_adapt_runs_builds_views_from_run_metadata(
+    make_run: MakeRun, name: str
+) -> None:
+    """Verify that the name in the run's manifest is used without loading the
+    workplan from disk.
     """
     run = make_run("r1", size=7, start=T0, name=name)
 
@@ -622,11 +654,19 @@ async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
     assert view.name == name
 
 
-async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name() -> None:
+async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name(
+    tmp_path: Path,
+) -> None:
     """Verify a run recorded by an earlier release, whose stored name carries
     the `(transformed)` suffix, is listed under the plain workplan name.
     """
-    run = make_run("r1", name=f"plan-a{LEGACY_TRANSFORMED_NAME_SUFFIX}")
+    run = WorkplanRun.model_validate(
+        {
+            "output_path": str(tmp_path / "no-manifest"),
+            "run_id": "r1",
+            "metadata": {"name": f"plan-a{LEGACY_TRANSFORMED_NAME_SUFFIX}"},
+        }
+    )
 
     views = await adapt_runs_to_views([run], {}, "json")
 
@@ -634,6 +674,7 @@ async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name() -> None:
 
 
 async def test_adapt_runs_defaults_size_when_metadata_is_missing(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a run without measured step sizes renders the -1 sentinel."""
@@ -649,6 +690,7 @@ async def test_adapt_runs_defaults_size_when_metadata_is_missing(
 
 
 async def test_adapt_runs_falls_back_to_unknown_on_failed_deserialization(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -668,11 +710,13 @@ async def test_adapt_runs_falls_back_to_unknown_on_failed_deserialization(
 
 
 async def test_adapt_runs_deserializes_each_path_once(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify shared and pre-cached workplan paths are not loaded again."""
-    first, second = make_run("r1", size=1), make_run("r2", size=2)
-    object.__setattr__(second, "trx_workplan_path", first.trx_workplan_path)
+    first = make_run("r1", size=1)
+    second = make_run("r2", size=2, root=first.output_path)
+    assert second.trx_workplan_path == first.trx_workplan_path
     cached = make_run("r3", size=3)
     calls: list[list[Path]] = []
     monkeypatch.setattr(
@@ -692,6 +736,7 @@ async def test_adapt_runs_deserializes_each_path_once(
 
 
 async def test_adapt_runs_only_loads_workplans_for_runs_missing_a_name(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a cached run-name skips the workplan load entirely.
@@ -721,6 +766,7 @@ async def test_adapt_runs_only_loads_workplans_for_runs_missing_a_name(
 def patch_ls_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     runs: Sequence[WorkplanRun],
+    width: int = 200,
 ) -> tuple[io.StringIO, mock.AsyncMock]:
     """Patch the IO boundaries of `ls_runs` and capture console output.
 
@@ -730,6 +776,9 @@ def patch_ls_pipeline(
         The active monkeypatch fixture.
     runs : Sequence[WorkplanRun]
         The run records the stubbed repository will return.
+    width : int
+        The width of the console the command prints to; the console is not a
+        terminal.
 
     Returns
     -------
@@ -759,12 +808,13 @@ def patch_ls_pipeline(
     )
     monkeypatch.setattr("cstar.cli.workplan.ls.refresh_disk_usage", refresh_mock)
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.console", Console(file=buffer, width=200)
+        "cstar.cli.workplan.ls.console", Console(file=buffer, width=width)
     )
     return buffer, refresh_mock
 
 
 def test_ls_runs_renders_sorted_json_document(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify the end-to-end command emits parseable, sorted JSON."""
@@ -782,6 +832,7 @@ def test_ls_runs_renders_sorted_json_document(
 
 
 def test_ls_runs_applies_filters_and_reverse_sort(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify size/time filters and reverse ordering apply before rendering."""
@@ -807,6 +858,7 @@ def test_ls_runs_applies_filters_and_reverse_sort(
 
 
 def test_ls_runs_refresh_usage_awaits_refresh_disk_usage_once(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify `--size` triggers exactly one refresh call with all filtered runs."""
@@ -823,6 +875,7 @@ def test_ls_runs_refresh_usage_awaits_refresh_disk_usage_once(
 
 
 def test_ls_runs_without_refresh_usage_never_awaits_refresh_disk_usage(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify omitting `--size` never triggers a refresh."""
@@ -832,3 +885,421 @@ def test_ls_runs_without_refresh_usage_never_awaits_refresh_disk_usage(
     ls_runs(mock.Mock(), format="json", refresh_usage=False)
 
     refresh_mock.assert_not_awaited()
+
+
+LONG_RUN_ID: t.Final[str] = "a-run-id-" + "x" * 80
+"""A run-id wider than the 80 columns a console has when it is not a terminal."""
+LONG_NAME: t.Final[str] = "a workplan name with spaces" + " and words" * 6
+"""A name with spaces, wider than the 80 columns of a console that is not a terminal."""
+
+
+@pytest.mark.parametrize("width", [40, 80])
+def test_ls_runs_json_is_not_wrapped_at_the_console_width(
+    make_run: MakeRun, monkeypatch: pytest.MonkeyPatch, width: int
+) -> None:
+    """Verify the JSON document parses when values are wider than the console.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    width : int
+        The width of the console, which is not a terminal.
+    """
+    runs = [make_run(LONG_RUN_ID, size=5, name=LONG_NAME), make_run("r1")]
+    buffer, _ = patch_ls_pipeline(monkeypatch, runs, width=width)
+
+    ls_runs(mock.Mock(), format="json")
+
+    rows = {row["run_id"]: row for row in json.loads(buffer.getvalue())["data"]}
+    assert rows[LONG_RUN_ID]["name"] == LONG_NAME
+    assert rows[LONG_RUN_ID]["size"] == "5MB"
+    assert rows["r1"]["size"] is None
+
+
+@pytest.mark.parametrize("width", [40, 80])
+def test_ls_runs_csv_is_not_wrapped_at_the_console_width(
+    make_run: MakeRun, monkeypatch: pytest.MonkeyPatch, width: int
+) -> None:
+    """Verify each CSV row stays whole when values are wider than the console.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    width : int
+        The width of the console, which is not a terminal.
+    """
+    runs = [make_run(LONG_RUN_ID, size=5, name=LONG_NAME), make_run("r1")]
+    buffer, _ = patch_ls_pipeline(monkeypatch, runs, width=width)
+
+    ls_runs(mock.Mock(), format="csv")
+
+    rows = list(csv.DictReader(io.StringIO(buffer.getvalue())))
+    assert all(set(row) == INCLUSIONS for row in rows), rows
+    by_id = {row["run_id"]: row for row in rows}
+    assert set(by_id) == {LONG_RUN_ID, "r1"}
+    assert by_id[LONG_RUN_ID]["name"] == LONG_NAME
+    assert by_id["r1"]["size"] == ""
+
+
+# ---------------------------------------------------------------------------
+# --shared and --all
+# ---------------------------------------------------------------------------
+
+EXIT_BAD_ARGS: t.Final[int] = 2
+LATER: t.Final[datetime.datetime] = T0 + datetime.timedelta(days=2)
+"""When the runs the tests below put under tracking started."""
+
+
+class Listing:
+    """Runs `cstar run ls` against the tracking and the run directories of the test."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.buffer = io.StringIO()
+        monkeypatch.setattr(
+            "cstar.cli.workplan.ls.console", Console(file=self.buffer, width=400)
+        )
+
+    def run(self, *args: str) -> Result:
+        """Invoke the command; its console output is `buffer`."""
+        self.buffer.seek(0)
+        self.buffer.truncate()
+        return CliRunner().invoke(app_ls, ["ls", *args], color=False)
+
+    def rows(self, *args: str) -> dict[str, dict[str, str]]:
+        """List as JSON and key the rows by run-id."""
+        result = self.run("--format", "json", *args)
+        assert result.exit_code == 0, result.output
+        data = json.loads(self.buffer.getvalue())["data"]
+        assert len(data) == len({row["run_id"] for row in data}), data
+        return {row["run_id"]: row for row in data}
+
+    def where(self, *args: str) -> dict[str, str]:
+        """List as JSON and map each run-id to where it is kept."""
+        return {run_id: row["where"] for run_id, row in self.rows(*args).items()}
+
+
+@pytest.fixture
+def listing(monkeypatch: pytest.MonkeyPatch) -> Listing:
+    return Listing(monkeypatch)
+
+
+def track(built: BuiltRun, *, size: int | None = None) -> WorkplanRun:
+    """Put a built run under tracking, as a run started on this machine."""
+    run = WorkplanRun(
+        output_path=built.root,
+        run_id=built.run_id,
+        metadata={KEY_RUN_UUID: built.uuid},
+        step_sizes={} if size is None else {"step": size},
+    )
+    TrackingRepository().put_workplan_run_sync(run)
+    return run
+
+
+def restart(built: BuiltRun, start: datetime.datetime) -> None:
+    """Make the one attempt of a built run's manifest start at `start`."""
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    manifest.attempts = [Attempt(start_at=start)]
+    write_run_manifest(built.root, manifest)
+
+
+@pytest.fixture
+def populated(
+    build_run: t.Callable[..., BuiltRun],
+    local_run: t.Callable[..., BuiltRun],
+    project_run: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    tmp_path: Path,
+) -> dict[str, BuiltRun]:
+    """Runs of every kind, keyed by run-id.
+
+    - `mine` and `copied`: tracked, with directories in the data home
+    - `mine` is also linked from the project area
+    - `copied` also has a materialized copy in the project area
+    - `orphan`: in the data home, untracked
+    - `kept`: materialized in the project area
+    - `linked`: a link in the project area to a run kept elsewhere
+    """
+    hour = datetime.timedelta(hours=1)
+    runs = {
+        "mine": local_run("mine", start_at=T0),
+        "copied": local_run("copied", start_at=T0),
+        "orphan": local_run("orphan", start_at=T0 + hour),
+        "kept": project_run("kept", start_at=T0 + 2 * hour),
+        "linked": build_run(
+            tmp_path / "elsewhere" / "linked", "linked", start_at=T0 + 3 * hour
+        ),
+    }
+    shutil.copytree(runs["copied"].root, project_runs / "copied-copy", symlinks=True)
+    # a tracked run starts as its manifest says: the copy keeps the earlier start
+    for name in ("mine", "copied"):
+        restart(runs[name], LATER)
+    track(runs["mine"])
+    track(runs["copied"], size=5)
+    (project_runs / "mine-link").symlink_to(runs["mine"].root)
+    (project_runs / "linked").symlink_to(runs["linked"].root)
+    return runs
+
+
+def test_the_default_listing_never_scans(
+    populated: dict[str, BuiltRun],
+    listing: Listing,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the listing of the runs started here reads no run directory and has
+    no `where` column.
+    """
+    scan = mock.Mock(side_effect=AssertionError("the default listing scanned"))
+    monkeypatch.setattr(RunIndex, "locations", scan)
+
+    rows = listing.rows()
+
+    assert set(rows) == {"mine", "copied"}
+    assert all("where" not in row for row in rows.values())
+    scan.assert_not_called()
+
+
+def test_shared_lists_the_project_area_alone(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify `--shared` lists what the project's runs area holds, says which are
+    links, and lists no run kept only in the data home.
+    """
+    rows = listing.rows("--shared")
+
+    assert {run_id: row["where"] for run_id, row in rows.items()} == {
+        "kept": "project",
+        "linked": "project, linked",
+        "copied": "project",
+        "mine": "project, linked",
+    }
+    assert rows["kept"]["start"] == (T0 + datetime.timedelta(hours=2)).isoformat()
+    assert rows["kept"]["name"] == "kept"
+    assert rows["kept"]["size"] is None
+
+
+def test_all_lists_what_is_tracked_and_what_only_manifests_name(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify `--all` lists the runs tracked here, then the others the data home
+    and the project's runs area hold, each once: a run's own directory, and a
+    copy of it that holds its uuid, are the tracked run.
+    """
+    rows = listing.rows("--all")
+
+    assert {run_id: row["where"] for run_id, row in rows.items()} == {
+        "mine": "local",
+        "copied": "local",
+        "orphan": "local, untracked",
+        "kept": "project",
+        "linked": "project, linked",
+    }
+    assert rows["copied"]["size"] == "5MB"
+    assert rows["orphan"]["start"] == (T0 + datetime.timedelta(hours=1)).isoformat()
+
+
+def test_both_flags_list_what_all_lists(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify `--shared` beside `--all` changes nothing."""
+    assert listing.rows("--shared", "--all") == listing.rows("--all")
+
+
+def test_shared_without_a_project_home_is_a_bad_argument(
+    local_run: t.Callable[..., BuiltRun],
+    listing: Listing,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify there is nothing to list, and the way to set it, when no project is configured."""
+    local_run("orphan")
+
+    result = listing.run("--shared")
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    text = flatten_cli_output(result.stderr)
+    assert "CSTAR_PROJECT_HOME" in text
+    assert "cstar/runs" in text
+    assert listing.buffer.getvalue() == ""
+
+
+def attach(built: BuiltRun, access: Access | None = None) -> WorkplanRun:
+    """Put a built run under tracking, as `cstar run attach` records it."""
+    run = track(built)
+    run.attached = True
+    if access is not None:
+        run.access = access
+    TrackingRepository().put_workplan_run_sync(run)
+    return run
+
+
+def test_attached_runs_say_so_in_where(
+    build_run: t.Callable[..., BuiltRun],
+    local_run: t.Callable[..., BuiltRun],
+    listing: Listing,
+    tmp_path: Path,
+) -> None:
+    """Verify a run attached from elsewhere is listed with the runs started here,
+    wherever its directory is, and says whether nothing may write into it.
+    """
+    track(local_run("mine"))
+    attach(build_run(tmp_path / "colleague" / "theirs", "theirs"))
+    attach(build_run(tmp_path / "colleague" / "owned", "owned"), Access.owned)
+    attach(build_run(tmp_path / "colleague" / "frozen", "frozen"), Access.read_only)
+
+    assert listing.where("--all") == {
+        "mine": "local",
+        "theirs": "attached",
+        "owned": "attached",
+        "frozen": "attached, read-only",
+    }
+
+
+def test_all_without_a_project_home_lists_the_local_runs(
+    local_run: t.Callable[..., BuiltRun], listing: Listing
+) -> None:
+    """Verify `--all` is the runs of the data home when there is no project."""
+    mine = local_run("mine")
+    local_run("orphan")
+    track(mine)
+
+    assert listing.where("--all") == {"mine": "local", "orphan": "local, untracked"}
+
+
+def local_spelling(moment: datetime.datetime) -> str:
+    """Spell a moment as `--min-time` and `--max-time` read it: local, without an offset."""
+    return moment.astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
+
+
+def test_the_filters_apply_to_the_runs_only_a_manifest_names(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify the run-id and time filters drop index rows as they drop tracked ones."""
+    assert set(listing.where("--all", "--run-filter", "or")) == {"orphan"}
+
+    between = local_spelling(T0 + datetime.timedelta(minutes=90))
+    assert set(listing.where("--all", "--min-time", between)) == {
+        "mine",
+        "copied",
+        "kept",
+        "linked",
+    }
+    # `mine-link` is the tracked directory, which started later; `copied-copy`
+    # is a copy of its manifest as it was
+    assert set(listing.where("--shared", "--max-time", between)) == {"copied"}
+
+
+def test_a_tracked_run_a_filter_drops_does_not_return_as_its_copy(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify a tracked run that a filter drops is not listed again as the link
+    or the copy of it in the project area, whose manifests start earlier and so
+    pass the same filter.
+    """
+    before_tracking = local_spelling(T0 + datetime.timedelta(days=1))
+
+    rows = listing.where("--all", "--max-time", before_tracking)
+
+    assert set(rows) == {"orphan", "kept", "linked"}
+
+
+def test_a_tracked_run_whose_directory_is_gone_does_not_hide_its_copy(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify the copy in the project area of a tracked run whose directory was
+    purged is listed beside it: the copy is the one still readable.
+    """
+    shutil.rmtree(populated["copied"].root)
+
+    result = listing.run("--all", "--format", "json")
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(listing.buffer.getvalue())["data"]
+    assert sorted(row["where"] for row in data if row["run_id"] == "copied") == [
+        "local",
+        "project",
+    ]
+
+
+def test_the_size_filters_never_drop_a_run_whose_size_is_not_known(
+    populated: dict[str, BuiltRun],
+    listing: Listing,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify the runs tracking does not hold are kept by a size filter, and named."""
+    with caplog.at_level(logging.WARNING, logger=LS_LOGGER):
+        rows = listing.where("--all", "--max-size", "1")
+
+    assert set(rows) == {"mine", "orphan", "kept", "linked"}
+    named = " ".join(r.getMessage() for r in caplog.records)
+    assert all(run_id in named for run_id in ("orphan", "kept", "linked"))
+
+
+def test_the_table_says_where_and_does_not_hint_at_a_size_it_cannot_measure(
+    populated: dict[str, BuiltRun], listing: Listing
+) -> None:
+    """Verify the table adds a column, says the size of a run that is not
+    tracked here was not measured, and keeps the hint for one that is.
+    """
+    result = listing.run("--all")
+
+    assert result.exit_code == 0, result.output
+    lines = listing.buffer.getvalue().splitlines()
+    assert "where" in lines[0] or "where" in lines[1]
+    cells = {
+        line.split("│")[1].strip(): [c.strip() for c in line.split("│")[1:-1]]
+        for line in lines
+        if line.startswith("│")
+    }
+    assert cells["orphan"][2] == "not measured"
+    assert cells["orphan"][4] == "local, untracked"
+    assert cells["linked"][4] == "project, linked"
+    assert "cstar run status mine --size" in " ".join(cells["mine"])
+    assert cells["copied"][2] == "5MB"
+    assert listing.run().exit_code == 0
+    assert "where" not in listing.buffer.getvalue()
+
+
+def test_csv_says_where(populated: dict[str, BuiltRun], listing: Listing) -> None:
+    """Verify the CSV has a `where` column when a flag is given, and not otherwise."""
+    assert listing.run("--format", "csv", "--all").exit_code == 0
+    rows = [row for row in csv.reader(io.StringIO(listing.buffer.getvalue())) if row]
+    assert rows[0] == sorted(WHERE_INCLUSIONS)
+    where = {
+        dict(zip(rows[0], row))["run_id"]: dict(zip(rows[0], row))["where"]
+        for row in rows[1:]
+    }
+    assert where["orphan"] == "local, untracked"
+
+    assert listing.run("--format", "csv").exit_code == 0
+    assert next(csv.reader(io.StringIO(listing.buffer.getvalue()))) == sorted(
+        INCLUSIONS
+    )
+
+
+def test_the_formatters_add_where_on_request() -> None:
+    """Verify the `where` of a view is rendered by each formatter only when asked."""
+    views = [
+        ItemView(
+            run_id="r1",
+            name="alpha",
+            raw_size=-1,
+            raw_start=T0,
+            format="json",
+            where="project, linked",
+            tracked=False,
+        )
+    ]
+
+    plain = json_formatter(views)
+    wide = json_formatter(views, with_where=True)
+    assert isinstance(plain, Text)
+    assert isinstance(wide, Text)
+    assert set(json.loads(plain.plain)["data"][0]) == INCLUSIONS
+    row = json.loads(wide.plain)["data"][0]
+    assert row["where"] == "project, linked"
+    assert set(row) == WHERE_INCLUSIONS
+    table = table_formatter(views, with_where=True)
+    assert isinstance(table, Table)
+    assert [c.header for c in table.columns][-1] == "where"

@@ -72,9 +72,11 @@ jobs:
 
           root = files("cstar")
 
-          model_spec_dir = root / "catalog" / "bundled" / "ModelSpec"
+          model_spec_dir = root / "catalog" / "bundled" / "specs" / "ModelSpec"
           found_specs = {
-              p.name for p in model_spec_dir.iterdir() if (p / "model.yaml").is_file()
+              p.name.removesuffix(".yaml")
+              for p in model_spec_dir.iterdir()
+              if p.is_file() and p.name.endswith(".yaml")
           }
           expected_specs = {
               "cson_roms-marbl_v0.1",
@@ -88,6 +90,8 @@ jobs:
               "roms-marbl-0.9-default",
               "roms-marbl-0.10-default",
               "roms-marbl-0.11-default",
+              "roms-marbl-0.12-default",
+              "roms-marbl-0.13-default",
           }
           missing_specs = expected_specs - found_specs
           assert not missing_specs, f"missing bundled ModelSpecs: {sorted(missing_specs)}"

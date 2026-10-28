@@ -431,3 +431,71 @@ def test_cached_stager_clones_privately_after_timeout(
     assert (target / "README.md").is_file()
     assert not cache_path.exists()
     assert f"The repository cache {cache_path} stayed locked" in caplog.text
+
+
+def test_cached_stager_refresh_runs_no_git_maintenance(
+    tmp_path: Path,
+    remote_repo_uri: str,
+    cache_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cache refresh leaves the cache alone once `git pull` returns.
+
+    `git pull` ends by starting `git maintenance run --auto`, which by default
+    detaches and writes a commit-graph into the cache while the step copies the
+    cache with `cp`, outside the cache lock; `cp` then fails on a file renamed
+    under it. Here maintenance is made synchronous and eager (through a global git
+    config), so any maintenance the refresh starts leaves a commit-graph behind.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    monkeypatch : pytest.MonkeyPatch
+        Points git at the eager maintenance config
+    """
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text(
+        "[maintenance]\n"
+        "\tautoDetach = false\n"
+        '[maintenance "commit-graph"]\n'
+        "\tenabled = true\n"
+        "\tauto = 1\n"
+        "[gc]\n"
+        "\tautoDetach = false\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+
+    source_data = SourceData(remote_repo_uri)
+    source_data.stage(tmp_path / "first")
+    cache_path = t.cast("CRRS", source_data.stager)._get_cache_path()
+
+    upstream = tmp_path / "upstream" / "c-star"
+    (upstream / "README.md").write_text("changed\n")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(upstream),
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qam",
+            "change",
+        ],
+        check=True,
+    )
+
+    staged = SourceData(remote_repo_uri).stage(tmp_path / "second")
+
+    assert (staged.path / "README.md").read_text() == "changed\n"
+    info = cache_path / ".git" / "objects" / "info"
+    assert not list(info.glob("commit-graph*")), sorted(info.iterdir())

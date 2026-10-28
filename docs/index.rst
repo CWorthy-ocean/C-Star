@@ -6,7 +6,7 @@ ocean simulations. It is developed by ocean and biogeochemical modelers and
 scientific software engineers at `[C]Worthy <https://cworthy.org>`_ to support
 Monitoring, Reporting and Verification (MRV) of ocean-based carbon dioxide
 removal. Today it runs `UCLA-ROMS <https://github.com/CWorthy-ocean/ucla-roms>`_
-coupled to the `MARBL <https://marbl-ecosys.github.io>`_ biogeochemistry model,
+optionally coupled to the `MARBL <https://marbl-ecosys.github.io>`_ biogeochemistry model,
 on a laptop or on a supported HPC system, from the same description of the run.
 
 .. raw:: html
@@ -25,8 +25,8 @@ How it works
 C-Star is organized around two ideas.
 
 An **application** is something you can run:
-- the ROMS-MARBL model
-- Forge, the tool that builds a new ROMS-MARBL domain
+- the UCLA-ROMS model
+- Forge, the tool that builds a new UCLA-ROMS domain
 - any number of smaller data transformation steps or analysis packages
 
 A **blueprint** is a YAML file holding every input an application needs to produce its result: which model
@@ -36,14 +36,14 @@ machine, which is what makes a C-Star simulation shareable and reproducible.
 
 A simple ocean modeling project moves through three basic steps:
 
-1. **Describe the domain.** The Forge :ref:`wizard <wizard>`, a form that runs in your
+1. **Describe the domain.** The Forge :doc:`wizard <catalog_wizard/launching>`, a form that runs in your
    browser or as a Jupyter notebook, walks you through choosing a model configuration, a region and
    grid, forcing datasets, and a run window. It writes a *forge blueprint*.
 2. **Generate the inputs.** Running that forge blueprint downloads the source
    datasets, builds the grid, initial conditions, boundary and surface forcing,
    and rivers and tides where requested, and writes the ROMS namelist. Its
-   output is a *ROMS-MARBL blueprint* pointing at everything the model needs.
-3. **Run the simulation.** Running the ROMS-MARBL blueprint fetches and
+   output is a *UCLA-ROMS blueprint* pointing at everything the model needs.
+3. **Run the simulation.** Running the UCLA-ROMS blueprint fetches and
    compiles the model code and executes the simulation. Output lands in the
    blueprint's working directory.
 
@@ -51,7 +51,8 @@ The wizard can be run on any machine, even your laptop, and the Forge blueprint 
 then be moved to a different machine, like an HPC, where you want heavier computations to take place,
 or where collections of source data may be staged among your working group.
 
-Running any blueprint independently can be done with the command  ``cstar blueprint run <blueprint.yaml>``.
+Running any blueprint independently can be done with the command  ``cstar blueprint run <blueprint.yaml>``,
+or, on a cluster, ``cstar blueprint submit <blueprint.yaml>``, which sends it to the job scheduler.
 To run several simulations as one unit, a **workplan** lists the blueprints
 to run as *steps*, with dependencies between them. C-Star schedules the steps,
 submits them to the cluster's job scheduler, and tracks their status, so a
@@ -97,60 +98,80 @@ C-Star is built with these principles in mind:
     :caption: Getting Started
     :hidden:
 
-    Installing C-Star <installation>
-    Registering for datasets <data_access>
-    configuration
+    Installing C-Star <getting_started/installation>
+    Registering for datasets <getting_started/data_access>
+    getting_started/configuration
+    getting_started/terminology
 
 .. toctree::
     :maxdepth: 1
-    :caption: Terminology and Concepts
+    :caption: Guided tutorials
     :hidden:
 
-    terminology
-
-.. toctree::
-    :maxdepth: 1
-    :caption: Laptop-Runnable Examples
-    :hidden:
-
-    End to end: a new domain to a running simulation <tutorials/end_to_end>
+    Using blueprints to set up and run an ocean model <tutorials/blueprint_tutorial>
+    Automating the previous model with a workplan <tutorials/workplan>
+    Spin-up, a CDR release and its metrics <tutorials/cdr_workplan>
+    Nesting and upscaling: a tiny nested CDR run <tutorials/nesting_upscaling>
 
 .. toctree::
     :maxdepth: 2
-    :caption: User Guide
+    :caption: Applications and Blueprints
     :hidden:
 
-    blueprints
-    workplans
-    catalog
-    wizard
+    applications/index
+    General blueprint concepts <applications/blueprints>
+    UCLA-ROMS <applications/ucla_roms/index>
+    Forge <applications/forge/index>
+    Data transformations <applications/transformations/index>
+    Analytics <applications/analytics/index>
 
 .. toctree::
     :maxdepth: 1
-    :caption: Domain generation (Forge)
+    :caption: Workplans and Directives
     :hidden:
 
-    forge/index
-    forge/specs
-    forge/source_datasets
+    General workplan concepts <workplans/index>
+    workplans/directives
+    workplans/references
+    workplans/variables
 
 .. toctree::
     :maxdepth: 1
-    :caption: Deployment
+    :caption: Managing Runs
     :hidden:
 
-    machines
-    hpc
+    runs/monitoring
+    runs/pre_run_resume
+    Moving runs <runs/moving/index>
+
+.. toctree::
+    :maxdepth: 1
+    :caption: The C-Star Catalog and Wizard
+    :hidden:
+
+    catalog_wizard/catalog
+    catalog_wizard/launching
+    catalog_wizard/blueprints
+    catalog_wizard/workplans
+
+.. toctree::
+    :maxdepth: 1
+    :caption: Deployments
+    :hidden:
+
+    deployments/hpc
+    deployments/machines
 
 .. toctree::
     :maxdepth: 1
     :caption: Reference
     :hidden:
 
-    api-blueprint
-    api-orchestration
-    api-forge
-    api
+    Using C-Star from Python <reference/python>
+    reference/api-blueprint
+    reference/api-orchestration
+    reference/api-forge
+    reference/api
     schemas/index
 
 .. toctree::
@@ -159,11 +180,11 @@ C-Star is built with these principles in mind:
     :hidden:
 
     contributing
-    custom_applications
-    system-registration
+    developers/custom_applications
+    developers/system-registration
     developers/forge_internals
     developers/forge_templates
     developers/forge_source_data
     developers/forge_input_data
-    developers/catalog_design
+    Nesting and upscaling on the California Current System <developers/nesting_upscaling_ccs>
     releases

@@ -135,7 +135,7 @@ def _migrate_one(jo_dir: Path, *, dry_run: bool, report: MigrationReport) -> Non
     # `temp_dir` stay consistent with `jo_dir` only because
     # `migrate_output_layout` already resolved `root` before `rglob`.
 
-    from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+    from cstar.roms.file_system import RomsFileSystemManager
     # TODO: this is bad, but temporary... migration should not have app-specific code
     # in the core behaviors. It needs to move to the roms migration handlers.
 

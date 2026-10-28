@@ -20,7 +20,7 @@ class PIOExternalCodeBase(ExternalCodeBase):
     (GPTL) is disabled as ROMS links only `-lpiof -lpioc`.
 
     Note: unlike MARBL, the built libraries carry no compiler suffix, so switching
-    compilers on a system requires a fresh build (e.g. `CSTAR_FRESH_CODEBASES=1`).
+    compilers on a system requires a fresh build (e.g. `cstar blueprint run --clobber`).
     """
 
     @property

@@ -12,7 +12,7 @@ sections:
     required: false
   model:
     title: Model
-    desc: Choose the ROMS-MARBL model preset, biogeochemistry mode, and code versions this blueprint builds against.
+    desc: Choose the UCLA-ROMS model preset, biogeochemistry mode, and code versions this blueprint builds against.
     required: true
   grid:
     title: Domain and grid
@@ -28,11 +28,11 @@ sections:
     required: true
   output:
     title: Output
-    desc: Which output streams ROMS-MARBL writes, how often, and how many records per file.
+    desc: Which output streams UCLA-ROMS writes, how often, and how many records per file.
     required: false
   advanced:
     title: Advanced settings
-    desc: Fine-tune individual ROMS-MARBL namelist settings beyond what the other sections expose.
+    desc: Fine-tune individual UCLA-ROMS namelist settings beyond what the other sections expose.
     required: false
   review:
     title: Review and export
@@ -42,7 +42,7 @@ sections:
   # --- model subsections --------------------------------------------------------
   model.carbonate:
     title: Carbonate sensitivities
-    desc: The carbonate sensitivity files a CDR-lite build reads as surface forcing, supplied at run time by default.
+    desc: The carbonate sensitivity files a CDR-lite build reads as surface forcing, supplied at run time by default, and whether they are interpolated in time.
     required: false
 
   # --- grid subsections -------------------------------------------------------
@@ -123,6 +123,9 @@ sections:
     required: false
   settings.bottom_drag:
     title: Bottom drag
+    required: false
+  settings.v_sponge:
+    title: Sponge layer
     required: false
   settings.sponge_tune:
     title: Sponge tuning
@@ -238,10 +241,10 @@ fields:
     hint: MARBL couples biogeochemistry to the physics; “none” runs physics only; “cdr_lite” runs only the CDR-lite tracers, without MARBL.
   cs_source_dd:
     label: Sensitivity source
-    hint: By default the carbonate-sensitivity-from workplan directive supplies the files from an earlier ROMS-MARBL step at run time; choose a directory to put them on the blueprint now.
+    hint: By default the carbonate-sensitivity-from workplan directive supplies the files from an earlier UCLA-ROMS step at run time; choose a directory to put them on the blueprint now.
   cs_path:
     label: Sensitivity files
-    hint: A directory of joined ROMS _cdrgas files, written by a ROMS-MARBL run with the gas-exchange output enabled.
+    hint: A directory of joined ROMS _cdrgas files, written by a UCLA-ROMS run with MARBL and the gas-exchange output enabled.
   domain_dd:
     label: Domain preset
     required: true
@@ -272,6 +275,7 @@ fields:
     hint: 'Builds ROMS against the ParallelIO library: inputs are written as classic-format (CDF-5) netCDF and ROMS reads/writes joined files.'
   auto_tiling_chk:
     label: Automatic tiling
+    experimental: true
     hint: Picks the MPI tiling at runtime from the land mask (ucla-roms >= 0.5.0).
   n_cores:
     label: Total processors
@@ -786,6 +790,10 @@ fields:
   settings.bgc.wrt_avg_dia:
     label: Write BGC diagnostics averages
     symbol: wrt_avg_dia
+  settings.v_sponge.v_sponge_trc:
+    label: Sponge tracer diffusivity
+    symbol: v_sponge_trc
+    unit: m²/s
   settings.marbl_bgc.marbl_config_file:
     label: MARBL settings file
     symbol: marbl_config_file
@@ -826,6 +834,10 @@ fields:
     label: Compute carbonate sensitivities online
     symbol: cdr_online_carbonate_sensitivity
     hint: Compute the carbonate sensitivities of the CDR-lite air-sea CO2 flux online from MARBL’s alternative-CO2 state, instead of reading them from forcing files. Needs MARBL.
+  settings.cdr_lite.cdr_carbonate_sensitivity_time_interpolation:
+    label: Interpolate carbonate sensitivities in time
+    symbol: cdr_carbonate_sensitivity_time_interpolation
+    hint: Interpolate the carbonate sensitivities read from forcing files (ddic_dco2, ddic_dalk) linearly in time between records. Off, each record is held until the next one starts. Applies to the cdr_lite BGC mode only.
   settings.cdr_lite_output.do_cdr_lite_output:
     label: Write CDR-lite tracer output
     symbol: do_cdr_lite_output
@@ -970,7 +982,7 @@ fields:
     label: Restoring tracer flux
     symbol: wrt_rstflx
   settings.surf_flux.wrt_swflx:
-    label: Shortwave flux
+    label: Freshwater flux (P-E)
     symbol: wrt_swflx
   settings.surf_flux.sflx_avg:
     label: Write averages

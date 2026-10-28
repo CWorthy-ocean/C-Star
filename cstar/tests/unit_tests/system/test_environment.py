@@ -11,25 +11,28 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
     ENV_CSTAR_DISABLE_BUILD_VERIFICATION,
-    ENV_CSTAR_NPROCS_POST,
+    ENV_CSTAR_DISABLE_MIGRATION,
+    ENV_CSTAR_SLURM_DISABLE_MT,
     ENV_CSTAR_STATE_HOME,
     FLAG_OFF,
     FLAG_ON,
     get_env_item,
     hpc_data_directory,
 )
-from cstar.base.feature import (
-    ENV_FF_DEBUG_BUILD_MODE,
-    ENV_FF_SLURM_DISABLE_MT,
-    is_flag_enabled,
+from cstar.base.feature import is_flag_enabled
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.environment import (
     CStarEnvironment,
     LmodEnvSettings,
+    SlurmSettingsBase,
 )
 
 if t.TYPE_CHECKING:
@@ -883,7 +886,7 @@ def test_get_env_item_value_set(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the default is not returned if an env item is set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
     actual_value = "actual-value"
 
@@ -901,7 +904,7 @@ def test_get_env_item_value_not_set(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the default is returned if an env item is not set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
 
     monkeypatch.delenv(cstar_var, raising=False)
@@ -917,7 +920,7 @@ def test_get_env_item_value_ignore_factory(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the non-null factory value is not returned if the value is set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
     actual_value = "actual-value"
     factory_value = "factory-value"
@@ -938,7 +941,7 @@ def test_get_env_item_value_use_factory(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the non-null factory value is returned if the value is not set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
     factory_value = "factory-value"
 
@@ -957,7 +960,7 @@ def test_get_env_item_value_ignore_null_factory(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the null factory value is not returned and the default is returned."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
 
     monkeypatch.delenv(cstar_var, raising=False)
@@ -996,10 +999,10 @@ def test_env_show_default(
 @pytest.mark.parametrize(
     "key",
     [
-        ENV_FF_DEBUG_BUILD_MODE,
-        ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ENV_CSTAR_DEBUG_BUILD_MODE,
+        ENV_CSTAR_DISABLE_MIGRATION,
         ENV_CSTAR_DISABLE_BUILD_VERIFICATION,
-        ENV_FF_SLURM_DISABLE_MT,
+        ENV_CSTAR_SLURM_DISABLE_MT,
     ],
 )
 def test_is_flag_enabled(key: str) -> None:
@@ -1074,3 +1077,23 @@ def test_lmodenvsettings_variable_resolution(
     for key in lmod_settings_keys:
         expected_key = f"LMOD_{key}"
         assert LmodEnvSettings.variable(key) == expected_key
+
+
+def test_slurm_settings_max_walltime_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the maximum walltime falls back to the registered default of
+    the environment variable when the variable is not set.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to configure the environment.
+    """
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "an-account")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "a-queue")
+    monkeypatch.delenv(ENV_CSTAR_SLURM_MAX_WALLTIME, raising=False)
+    item = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME)
+    monkeypatch.setattr(item, "default", "12:34:56")
+
+    settings = SlurmSettingsBase()
+
+    assert settings.SLURM_MAX_WALLTIME == "12:34:56"

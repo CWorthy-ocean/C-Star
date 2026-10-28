@@ -52,7 +52,7 @@ for this; a tier is selected by path.
    Runs the forge application with real ``roms-tools`` against the pinned
    source data, without building ROMS. It checks the generated input
    files (classic-format netCDF that ParallelIO can read), the emitted
-   ``roms_marbl`` blueprint, the rendered namelist and ``cppdefs``, and
+   ``ucla_roms`` blueprint, the rendered namelist and ``cppdefs``, and
    compares the namelist to a golden file. It takes about a minute (about
    ten seconds per case after the first fetch) and runs on Ubuntu and
    macOS for every pull request::
@@ -60,13 +60,13 @@ for this; a tier is selected by path.
       python -m pytest cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge
 
 **Tier 2: end to end** (``e2e/``)
-   Runs a two-step workplan (forge, then ``roms_marbl`` through
-   ``blueprint: {from_step: ...}``) with ``cstar workplan run`` and the
+   Runs a two-step workplan (forge, then ``ucla_roms`` through
+   ``blueprint: {from_step: ...}``) with ``cstar workplan submit`` and the
    local launcher. ROMS, MARBL and ParallelIO are compiled and ROMS is
    run with ``mpirun -n 4`` on the generated inputs, with ParallelIO
    enabled. A negative control (``test_pio_input_guard.py``) feeds a
    NETCDF4 input to a ParallelIO build and expects it to be refused.
-   ``roms_marbl/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
+   ``ucla_roms/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
    ``cstar_blueprint_test_case`` through ``cstar blueprint run`` (no
    ParallelIO, partitioned inputs) in the same CI job.
    ``e2e/test_workplan_shapes.py`` covers DAG shapes and dependency-failure
@@ -77,11 +77,11 @@ for this; a tier is selected by path.
 
 **Tier 3: extended** (``extended/``)
    Not part of the pull request checks. The weekly
-   ``integration_extended.yaml`` workflow runs the suite on both operating
-   systems, Python 3.12 and 3.13, against ucla-roms ``0.11.0`` and
-   ``main``. The ``CSTAR_IT_ROMS_REF`` environment variable overrides the
-   ucla-roms ref of the model spec. Failures are an early warning for
-   upstream changes, not a merge blocker.
+   ``integration_extended.yaml`` workflow runs the suite against ucla-roms
+   ``0.13.0`` and ``main``, on Python 3.12, 3.13 and 3.14 on Ubuntu and on
+   Python 3.14 on macOS. The ``CSTAR_IT_ROMS_REF`` environment variable
+   overrides the ucla-roms ref of the model spec. Failures are an early
+   warning for upstream changes, not a merge blocker.
 
 Running the integration tiers requires ``nccopy`` (from ``libnetcdf``,
 installed with ``environment-laptop.yml``), ``mpirun`` and the compilers
@@ -106,7 +106,7 @@ Shared pieces are in ``cstar/tests/integration_tests``:
   physics-only ``test-glorys-era5-physics``) and a
   minimal output spec (``test-minimal``). ``${TEST_DATA}`` in these files
   is replaced by the data cache directory. Model specs come from the
-  bundled catalog; ``roms-marbl-0.11-default`` pins ucla-roms 0.11.0.
+  bundled catalog; ``roms-marbl-0.13-default`` pins ucla-roms 0.13.0.
 - ``conftest.py``: the ``integration_test_data``, ``test_catalog_root``,
   ``test_catalog``, ``forge_blueprint_factory`` and ``cstar_shim`` fixtures.
 - ``cli_harness.py``: ``make_shim``, ``make_cli_env`` and ``run_cstar``,
@@ -116,8 +116,8 @@ Adding an integration case
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Add a ``DomainSpec`` and a ``ForcingSpec`` under
-   ``cstar/tests/integration_tests/catalog/`` (a directory per spec
-   holding ``Domain.yaml`` or ``Forcing.yaml``), pointing at files from
+   ``cstar/tests/integration_tests/catalog/`` (a file per spec,
+   ``specs/DomainSpec/<name>.yaml`` or ``specs/ForcingSpec/<name>.yaml``), pointing at files from
    the data registry through ``${TEST_DATA}``.
 2. Add a ``ForgeCase`` entry to ``FORGE_CASES`` in ``cases.py``, with
    ``compile_time_overrides`` if the case changes ``cppdefs``,
@@ -164,8 +164,8 @@ GitHub evicts caches that are idle for seven days, and caches saved on
 warm. A cache miss only costs a re-download.
 
 Data roles: ``roms-tools-test-data`` is the source of all upstream data;
-``cstar_blueprint_test_case`` is the older ``roms_marbl``-only case used by
-``roms_marbl/test_prebuilt_case.py``; ``cstar_blueprint_roms_marbl_example`` is
+``cstar_blueprint_test_case`` is the older ``ucla_roms``-only case used by
+``ucla_roms/test_prebuilt_case.py``; ``cstar_blueprint_roms_marbl_example`` is
 used by the documentation tutorials only.
 
 Contributing code
@@ -225,6 +225,74 @@ maintain code quality and reliability. Follow these guidelines:
 
   - Select tests by path rather than by marker: the repository defines no
     ``pytest.mark`` categories, and ``-m`` selection does not work here.
+
+Deprecations and compatibility
+------------------------------
+
+Users keep workplans, blueprints, catalogs and shell scripts for months, so
+anything a user may have written down -- a CLI command, a directive key, a
+catalog layout, a configuration setting -- is renamed or removed in two steps:
+first deprecated, then removed. Blueprint schema changes follow their own
+rule (a major ``schema_version`` with a migration, see
+:doc:`developers/custom_applications`) and are not covered here.
+
+Renaming or restructuring a field of a catalog spec (ModelSpec, DomainSpec,
+ForcingSpec, OutputSpec, CdrSpec) needs a registered spec migration: a
+``SchemaAdapter`` added to ``SPEC_MIGRATIONS`` in
+``cstar/applications/forge/migration.py``, a major bump of that kind in
+``SPEC_SCHEMA_VERSIONS`` (``cstar/catalog/spec_schema.py``), and the bundled
+specs restamped. The adapter must leave content that is already current
+unchanged. An additive optional key is a minor bump with no adapter.
+
+**Deprecating.** The old form keeps working, and the code that detects it
+calls ``cstar.base.deprecation.deprecated``:
+
+.. code:: python
+
+   from cstar.base.deprecation import deprecated
+
+   deprecated(
+       f"The {cls.key()!r} key {cls.KEY_BRY_PATH!r}",
+       repr(cls.KEY_PATH),
+       removal="0.20.0",
+   )
+
+which warns once per process::
+
+   The 'nest-from' key 'bry_path' is deprecated and stops working in
+   cstar-ocean 0.20.0; use 'path' instead.
+
+- Call it where the old form is first read: at load time, or in the
+  validation ``cstar workplan check`` runs. A warning that only appears in a
+  step's log on the compute node comes too late.
+- Name the replacement in ``replacement``, and when a command does the
+  migration (``cstar admin migrate-catalog``), name the command.
+- ``removal`` is a minor release at least two minor releases after the first
+  release that ships the warning: a deprecation first released in 0.18.0 is
+  removed in 0.20.0 at the earliest. Pass it as a string literal.
+- The message goes out as a ``CstarDeprecationWarning`` (a
+  ``FutureWarning``, so Python shows it by default) and as a log line. The CLI
+  shows only the log line.
+- Add a bullet under **Breaking Changes** in the pull request:
+  ``Deprecated: <what>, removed in <release>; use <replacement>.`` Pull request
+  descriptions become the release notes.
+
+**Removing.** When the removal release comes, delete the code that still
+honors the old form, but keep the code that detects it, and raise an error
+naming the migration command, or the edit to make if there is no command.
+Never let an old form silently stop meaning anything: a catalog file in a
+removed layout must not just disappear from listings, and an unknown key
+must not be ignored. Add a ``Removed: <what>; <migration>.`` bullet under
+**Breaking Changes**.
+
+``ci/check_deprecations.py`` makes sure removals happen. It reads every
+``deprecated`` call under ``cstar/`` (and every ``deprecation_message`` call,
+for text C-Star prints without Python, such as the ``cstar env shell-init``
+function), and the Finalize Release Notes workflow runs it before it opens the
+release pull request: a release that a deprecation is due in is refused until
+the removal lands on ``main``. A forgotten removal then stops the release, not
+the user. ``cstar/tests/unit_tests/base/test_deprecation.py`` runs the same
+check on every pull request against the newest finalized release.
 
 Building the documentation locally
 ----------------------------------

@@ -1,9 +1,12 @@
 import functools
+import hashlib
 import json
 import os
 import sys
 import typing as t
+import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -13,31 +16,42 @@ from rich.console import Console
 
 import cstar
 from cstar.applications.core import get_application
+from cstar.base.deprecation import CstarDeprecationWarning
 from cstar.base.env import (
-    ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
-    FLAG_ON,
+    REMOVED_SETTINGS,
+    get_env_item,
+    load_user_config,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import (
+    CstarError,
+    CstarExpectationFailed,
+    CstarUserConfigError,
+)
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
+from cstar.entrypoint.utils import (
+    ARG_LOGLEVEL_HELP,
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
+)
 from cstar.execution.file_system import (
     DirectoryManager,
     get_backup_path,
     is_remote_resource,
     local_copy,
+    write_bytes_atomic,
 )
 from cstar.orchestration.formatting import (
     format_validation_errors as format_validation_errors,  # re-export
 )
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     anchor_blueprint_file,
     anchor_locations,
-    serialize,
+    model_to_yaml,
     validate_serialized_entity,
 )
 from cstar.system.migration import (
@@ -54,6 +68,8 @@ from cstar.system.migration import (
 )
 
 if t.TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pydantic import BaseModel
 
 app = typer.Typer()
@@ -61,8 +77,9 @@ console = Console()
 log = get_logger(__name__)
 
 HELP_SHORT = (
-    "Print the cstar executable location, the C-Star version, and the versions "
-    "of installed companion packages, then exit."
+    "Print the cstar executable location, the C-Star version, the versions of "
+    "installed companion packages, and the newest ucla-roms release this C-Star "
+    "knows, then exit."
 )
 
 
@@ -73,7 +90,6 @@ SCHEMA_ERRORS: t.Final[tuple[type[CstarMigrationError], ...]] = (
 )
 """Errors raised while planning a migration that no CLI command can recover from."""
 
-BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
 StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
 
 
@@ -182,7 +198,9 @@ def id_label(id: int, name: str, app: str | None) -> str:
 
 
 def version_callback(value: bool) -> bool:
-    """Print the executable location and installed package versions, then exit."""
+    """Print the executable location, installed package versions and the newest
+    ucla-roms release this C-Star knows, then exit.
+    """
     if value:
         typer.echo(f"cstar executable location: {Path(sys.argv[0]).resolve()}")
         typer.echo(f"C-Star version: {cstar.__version__}")
@@ -192,6 +210,13 @@ def version_callback(value: bool) -> bool:
                 typer.echo(f"{pkg} version: {_pkg_version(pkg)}")
             except PackageNotFoundError:
                 pass
+        # Imported here: the namelist models are not needed to start the CLI.
+        from cstar.roms.namelist import NEWEST_KNOWN_UCLA_ROMS, format_roms_version
+
+        typer.echo(
+            "Newest known ucla-roms release: "
+            f"{format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}"
+        )
         raise typer.Exit(0)
 
     return value
@@ -210,7 +235,94 @@ def common_callback(
         ),
     ] = False,
 ) -> None:
-    pass
+    """Load the user's configuration file, then warn on stderr about each
+    exported setting that no longer has an effect.
+
+    A deprecation is reported by its log line alone: the Python warning that
+    `deprecated` also emits would repeat it, with a source line, on the terminal.
+
+    The file is loaded before any command's options are parsed, so an option's
+    ``envvar`` binding sees it; an exported variable still wins over it. A log
+    level the file sets is applied to the loggers that already exist. A file
+    the loader refuses (one it cannot read) stops every command except the ones
+    that manage it, ``cstar init`` and ``cstar env``.
+
+    Raises
+    ------
+    typer.Exit
+        With code 2 when the loader refuses the configuration file.
+    """
+    warnings.simplefilter("ignore", CstarDeprecationWarning)
+    try:
+        config = load_user_config()
+    except CstarUserConfigError as ex:
+        from cstar.cli.environment import NAME as NAME_ENV
+        from cstar.cli.init import COMMAND_INIT
+
+        typer.echo(str(ex), err=True)
+        if ctx.invoked_subcommand not in {NAME_ENV, COMMAND_INIT}:
+            raise typer.Exit(2) from ex
+    else:
+        # the module loggers were created at import, before the file was loaded
+        if ENV_CSTAR_LOG_LEVEL in config.applied:
+            reset_log_level(LogLevelChoices(config.applied[ENV_CSTAR_LOG_LEVEL]))
+
+    for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
+        typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
+
+
+def exit_on_refused_settings() -> None:
+    """Stop a command that a `refused` removed setting used to change.
+
+    The commands such a setting used to change call this before they touch
+    anything: running them while it is exported, or named in the configuration
+    file (which skips it), would do more than was asked (a dry run becoming a
+    real one).
+
+    Raises
+    ------
+    typer.Exit
+        With code 2 when a refused setting is exported or in the file.
+    """
+    config = load_user_config()
+    named = os.environ.keys() | config.skipped.keys()
+    refused = [
+        name
+        for name in sorted(REMOVED_SETTINGS.keys() & named)
+        if REMOVED_SETTINGS[name].refused
+    ]
+    if refused:
+        msg = (
+            f"Refusing to run while {', '.join(refused)} is exported or set in "
+            f"{config.path}; remove it to continue."
+        )
+        typer.echo(msg, err=True)
+        raise typer.Exit(2)
+
+
+@contextmanager
+def exit_on_failure(prefix: str = "Error") -> "Iterator[None]":
+    """Turn a failed operation into a one-line message and exit code 1.
+
+    A `typer.BadParameter` or `typer.Exit` raised inside passes through, so a
+    refusal keeps its own exit code.
+
+    Parameters
+    ----------
+    prefix : str
+        What the message opens with, before the exception's text.
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 when a `CstarError`, `CstarExpectationFailed` or `OSError` is
+        raised inside; the message is printed to stderr.
+    """
+    try:
+        yield
+    except (CstarError, CstarExpectationFailed, OSError) as ex:
+        typer.echo(f"{prefix}: {ex}", err=True)
+        raise typer.Exit(1) from ex
 
 
 P = t.ParamSpec("P")
@@ -236,40 +348,6 @@ def cb_pipeline(
         """Callback wrapper that executes all specified callbacks."""
         for callback in callbacks:
             value = callback(ctx, value)
-
-        return value
-
-    return _callback
-
-
-def set_flag(
-    key: str,
-    extra: BoolCallback | None = None,
-) -> BoolCallback:
-    """Create a typer Callback function that sets the value of an environment
-    variable to the value of the argument supplied by the user.
-
-    Parameters
-    ----------
-    key : str
-        The environment variable to be set
-    extra : StrCallback
-        Additional logic called after setting the environment variable.
-
-    Returns
-    -------
-    StrCallback
-    """
-
-    def _callback(ctx: typer.Context, value: bool) -> bool:
-        """Callback that sets the specified environment variable to `FLAG_ON`
-        if `value` is `True`.
-        """
-        if value:
-            os.environ[key] = FLAG_ON
-
-        if extra:
-            value = extra(ctx, value)
 
         return value
 
@@ -305,6 +383,39 @@ def normalize_runid(_context: typer.Context, run_id: str) -> str:
     return normalized
 
 
+WORKPLAN_FILE_SUFFIXES: t.Final[frozenset[str]] = frozenset({".yaml", ".yml"})
+"""Suffixes that identify a workplan file, which `cstar workplan check` validates."""
+
+
+def refuse_workplan_file(_context: typer.Context, target: str) -> str:
+    """Refuse a workplan file: a run command acts on a run, not a workplan.
+
+    Parameters
+    ----------
+    _context : typer.Context
+        The typer context (unused).
+    target : str
+        The user-supplied target.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target names a YAML file.
+    """
+    if Path(target).suffix.casefold() in WORKPLAN_FILE_SUFFIXES:
+        msg = (
+            f"{target!r} is a workplan file, not a run. "
+            f"To validate it, use `cstar workplan check {target}`."
+        )
+        raise typer.BadParameter(msg)
+
+    return target
+
+
 def set_env(
     key: str,
     extra: StrCallback | None = None,
@@ -337,11 +448,30 @@ def set_env(
 
 def update_loggers(ctx: typer.Context, value: str) -> str:
     """Perform a log-level reset on all loggers if the log level is updated via CLI."""
-    reset_log_level(LogLevelChoices[value])
+    reset_log_level(LogLevelChoices(value))
     return value
 
 
 log_level_callback = cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers)
+
+LogLevelOption = t.Annotated[
+    LogLevelChoices,
+    typer.Option(
+        ARG_LOGLEVEL_LONG,
+        ARG_LOGLEVEL_SHORT,
+        callback=log_level_callback,
+        case_sensitive=False,
+        envvar=ENV_CSTAR_LOG_LEVEL,
+        help=ARG_LOGLEVEL_HELP,
+        is_eager=True,
+    ),
+]
+"""The ``--log-level`` option; the command writes its default, `DEFAULT_LOG_LEVEL_CHOICE`."""
+
+DEFAULT_LOG_LEVEL_CHOICE: t.Final[LogLevelChoices] = LogLevelChoices(
+    get_env_item(ENV_CSTAR_LOG_LEVEL).default
+)
+"""The log level a command runs at when neither the option nor the environment names one."""
 
 
 def path_callback(value: str | None) -> str | None:
@@ -415,13 +545,15 @@ def get_migrator(
     app_def = get_application(application)
     return BlueprintMigration(
         adapters=app_def.migrations or [],
-        targets={application: app_def.schema_version},
+        targets={app_def.name: app_def.schema_version},
         on_planned=on_planned,
         on_migrated=on_migrated,
     )
 
 
-def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
+def on_planned_callback(
+    bp_path: Path, plan: MigrationPlan, verbose: bool = False
+) -> None:
     """Display a summary of a migration plan.
 
     Only called for plans that require adapters.
@@ -432,8 +564,10 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
         The path to the blueprint being migrated.
     plan : MigrationPlan
         Details of the planned migration.
+    verbose : bool
+        Display every migration step in a table instead of a one-line summary.
     """
-    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
+    if not verbose:
         num_steps = len(plan.adapters)
         msg = f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} step(s)."
         console.print(msg)
@@ -485,11 +619,16 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     directory.
 
     The resulting filename follows the convention:
-        &lt;original_stem&gt;_&lt;latest_version&gt;.&lt;ext&gt;
+        <original_stem>-<digest>_<latest_version>.<ext>
+
+    where `<digest>` is taken from the source's resolved path and content, so
+    sources sharing a filename in different directories never share a copy,
+    an edited source never replaces the copy a running step may still read,
+    and re-migrating an unchanged source reuses its copy.
 
     Example:
     - Input: foo.yaml with any prior version, latest == 3.0.0
-    - Output: foo_3.0.0.yaml
+    - Output: foo-1a2b3c4d5e6f_3.0.0.yaml
 
     Parameters
     ----------
@@ -506,10 +645,10 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     if request.target is not None:
         output = request.target
     else:
-        stem = request.source.stem
-        suffix = request.source.suffix
-        state_dir = DirectoryManager.state_home()
-        output = state_dir / f"{stem}_{plan.target}{suffix}"
+        source = request.source.resolve()
+        digest = hashlib.sha256(str(source).encode() + b"\0" + source.read_bytes())
+        name = f"{source.stem}-{digest.hexdigest()[:12]}_{plan.target}{source.suffix}"
+        output = DirectoryManager.state_home() / name
 
     return output.expanduser().resolve()
 
@@ -556,16 +695,18 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
         if persist_to.expanduser().resolve().parent != source_dir:
             migrated = anchor_locations(migrated, source_dir)
         updated_bp = bp_type(**migrated)
+        # Report a file edited by hand before the write records the hash of the
+        # content it holds: afterwards the edit could no longer be told.
+        if problem := updated_bp.integrity_problem():
+            log.warning(problem)
         if request.in_place:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())
 
-        nbytes = serialize(
-            persist_to,
-            updated_bp,
-            mode=PersistenceMode.auto,
-        )
-        assert nbytes, "The migrated blueprint failed to write content"
+        content = model_to_yaml(updated_bp).encode()
+        assert content, "The migrated blueprint failed to serialize"
+        # atomic, so a concurrent run of the same source never reads half a file
+        write_bytes_atomic(persist_to, content)
     except (SyntaxError, CstarExpectationFailed) as ex:
         msg = f"Unable to complete migration: {ex}"
         raise typer.BadParameter(msg) from ex
@@ -573,13 +714,17 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     return persist_to
 
 
-def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
+def execute_migration(
+    request: MigrationRequest, verbose: bool = False
+) -> PersistedMigrateResult:
     """Execute the schema migration for a blueprint.
 
     Parameters
     ----------
     request : MigrationRequest
         Parameters to pass to the migrator.
+    verbose : bool
+        Display every step of a planned migration instead of a summary.
 
     Returns
     -------
@@ -595,7 +740,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         If the planned migration fails to complete, or the blueprint requires
         migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
     CstarSchemaTooNewError
-        If the blueprint's schema is newer than this build reads.
+        If the blueprint's schema is newer than this build reads (see `VersionedDocument`).
     CstarManualMigrationError
         If the blueprint's schema has no automatic migration to this build's.
     CstarUnsupportedMigrationError
@@ -608,13 +753,15 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     dumped = validation_result.item.model_dump()
     migrator = get_migrator(
         validation_result.item.application,
-        on_planned=functools.partial(on_planned_callback, request.source),
+        on_planned=functools.partial(
+            on_planned_callback, request.source, verbose=verbose
+        ),
         on_migrated=on_migrated_callback,
     )
 
     plan = migrator.plan(dumped)
 
-    if request.dry_run() or plan.is_compatible:
+    if request.dry_run or plan.is_compatible:
         log.debug("Short-circuiting migration after planning")
         result = MigrateResult(dumped, dumped, plan=plan)
         # result with target == source indicates no change occurred
@@ -646,13 +793,15 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     return PersistedMigrateResult(result, persisted_to)
 
 
-def localize_and_migrate(path: str) -> tuple[Path, bool]:
+def localize_and_migrate(path: str, verbose: bool = False) -> tuple[Path, bool]:
     """Copy the blueprint locally and auto-migrate its schema if necessary.
 
     Parameters
     ----------
     path : str
         The path to the blueprint.
+    verbose : bool
+        Display every step of a planned migration instead of a summary.
 
     A blueprint downloaded from a URL has no directory of its own, so the
     relative locations in its local copy are anchored to the working directory,
@@ -671,7 +820,7 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
     Raises
     ------
     CstarSchemaTooNewError
-        If the blueprint's schema is newer than this build reads.
+        If the blueprint's schema is newer than this build reads (see `VersionedDocument`).
     CstarManualMigrationError
         If the blueprint's schema has no automatic migration to this build's.
     CstarUnsupportedMigrationError
@@ -687,7 +836,7 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
         is_migrated = False
 
         try:
-            persist_result = execute_migration(request)
+            persist_result = execute_migration(request, verbose=verbose)
 
             if persist_result.migration_result.error:
                 console.print(persist_result.migration_result.error)
@@ -728,6 +877,46 @@ def get_from_ctxmap(context: typer.Context, key: str, klass: type[_TValue]) -> _
     if value is None:
         log.debug(f"Context map contains null value for key: {key}")
         raise typer.Exit(101)
+
+    if not isinstance(value, klass):
+        log.warning(
+            "Context map contains value with type mismatch. "
+            f"Expected {klass.__name__!r} but received {value.__class__.__name__!r}."
+        )
+        raise typer.Exit(102)
+
+    return value
+
+
+def try_get_from_ctxmap(
+    context: typer.Context, key: str, klass: type[_TValue]
+) -> _TValue | None:
+    """Retrieve a strongly-typed value from the typer context when it holds one.
+
+    Unlike `get_from_ctxmap`, an absent key is not an error.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context object.
+    key : str
+        The key the value is stored under.
+    klass : type[_TValue]
+        The type the value must have.
+
+    Returns
+    -------
+    _TValue | None
+        The value, or `None` when the key is absent or holds `None`.
+
+    Raises
+    ------
+    typer.Exit
+        With code 102 when the value is not a `klass`.
+    """
+    value = (context.obj or {}).get(key)
+    if value is None:
+        return None
 
     if not isinstance(value, klass):
         log.warning(

@@ -3,6 +3,7 @@ import datetime as dt
 import functools
 import hashlib
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -24,9 +25,8 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
-"""A fixed `output_root_name` to be used when generating outputs with ROMS."""
-
+MAX_CONCURRENCY: t.Final[int] = 10
+"""The maximum number of concurrent disk IO operations."""
 
 WALLTIME_RE = r"^((\d{1,2}-\d{1,2}|\d{1,3}):)?(\d{2}):(\d{2})$"
 """Regex for the SLURM walltime forms C-Star accepts: `MM:SS`, `H:MM:SS` with one
@@ -457,6 +457,31 @@ def utc_now() -> dt.datetime:
     datetime
     """
     return dt.datetime.now(tz=dt.UTC)
+
+
+def cpus_available() -> int:
+    """Count the CPUs the current process may run on.
+
+    The CPU affinity respects cgroup, cpuset and taskset limits (a SLURM job's
+    cores, a container's allotment), where `os.cpu_count` reports the whole
+    node. Where the platform reports no affinity (macOS), the machine's CPU
+    count stands in for it.
+
+    Returns
+    -------
+    int
+        The number of CPUs, at least 1.
+    """
+    # getattr, not a direct os.sched_getaffinity reference: typeshed only
+    # declares that attribute on Linux, so a direct call fails mypy's
+    # attr-defined check on other platforms even inside a try/except.
+    sched_getaffinity = getattr(os, "sched_getaffinity", None)
+    if sched_getaffinity is not None:
+        try:
+            return len(sched_getaffinity(0))
+        except OSError:
+            pass
+    return os.cpu_count() or 1
 
 
 def generate_schema_ref(app_name: str, vtarget: str) -> str:

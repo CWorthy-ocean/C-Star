@@ -12,19 +12,29 @@ from pydantic import BaseModel, Field, PrivateAttr
 from rich.console import Console
 from rich.prompt import Prompt
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID
-from cstar.base.feature import is_flag_enabled
+from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    exit_on_refused_settings,
     normalize_runid,
     set_env,
-    set_flag,
 )
 from cstar.cli.workplan.shared import colored, list_runs
-from cstar.entrypoint.utils import ARG_DRY_RUN
+from cstar.entrypoint.utils import (
+    ARG_ALL,
+    ARG_ALL_CLEAN_HELP,
+    ARG_DRY_RUN,
+    ARG_RUN_ID,
+    ARG_YES,
+)
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
-from cstar.orchestration.tracking import TrackingRepository
+from cstar.orchestration.tracking import (
+    TrackingRepository,
+    WorkplanRun,
+    require_writable,
+)
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -32,16 +42,12 @@ console = Console()
 
 short_help: t.Final[str] = "Clean up leftover data and files written to disk."
 help: t.Final[str] = (
-    f"{short_help}. WARNING: This will execute a destructive wipe "
-    "of C-Star directories. Data will be unrecoverable"
+    f"{short_help} Pass {ARG_RUN_ID} to remove one run's state and data, or "
+    f"{ARG_ALL} to wipe C-Star's directories. WARNING: Removed data is "
+    f"unrecoverable; preview with {ARG_DRY_RUN}."
 )
-yes_help: t.Final[str] = (
-    "Perform clean operations for all stored assets without user interaction."
-)
-run_help: t.Final[str] = "Clean up stored assets for a specific run"
-
-
-ARG_YES: t.Final[str] = "--yes"
+yes_help: t.Final[str] = "Remove without asking for confirmation of each item."
+run_help: t.Final[str] = "Remove the state and data of this run."
 
 
 class CleanupStatus(IntEnum):
@@ -155,7 +161,6 @@ class FileSystemCleanupAction(CleanupAction):
         -------
         `True` if cleanup was completed (or unnecessary), `False` otherwise.
         """
-        dry_run = is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
         results = CleanupResult(name=self.name)
         self._results = results
 
@@ -170,18 +175,17 @@ class FileSystemCleanupAction(CleanupAction):
             asset_type = "file" if asset.is_file() else "directory"
 
             try:
-                if not dry_run:
-                    if keeps := self._keeps_in(asset):
-                        for child in list(_removable(asset, keeps)):
-                            if child.is_dir() and not child.is_symlink():
-                                shutil.rmtree(child)
-                            else:
-                                child.unlink()
-                    elif asset_type == "directory":
-                        shutil.rmtree(asset)
-                    elif asset_type == "file":
-                        asset.unlink()
-                    state = asset_key, CleanupStatus.DONE, ""
+                if keeps := self._keeps_in(asset):
+                    for child in list(_removable(asset, keeps)):
+                        if child.is_dir() and not child.is_symlink():
+                            shutil.rmtree(child)
+                        else:
+                            child.unlink()
+                elif asset_type == "directory":
+                    shutil.rmtree(asset)
+                elif asset_type == "file":
+                    asset.unlink()
+                state = asset_key, CleanupStatus.DONE, ""
             except Exception:
                 msg = f"An error occurred cleaning up {asset_type}: {asset}"
                 state = asset_key, CleanupStatus.INCOMPLETE, msg
@@ -303,13 +307,17 @@ def display_groups(displays: Iterable[list[str]], msg: str, color: str) -> None:
             console.print(item)
 
 
-async def perform_actions(actions: Sequence[CleanupAction]) -> int:
+async def perform_actions(
+    actions: Sequence[CleanupAction], dry_run: bool = False
+) -> int:
     """Perform all specified clean-up actions.
 
     Parameters
     ----------
     actions : Sequence[CleanupAction]
         The cleanup actions that will be processed.
+    dry_run : bool
+        Display the assets that would be removed without removing them.
 
     Returns
     -------
@@ -318,7 +326,6 @@ async def perform_actions(actions: Sequence[CleanupAction]) -> int:
     """
     COLOR_READY: t.Final[str] = "white"
     COLOR_EXECUTED: t.Final[str] = "red"
-    dry_run = is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
     msg, color = "Will remove", COLOR_READY
 
     if not dry_run:
@@ -359,7 +366,7 @@ def actions_filter_prompt(
     """
     if not available:
         console.print("No cleanup actions to perform")
-        raise typer.Exit(99)
+        raise typer.Exit(0)
 
     CHOICE_YES: t.Final[str] = "y"
     CHOICE_NO: t.Final[str] = "n"
@@ -408,10 +415,38 @@ def runid_callback(_context: typer.Context, run_id: str) -> str:
     str
     """
     if run_id and not run_id.strip():
-        log.debug("Skipping run loading; run-id was not specified")
-        raise typer.Exit(1)
+        raise typer.BadParameter(
+            "The run-id is blank; give a run-id or omit the option."
+        )
 
     return run_id.strip()
+
+
+def _keep_data_reason(run: WorkplanRun) -> str:
+    """Say why a tracked run's data must not be removed, when it must not.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The tracked run.
+
+    Returns
+    -------
+    str
+        The reason, or an empty string when `clean` may remove the run's data.
+    """
+    try:
+        require_writable(run, action="admin clean")
+    except CstarError as ex:
+        return str(ex)
+
+    project = DirectoryManager.project_runs_home()
+    if project is not None and run.output_path.resolve().parent == project.resolve():
+        return (
+            f"The run directory {run.output_path} is in the project runs area, "
+            "which `admin clean` leaves alone; remove it by hand."
+        )
+    return ""
 
 
 def get_run_actions(run_id: str) -> list[CleanupAction]:
@@ -426,14 +461,16 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     -------
     list[CleanupAction]
     """
-    cache_paths: list[Path] = []
     runstate_paths: set[Path] = set()
     rundata_paths: list[Path] = []
 
     run_repo = TrackingRepository()
 
     if run := asyncio.run(run_repo.get_workplan_run(run_id)):
-        rundata_paths.append(run.output_path)
+        if reason := _keep_data_reason(run):
+            console.print(reason, markup=False, soft_wrap=True)
+        else:
+            rundata_paths.append(run.output_path)
     else:
         # if we can't load a run, check the default data path.
         data_dir = StateDirectoryManager.data_dir(run_id=run_id)
@@ -446,21 +483,18 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
         runstate_paths.update(run_paths)  # remove history entries
         runstate_paths.add(run_repo.latest_path(run_id))  # remove symlink to latest
 
+    # the sentinels outlive the run directory; left behind, a later run of this
+    # id would adopt them and report its steps done without running them
+    if (sentinels_dir := StateDirectoryManager.run_state_dir(run_id=run_id)).is_dir():
+        runstate_paths.add(sentinels_dir)
+
     actions: list[CleanupAction] = []
 
-    if cache_paths:
-        actions.append(
-            FileSystemCleanupAction(
-                name=f"{run_id!r} Cached Results",
-                description="Cached outputs from successful steps",
-                asset_paths=cache_paths,
-            ),
-        )
     if runstate_paths:
         actions.append(
             FileSystemCleanupAction(
                 name=f"{run_id!r} State",
-                description="Internal C-Star state information related to run history.",
+                description="Internal C-Star state information: the run's history and step status.",
                 asset_paths=list(runstate_paths),
             ),
         )
@@ -489,15 +523,21 @@ def clean(
             help=yes_help,
         ),
     ] = False,
+    all_: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_ALL,
+            help=ARG_ALL_CLEAN_HELP,
+        ),
+    ] = False,
     run_id: t.Annotated[
         str,
         typer.Option(
-            "--run-id",
+            ARG_RUN_ID,
             help=run_help,
             callback=cb_pipeline(
                 runid_callback, normalize_runid, set_env(ENV_CSTAR_RUNID)
             ),
-            min=1,
             autocompletion=list_runs,
         ),
     ] = "",
@@ -506,10 +546,6 @@ def clean(
         typer.Option(
             ARG_DRY_RUN,
             help="Enumerate the assets that will be removed without performing any deletions",
-            callback=cb_pipeline(
-                set_flag(ENV_CSTAR_CLI_DRY_RUN),
-            ),
-            envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
 ) -> None:
@@ -519,14 +555,20 @@ def clean(
     -------
     None
     """
-    if not run_id:
-        all_actions = get_default_cleanup_actions()
-        todo = actions_filter_prompt(all_actions, yes)
-    else:
-        run_actions = get_run_actions(run_id)
-        todo = actions_filter_prompt(run_actions, yes)
+    if bool(run_id) == all_:
+        raise typer.BadParameter(
+            f"Give exactly one of {ARG_RUN_ID} <id> (clean one run) or {ARG_ALL} "
+            "(wipe the data, state, cache and config directories)."
+        )
 
-    asyncio.run(perform_actions(todo))
+    exit_on_refused_settings()
+
+    if all_:
+        todo = actions_filter_prompt(get_default_cleanup_actions(), yes or dry_run)
+    else:
+        todo = actions_filter_prompt(get_run_actions(run_id), yes or dry_run)
+
+    asyncio.run(perform_actions(todo, dry_run=dry_run))
 
 
 if __name__ == "__main__":

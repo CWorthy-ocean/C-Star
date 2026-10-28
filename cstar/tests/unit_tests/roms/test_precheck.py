@@ -5,8 +5,10 @@ for every *enabled* output stream, `nrpf * output_period` must be positive and
 must evenly divide `basic_output_settings.output_period_rst`, when restarts
 are on (`wrt_file_rst`). Six stream groups are additionally gated on a
 compile-time cppdef. Also covers `check_restart_period_divisible_by_dt` (a
-C-Star reproducibility convention, not a ucla-roms abort) and `applies_to`
-(the >= 0.5.0 schema gate for the output-streams rule).
+C-Star reproducibility convention, not a ucla-roms abort), `applies_to`
+(the >= 0.5.0 schema gate for the output-streams rule), and
+`check_averages_end_on_marbl_step` with its release and schema gates (ucla-roms >=
+0.13.0's `check_avg_ends_on_marbl_step`).
 
 Operates on C-Star's canonical namelist vocabulary (RomsNamelistBase group
 field names + real Fortran namelist keys), NOT forge's settings-dict
@@ -19,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from cstar.roms.namelist import (
+    NAMELIST_SCHEMA_REGISTRY,
     RomsNamelist,
     RomsNamelistV0_4_0,
     RomsNamelistV0_5_0,
@@ -26,17 +29,24 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
 )
 from cstar.roms.precheck import (
     _STREAM_CHECKS,
     NamelistConsistencyError,
     applies_to,
+    averages_end_on_marbl_step_applies_to,
+    averages_end_on_marbl_step_applies_to_schema,
+    check_averages_end_on_marbl_step,
     check_output_streams_divide_rst,
     check_restart_period_divisible_by_dt,
 )
 
 V0_5_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
 V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
+V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
+V0_13_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 
 
 def _base_settings(**overrides):
@@ -467,6 +477,15 @@ def _settings_for_row(row, *, nrpf, period):
     return settings
 
 
+def _schema_for_row(row):
+    """The newest registered namelist schema whose call list has `row`."""
+    return next(
+        schema
+        for *_, schema in reversed(NAMELIST_SCHEMA_REGISTRY)
+        if row.applies_to(schema)
+    )
+
+
 def _cppdefs_for_row(row):
     """A cppdefs mapping that satisfies `row`'s cppdef guard (empty if none)."""
     cppdefs = {}
@@ -483,13 +502,17 @@ def test_every_stream_row_raises_when_enabled_active_and_non_dividing(row):
         row, nrpf=_NON_DIVIDING_NRPF, period=_NON_DIVIDING_PERIOD
     )
     with pytest.raises(ValueError, match=row.label):
-        check_output_streams_divide_rst(settings, cppdefs=_cppdefs_for_row(row))
+        check_output_streams_divide_rst(
+            settings, cppdefs=_cppdefs_for_row(row), schema=_schema_for_row(row)
+        )
 
 
 @pytest.mark.parametrize("row", _STREAM_CHECKS, ids=lambda r: r.label)
 def test_every_stream_row_passes_when_enabled_active_and_dividing(row):
     settings = _settings_for_row(row, nrpf=_DIVIDING_NRPF, period=_DIVIDING_PERIOD)
-    check_output_streams_divide_rst(settings, cppdefs=_cppdefs_for_row(row))
+    check_output_streams_divide_rst(
+        settings, cppdefs=_cppdefs_for_row(row), schema=_schema_for_row(row)
+    )
 
 
 @pytest.mark.parametrize(
@@ -503,7 +526,52 @@ def test_every_guarded_row_skipped_when_cppdef_inactive(row):
     settings = _settings_for_row(
         row, nrpf=_NON_DIVIDING_NRPF, period=_NON_DIVIDING_PERIOD
     )
-    check_output_streams_divide_rst(settings, cppdefs={})
+    check_output_streams_divide_rst(settings, cppdefs={}, schema=_schema_for_row(row))
+
+
+@pytest.mark.parametrize("switch", ["wrt_swflx", "wrt_rstflx"])
+@pytest.mark.parametrize(
+    ("schema", "checked"),
+    [(RomsNamelistV0_12_0, False), (RomsNamelistV0_13_0, True), (None, True)],
+)
+def test_sflx_gate_counts_every_switch_from_0_13_0(switch, schema, checked):
+    """ucla-roms >= 0.13.0 (PR #407) writes the surface-flux file, and checks its
+    period, for any of its four switches; earlier releases only for
+    `wrt_smflx` or `wrt_stflx`. No schema counts as the newest.
+    """
+    settings = {
+        "basic_output_settings": {"wrt_file_rst": True, "output_period_rst": 86400},
+        "surf_flx_output_settings": {
+            switch: True,
+            "output_period_sflx": 1000,
+            "nrpf_sflx": 3,
+        },
+    }
+    if checked:
+        with pytest.raises(NamelistConsistencyError, match="surf_flx_output_settings"):
+            check_output_streams_divide_rst(settings, cppdefs={}, schema=schema)
+    else:
+        check_output_streams_divide_rst(settings, cppdefs={}, schema=schema)
+
+
+@pytest.mark.parametrize(
+    ("schema", "fixture", "checked"),
+    [
+        (RomsNamelistV0_12_0, V0_12_0_NAMELIST, False),
+        (RomsNamelistV0_13_0, V0_13_0_NAMELIST, True),
+    ],
+)
+def test_live_namelist_sflx_gate_follows_its_schema(schema, fixture, checked):
+    """A live namelist selects its rows by its own type."""
+    nml = schema.read(fixture)
+    nml.surf_flx_output_settings.wrt_swflx = True
+    nml.surf_flx_output_settings.nrpf_sflx = 3
+    nml.surf_flx_output_settings.output_period_sflx = 1000
+    if checked:
+        with pytest.raises(NamelistConsistencyError, match="surf_flx_output_settings"):
+            check_output_streams_divide_rst(nml, cppdefs={})
+    else:
+        check_output_streams_divide_rst(nml, cppdefs={})
 
 
 def test_live_namelist_conforming_passes():
@@ -634,7 +702,183 @@ def test_applies_to_v0_4_0_schema_is_false():
         RomsNamelistV0_7_0,
         RomsNamelistV0_9_0,
         RomsNamelistV0_11_0,
+        RomsNamelistV0_12_0,
+        RomsNamelistV0_13_0,
     ],
 )
 def test_applies_to_versioned_schemas_is_true(schema):
     assert applies_to(schema) is True
+
+
+# ---- check_averages_end_on_marbl_step (ucla-roms >= 0.13.0) ----
+
+_MARBL_CDR_BUILD = {"marbl": True, "marbl_diags": True, "cdr_forcing": True}
+
+
+def _averaging_settings(
+    *,
+    dt: float = 60.0,
+    marbl_timestep: float = 3600.0,
+    cdr: dict | None = None,
+    bgc: dict | None = None,
+) -> dict:
+    """Canonical settings with the ``_cdr`` average on at an hourly period and
+    the ``_bgc_dia_avg`` average off, restarts off (Rule C ignores them).
+    """
+    return {
+        "time_stepping": {"dt": dt},
+        "marbl_biogeochemistry_settings": {"marbl_timestep": marbl_timestep},
+        "basic_output_settings": {"wrt_file_rst": False},
+        "cdr_output_settings": {
+            "do_cdr_output": True,
+            "wrt_cdr_avg": True,
+            "cdr_monthly_averages": False,
+            "output_period_cdr": 3600.0,
+            **(cdr or {}),
+        },
+        "bgc_settings": {
+            "wrt_bgc_dia_avg": False,
+            "output_period_bgc_avg_dia": 3600.0,
+            **(bgc or {}),
+        },
+    }
+
+
+def test_averages_on_marbl_steps_pass():
+    check_averages_end_on_marbl_step(_averaging_settings(), _MARBL_CDR_BUILD)
+    check_averages_end_on_marbl_step(
+        _averaging_settings(cdr={"output_period_cdr": 86400.0}), _MARBL_CDR_BUILD
+    )
+
+
+def test_cdr_average_shorter_than_the_marbl_step_raises():
+    """C-Star's own Tier 2 e2e ran 900 s ``_cdr`` windows with hourly MARBL steps,
+    which ucla-roms 0.13.0 stops on; the error ignores ``wrt_file_rst``.
+    """
+    settings = _averaging_settings(cdr={"output_period_cdr": 900.0})
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_averages_end_on_marbl_step(settings, _MARBL_CDR_BUILD)
+    err = excinfo.value
+    assert err.rule == "averages_end_on_marbl_step"
+    assert err.section == "cdr_output_settings"
+    assert err.keys == ("output_period_cdr",)
+    assert "3600.0 s" in str(err)
+    assert ">= 0.13.0" in str(err)
+
+
+def test_marbl_timestep_is_rounded_down_to_a_multiple_of_dt():
+    """With ``dt`` 480 s ROMS steps MARBL every 7 * 480 = 3360 s, so an hourly
+    average no longer ends on a MARBL step; a 3360 s one does.
+    """
+    with pytest.raises(NamelistConsistencyError, match="3360.0 s"):
+        check_averages_end_on_marbl_step(
+            _averaging_settings(dt=480.0), _MARBL_CDR_BUILD
+        )
+    check_averages_end_on_marbl_step(
+        _averaging_settings(dt=480.0, cdr={"output_period_cdr": 3360.0}),
+        _MARBL_CDR_BUILD,
+    )
+
+
+def test_marbl_timestep_below_dt_is_one_dt():
+    check_averages_end_on_marbl_step(
+        _averaging_settings(
+            dt=600.0, marbl_timestep=300.0, cdr={"output_period_cdr": 1800.0}
+        ),
+        _MARBL_CDR_BUILD,
+    )
+
+
+@pytest.mark.parametrize(
+    "cdr",
+    [
+        {"do_cdr_output": False},
+        {"wrt_cdr_avg": False},
+        {"cdr_monthly_averages": True},
+    ],
+)
+def test_cdr_average_not_written_is_not_checked(cdr):
+    settings = _averaging_settings(cdr={"output_period_cdr": 900.0, **cdr})
+    check_averages_end_on_marbl_step(settings, _MARBL_CDR_BUILD)
+
+
+@pytest.mark.parametrize("inactive", ["marbl", "marbl_diags", "cdr_forcing"])
+def test_cdr_average_not_compiled_is_not_checked(inactive):
+    settings = _averaging_settings(cdr={"output_period_cdr": 900.0})
+    check_averages_end_on_marbl_step(settings, {**_MARBL_CDR_BUILD, inactive: False})
+
+
+def test_bgc_diagnostics_average_raises():
+    """The ``standard`` OutputSpec's 60 s ``_bgc_dia_avg`` period, once turned on."""
+    settings = _averaging_settings(
+        bgc={"wrt_bgc_dia_avg": True, "output_period_bgc_avg_dia": 60.0}
+    )
+    build = {"marbl": True, "marbl_diags": True}
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_averages_end_on_marbl_step(settings, build)
+    assert excinfo.value.section == "bgc_settings"
+    assert excinfo.value.keys == ("output_period_bgc_avg_dia",)
+    check_averages_end_on_marbl_step(settings, {"marbl": True})
+
+
+def test_live_v0_12_0_namelist_with_cdr_output_raises():
+    """The 0.12.0 fixture's ``dt`` of 2160 s makes ROMS step MARBL every 2160 s,
+    so its hourly ``_cdr`` average fails once ``do_cdr_output`` is on.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_12_0_NAMELIST)
+    check_averages_end_on_marbl_step(nml, _MARBL_CDR_BUILD)
+    nml.cdr_output_settings.do_cdr_output = True
+    with pytest.raises(NamelistConsistencyError, match="2160.0 s"):
+        check_averages_end_on_marbl_step(nml, _MARBL_CDR_BUILD)
+
+
+@pytest.mark.parametrize(
+    ("roms_ref", "applies"),
+    [
+        ("0.12.0", False),
+        ("v0.12.0", False),
+        ("0.13.0", True),
+        ("v0.13.1", True),
+        ("main", True),
+        ("3220b701", False),
+        (None, True),
+    ],
+)
+def test_averages_check_applies_from_0_13_0(roms_ref, applies):
+    """Releases before 0.13.0 do not check; a branch counts as the latest release,
+    and an unresolved commit hash is left to the callers that resolve it.
+    """
+    assert averages_end_on_marbl_step_applies_to(roms_ref) is applies
+
+
+@pytest.mark.parametrize(
+    ("schema", "applies"),
+    [
+        (RomsNamelist, False),
+        (RomsNamelistV0_9_0, False),
+        (RomsNamelistV0_12_0, False),
+        (RomsNamelistV0_13_0, True),
+    ],
+)
+def test_averages_check_schema_gate_applies_from_0_13_0(schema, applies):
+    """The ``ucla_roms`` path, which has resolved its schema, gates on it."""
+    assert averages_end_on_marbl_step_applies_to_schema(schema) is applies
+
+
+@pytest.mark.parametrize(
+    ("lower", "schema"),
+    [
+        (lower, schema)
+        for lower, _, schema in NAMELIST_SCHEMA_REGISTRY
+        if lower is not None
+    ],
+)
+def test_averages_check_schema_gate_agrees_with_the_release_gate(lower, schema):
+    """Each registered tier is on the same side of the boundary gated by its schema
+    as by the release tag that starts it, so a later tier, which subclasses the
+    last, stays in step with the release gate.
+    """
+    tag = ".".join(str(part) for part in lower)
+    assert averages_end_on_marbl_step_applies_to_schema(
+        schema
+    ) is averages_end_on_marbl_step_applies_to(tag)

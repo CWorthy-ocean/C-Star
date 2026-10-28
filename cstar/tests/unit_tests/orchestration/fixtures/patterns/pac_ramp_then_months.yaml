@@ -2,7 +2,7 @@ name: pac_ramp_then_months
 description: golden for pac_ramp_then_months
 steps:
 - name: spin-01
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   blueprint_overrides:
     runtime_params:
@@ -14,7 +14,7 @@ steps:
     continue-from:
       path: /ini
 - name: spin-02
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - spin-01
@@ -28,7 +28,7 @@ steps:
     continue-from:
       step: spin-01
 - name: spin-03
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - spin-02
@@ -42,7 +42,7 @@ steps:
     continue-from:
       step: spin-02
 - name: main-01
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - spin-03
@@ -59,7 +59,7 @@ steps:
     continue-from:
       step: spin-03
 - name: main-02
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - main-01
@@ -76,7 +76,7 @@ steps:
     continue-from:
       step: main-01
 - name: main-03
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - main-02
@@ -92,3 +92,4 @@ steps:
   directives:
     continue-from:
       step: main-02
+schema_version: 1.2.0

@@ -1,9 +1,9 @@
 name: integration_extended
 
-# Non-PR-gating tier: tracks upstream ucla-roms (a pinned release and main) across
-# both operating systems and both Python versions, and runs the heavier
-# scenarios under cstar/tests/integration_tests/extended. Failures here are an
-# early warning, not a merge blocker.
+# Non-PR-gating tier: tracks upstream ucla-roms (a pinned release and main) on
+# every supported Python version on Ubuntu and the newest one on macOS, and runs
+# the heavier scenarios under cstar/tests/integration_tests/extended. Failures
+# here are an early warning, not a merge blocker.
 
 on:
   schedule:
@@ -27,8 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.13"]
-        roms_ref: ["0.11.0", "main"]
+        python-version: ["3.12", "3.13", "3.14"]
+        roms_ref: ["0.13.0", "main"]
+        # macOS runs only the newest Python, against both ucla-roms refs
+        exclude:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 
@@ -86,7 +92,7 @@ jobs:
           CSTAR_IT_ROMS_REF: ${{ matrix.roms_ref == 'main' && (github.event.inputs.roms_ref || 'main') || matrix.roms_ref }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/roms_marbl cstar/tests/integration_tests/extended
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms cstar/tests/integration_tests/extended
 
       - name: Get coverage report
         shell: micromamba-shell {0}

@@ -57,6 +57,11 @@ def test_chip_contains_kind_class_and_text():
     assert "Required" in html
 
 
+def test_chip_title_becomes_a_tooltip():
+    assert "title='why'" in C.chip("Experimental", "warn", title="why")
+    assert "title=" not in C.chip("Required", "req")
+
+
 def test_banner_contains_kind_class_and_html():
     html = C.banner("warn", "watch out")
     assert "forge-banner warn" in html
@@ -122,6 +127,13 @@ def test_field_row_required_marker_present_for_required_field():
     widget = W.Text()
     row = C.field_row(W, "grid_name", widget)
     assert "req" in row.children[0].value
+
+
+def test_field_row_experimental_chip_only_for_flagged_field():
+    flagged = C.field_row(W, "auto_tiling_chk", W.Checkbox())
+    plain = C.field_row(W, "use_pio_chk", W.Checkbox())
+    assert C.EXPERIMENTAL_CHIP in flagged.children[0].value
+    assert "Experimental" not in plain.children[0].value
 
 
 def test_field_grid_sets_columns_and_gap():

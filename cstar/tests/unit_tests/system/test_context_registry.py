@@ -3,7 +3,6 @@ from unittest.mock import PropertyMock, patch
 
 import pytest
 
-from cstar.base.exceptions import CstarError
 from cstar.system.manager import (
     CTX_REGISTRY,
     AnvilSystemContext,
@@ -16,8 +15,10 @@ from cstar.system.manager import (
     MacOSSystemContext,
     PerlmutterSystemContext,
     SystemContext,
+    SystemSource,
     get_system_context,
     register_sys_context,
+    select_system,
 )
 from cstar.system.scheduler import Scheduler
 
@@ -92,8 +93,9 @@ def test_registry_keys(expected_name: str, wrapped_class: type[SystemContext]) -
     assert expected_name == wrapped_class.name
 
 
-def test_new_registration() -> None:
+def test_new_registration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify that registrations of new context types are immediately available."""
+    monkeypatch.setattr("cstar.system.manager.CTX_REGISTRY", dict(CTX_REGISTRY))
 
     @register_sys_context
     class MockSystemContext(SystemContext):
@@ -120,13 +122,25 @@ def test_new_registration() -> None:
 
 
 def test_unknown_context_name() -> None:
-    """Verify that requesting an unregistered context fails."""
+    """Verify that a detected name that is not registered falls back to the generic
+    context of the platform instead of failing.
+    """
     with (
-        pytest.raises(CstarError),
         patch(
             "cstar.system.manager.HostNameEvaluator.name",
             new_callable=PropertyMock,
             return_value="invalid-name",
         ),
+        patch(
+            "cstar.system.manager.HostNameEvaluator.platform_hostname",
+            new_callable=PropertyMock,
+            return_value="linux_x86_64",
+        ),
     ):
-        _ = get_system_context()
+        selection = select_system()
+        ctx = get_system_context()
+
+    assert selection.context is LinuxSystemContext
+    assert selection.source is SystemSource.FALLBACK
+    assert selection.detected == "invalid-name"
+    assert isinstance(ctx, LinuxSystemContext)

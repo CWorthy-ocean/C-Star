@@ -1,7 +1,7 @@
 """Blueprints emitted by runs of a catalog's entries.
 
 A producing application's run can publish a blueprint for a downstream
-application (a ``forge`` run publishes the ``roms_marbl`` blueprint
+application (a ``forge`` run publishes the ``ucla_roms`` blueprint
 ``B_<name>.yaml``). :func:`find_blueprint_outputs` finds those blueprints, and
 :class:`BlueprintOutput` says how each one's recorded producer compares with the
 catalog entry it came from. Reached through
@@ -20,6 +20,8 @@ from pathlib import Path
 import yaml
 from pydantic import Field, ValidationError
 
+from cstar.base.application_names import canonical_application
+from cstar.base.digest import digest_scheme
 from cstar.orchestration.models import (
     BlueprintCore,
     BlueprintIdentity,
@@ -52,8 +54,9 @@ class OutputStatus(StrEnum):
 
     UNVERIFIED = "unverified"
     """The output cannot be checked against the catalog: it records no producer
-    (e.g. it was emitted before provenance existed), or the catalog entry of its
-    recorded producer could not be loaded."""
+    (e.g. it was emitted before provenance existed), it records its producer's
+    content hash under another hash scheme (another release's recipe), or the
+    catalog entry of its recorded producer could not be loaded."""
 
 
 class BlueprintOutput(ConfiguredBaseModel):
@@ -63,7 +66,7 @@ class BlueprintOutput(ConfiguredBaseModel):
     """The emitted blueprint file."""
 
     application: RequiredString
-    """The emitted blueprint's own application, e.g. `roms_marbl`."""
+    """The emitted blueprint's own application, e.g. `ucla_roms`."""
 
     producer: BlueprintIdentity
     """The blueprint that produced it: the one its provenance records or, when it
@@ -210,24 +213,47 @@ async def _run_candidates(application: str) -> list[_Candidate]:
     """Find the blueprint files in the output directories of the ``application``
     steps of every tracked workplan run, in run-id order.
     """
-    from cstar.base.env import max_concurrency
+    from cstar.base.utils import MAX_CONCURRENCY
     from cstar.orchestration.orchestration import LiveWorkplan
     from cstar.orchestration.tracking import TrackingRepository
 
     runs = sorted(
         await TrackingRepository().list_latest_runs(), key=lambda run: run.run_id
     )
-    workplans = await LiveWorkplan.load_all(
-        [run.trx_workplan_path for run in runs], max_concurrency()
-    )
+    # a run whose directory holds no transformed workplan is as unreadable as one
+    # whose workplan fails to load
+    readable: list[WorkplanRun] = []
+    paths: list[Path] = []
+    unlocated: list[str] = []
+    for run in runs:
+        if (path := run.try_trx_workplan_path()) is None:
+            unlocated.append(run.run_id)
+        else:
+            paths.append(path)
+            readable.append(run)
+    workplans = await LiveWorkplan.load_all(paths, MAX_CONCURRENCY)
 
     # Listing each step's directory blocks, so it runs off the event loop.
     candidates, unreadable = await asyncio.to_thread(
-        _step_candidates, runs, workplans, application
+        _step_candidates, readable, workplans, application
     )
 
-    _log_skipped("runs have no readable workplan and were skipped", unreadable)
+    _log_skipped(
+        "runs have no readable workplan and were skipped",
+        sorted([*unlocated, *unreadable]),
+    )
     return candidates
+
+
+def _compare(recorded: BlueprintIdentity, current: BlueprintIdentity) -> OutputStatus:
+    """Compare an output's recorded producer with the catalog entry's current one.
+
+    A content hash recorded under another scheme than the current one was computed
+    by another recipe, so the two cannot be compared.
+    """
+    if digest_scheme(recorded.content_hash) != digest_scheme(current.content_hash):
+        return OutputStatus.UNVERIFIED
+    return OutputStatus.CURRENT if recorded == current else OutputStatus.CHANGED
 
 
 def _describe(
@@ -286,8 +312,7 @@ def _describe(
         else:
             producer = recorded
             if recorded.name in current:
-                same = recorded == current[recorded.name]
-                status = OutputStatus.CURRENT if same else OutputStatus.CHANGED
+                status = _compare(recorded, current[recorded.name])
             elif recorded.name in unloadable:
                 status = OutputStatus.UNVERIFIED
             else:
@@ -325,7 +350,8 @@ async def find_blueprint_outputs(
     catalog : LayeredCatalog
         The catalog whose entries are the producers.
     application : str
-        The producing application, e.g. ``forge``.
+        The producing application, e.g. ``forge``. An earlier name of an
+        application is read as its current name.
 
     Returns
     -------
@@ -352,6 +378,9 @@ async def find_blueprint_outputs(
     only the output cannot be checked against it. An error in the application's
     ``emitted_blueprint`` is not skipped but propagates.
     """
+    # The step and provenance applications compared against below are canonical
+    # (the models canonicalise them on load), so the parameter must be too.
+    application = canonical_application(application)
     # Loading the entries (the application's first use imports its dependencies)
     # and reading the files block, so they run off the event loop: the wizard
     # awaits this on the kernel's loop. The two scans do not depend on each other,

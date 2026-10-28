@@ -8,19 +8,37 @@ pytest.importorskip("ipywidgets")
 
 import re
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, Literal
+from uuid import uuid4
 
 import yaml
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
 )
-from cstar.orchestration.models import BLUEPRINT_METADATA_FIELDS, Step, Workplan
+from cstar.execution.file_system import StateDirectoryManager
+from cstar.orchestration.index import RunIndex, run_uri
+from cstar.orchestration.manifest import (
+    Attempt,
+    RunManifest,
+    StepEntry,
+    StepRecord,
+    write_run_manifest,
+    write_step_record,
+)
+from cstar.orchestration.models import (
+    BLUEPRINT_METADATA_FIELDS,
+    BlueprintIdentity,
+    Step,
+    Workplan,
+)
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.ui import labels
 from cstar.wizard.wizard import WIZARD_TOOL, ForgeBlueprintWizardApp
@@ -31,8 +49,8 @@ _BP_TEMPLATE = (
     / "additional_files"
     / "templates"
     / "bp"
-    / "roms_marbl"
-    / "blueprint.3.2.0.yaml"
+    / "ucla_roms"
+    / "blueprint.3.3.0.yaml"
 )
 _FORGE_BP = "wio-toy-simple"
 
@@ -57,7 +75,7 @@ def page(bp_app: ForgeBlueprintWizardApp) -> WorkplanBuilderPage:
 
 @pytest.fixture
 def roms_bp(tmp_path: Path) -> Path:
-    """A readable roms_marbl blueprint (128 CPUs, 2020-01-01 start, ucla-roms ``main``)."""
+    """A readable ucla_roms blueprint (128 CPUs, 2020-01-01 start, ucla-roms ``main``)."""
     path = tmp_path / "roms.yaml"
     shutil.copy(_BP_TEMPLATE, path)
     return path
@@ -178,7 +196,7 @@ def test_pane_prefills_cpus_and_shows_the_blueprint_window(page, roms_bp):
     pane = page.panes[0]
     _path_step(pane, "run", roms_bp)
     assert pane.num_cpus.value == 128
-    assert pane.application.value == "roms_marbl"
+    assert pane.application.value == "ucla_roms"
     assert pane.application.disabled  # derived from the file
     assert "2020-01-01" in pane.start_note.value
     assert "start_date" not in str(pane.gather().blueprint_overrides)
@@ -512,7 +530,7 @@ def test_deferred_step_is_prefilled_from_the_forge_hook(page):
     run.producer.value = "forge"
     assert run.filename.value == f"B_{_FORGE_BP}.yaml"
     assert run.num_cpus.value == 10
-    assert run.application.value == "roms_marbl"
+    assert run.application.value == "ucla_roms"
     step = page.draft.steps[1]
     assert step.is_deferred
     assert step.blueprint_path.filename == f"B_{_FORGE_BP}.yaml"
@@ -632,7 +650,7 @@ def test_upload_source_stages_the_file(page, roms_bp):
     )
     assert Path(pane._uploaded_path).name == "up.yaml"
     assert Path(pane._uploaded_path).read_bytes() == roms_bp.read_bytes()
-    assert pane.application.value == "roms_marbl"
+    assert pane.application.value == "ucla_roms"
 
 
 # ---------------------------------------------------------------------------
@@ -723,54 +741,400 @@ def test_runs_table_declares_aliases_and_offers_their_steps(page, roms_bp):
     assert page.draft is None  # the dependency now names an undeclared alias
 
 
-def test_refresh_runs_lists_records_newest_first_and_loads_steps(
-    page, roms_bp, tmp_path, monkeypatch
-):
+_STAMP = datetime(2026, 3, 1, 12, tzinfo=UTC)
+_STEP = "create-ic"
+
+
+@pytest.fixture
+def run_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the data and project homes at temporary directories.
+
+    Returns the project's runs area (not created). `PROJECT` is cleared so no
+    refresh can scan a real one.
+    """
+    monkeypatch.delenv("PROJECT", raising=False)
     monkeypatch.setenv("CSTAR_DATA_HOME", str(tmp_path / "data"))
-    recorded = tmp_path / "recorded.yaml"
-    recorded.write_text(
-        yaml.safe_dump(
-            {
-                "name": "old",
-                "description": "an earlier run",
-                "steps": [
-                    {
-                        "name": "create-ic",
-                        "application": "roms_marbl",
-                        "blueprint": str(roms_bp),
-                    }
-                ],
-            }
-        )
-    )
+    project = (tmp_path / "project").resolve()
+    monkeypatch.setenv("CSTAR_PROJECT_HOME", str(project))
+    return project / "cstar" / "runs"
 
-    class _Run:
-        def __init__(self, run_id: str, start_at: datetime) -> None:
-            self.run_id, self.start_at = run_id, start_at
-            self.trx_workplan_path = recorded
 
-    runs = [_Run("old", datetime(2026, 1, 1)), _Run("new", datetime(2026, 6, 1))]
+@pytest.fixture
+def tracked(monkeypatch: pytest.MonkeyPatch) -> list[WorkplanRun]:
+    """The runs tracking lists; a test appends to it."""
+    runs: list[WorkplanRun] = []
 
     async def _list(self, run_id_filter: str = ""):
         return runs
 
-    from cstar.orchestration.tracking import TrackingRepository
-
     monkeypatch.setattr(TrackingRepository, "list_latest_runs", _list)
+    return runs
 
+
+@pytest.fixture
+def scans(monkeypatch: pytest.MonkeyPatch) -> list[RunIndex]:
+    """The indexes that scanned: one entry per scan, whichever index did it."""
+    scanned: list[RunIndex] = []
+    scan = RunIndex.locations
+
+    def _locations(self: RunIndex):
+        scanned.append(self)
+        return scan(self)
+
+    monkeypatch.setattr(RunIndex, "locations", _locations)
+    return scanned
+
+
+def _workplan_text(roms_bp: Path, name: str = "earlier") -> str:
+    return yaml.safe_dump(
+        {
+            "name": name,
+            "description": "an earlier run",
+            "steps": [
+                {
+                    "name": _STEP,
+                    "application": "roms_marbl",
+                    "blueprint": str(roms_bp),
+                }
+            ],
+        }
+    )
+
+
+def _make_run(
+    root: Path,
+    run_id: str,
+    roms_bp: Path,
+    *,
+    uuid: str | None = None,
+    kind: Literal["workplan", "blueprint"] = "workplan",
+    start: datetime = _STAMP,
+    done: bool = True,
+    status: str = "",
+    transformed: bool = True,
+) -> str:
+    """Write a run directory (manifest, transformed workplan, step record); return its uuid."""
+    uuid = uuid or str(uuid4())
+    manifest = RunManifest(
+        id=uuid,
+        run_id=run_id,
+        name=run_id,
+        kind=kind,
+        created_at=start,
+        attempts=[Attempt(start_at=start)],
+        steps=[
+            StepEntry(
+                name=_STEP,
+                application="roms_marbl",
+                working_dir=f"tasks/{_STEP}",
+                status=status,
+            )
+        ],
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    write_run_manifest(root, manifest)
+    if transformed:
+        (root / f"{run_id}_transformed.yaml").write_text(_workplan_text(roms_bp))
+    if done:
+        write_step_record(
+            root / "tasks" / _STEP,
+            StepRecord(
+                step=_STEP,
+                application="roms_marbl",
+                blueprint=BlueprintIdentity(
+                    kind="Blueprint",
+                    application="roms_marbl",
+                    name="bp",
+                    content_hash="abc",
+                ),
+                outcome="completed",
+                finished_at=start,
+            ),
+        )
+    return uuid
+
+
+def _local_run(run_id: str, roms_bp: Path, **kwargs: Any) -> tuple[Path, str]:
+    """A workplan run in the data home; return its directory and uuid."""
+    root = StateDirectoryManager.workplan_runs_dir() / run_id
+    return root, _make_run(root, run_id, roms_bp, **kwargs)
+
+
+def _tracked(
+    root: Path, run_id: str, *, uuid: str = "", start: datetime = _STAMP
+) -> WorkplanRun:
+    """A tracking record of the run in ``root``, stamped with ``uuid`` when given.
+
+    ``start`` is when the record was written: the run's start unless its
+    directory holds a manifest that says otherwise.
+    """
+    return WorkplanRun(
+        output_path=root,
+        run_id=run_id,
+        recorded_at=start,
+        metadata={KEY_RUN_UUID: uuid} if uuid else {},
+    )
+
+
+def _labels(widget) -> list[str]:
+    """The option labels of a selection widget."""
+    return [o[0] if isinstance(o, tuple) else o for o in widget.options]
+
+
+def _run_row(page: WorkplanBuilderPage, roms_bp: Path, alias: str = "ini"):
+    """A page with one step and one run row aliased ``alias``."""
     _name_page(page)
     _path_step(page.panes[0], "run", roms_bp)
     page._add_run()
     row = page.run_rows[0]
-    row.alias.value = "ini"
+    row.alias.value = alias
+    return row
+
+
+def test_refresh_runs_lists_records_newest_first_and_loads_steps(
+    page, roms_bp, tmp_path, run_homes, tracked
+):
+    for run_id, start in (
+        ("old", datetime(2026, 1, 1, tzinfo=UTC)),
+        ("new", datetime(2026, 6, 1, tzinfo=UTC)),
+    ):
+        _make_run(tmp_path / run_id, run_id, roms_bp, start=start)
+        tracked.append(_tracked(tmp_path / run_id, run_id))
+
+    row = _run_row(page, roms_bp)
     page.refresh_runs()
     assert _values(row.pick) == ["", "new", "old"]
+    assert (
+        page.runs_status.value == "2 recorded run(s), 0 more found in run directories"
+    )
 
     row.pick.value = "old"
     assert row.run_id.value == "old"
-    assert page.run_steps["ini"] == ["create-ic"]
+    assert page.run_steps["ini"] == [_STEP]
     assert "not finished" in row.status.value  # no sentinel: not known to be Done
     assert page.draft.runs["ini"].run_id == "old"
+
+
+def test_refresh_runs_lists_runs_found_in_run_directories(
+    page, roms_bp, run_homes, tracked
+):
+    _, local_uuid = _local_run("scratch-run", roms_bp, start=_STAMP)
+    copy_uuid = _make_run(
+        run_homes / "kept-run", "kept-run", roms_bp, start=_STAMP + timedelta(days=1)
+    )
+    target, linked_uuid = _local_run(
+        "linked-source", roms_bp, start=_STAMP + timedelta(days=2)
+    )
+    (run_homes / "linked-run").symlink_to(target)  # the run, kept in the project
+    tracked.append(
+        _tracked(
+            StateDirectoryManager.workplan_runs_dir() / "tracked",
+            "tracked",
+            start=_STAMP + timedelta(days=3),
+        )
+    )
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == [
+        "",
+        "tracked",
+        run_uri(linked_uuid),
+        run_uri(copy_uuid),
+        run_uri(local_uuid),
+    ]
+    assert _labels(row.pick)[2:] == [
+        "linked-source  (2026-03-03 12:00, project, linked)",
+        "kept-run  (2026-03-02 12:00, project)",
+        "scratch-run  (2026-03-01 12:00, local, untracked)",
+    ]
+    assert (
+        page.runs_status.value == "1 recorded run(s), 3 more found in run directories"
+    )
+
+
+def test_a_tracked_run_found_again_is_listed_once(page, roms_bp, run_homes, tracked):
+    by_root, _ = _local_run("by-root", roms_bp)
+    tracked.append(_tracked(by_root, "by-root"))  # an unstamped record: no uuid cached
+
+    # the run dir was purged from the data home; the project keeps a copy, the only
+    # readable one, so the copy is listed beside the tracked entry
+    gone = StateDirectoryManager.workplan_runs_dir() / "by-uuid"
+    uuid = _make_run(run_homes / "by-uuid", "by-uuid", roms_bp)
+    tracked.append(_tracked(gone, "by-uuid", uuid=uuid))
+
+    # a copy of a tracked run whose directory exists is that run
+    kept = _make_run(
+        StateDirectoryManager.workplan_runs_dir() / "kept", "kept", roms_bp
+    )
+    tracked.append(_tracked(StateDirectoryManager.workplan_runs_dir() / "kept", "kept"))
+    _make_run(run_homes / "kept", "kept", roms_bp, uuid=kept)
+
+    # a run of the same name that is another run is kept
+    other = _make_run(run_homes / "by-root-2", "by-root", roms_bp)
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == [
+        "",
+        "by-root",
+        "by-uuid",
+        "kept",
+        run_uri(other),
+        run_uri(uuid),
+    ]
+    assert [r.uuid for r in page.indexed_runs] == [other, uuid]
+
+    row.pick.value = "by-uuid"  # the tracked entry: its directory is gone
+    assert "could not be read" in row.status.value
+    row.pick.value = run_uri(uuid)  # the copy
+    assert page.run_steps["ini"] == [_STEP]
+    assert "Done" in row.status.value
+
+
+def test_a_tracked_run_is_matched_by_directory_without_reading_uuids(
+    page, roms_bp, run_homes, tracked, monkeypatch
+):
+    root, _ = _local_run("mine", roms_bp)
+    tracked.append(_tracked(root, "mine", uuid="not-the-manifests"))
+    reads: list[str] = []
+
+    def _uuid(self: WorkplanRun) -> str:
+        reads.append(self.run_id)
+        return ""
+
+    monkeypatch.setattr(WorkplanRun, "uuid", property(_uuid))
+    _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert page.indexed_runs == []
+    assert reads == []
+
+
+def test_a_run_kept_in_two_places_is_listed_once(page, roms_bp, run_homes, tracked):
+    _, uuid = _local_run("moved", roms_bp)
+    _make_run(run_homes / "moved", "moved", roms_bp, uuid=uuid)
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == ["", run_uri(uuid)]
+    assert "(2026-03-01 12:00, project)" in _labels(row.pick)[1]
+
+
+def test_blueprint_runs_are_not_listed(page, roms_bp, run_homes, tracked):
+    _make_run(
+        StateDirectoryManager.blueprint_runs_dir() / "ucla_roms" / "solo",
+        "solo",
+        roms_bp,
+        kind="blueprint",
+    )
+    _, uuid = _local_run("plan", roms_bp)
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == ["", run_uri(uuid)]
+
+
+def test_picking_an_indexed_run_loads_its_steps_and_statuses(
+    page, roms_bp, run_homes, tracked
+):
+    _, done = _local_run("done-run", roms_bp)
+    _, running = _local_run(
+        "running-run",
+        roms_bp,
+        done=False,
+        status="Running",
+        start=_STAMP + timedelta(days=1),
+    )
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    row.pick.value = run_uri(done)
+    assert row.run_id.value == run_uri(done)
+    assert page.run_steps["ini"] == [_STEP]
+    assert "Done" in row.status.value
+    assert "not finished" not in row.status.value
+    assert page.draft.runs["ini"].run_id == run_uri(done)
+
+    row.run_id.value = f"RUN://{running.upper()}"  # the handle is read in any case
+    assert "Running" in row.status.value
+    assert "not finished" in row.status.value
+
+    row.run_id.value = "run://not-a-uuid"
+    assert row.status.value == ""
+    row.run_id.value = ""
+    assert row.status.value == ""
+
+
+def test_an_indexed_run_without_a_workplan_says_so(page, roms_bp, run_homes, tracked):
+    _, uuid = _local_run("bare", roms_bp, transformed=False)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    row.pick.value = run_uri(uuid)
+    assert "could not be read" in row.status.value
+    assert "holds no transformed workplan" in row.status.value
+
+
+def test_every_refresh_rescans_the_run_directories(
+    page, roms_bp, run_homes, tracked, scans
+):
+    _, first = _local_run("first", roms_bp)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+    assert _values(row.pick) == ["", run_uri(first)]
+
+    _, second = _local_run("second", roms_bp, start=_STAMP + timedelta(days=1))
+    assert _values(row.pick) == ["", run_uri(first)]  # nothing scans by itself
+    page.refresh_runs()
+    assert _values(row.pick) == ["", run_uri(second), run_uri(first)]
+    assert len(scans) == 2
+    assert scans[0] is not scans[1]
+
+
+def test_editing_a_row_does_not_scan(page, roms_bp, run_homes, tracked, scans):
+    _, uuid = _local_run("plan", roms_bp)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+    assert len(scans) == 1
+
+    row.pick.value = run_uri(uuid)
+    row.run_id.value = "something-else"
+    row.steps.value = "a, b"
+    row.alias.value = "spin"
+    page._add_run()
+    page.run_rows[1].run_id.value = run_uri(uuid)
+    assert len(scans) == 1
+
+
+def test_a_failed_scan_keeps_the_tracked_runs(
+    page, roms_bp, tmp_path, run_homes, tracked, monkeypatch
+):
+    tracked.append(_tracked(tmp_path / "mine", "mine"))
+
+    def _boom(self):
+        raise OSError("stale file handle")
+
+    monkeypatch.setattr(RunIndex, "locations", _boom)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == ["", "mine"]
+    assert "1 recorded run(s)" in page.runs_status.value
+    assert "Could not scan the run directories: stale file handle" in (
+        page.runs_status.value
+    )
+
+
+def test_run_start_times_sort_together_with_or_without_a_time_zone():
+    naive = datetime(2026, 1, 1)
+    assert wb._aware(naive) == naive.replace(tzinfo=UTC)
+    assert wb._aware(_STAMP) is _STAMP
+    assert sorted([_STAMP, naive], key=wb._aware) == [naive, _STAMP]
 
 
 # ---------------------------------------------------------------------------
@@ -985,7 +1349,7 @@ class _StubCatalog:
         self.root = root
         self.read_only = read_only
         self.workplans_dir = root / "workplans"
-        self.blueprint_applications = ["roms_marbl"]
+        self.blueprint_applications = ["ucla_roms"]
 
     def blueprint_names(self, application: str) -> list[str]:
         return sorted(p.stem for p in (self.root / application).glob("*.yaml"))
@@ -1002,9 +1366,9 @@ def _stub_page(catalog: _StubCatalog) -> WorkplanBuilderPage:
 
 
 def test_catalog_blueprint_entry_resolves_to_its_file(tmp_path, roms_bp):
-    """A ``blueprints/roms_marbl/<name>.yaml`` entry maps to that file."""
-    (tmp_path / "roms_marbl").mkdir()
-    entry = tmp_path / "roms_marbl" / "flat.yaml"
+    """A ``blueprints/ucla_roms/<name>.yaml`` entry maps to that file."""
+    (tmp_path / "ucla_roms").mkdir()
+    entry = tmp_path / "ucla_roms" / "flat.yaml"
     shutil.copy(roms_bp, entry)
 
     page = _stub_page(_StubCatalog(tmp_path))
@@ -1119,7 +1483,7 @@ def test_chunk_recipe_first_source_declares_the_external_run(page, roms_bp, tmp_
     _round_trips(page, tmp_path)
 
 
-def test_time_recipes_offer_only_roms_marbl_steps_as_bases(page):
+def test_time_recipes_offer_only_ucla_roms_steps_as_bases(page):
     pane = page.panes[0]
     pane.name.value = "hello"
     pane.source.value = wb.SOURCE_INLINE
@@ -1127,7 +1491,7 @@ def test_time_recipes_offer_only_roms_marbl_steps_as_bases(page):
     assert page.roms_step_names() == []
     assert _values(page.chunk_base.step) == [""]
     assert _values(page.ramp_base.step) == [""]
-    assert "upscaling needs roms_marbl steps" in page.recipe_hint.value
+    assert "Chunk and ramp can start from a blueprint" in page.recipe_hint.value
     assert page.upscale_btn.disabled
     # chunk and ramp can still start from a blueprint, so they stay enabled
     assert not page.chunk_btn.disabled and not page.ramp_btn.disabled
@@ -1172,7 +1536,7 @@ def test_forge_then_run_recipe_adds_forge_and_deferred_steps(page, tmp_path):
     _name_page(page)
     page.forge_source.value = _FORGE_BP
     page.forge_btn.click()
-    assert [p.name.value for p in page.panes] == ["forge", "roms_marbl"]
+    assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
     draft = _round_trips(page, tmp_path)
     forge, run = draft.steps
     assert forge.application == "forge"
@@ -1181,29 +1545,34 @@ def test_forge_then_run_recipe_adds_forge_and_deferred_steps(page, tmp_path):
     assert run.compute_overrides == {"slurm": {"num_cpus": 10}}
     # a second addition picks fresh names
     page.forge_btn.click()
-    assert [p.name.value for p in page.panes][2:] == ["forge-2", "roms_marbl-2"]
+    assert [p.name.value for p in page.panes][2:] == ["forge-2", "ucla_roms-2"]
     page.forge_source.value = ""
     page.forge_path.value = str(tmp_path / "missing.yaml")
     page.forge_btn.click()
     assert "cannot read a forge blueprint" in page.forge_status.value
 
 
-def test_upscale_recipe_reads_use_pio_from_the_blueprints(page, roms_bp, tmp_path):
+def test_upscale_recipe_refuses_as_not_yet_supported(page, roms_bp):
     _roms_page(page, roms_bp, "inner")
     outer = page.add_step("outer")
     _path_step(outer, "outer", roms_bp)
-    assert page.upscale_levels.allowed_tags == ["inner", "outer"]
-    page.upscale_levels.value = ["inner", "outer"]
+    page.upscale_levels.value = ("inner", "outer")
     page.upscale_btn.click()
-    names = [p.name.value for p in page.panes]
-    assert names == ["inner", "outer", "upscale_inner_outer", "outer_up"]
-    draft = _round_trips(page, tmp_path)
-    upscale = {s.name: s for s in draft.steps}["upscale_inner_outer"]
-    assert upscale.is_inline and upscale.blueprint_overrides["pio"] is True
-    assert page.panes[2].application.value == "upscaler"
-    page.upscale_levels.value = ["inner"]
-    page.upscale_btn.click()
-    assert "at least two levels" in page.upscale_status.value
+    assert "forge-msg-err" in page.upscale_status.value
+    assert "not yet supported" in page.upscale_status.value
+    assert "cdr.mode: upscaled" in page.upscale_status.value
+    assert "continue-from" in page.upscale_status.value
+    assert [p.name.value for p in page.panes] == ["inner", "outer"]
+
+
+def test_upscale_controls_stay_disabled_with_levels_present(page, roms_bp):
+    assert page.upscale_levels.disabled and page.upscale_btn.disabled
+    _roms_page(page, roms_bp, "inner")
+    outer = page.add_step("outer")
+    _path_step(outer, "outer", roms_bp)
+    assert list(page.upscale_levels.options) == ["inner", "outer"]
+    assert page.upscale_levels.disabled
+    assert page.upscale_btn.disabled
 
 
 # ---------------------------------------------------------------------------
@@ -1337,7 +1706,7 @@ def test_run_saves_streams_and_runs_pre_run_first_on_slurm(
     cmd = commands[0]
     assert cmd[-6:] == (
         "workplan",
-        "run",
+        "submit",
         str(tmp_path / "plans" / "demo.yaml"),
         "--run-id",
         "demo",
@@ -1527,36 +1896,6 @@ def test_current_config_is_not_saved_when_boundaries_cannot_be_derived(
     assert any("choose a blueprint" in p for p in page.problems)
 
 
-def test_upscale_use_pio_defaults_to_off_when_unknown(page, tmp_path):
-    for name in ("inner", "outer"):
-        pane = page.panes[0] if name == "inner" else page.add_step(name)
-        pane.name.value = name
-        pane.source.value = wb.SOURCE_PATH
-        pane.path.value = str(tmp_path / "unreadable.yaml")
-        pane.application.value = "roms_marbl"
-    page.upscale_levels.value = ["inner", "outer"]
-    page.upscale_btn.click()
-    upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
-    assert upscale._form["pio"][0].value is False
-
-
-def test_upscale_use_pio_of_a_deferred_level_comes_from_the_hook(page):
-    page._delete(page.panes[0])
-    _name_page(page)
-    page.forge_source.value = _FORGE_BP
-    page.forge_btn.click()
-    inner = page.add_step("inner")
-    inner.source.value = wb.SOURCE_DEFERRED
-    inner.producer.value = "forge"  # wio-toy-simple predicts use_pio=True
-    outer = page.add_step("outer")
-    outer.source.value = wb.SOURCE_DEFERRED
-    outer.producer.value = "forge"
-    page.upscale_levels.value = ["inner", "outer"]
-    page.upscale_btn.click()
-    upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
-    assert upscale._form["pio"][0].value is True
-
-
 @pytest.mark.parametrize(
     "block",
     [
@@ -1672,11 +2011,11 @@ def test_chunk_window_is_prefilled_from_a_deferred_producer(page):
     _name_page(page)
     page.forge_source.value = _FORGE_BP
     page.forge_btn.click()
-    assert page.roms_step_names() == ["roms_marbl"]
-    page.chunk_base.step.value = "roms_marbl"
+    assert page.roms_step_names() == ["ucla_roms"]
+    page.chunk_base.step.value = "ucla_roms"
     assert page.chunk_start.value == "2012-01-01 00:00:00"
     assert page.chunk_end.value == "2012-01-02 00:00:00"
-    assert page.chunk_prefix.value == "roms_marbl"
+    assert page.chunk_prefix.value == "ucla_roms"
 
 
 # ---------------------------------------------------------------------------
@@ -1710,8 +2049,8 @@ def test_runs_section_title():
 
 
 def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
-    (tmp_path / "roms_marbl").mkdir()
-    shutil.copy(roms_bp, tmp_path / "roms_marbl" / "my.bp.yaml")
+    (tmp_path / "ucla_roms").mkdir()
+    shutil.copy(roms_bp, tmp_path / "ucla_roms" / "my.bp.yaml")
     page = _stub_page(_StubCatalog(tmp_path))
     page._delete(page.panes[0])
     _name_page(page)
@@ -1725,7 +2064,7 @@ def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
     names = [p.name.value for p in page.panes]
     assert names == ["my.bp-01", "my.bp-02"]  # the base is synthesized, not added
     first, second = page.draft.steps
-    assert first.blueprint_path == str(tmp_path / "roms_marbl" / "my.bp.yaml")
+    assert first.blueprint_path == str(tmp_path / "ucla_roms" / "my.bp.yaml")
     assert first.compute_overrides == {"slurm": {"num_cpus": 128}}
     assert second.directives["continue-from"] == {"step": "my.bp-01"}
 
@@ -2129,16 +2468,24 @@ def _root_order(page) -> list:
             labels.append("bar")
         elif "forge-style" in child._dom_classes:
             labels.append("style")
+        elif "forge-banner-w" in child._dom_classes:
+            labels.append("notice")
         else:
             labels.append("other")
     return labels
+
+
+def test_under_development_notice_sits_under_the_bar(page):
+    (notice,) = (c for c in page.widget.children if "forge-banner-w" in c._dom_classes)
+    assert "forge-banner warn" in notice.value
+    assert "Under development" in notice.value
 
 
 def test_placement_defaults_to_a_pinned_right_column(page):
     assert list(page.placement.options) == ["Right", "Bottom", "Top", "Hidden"]
     assert page.placement.value == "Right" and page.pinned.value is True
     assert page.pinned.description == "Keep preview visible"
-    assert _root_order(page) == ["style", "bar", "intro", "columns"]
+    assert _root_order(page) == ["style", "bar", "notice", "intro", "columns"]
     assert list(page.columns.children) == [page.left, page.side]
     assert {"forge-side", "forge-side-right", "forge-pinned"} <= set(
         page.side._dom_classes
@@ -2147,7 +2494,14 @@ def test_placement_defaults_to_a_pinned_right_column(page):
 
 def test_placement_reparents_the_pane_for_each_value(page):
     page.placement.value = "Bottom"
-    assert _root_order(page) == ["style", "bar", "intro", "left", "side"]  # last child
+    assert _root_order(page) == [
+        "style",
+        "bar",
+        "notice",
+        "intro",
+        "left",
+        "side",
+    ]  # last child
     assert list(page.columns.children) == []
     assert "forge-side-bottom" in page.side._dom_classes
     assert "forge-side-right" not in page.side._dom_classes
@@ -2156,6 +2510,7 @@ def test_placement_reparents_the_pane_for_each_value(page):
     assert _root_order(page) == [
         "style",
         "bar",
+        "notice",
         "side",
         "intro",
         "left",
@@ -2164,6 +2519,7 @@ def test_placement_reparents_the_pane_for_each_value(page):
     assert "forge-side-bottom" not in page.side._dom_classes
 
     page.placement.value = "Hidden"
+    assert _root_order(page)[:3] == ["style", "bar", "notice"]
     assert _root_order(page)[-1] == "side"  # only the controls strip remains
     assert page.pane_body.layout.display == "none"
     assert page.view.layout.display == "none"
@@ -2171,7 +2527,7 @@ def test_placement_reparents_the_pane_for_each_value(page):
     assert "forge-side-hidden" in page.side._dom_classes
 
     page.placement.value = "Right"
-    assert _root_order(page) == ["style", "bar", "intro", "columns"]
+    assert _root_order(page) == ["style", "bar", "notice", "intro", "columns"]
     assert list(page.columns.children) == [page.left, page.side]
     assert page.pane_body.layout.display != "none"
     assert "forge-side-hidden" not in page.side._dom_classes

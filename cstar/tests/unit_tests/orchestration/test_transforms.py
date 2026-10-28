@@ -12,40 +12,50 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
+from cstar.applications.core import ArtifactKind
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import (
-    BoundaryFile,
-    CarbonateSensitivityFile,
-    RestartFile,
-    restart_timestamp,
-    warn_on_restart_start_date_mismatch,
-)
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms.transforms import (
     SOURCE_DELIMITER,
     CarbonateSensitivityDirective,
     CarbonateSensitivityTrxAdapter,
     ContinuanceDirective,
     NestingDirective,
     RestartFileTrxAdapter,
-    RomsMarblTimeSplitter,
+    RomsTimeSplitter,
     _split_sources,
+    step_output_files,
 )
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.transforms import (
     log as transforms_log,
 )
-from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
+from cstar.base.deprecation import CstarDeprecationWarning
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME, ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
+from cstar.orchestration.check import deep_check
 from cstar.orchestration.compute_environment import ComputeEnvironment
-from cstar.orchestration.dag_runner import prepare_workplan
+from cstar.orchestration.dag_runner import build_dag, prepare_workplan, run_dag
+from cstar.orchestration.index import RunIndex
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    Attempt,
+    ExternalRun,
+    Product,
+    RunManifest,
+    StepEntry,
+    StepRecord,
+    read_run_manifest,
+    write_run_manifest,
+    write_step_record,
+)
 from cstar.orchestration.models import (
     Application,
+    BlueprintIdentity,
     BlueprintState,
     DeferredBlueprintRef,
     InlineBlueprintRef,
@@ -62,9 +72,13 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
 )
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import deserialize, dump_yaml, serialize
 from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_RUN_UUID,
+    TrackingRepository,
+    WorkplanRun,
+)
 from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
@@ -89,9 +103,21 @@ from cstar.orchestration.transforms import (
     package_runtime_overrides,
     resolve_deferred_blueprint,
 )
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.outputs import (
+    EXTRACT_ROLE,
+    BoundaryFile,
+    CarbonateSensitivityFile,
+    CdrOutputFile,
+    RestartFile,
+    restart_timestamp,
+    warn_on_restart_start_date_mismatch,
+)
+from cstar.system.migration import for_writing
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
-TRANSFORMS_LOGGER_NAME = "cstar.applications.roms_marbl.transforms"
-"""The logger name used by `cstar.applications.roms_marbl.transforms`."""
+TRANSFORMS_LOGGER_NAME = "cstar.applications.ucla_roms.transforms"
+"""The logger name used by `cstar.applications.ucla_roms.transforms`."""
 
 
 @pytest.fixture(autouse=True)
@@ -198,21 +224,21 @@ def test_get_transforms() -> None:
     """Confirm that registered transforms are returned via `get_transforms`"""
     with mock.patch.dict(
         "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.ROMS_MARBL.value: [OverrideTransform]},
+        {Application.UCLA_ROMS.value: [OverrideTransform]},
         clear=True,
     ):
-        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transforms = get_transforms(Application.UCLA_ROMS.value)
 
     assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
 
     with mock.patch.dict(
         "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.ROMS_MARBL.value: [RomsMarblTimeSplitter()]},
+        {Application.UCLA_ROMS.value: [RomsTimeSplitter()]},
         clear=True,
     ):
-        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transforms = get_transforms(Application.UCLA_ROMS.value)
 
-    assert any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
+    assert any(isinstance(tx, RomsTimeSplitter) for tx in transforms)
 
 
 def test_get_transforms_empty() -> None:
@@ -220,10 +246,10 @@ def test_get_transforms_empty() -> None:
     for an application that has no transforms registered.
     """
     with mock.patch.dict("cstar.orchestration.transforms.TRANSFORMS", {}, clear=True):
-        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transforms = get_transforms(Application.UCLA_ROMS.value)
 
     assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
-    assert not any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
+    assert not any(isinstance(tx, RomsTimeSplitter) for tx in transforms)
 
 
 def test_override_transform(
@@ -257,8 +283,8 @@ def test_override_transform(
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
 
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_old = deserialize(step.blueprint_path, UclaRomsBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
 
     # confirm nested attributes (bp.runtime_params.xxx)) is changed
     assert bp_old.effective_working_dir == dir_orig.expanduser().resolve()
@@ -280,6 +306,30 @@ def test_override_transform(
     # confirm some other attribute of the step is unchanged
     assert bp_old.initial_conditions.data[0].partitioned
     assert bp_new.initial_conditions.data[0].partitioned
+
+
+def test_serialize_leaves_a_blueprint_without_a_recorded_hash_unchanged(
+    hello_world_bp_path: Path, tmp_path: Path
+) -> None:
+    """Verify serializing a blueprint whose provenance records no hash writes the
+    same YAML as before the write hook existed, with no provenance recorded.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
+    assert bp.integrity_problem() is None
+    assert bp.stamped_for_write() is bp
+
+    written = tmp_path / "written.yaml"
+    serialize(written, bp)
+
+    assert written.read_text() == dump_yaml(for_writing(bp))
+    assert "provenance" not in written.read_text()
 
 
 def test_override_transform_anchors_relative_locations(
@@ -313,7 +363,7 @@ def test_override_transform_anchors_relative_locations(
     transformed = next(iter(OverrideTransform()(step)))
 
     assert Path(transformed.blueprint_path).parent != bp_dir
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
     assert str(bp_new.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"
     )
@@ -353,8 +403,8 @@ def test_override_transform_system_precedence(
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
 
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_old = deserialize(step.blueprint_path, UclaRomsBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
 
     # confirm that even though a working directory override was applied, the
     # system level override was applied last.
@@ -382,7 +432,7 @@ def test_override_transform_system_list_replaces_wholesale(
     user_working_dir = tmp_path / "user_override"
     step.blueprint_overrides["working_dir"] = user_working_dir.as_posix()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
     assert len(bp_before.forcing.boundary.data) == 3
 
     location = "http://mockdoc.com/x_bry.20230201003000.nc"
@@ -396,7 +446,7 @@ def test_override_transform_system_list_replaces_wholesale(
     )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
 
     assert len(bp_after.forcing.boundary.data) == 1
     assert bp_after.forcing.boundary.data[0].location == location
@@ -432,7 +482,7 @@ def test_override_transform_system_list_without_flag_merges_elementwise(
     )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
 
     assert len(data) == 3
@@ -462,7 +512,7 @@ def test_override_transform_user_list_merges_elementwise(
     transform = OverrideTransform()
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
 
     assert len(data) == 3
@@ -558,7 +608,7 @@ async def test_continuance_directive_step_resolution(
             prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
             expected_dir = prior_fsm.output_dir
 
-            bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+            bp = deserialize(altered.blueprint_path, UclaRomsBlueprint)
             location = Path(bp.initial_conditions.data[0].location)
             assert location.is_relative_to(expected_dir)
             assert location.name == expected_name
@@ -681,8 +731,8 @@ def test_continuance_directive_extra_unknown_key_rejected(
 
 
 @pytest.fixture
-def roms_marbl_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
-    """A minimal `roms_marbl` LiveStep to validate directive configs against.
+def ucla_roms_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
+    """A minimal `ucla_roms` LiveStep to validate directive configs against.
 
     Schedule-time directive validation never reads the step's blueprint, so the
     hello-world blueprint file only has to exist.
@@ -718,7 +768,7 @@ def roms_marbl_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
     ],
 )
 def test_continuance_directive_timestamp_accepted_forms(
-    value: t.Any, roms_marbl_step: LiveStep
+    value: t.Any, ucla_roms_step: LiveStep
 ) -> None:
     """Verify every form YAML can deliver for a `timestamp` parses to the same
     instant, a date alone meaning midnight, and passes schedule-time validation.
@@ -727,7 +777,7 @@ def test_continuance_directive_timestamp_accepted_forms(
     ----------
     value : t.Any
         The `timestamp` value as it would arrive from the workplan.
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     assert ContinuanceDirective._parse_timestamp(value) == datetime(2012, 1, 15)
@@ -736,7 +786,7 @@ def test_continuance_directive_timestamp_accepted_forms(
         ContinuanceDirective.KEY_PATH: "x",
         ContinuanceDirective.KEY_TIMESTAMP: value,
     }
-    assert not ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    assert not ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
 
 @pytest.mark.parametrize(
@@ -752,7 +802,7 @@ def test_continuance_directive_timestamp_accepted_forms(
     ],
 )
 def test_continuance_directive_timestamp_rejected_values(
-    value: t.Any, reason: str, roms_marbl_step: LiveStep
+    value: t.Any, reason: str, ucla_roms_step: LiveStep
 ) -> None:
     """Verify a malformed `timestamp` is reported once at schedule time rather
     than completed, guessed at, or read as "latest".
@@ -763,7 +813,7 @@ def test_continuance_directive_timestamp_rejected_values(
         The malformed `timestamp` value.
     reason : str
         A fragment of the message expected for this kind of malformation.
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     config = {
@@ -771,7 +821,7 @@ def test_continuance_directive_timestamp_rejected_values(
         ContinuanceDirective.KEY_TIMESTAMP: value,
     }
 
-    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    problems = ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert ContinuanceDirective.KEY_TIMESTAMP in problems[0]
@@ -779,33 +829,33 @@ def test_continuance_directive_timestamp_rejected_values(
 
 
 def test_continuance_directive_timestamp_without_source_rejected(
-    roms_marbl_step: LiveStep,
+    ucla_roms_step: LiveStep,
 ) -> None:
     """Verify `timestamp` without a `step` or `path` source is rejected with a
     message naming the missing source.
 
     Parameters
     ----------
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     config = {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15"}
 
-    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    problems = ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert "also supply" in problems[0]
 
 
 def test_continuance_directive_timestamp_with_unknown_key_rejected(
-    roms_marbl_step: LiveStep,
+    ucla_roms_step: LiveStep,
 ) -> None:
     """Verify an unrecognized key alongside `path` and `timestamp` gets the
     generic message, listing the supported and provided keys in sorted order.
 
     Parameters
     ----------
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     config = {
@@ -814,7 +864,7 @@ def test_continuance_directive_timestamp_with_unknown_key_rejected(
         "bogus": 1,
     }
 
-    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    problems = ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert "supported configuration: path, step, timestamp" in problems[0]
@@ -871,8 +921,8 @@ def test_continuance_directive_happy_path(
 
     transformed = steps[0]
 
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_old = deserialize(step.blueprint_path, UclaRomsBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
 
     # confirm the old blueprint has a different initial conditions location
     assert str(continue_from_dir) not in str(bp_old.initial_conditions.data[0].location)
@@ -943,7 +993,7 @@ def test_continuance_directive_warns_on_explicit_start_date_mismatch(
     assert explicit_start in records[0].getMessage()
     assert str(expected_ts) in records[0].getMessage()
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.runtime_params.start_date == expected_ts
 
 
@@ -977,7 +1027,7 @@ def test_continuance_directive_no_warning_without_explicit_start_date(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
     assert bp_before.runtime_params.start_date != datetime(2012, 1, 1, 0, 20, 0)
     assert ApplyOverridesDirective.key() not in step.directives
 
@@ -1049,14 +1099,14 @@ def test_nesting_directive_path_only_sets_boundary_only(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
 
     transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
     assert set(transform._system_overrides) == {"forcing"}
 
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert Path(bp_after.forcing.boundary.data[0].location).name == (
         "parent_bry.20230201003000.nc"
     )
@@ -1131,13 +1181,13 @@ async def test_nesting_directive_step_resolution(
     modifier = NestingDirective(config, workplan=live_plan)
     altered = modifier(step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.forcing.boundary.data[0].location)
     assert location.is_relative_to(expected_dir)
     assert location.name == expected_name
 
 
-async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_source(
+async def test_continuance_directive_resolves_step_output_for_non_ucla_roms_source(
     tmp_path: Path,
     bp_templates_dir: Path,
     hello_world_bp_path: Path,
@@ -1145,8 +1195,8 @@ async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_sou
 ) -> None:
     """Verify `continue-from: {step: <name>}` resolves a restart-style file
     produced under a referenced step's `output` directory even when that
-    step's own blueprint is not a `RomsMarblBlueprint`, mirroring the
-    tutorial's nest_ic-conversion-step -> ROMS-MARBL-child migration path.
+    step's own blueprint is not a `UclaRomsBlueprint`, mirroring the
+    tutorial's nest_ic-conversion-step -> UCLA-ROMS-child migration path.
 
     Parameters
     ----------
@@ -1199,7 +1249,7 @@ async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_sou
     modifier = ContinuanceDirective(config, workplan=live_plan)
     altered = modifier(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == ic_file.resolve()
 
@@ -1324,6 +1374,54 @@ async def test_continuance_directive_step_output_rejects_partitioned(
 
     with pytest.raises(FileNotFoundError, match="migrate-outputs"):
         ContinuanceDirective(config, workplan=live_plan)
+
+
+def _listed(step: LiveStep, kind: ArtifactKind, path: Path, **metadata: str) -> Product:
+    """Describe a file of `step` as a product of `kind`.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step that produced the file.
+    kind : ArtifactKind
+        The kind the product is recorded under.
+    path : Path
+        The file, under the step's working directory.
+    **metadata : str
+        The product's metadata, e.g. `role`.
+
+    Returns
+    -------
+    Product
+    """
+    return Product(
+        kind=kind,
+        path=path.relative_to(step.fsm.root_dir).as_posix(),
+        metadata={**metadata},
+    )
+
+
+def _write_record(step: LiveStep, *products: Product) -> None:
+    """Write the step record of a completed `step` that listed `products`.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step the record belongs to.
+    *products : Product
+        The products the record lists; none for a record written by 0.17.0.
+    """
+    record = StepRecord(
+        step=step.name,
+        application=step.application,
+        blueprint=BlueprintIdentity(
+            kind="Blueprint", application=step.application, name="bp"
+        ),
+        outcome="completed",
+        finished_at=datetime(2026, 10, 15, 12, tzinfo=UTC),
+        products=list(products),
+    )
+    write_step_record(step.fsm.root_dir, record)
 
 
 def _plan_with_parent_restarts(
@@ -1455,7 +1553,7 @@ def test_continuance_directive_step_timestamp_selects_restart(
     )
     altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (parent_output / expected_name).resolve()
     assert bp_after.runtime_params.start_date == expected_start
@@ -1536,6 +1634,513 @@ def test_continuance_directive_step_timestamp_no_restarts(
 
     with pytest.raises(FileNotFoundError, match="migrate-outputs"):
         ContinuanceDirective(config, workplan=live_plan)
+
+
+@pytest.mark.parametrize(
+    ("recorded", "unrecorded", "directive_extra", "expected_name"),
+    [
+        pytest.param(
+            ["output_rst.20120115000000.nc"],
+            ["output_rst.20120201000000.nc"],
+            {},
+            "output_rst.20120115000000.nc",
+            id="the latest restart on disk is not recorded",
+        ),
+        pytest.param(
+            ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+            ["output_rst.20120301000000.nc"],
+            {},
+            "output_rst.20120201000000.nc",
+            id="latest recorded restart",
+        ),
+        pytest.param(
+            ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+            ["output_rst.20120301000000.nc"],
+            {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15 00:00:00"},
+            "output_rst.20120115000000.nc",
+            id="timestamp selects a recorded restart",
+        ),
+    ],
+)
+def test_continuance_directive_step_reads_the_producers_record(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    recorded: list[str],
+    unrecorded: list[str],
+    directive_extra: dict[str, str],
+    expected_name: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` continues from the restarts the
+    producer's record lists, not from every restart in its `output`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    recorded : list[str]
+        The restarts in the parent's `output` that its record lists.
+    unrecorded : list[str]
+        The restarts in the parent's `output` that its record does not list.
+    directive_extra : dict[str, str]
+        The keys added to the directive's `step` source.
+    expected_name : str
+        The name of the file the child is expected to continue from.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*recorded, *unrecorded],
+        {ContinuanceDirective.KEY_STEP: "parent", **directive_extra},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(_listed(parent, ArtifactKind.restart, parent_output / n) for n in recorded),
+    )
+
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / expected_name).resolve()
+
+
+def test_continuance_directive_step_timestamp_not_recorded(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `timestamp` that only an unrecorded restart carries lists the
+    recorded timestamps, without the legacy-layout hint.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    recorded = ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"]
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*recorded, "output_rst.20120301000000.nc"],
+        {
+            ContinuanceDirective.KEY_STEP: "parent",
+            ContinuanceDirective.KEY_TIMESTAMP: "2012-03-01 00:00:00",
+        },
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(_listed(parent, ArtifactKind.restart, parent_output / n) for n in recorded),
+    )
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(FileNotFoundError) as error:
+        ContinuanceDirective(config, workplan=live_plan)
+
+    message = str(error.value)
+    assert message.endswith("found there: 2012-01-15 00:00:00, 2012-02-01 00:00:00")
+    assert STEP_RECORD_NAME in message
+    assert "migrate-outputs" not in message
+
+
+def test_continuance_directive_step_recorded_partition_piece_is_rejected(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a partition piece the producer's record lists is refused as one
+    found by searching `output` is, pointing at `cstar admin migrate-outputs`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    piece = "output_rst.20120201000000.000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [piece],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(parent, _listed(parent, ArtifactKind.restart, parent_output / piece))
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(FileNotFoundError, match="migrate-outputs"):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+@pytest.mark.parametrize(
+    ("recorded", "unrecorded", "expected_name"),
+    [
+        pytest.param(
+            [(ArtifactKind.initial_conditions, "ic_from_parent_rst.20120115000000.nc")],
+            ["output_rst.20120201000000.nc"],
+            "ic_from_parent_rst.20120115000000.nc",
+            id="restart-named initial conditions, as nest_ic writes them",
+        ),
+        pytest.param(
+            [(ArtifactKind.initial_conditions, "grid_initial_conditions.nc")],
+            ["output_rst.20120201000000.nc"],
+            "output_rst.20120201000000.nc",
+            id="initial conditions not named like a restart fall back to output",
+        ),
+        pytest.param(
+            [
+                (ArtifactKind.restart, "output_rst.20120115000000.nc"),
+                (
+                    ArtifactKind.initial_conditions,
+                    "ic_from_parent_rst.20120201000000.nc",
+                ),
+            ],
+            [],
+            "output_rst.20120115000000.nc",
+            id="restart products are preferred over initial conditions",
+        ),
+    ],
+)
+def test_continuance_directive_step_reads_recorded_initial_conditions(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    recorded: list[tuple[ArtifactKind, str]],
+    unrecorded: list[str],
+    expected_name: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` reads the initial conditions a
+    producer such as `nest_ic` records, when their names are restart names.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    recorded : list[tuple[ArtifactKind, str]]
+        The kind and name of each file in the parent's `output` its record lists.
+    unrecorded : list[str]
+        The names of the files in the parent's `output` its record does not list.
+    expected_name : str
+        The name of the file the child is expected to continue from.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*(name for _, name in recorded), *unrecorded],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(_listed(parent, kind, parent_output / name) for kind, name in recorded),
+    )
+
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / expected_name).resolve()
+
+
+def test_continuance_directive_step_without_recorded_products_searches_output(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a record that lists no products, as 0.17.0 wrote, leaves the
+    restart to be found in `output`, with a debug message naming the step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    _write_record(live_plan["parent"])
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=TRANSFORMS_LOGGER_NAME):
+        altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / "output_rst.20120201000000.nc").resolve()
+    assert any(
+        record.levelno == logging.DEBUG and "'parent'" in record.getMessage()
+        for record in caplog.records
+        if record.name == TRANSFORMS_LOGGER_NAME
+    )
+
+
+def test_continuance_directive_step_missing_recorded_restart(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the restart the record lists and the directive selects, but that
+    is gone, fails the directive rather than continuing from another restart
+    found in `output`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    gone = "output_rst.20120201000000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [gone, "output_rst.20120115000000.nc"],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(parent, _listed(parent, ArtifactKind.restart, parent_output / gone))
+    (parent_output / gone).unlink()
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(CstarError, match=gone):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+def test_continuance_directive_step_pruned_older_restarts_are_not_needed(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify deleting recorded restarts the directive does not select (older
+    ones, pruned to save space) leaves `continue-from` working.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    older = ["output_rst.20120101000000.nc", "output_rst.20120115000000.nc"]
+    latest = "output_rst.20120201000000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*older, latest],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.restart, parent_output / name)
+            for name in [*older, latest]
+        ),
+    )
+    for name in older:
+        (parent_output / name).unlink()
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / latest).resolve()
+
+
+def test_step_output_files_skips_recorded_names_that_are_not_restarts(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify products whose names do not parse as the wanted file type are
+    skipped, and the files that do parse are returned unselected.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    names = [
+        "grid_initial_conditions.nc",
+        "ic_from_parent_rst.20120115000000.nc",
+        "ic_from_parent_rst.20120201000000.000.nc",
+    ]
+    live_plan, _, parent_output = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, names, {}
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.initial_conditions, parent_output / name)
+            for name in names
+        ),
+    )
+
+    files, source = step_output_files(
+        RestartFile, parent.fsm.root_dir, "parent", (ArtifactKind.initial_conditions,)
+    )
+
+    assert [file.path.name for file in files] == names[1:]
+    assert source == parent.fsm.root_dir / STEP_RECORD_NAME
+
+
+def test_step_output_files_reads_only_records_in_the_output_directory(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a restart-named product the record lists outside the step's
+    `output` directory is left out, and that directory is searched instead.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    names = ["ic_from_parent_rst.20120115000000.nc"]
+    live_plan, _, parent_output = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, names, {}
+    )
+    parent = live_plan["parent"]
+    elsewhere = parent.fsm.root_dir / "input_data" / "ic_rst.20120201000000.nc"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.touch()
+    _write_record(parent, _listed(parent, ArtifactKind.initial_conditions, elsewhere))
+
+    files, source = step_output_files(
+        RestartFile, parent.fsm.root_dir, "parent", (ArtifactKind.initial_conditions,)
+    )
+
+    assert [file.path.name for file in files] == names
+    assert source == parent_output
+
+
+def test_step_output_files_searches_output_without_a_record(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step that wrote no record has every restart in `output`
+    returned, partition pieces included, and none selected.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    names = ["output_rst.20120115000000.nc", "output_rst.20120201000000.000.nc"]
+    live_plan, _, _ = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, names, {}
+    )
+
+    root = live_plan["parent"].fsm.root_dir
+    files, source = step_output_files(
+        RestartFile, root, "parent", (ArtifactKind.restart,)
+    )
+
+    assert sorted(file.path.name for file in files) == names
+    assert source == RomsFileSystemManager(root).output_dir
+
+
+def test_step_output_files_without_any_files_points_at_the_legacy_layout(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step with neither recorded nor searchable files fails with the
+    legacy-layout hint.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    live_plan, _, _ = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, [], {}
+    )
+    _write_record(live_plan["parent"])
+
+    with pytest.raises(FileNotFoundError, match="No restart files located") as error:
+        step_output_files(
+            RestartFile,
+            live_plan["parent"].fsm.root_dir,
+            "parent",
+            (ArtifactKind.restart,),
+        )
+
+    assert "migrate-outputs" in str(error.value)
 
 
 def test_nesting_directive_step_output_rejects_partitioned(
@@ -1624,7 +2229,7 @@ def test_nesting_directive_path_allows_partitioned(
     transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert Path(bp_after.forcing.boundary.data[0].location).name == (
         "parent_bry.20230201003000.000.nc"
     )
@@ -1656,20 +2261,20 @@ def test_nesting_directive_bry_path_deprecated_matches_path(
     step.blueprint_overrides.clear()
 
     path_transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
-    bp_via_path = deserialize(
-        path_transform(step)[0].blueprint_path, RomsMarblBlueprint
-    )
+    bp_via_path = deserialize(path_transform(step)[0].blueprint_path, UclaRomsBlueprint)
 
     with (
-        caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
+        caplog.at_level(logging.WARNING),
         pytest.warns(FutureWarning, match="bry_path"),
     ):
         bry_transform = NestingDirective({NestingDirective.KEY_BRY_PATH: str(bry_dir)})
 
-    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
-    assert any("bry_path" in r.getMessage() for r in records)
+    assert any(
+        "bry_path" in r.getMessage() and "0.20.0" in r.getMessage()
+        for r in caplog.records
+    )
 
-    bp_via_bry = deserialize(bry_transform(step)[0].blueprint_path, RomsMarblBlueprint)
+    bp_via_bry = deserialize(bry_transform(step)[0].blueprint_path, UclaRomsBlueprint)
 
     assert bp_via_bry.forcing.boundary == bp_via_path.forcing.boundary
 
@@ -1706,7 +2311,7 @@ def test_nesting_directive_rst_path_deprecated_still_applies_restart(
     step.blueprint_overrides.clear()
 
     with (
-        caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
+        caplog.at_level(logging.WARNING),
         pytest.warns(FutureWarning, match="rst_path"),
     ):
         transform = NestingDirective(
@@ -1716,11 +2321,13 @@ def test_nesting_directive_rst_path_deprecated_still_applies_restart(
             }
         )
 
-    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
-    assert any("rst_path" in r.getMessage() for r in records)
+    assert any(
+        "rst_path" in r.getMessage() and "0.20.0" in r.getMessage()
+        for r in caplog.records
+    )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
 
     assert bp_after.runtime_params.start_date == datetime(2012, 1, 1, 0, 20, 0)
     assert Path(bp_after.forcing.boundary.data[0].location).name == (
@@ -1822,15 +2429,15 @@ def test_nesting_directive_rst_path_alone_has_no_boundary_source(
 ) -> None:
     """Verify `rst_path` alone (a recognized key, but not itself a boundary
     source) is rejected for lacking a boundary source, not treated as an
-    unrecognized key.
-
-    Config-shape validation runs before the deprecated-key warnings, so no
-    `FutureWarning` is emitted for this rejected config.
+    unrecognized key. The deprecated key is still announced.
     """
     rst_dir = tmp_path / "rst"
     rst_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="supported"):
+    with (
+        pytest.raises(NotImplementedError, match="supported"),
+        pytest.warns(FutureWarning, match="rst_path"),
+    ):
         NestingDirective({NestingDirective.KEY_RST_PATH: str(rst_dir)})
 
 
@@ -1887,7 +2494,7 @@ def test_nesting_directive_multiple_paths(
     transform = NestingDirective({NestingDirective.KEY_PATH: f"{dir_a} ; {dir_b}"})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
         "parent_bry.20230201003000.nc",
         "sibling_bry.20230301003000.nc",
@@ -1921,7 +2528,7 @@ def test_nesting_directive_path_names_a_single_file(
     transform = NestingDirective({NestingDirective.KEY_PATH: str(chosen)})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location) for d in bp_after.forcing.boundary.data] == [
         chosen.resolve()
     ]
@@ -1955,7 +2562,7 @@ def test_nesting_directive_path_mixes_directory_and_file(
     transform = NestingDirective({NestingDirective.KEY_PATH: f"{file_b} ; {dir_a}"})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
         "sibling_bry.20230301003000.nc",
         "parent_bry.20230201003000.nc",
@@ -2050,11 +2657,150 @@ def test_nesting_directive_multiple_steps(
     transform = NestingDirective(config, workplan=live_plan)
     steps = transform(child_step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
     assert len(data) == 2
     assert Path(data[0].location).is_relative_to(first_fsm.output_dir)
     assert Path(data[1].location).is_relative_to(second_fsm.output_dir)
+
+
+def _plan_with_parent_outputs(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    parents: Mapping[str, Sequence[str]],
+    directive: str,
+    config: Mapping[str, t.Any],
+) -> tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]:
+    """Build parent steps holding files in their `output` directories and a
+    `ucla_roms` child step carrying a `directive`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        The directory containing blueprint template files.
+    hello_world_bp_path : Path
+        The path to a hello-world blueprint file, used for the parents.
+    parents : Mapping[str, Sequence[str]]
+        For each parent step, the names of the files written to its `output`
+        directory.
+    directive : str
+        The key of the child's directive.
+    config : Mapping[str, t.Any]
+        The child's configuration of the directive.
+
+    Returns
+    -------
+    tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]
+        The plan, its child step, and each parent's file system manager.
+    """
+    parent_steps: list[LiveStep] = []
+    fsms: dict[str, RomsFileSystemManager] = {}
+    for name, filenames in parents.items():
+        parent = LiveStep(
+            name=name,
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / name,
+        )
+        parent_steps.append(parent)
+        fsms[name] = RomsFileSystemManager(parent.fsm.root_dir)
+        fsms[name].prepare()
+        for filename in filenames:
+            (fsms[name].output_dir / filename).write_text("mock data")
+
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    child = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        directives={directive: dict(config)},
+    )
+    plan = LiveWorkplan(
+        name="parent-outputs-plan",
+        description="parent steps supplying files to a child",
+        steps=[*parent_steps, child],
+    )
+    return plan, child, fsms
+
+
+@pytest.mark.parametrize(
+    ("recorded", "unrecorded", "expected_names"),
+    [
+        pytest.param(
+            [("child_bry.20230201003000.nc", {"role": EXTRACT_ROLE})],
+            ["child_bry.20230301003000.nc", "parent_bry.20230201003000.nc"],
+            ["child_bry.20230201003000.nc"],
+            id="only the recorded child extraction",
+        ),
+        pytest.param(
+            [("other_bry.20230201003000.nc", {})],
+            ["child_bry.20230301003000.nc"],
+            ["child_bry.20230301003000.nc", "other_bry.20230201003000.nc"],
+            id="boundary products without the child role fall back to output",
+        ),
+    ],
+)
+def test_nesting_directive_step_reads_recorded_child_boundaries(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    recorded: list[tuple[str, dict[str, str]]],
+    unrecorded: list[str],
+    expected_names: list[str],
+) -> None:
+    """Verify `nest-from: {step: <name>}` reads the boundary forcing a producer
+    records under the child role, and searches `output` when it records none.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    recorded : list[tuple[str, dict[str, str]]]
+        The name and metadata of each boundary file in the parent's `output`
+        that its record lists as boundary forcing.
+    unrecorded : list[str]
+        The names of the files in the parent's `output` its record does not list.
+    expected_names : list[str]
+        The names of the boundary files the child is expected to be forced by.
+    """
+    config = {NestingDirective.KEY_STEP: "parent"}
+    plan, child, fsms = _plan_with_parent_outputs(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        {"parent": [*(name for name, _ in recorded), *unrecorded]},
+        NestingDirective.key(),
+        config,
+    )
+    parent = plan["parent"]
+    output = fsms["parent"].output_dir
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.boundary_forcing, output / name, **metadata)
+            for name, metadata in recorded
+        ),
+    )
+
+    altered = NestingDirective(config, workplan=plan)(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
+    assert [Path(d.location) for d in bp_after.forcing.boundary.data] == [
+        output / name for name in expected_names
+    ]
 
 
 def test_nesting_directive_multiple_steps_missing_output_raises(
@@ -2150,7 +2896,7 @@ def test_nesting_directive_duplicate_paths_deduplicated(
     transform = NestingDirective({NestingDirective.KEY_PATH: f"{bry_dir}; {bry_dir}"})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert len(bp_after.forcing.boundary.data) == 1
 
 
@@ -2191,7 +2937,7 @@ def test_nesting_directive_bry_path_multiple_paths(
         )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert len(bp_after.forcing.boundary.data) == 2
 
 
@@ -2325,6 +3071,60 @@ def test_timestamped_output_file_find(tmp_path: Path) -> None:
         CarbonateSensitivityFile.find(tmp_path, notfound_ok=False)
 
 
+def test_cdr_output_file_find_skips_sibling_kinds(tmp_path: Path) -> None:
+    """Verify the `_cdr` search finds only CDR output: the sibling streams and
+    the CDR forcing file share the `_cdr` prefix and must be skipped, while a
+    name with the timestamp that breaks the naming convention still raises.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to search.
+    """
+    for name in (
+        "x_cdr.20120101020000.nc",
+        "x_cdr.20120101000000.nc",
+        "x_cdrgas.20120101000000.nc",
+        "x_cdrtrc.20120101000000.nc",
+        "x_his.20120101000000.nc",
+        "x_cdr.nc",
+    ):
+        (tmp_path / name).write_text("mock")
+
+    found = CdrOutputFile.find(tmp_path)
+
+    assert found is not None
+    assert [f.path.name for f in found] == [
+        "x_cdr.20120101000000.nc",
+        "x_cdr.20120101020000.nc",
+    ]
+    assert all(type(f) is CdrOutputFile for f in found)
+    assert [f.timestamp.hour for f in found] == [0, 2]
+
+    (tmp_path / "x_cdr.20120101000000_old.nc").write_text("mock")
+    with pytest.raises(ValueError, match="naming convention"):
+        CdrOutputFile.find(tmp_path)
+
+
+def test_timestamped_output_file_base_search_rejects_misnamed_files(
+    tmp_path: Path,
+) -> None:
+    """Verify the looser search of the other output kinds is unchanged by the
+    `_cdr` override: a misnamed file in the directory raises rather than
+    being skipped.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to search.
+    """
+    (tmp_path / "roms_cdrgas.20230201003000.nc").write_text("mock")
+    (tmp_path / "roms_cdrgas_old.nc").write_text("mock")
+
+    with pytest.raises(ValueError, match="naming convention"):
+        CarbonateSensitivityFile.find(tmp_path)
+
+
 def test_timestamped_output_file_find_single_file(tmp_path: Path) -> None:
     """Verify `find` on a path naming a file returns just that file, whether
     or not other matching files sit beside it, and still enforces the naming
@@ -2418,7 +3218,7 @@ def test_carbonate_sensitivity_directive_path_sets_forcing_only(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
     assert bp_before.forcing.carbonate_sensitivity is None
 
     transform = CarbonateSensitivityDirective(
@@ -2428,7 +3228,7 @@ def test_carbonate_sensitivity_directive_path_sets_forcing_only(
 
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location).name for d in data] == [
@@ -2468,7 +3268,7 @@ def test_carbonate_sensitivity_directive_path_whole_file(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location).name for d in data] == ["parent_cdrgas.20230201003000.nc"]
@@ -2505,7 +3305,7 @@ def test_carbonate_sensitivity_directive_multiple_paths(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     assert [
         Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
@@ -2540,7 +3340,7 @@ def test_carbonate_sensitivity_directive_path_names_a_single_file(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location) for d in data] == [chosen.resolve()]
@@ -2577,7 +3377,7 @@ def test_carbonate_sensitivity_directive_path_mixes_directory_and_file(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     assert [
         Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
@@ -2614,7 +3414,7 @@ def _plan_with_cdrgas_parents(
     config: Mapping[str, t.Any],
 ) -> tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]:
     """Build parent steps holding files in their `output` directories and a
-    `roms_marbl` child step carrying a `carbonate-sensitivity-from` directive.
+    `ucla_roms` child step carrying a `carbonate-sensitivity-from` directive.
 
     Parameters
     ----------
@@ -2706,7 +3506,7 @@ def test_carbonate_sensitivity_directive_step_source(
     transform = CarbonateSensitivityDirective(config, workplan=plan)
     altered = transform(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert len(data) == 1
@@ -2714,6 +3514,102 @@ def test_carbonate_sensitivity_directive_step_source(
         "first_cdrgas.20230201003000.nc"
     )
     assert not data[0].partitioned
+
+
+def test_carbonate_sensitivity_directive_step_reads_recorded_gas_exchange(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` source reads the `gas_exchange` files the producer's
+    record lists, leaving out a `_cdrgas` file in `output` it does not list.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, child, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc", "stray_cdrgas.20230301003000.nc"]},
+        config,
+    )
+    first = plan["first"]
+    _write_record(
+        first,
+        _listed(
+            first,
+            ArtifactKind.gas_exchange,
+            fsms["first"].output_dir / "first_cdrgas.20230201003000.nc",
+        ),
+    )
+
+    altered = CarbonateSensitivityDirective(config, workplan=plan)(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert [Path(d.location) for d in data] == [
+        fsms["first"].output_dir / "first_cdrgas.20230201003000.nc"
+    ]
+
+
+def test_carbonate_sensitivity_directive_step_missing_recorded_file(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `_cdrgas` file the producer's record lists but that is gone
+    fails the directive without the hint to enable the gas-exchange output,
+    which the producer evidently had enabled.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    gone = "first_cdrgas.20230301003000.nc"
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, _, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc", gone]},
+        config,
+    )
+    first = plan["first"]
+    _write_record(
+        first,
+        *(
+            _listed(first, ArtifactKind.gas_exchange, fsms["first"].output_dir / name)
+            for name in ["first_cdrgas.20230201003000.nc", gone]
+        ),
+    )
+    (fsms["first"].output_dir / gone).unlink()
+
+    with pytest.raises(CstarError, match=gone) as error:
+        CarbonateSensitivityDirective(config, workplan=plan)
+
+    assert "do_cdr_gas_exch_output" not in str(error.value)
 
 
 def test_carbonate_sensitivity_directive_multiple_steps(
@@ -2752,7 +3648,7 @@ def test_carbonate_sensitivity_directive_multiple_steps(
     transform = CarbonateSensitivityDirective(config, workplan=plan)
     altered = transform(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert len(data) == 2
@@ -2906,7 +3802,7 @@ def test_carbonate_sensitivity_directive_step_requires_workplan() -> None:
 def test_carbonate_sensitivity_directive_config_problems(
     config: dict[str, str | None],
     expected: str,
-    roms_marbl_step: LiveStep,
+    ucla_roms_step: LiveStep,
 ) -> None:
     """Verify a malformed configuration is reported at schedule time by
     `validate_directives` and refused when the directive is constructed.
@@ -2917,12 +3813,10 @@ def test_carbonate_sensitivity_directive_config_problems(
         The directive configuration.
     expected : str
         Text the (single) problem must contain.
-    roms_marbl_step : LiveStep
-        A `roms_marbl` step to validate the config against.
+    ucla_roms_step : LiveStep
+        A `ucla_roms` step to validate the config against.
     """
-    problems = CarbonateSensitivityDirective.validate_directives(
-        config, roms_marbl_step
-    )
+    problems = CarbonateSensitivityDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert expected in problems[0]
@@ -3014,7 +3908,7 @@ def test_workplan_transformer_applies_working_dir_overrides(
     wp_transformer = WorkplanTransformer(step_overiding_wp)
     original_bp_path = Path(step_overiding_wp.steps[0].blueprint_path)
     step_orig: Step = step_overiding_wp.steps[0]
-    bp_orig = deserialize(step_orig.blueprint_path, RomsMarblBlueprint)
+    bp_orig = deserialize(step_orig.blueprint_path, UclaRomsBlueprint)
     mock_overrides = {"working_dir": sys_working_dir_override}
 
     with (
@@ -3158,6 +4052,66 @@ def test_collect_directive_problems_allows_boundary_only_nest_from(
     assert collect_directive_problems([step]) == []
 
 
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param(
+            {NestingDirective.KEY_BRY_PATH: "prior/bry"},
+            "The 'nest-from' key 'bry_path' (step 'nested-step') is deprecated and "
+            "stops working in "
+            "cstar-ocean 0.20.0; use 'path' instead.",
+            id="bry_path",
+        ),
+        pytest.param(
+            {
+                NestingDirective.KEY_PATH: "prior/bry",
+                NestingDirective.KEY_RST_PATH: "prior/run",
+            },
+            "The 'nest-from' key 'rst_path' (step 'nested-step') is deprecated and "
+            "stops working in "
+            "cstar-ocean 0.20.0; use a 'continue-from' directive with the same "
+            "'path' instead.",
+            id="rst_path",
+        ),
+    ],
+)
+def test_collect_directive_problems_announces_deprecated_nest_from_keys(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    config: dict[str, str],
+    expected: str,
+) -> None:
+    """Verify a deprecated `nest-from` key is announced at check and schedule
+    time (`collect_directive_problems`), naming its replacement and removal
+    release, while the workplan is still accepted.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a blueprint file; `collect_directive_problems`
+        never reads it, so any existing file works.
+    config : dict[str, str]
+        The `nest-from` configuration.
+    expected : str
+        The deprecation message.
+    """
+    step = LiveStep(
+        name="nested-step",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={NestingDirective.key(): config},
+    )
+
+    with pytest.warns(CstarDeprecationWarning) as record:
+        problems = collect_directive_problems([step])
+
+    assert problems == []
+    assert [str(w.message) for w in record] == [expected]
+
+
 def test_collect_directive_problems_rejects_malformed_continue_from_timestamp(
     tmp_path: Path,
     hello_world_bp_path: Path,
@@ -3267,7 +4221,7 @@ def test_collect_directive_problems_roms_directive_on_hello_world_step(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify a `roms_marbl` directive (`nest-from`) on a `hello_world` step
+    """Verify a `ucla_roms` directive (`nest-from`) on a `hello_world` step
     is reported as unknown -- `hello_world` does not declare it.
 
     Parameters
@@ -3634,7 +4588,7 @@ def test_continue_from_timestamp_survives_directive_file_round_trip(
     monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
     result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
 
-    bp_after = deserialize(Path(result), RomsMarblBlueprint)
+    bp_after = deserialize(Path(result), UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (rst_dir / "output_rst.20120115000000.nc").resolve()
     assert bp_after.runtime_params.start_date == datetime(2012, 1, 15)
@@ -3682,7 +4636,7 @@ directives:
     result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
 
     assert Path(result).parent != bp_dir
-    bp_after = deserialize(Path(result), RomsMarblBlueprint)
+    bp_after = deserialize(Path(result), UclaRomsBlueprint)
     assert str(bp_after.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"
     )
@@ -4929,6 +5883,48 @@ def test_workplan_transformer_deferred_step(deferred_workplan: Workplan) -> None
     assert config[ApplyOverridesDirective.KEY_APPLICATION] == "hello_world"
 
 
+def test_workplan_transformer_deferred_step_packages_current_application_name(
+    blueprint_path: Path,
+) -> None:
+    """Verify a deferred step authored under an earlier application name packages
+    the current one for the runtime mismatch check.
+
+    Parameters
+    ----------
+    blueprint_path : Path
+        Fixture returning the path to a roms blueprint file.
+    """
+    producer = Step(
+        name="producer",
+        application="roms_marbl",
+        blueprint=blueprint_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "roms_marbl",
+            "blueprint": {"from_step": "producer", "filename": "generated.yaml"},
+            "depends_on": ["producer"],
+            "blueprint_overrides": {"description": "@overridden"},
+        },
+    )
+    workplan = Workplan(
+        name="deferred-workplan",
+        description="A workplan with a deferred blueprint.",
+        steps=[producer, consumer],
+    )
+
+    transformed = WorkplanTransformer(workplan).apply()
+
+    consumer_trx = t.cast(
+        "LiveStep",
+        next(s for s in transformed.steps if s.name == "consumer"),
+    )
+    directives = t.cast("dict[str, dict[str, t.Any]]", consumer_trx.directives)
+    config = directives[ApplyOverridesDirective.key()]
+    assert config[ApplyOverridesDirective.KEY_APPLICATION] == "ucla_roms"
+
+
 def test_workplan_transformer_deferred_untouched_by_producer_transform(
     deferred_workplan: Workplan,
 ) -> None:
@@ -4979,14 +5975,14 @@ def test_workplan_transformer_deferred_active_transform_raises(
     consumer = Step.model_validate(
         {
             "name": "consumer",
-            "application": Application.ROMS_MARBL.value,
+            "application": Application.UCLA_ROMS.value,
             "blueprint": {"from_step": "producer"},
             "depends_on": ["producer"],
         },
     )
     wp = Workplan(
         name="deferred-workplan",
-        description="A workplan with a deferred roms-marbl blueprint.",
+        description="A workplan with a deferred ucla_roms blueprint.",
         steps=[producer, consumer],
     )
 
@@ -4997,7 +5993,7 @@ def test_workplan_transformer_deferred_active_transform_raises(
             _ = transformer.apply()
 
     assert "deferred" in str(error.value)
-    assert RomsMarblTimeSplitter.__name__ in str(error.value)
+    assert RomsTimeSplitter.__name__ in str(error.value)
 
 
 def test_workplan_transformer_deferred_inactive_transform_ok(
@@ -5005,7 +6001,7 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
     test_bp_path: Path,
     bp_templates_dir: Path,
 ) -> None:
-    """Verify that a deferred roms-marbl step is permitted when the time
+    """Verify that a deferred ucla_roms step is permitted when the time
     splitter feature flag is disabled.
 
     Parameters
@@ -5025,14 +6021,14 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
     consumer = Step.model_validate(
         {
             "name": "consumer",
-            "application": Application.ROMS_MARBL.value,
+            "application": Application.UCLA_ROMS.value,
             "blueprint": {"from_step": "producer"},
             "depends_on": ["producer"],
         },
     )
     wp = Workplan(
         name="deferred-workplan",
-        description="A workplan with a deferred roms-marbl blueprint.",
+        description="A workplan with a deferred ucla_roms blueprint.",
         steps=[producer, consumer],
     )
 
@@ -5326,6 +6322,43 @@ def test_apply_overrides_directive_application_mismatch(
     assert "plotter" in str(error.value)
 
 
+def test_apply_overrides_directive_accepts_earlier_application_name(
+    tmp_path: Path,
+    blueprint_path: Path,
+) -> None:
+    """Verify a directive packaged under an earlier application name accepts a
+    blueprint that declares the current one.
+
+    A transformed workplan written by an earlier release carries the name it
+    was written under inside the directive configuration.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    blueprint_path : Path
+        Fixture returning the path to a roms blueprint file.
+    """
+    step = LiveStep(
+        name="directive-step",
+        application="roms_marbl",
+        blueprint=blueprint_path.as_posix(),
+        working_dir=tmp_path / "wd",
+    )
+    assert step.application == "ucla_roms"
+
+    config: dict[str, t.Any] = {
+        ApplyOverridesDirective.KEY_OVERRIDES: {"partitioning": {"n_procs_x": 1}},
+        ApplyOverridesDirective.KEY_APPLICATION: "roms_marbl",
+    }
+    directive = ApplyOverridesDirective(config)
+    transformed = directive(step)[0]
+
+    bp = deserialize(Path(transformed.blueprint_path), UclaRomsBlueprint)
+    assert bp.application == "ucla_roms"
+    assert bp.partitioning.n_procs_x == 1
+
+
 def test_apply_overrides_directive_requires_overrides() -> None:
     """Verify the directive rejects configuration without an overrides mapping."""
     with pytest.raises(ValueError, match="overrides"):
@@ -5377,7 +6410,7 @@ def test_apply_overrides_directive_user_list_merges_elementwise(
     directive = ApplyOverridesDirective(config)
     transformed = directive(packaged)[0]
 
-    bp_after = deserialize(Path(transformed.blueprint_path), RomsMarblBlueprint)
+    bp_after = deserialize(Path(transformed.blueprint_path), UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
 
     assert len(data) == 3
@@ -5422,14 +6455,12 @@ async def deferred_run_context(
         steps=[producer],
     )
 
-    trx_wp_path = tmp_path / "deferred_run_trx.yaml"
+    trx_wp_path = tmp_path / "deferred_run_transformed.yaml"
     assert serialize(trx_wp_path, live_plan)
 
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "deferred_run.yaml",
-            trx_workplan_path=trx_wp_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
@@ -5508,6 +6539,115 @@ async def test_resolve_deferred_blueprint_ambiguous(
         _ = resolve_deferred_blueprint(ref)
 
 
+async def test_resolve_deferred_blueprint_uses_the_recorded_blueprint(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify resolution takes the blueprint the producer's record lists, even
+    when another blueprint-like file in its output would make a search ambiguous.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    generated = producer.fsm.output_dir / "generated.yaml"
+    generated.write_text(hello_world_bp_content)
+    (producer.fsm.output_dir / "other.yaml").write_text(hello_world_bp_content)
+    _write_record(
+        producer, _listed(producer, ArtifactKind.emitted_blueprint, generated)
+    )
+
+    ref = DeferredBlueprintRef(from_step="producer")
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+async def test_resolve_deferred_blueprint_searches_output_without_a_recorded_blueprint(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a record that lists no blueprint, as 0.17.0 wrote, leaves the
+    blueprint to be found in the producer's output.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    generated = producer.fsm.output_dir / "anything.yaml"
+    generated.write_text(hello_world_bp_content)
+    _write_record(producer)
+
+    ref = DeferredBlueprintRef(from_step="producer")
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+async def test_resolve_deferred_blueprint_recorded_blueprints_are_ambiguous(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify several recorded blueprints and no filename fail as several files
+    in the output do.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    paths = [producer.fsm.output_dir / name for name in ("one.yaml", "two.yaml")]
+    for path in paths:
+        path.write_text(hello_world_bp_content)
+    _write_record(
+        producer,
+        *(_listed(producer, ArtifactKind.emitted_blueprint, path) for path in paths),
+    )
+
+    ref = DeferredBlueprintRef(from_step="producer")
+
+    with pytest.raises(CstarError, match="Multiple candidate blueprints"):
+        _ = resolve_deferred_blueprint(ref)
+
+
+async def test_resolve_deferred_blueprint_recorded_blueprint_is_missing(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a blueprint the record lists but that is gone fails resolution,
+    rather than resolving to another file in the output.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    (producer.fsm.output_dir / "other.yaml").write_text(hello_world_bp_content)
+    _write_record(
+        producer,
+        _listed(
+            producer,
+            ArtifactKind.emitted_blueprint,
+            producer.fsm.output_dir / "generated.yaml",
+        ),
+    )
+
+    ref = DeferredBlueprintRef(from_step="producer")
+
+    with pytest.raises(CstarError, match="generated.yaml"):
+        _ = resolve_deferred_blueprint(ref)
+
+
 async def test_resolve_deferred_blueprint_missing(
     deferred_run_context: LiveWorkplan,
 ) -> None:
@@ -5576,7 +6716,7 @@ def test_workplan_transformer_deferred_split_producer_raises(
 
     producer = Step(
         name="producer",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path.as_posix(),
     )
     consumer = Step.model_validate(
@@ -5604,8 +6744,8 @@ async def test_load_workplan_missing_trx_file_raises_runtime_error(
     tmp_path: Path,
     mock_run_id: str,
 ) -> None:
-    """A run record pointing at a nonexistent trx workplan surfaces
-    `FileNotFoundError` rather than a generic `RuntimeError`.
+    """A run record whose run directory holds no transformed workplan is
+    reported as a `RuntimeError` saying the workplan could not be located.
 
     Parameters
     ----------
@@ -5614,19 +6754,15 @@ async def test_load_workplan_missing_trx_file_raises_runtime_error(
     mock_run_id : str
         A unique run-id that has already been added to os.environ.
     """
-    trx_path = tmp_path / "missing_trx.yaml"
-
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "wp.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
     )
 
-    with pytest.raises(RuntimeError, match="Unable to load workplan"):
+    with pytest.raises(RuntimeError, match="Unable to locate the workplan"):
         DirectiveConfig.load_workplan()
 
 
@@ -5645,7 +6781,7 @@ async def test_load_workplan_invalid_content_raises_runtime_error(
     mock_run_id : str
         A unique run-id that has already been added to os.environ.
     """
-    trx_path = tmp_path / "bad_trx.yaml"
+    trx_path = tmp_path / "bad_transformed.yaml"
     # valid YAML, but missing the `name` required by `Workplan`
     trx_path.write_text(
         """\
@@ -5657,8 +6793,6 @@ steps: []
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "wp.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
@@ -5682,14 +6816,12 @@ async def test_load_workplan_malformed_yaml_raises_runtime_error(
     mock_run_id : str
         A unique run-id that has already been added to os.environ.
     """
-    trx_path = tmp_path / "truncated_trx.yaml"
+    trx_path = tmp_path / "truncated_transformed.yaml"
     trx_path.write_text("name: truncated\nsteps: [\n  - name: step-a\n")
 
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "wp.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
@@ -5835,13 +6967,13 @@ def test_workplan_transformer_inline_active_transform_raises() -> None:
     consumer = Step.model_validate(
         {
             "name": "consumer",
-            "application": Application.ROMS_MARBL.value,
+            "application": Application.UCLA_ROMS.value,
             "blueprint": "inline",
         },
     )
     wp = Workplan(
         name="inline-workplan",
-        description="A workplan with an inline roms-marbl blueprint.",
+        description="A workplan with an inline ucla_roms blueprint.",
         steps=[consumer],
     )
 
@@ -5850,7 +6982,7 @@ def test_workplan_transformer_inline_active_transform_raises() -> None:
             _ = WorkplanTransformer(wp).apply()
 
     assert "inline" in str(error.value)
-    assert RomsMarblTimeSplitter.__name__ in str(error.value)
+    assert RomsTimeSplitter.__name__ in str(error.value)
 
 
 def test_materialize_inline_blueprints(inline_workplan: Workplan) -> None:
@@ -5936,6 +7068,18 @@ EXTERNAL_START_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 """The start time recorded for fabricated external runs."""
 
 
+@pytest.fixture(autouse=True)
+def _isolated_project_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the run resolver out of a real project's runs area.
+
+    Resolving an external run looks in the project's runs area when there is
+    one, so a `PROJECT` or `CSTAR_PROJECT_HOME` in the developer's environment
+    would otherwise decide what these tests find.
+    """
+    monkeypatch.delenv("PROJECT", raising=False)
+    monkeypatch.setenv(ENV_CSTAR_PROJECT_HOME, str((tmp_path / "project").resolve()))
+
+
 class _FakeHandle(ProcessHandle):
     """A launcher-specific handle type, distinct from the generic `ProcessHandle`."""
 
@@ -5949,7 +7093,9 @@ class _FakeLauncher(Launcher[ProcessHandle]):
         return t.cast("ProcessHandle", item).status
 
     @classmethod
-    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+    async def launch(
+        cls, step: LiveStep, dependencies: list[ProcessHandle], *, run_uuid: str
+    ) -> t.Any:
         raise NotImplementedError
 
     @classmethod
@@ -6037,16 +7183,16 @@ def fabricate_external_run(
             description="A fabricated external run.",
             steps=[step],
         )
-        trx_path = tmp_path / f"{run_id}_trx.yaml"
-        assert serialize(trx_path, plan)
-
-        record = WorkplanRun(
-            workplan_path=tmp_path / f"{run_id}.yaml",
-            trx_workplan_path=trx_path,
-            output_path=tmp_path,
-            run_id=run_id,
+        run_dir = tmp_path / "records" / run_id
+        write_identity(
+            run_dir,
+            run_id,
+            workplan=tmp_path / f"{run_id}.yaml",
             start_at=EXTERNAL_START_AT,
         )
+        assert serialize(run_dir / f"{run_id}_transformed.yaml", plan)
+
+        record = WorkplanRun(output_path=run_dir, run_id=run_id)
         TrackingRepository().put_workplan_run_sync(record)
 
         sentinel_path = StateRepository.sentinel_path("outer", run_id=run_id)
@@ -6089,6 +7235,81 @@ def test_fill_runs_without_fill_transform() -> None:
         _ = fill_runs({"spinup": RunRef(run_id="{{spin_id}}")}, None)
 
 
+def test_fill_runs_keeps_id_and_path() -> None:
+    """Verify the uuid and directory a scheduled workplan pinned survive filling."""
+    pinned = RunRef(
+        run_id="spin", id="u-1", path="/runs/spin", start_at=EXTERNAL_START_AT
+    )
+
+    assert fill_runs({"spinup": pinned}, None)["spinup"] == pinned
+
+
+@pytest.mark.parametrize("text", ["spin", f"run://{uuid.uuid4()}"])
+def test_fill_runs_leaves_run_ids_and_uuids_as_authored(
+    text: str, tmp_path: Path
+) -> None:
+    """Verify only a directory is anchored: a run-id or `run://<uuid>` is kept."""
+    runs = {"spinup": RunRef(run_id=text)}
+
+    assert fill_runs(runs, None, tmp_path)["spinup"].run_id == text
+
+
+def test_fill_runs_anchors_a_relative_directory(tmp_path: Path) -> None:
+    """Verify a relative run directory is resolved against the workplan's
+    directory, and left as authored when there is none.
+    """
+    base = tmp_path / "plans"
+    base.mkdir()
+    runs = {
+        "up": RunRef(run_id="../runs/spin"),
+        "here": RunRef(run_id="./spin"),
+        "hidden": RunRef(run_id=".spin"),
+    }
+
+    anchored = fill_runs(runs, None, base)
+
+    assert anchored["up"].run_id == str(tmp_path.resolve() / "runs" / "spin")
+    assert anchored["here"].run_id == str(base.resolve() / "spin")
+    assert anchored["hidden"].run_id == str(base.resolve() / ".spin")
+    assert fill_runs(runs, None)["here"].run_id == "./spin"
+    assert fill_runs(runs, None)["up"].run_id == "../runs/spin"
+
+
+def test_fill_runs_expands_home_and_keeps_absolute_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `~` is expanded whether or not there is a base directory, and an
+    absolute directory is not changed.
+    """
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    absolute = str(tmp_path / "elsewhere" / "spin")
+    runs = {"tilde": RunRef(run_id="~/runs/spin"), "abs": RunRef(run_id=absolute)}
+
+    for base in (None, tmp_path / "plans"):
+        filled = fill_runs(runs, None, base)
+        assert filled["tilde"].run_id == str(home / "runs" / "spin")
+        assert filled["abs"].run_id == absolute
+
+
+def test_fill_runs_anchors_a_directory_once_its_placeholder_is_filled(
+    tmp_path: Path,
+) -> None:
+    """Verify a placeholder inside a directory is filled, then the result anchored."""
+    runs = {"spinup": RunRef(run_id="../{{where}}/spin")}
+    fill = TemplateFillTransform(variable_resolver=lambda name: f"in-{name}")
+
+    filled = fill_runs(runs, fill, tmp_path / "plans")
+
+    assert filled["spinup"].run_id == str(tmp_path.resolve() / "in-where" / "spin")
+
+
+def test_fill_runs_rejects_a_bad_uuid_naming_the_alias() -> None:
+    """Verify a `run://` reference that holds no uuid is refused, naming the alias."""
+    with pytest.raises(CstarExpectationFailed, match=r"'spinup'.*run://<uuid>"):
+        _ = fill_runs({"spinup": RunRef(run_id="run://x")}, None)
+
+
 def test_external_runs_undeclared_alias() -> None:
     """Verify an undeclared alias is reported with the declared ones."""
     registry = ExternalRuns({"known": RunRef(run_id="r")})
@@ -6119,11 +7340,13 @@ def test_external_runs_unknown_step(
 def test_external_runs_missing_workplan_file(
     fabricate_external_run: Callable[..., FabricatedRun],
 ) -> None:
-    """Verify an unreadable recorded workplan is reported as a `CstarError`."""
+    """Verify a run directory without its transformed workplan is reported as a
+    `CstarError`.
+    """
     fab = fabricate_external_run()
     fab.record.trx_workplan_path.unlink()
 
-    with pytest.raises(CstarError, match="Unable to load workplan"):
+    with pytest.raises(CstarError, match="holds no transformed workplan"):
         _ = ExternalRuns(fab.runs).step(fab.ref)
 
 
@@ -6255,7 +7478,7 @@ async def test_external_runs_refresh_records_resolution_errors(
     await registry.refresh(refs, _FakeSlurmLauncher())
 
     assert "has not been submitted" in registry.problem(refs[0])
-    assert "No run record" in registry.problem(refs[1])
+    assert "No run found" in registry.problem(refs[1])
     assert not registry.is_done(refs[0])
     assert not fab.sentinel.exists()
 
@@ -6306,7 +7529,7 @@ async def test_external_runs_refresh_resolves_step_up_front(
 
     await registry.refresh([fab.ref], _FakeSlurmLauncher())
 
-    assert "Unable to load workplan" in registry.problem(fab.ref)
+    assert "holds no transformed workplan" in registry.problem(fab.ref)
     assert registry.tasks() == {}
 
 
@@ -6380,6 +7603,534 @@ async def test_external_runs_refresh_leaves_sentinel_untouched(
     await ExternalRuns(fab.runs).refresh([fab.ref], _FakeSlurmLauncher())
 
     assert fab.sentinel.read_text() == before
+
+
+@dataclasses.dataclass(frozen=True)
+class ManifestOnlyRun:
+    """An external run known only by its manifest: it has no tracking record."""
+
+    run_id: str
+    uuid: str
+    root: Path
+    step: LiveStep
+
+    @property
+    def ref(self) -> StepRef:
+        """A reference to the run's step, using the alias `spinup`."""
+        return StepRef(step=self.step.name, run="spinup")
+
+    @property
+    def spellings(self) -> dict[str, str]:
+        """What a workplan can call the run by, by the kind of handle."""
+        return {
+            "run_id": self.run_id,
+            "uuid": f"run://{self.uuid}",
+            "path": str(self.root),
+        }
+
+    def runs(self, spelling: str = "run_id") -> dict[str, RunRef]:
+        """The `runs` declaration of a workplan referring to this run."""
+        return {"spinup": RunRef(run_id=self.spellings[spelling])}
+
+
+@pytest.fixture
+def fabricate_manifest_run(
+    hello_world_bp_path: Path,
+) -> Callable[..., ManifestOnlyRun]:
+    """Create a factory that lays out a run in the data home that tracking has
+    never heard of: a manifest, a transformed workplan holding the step `outer`
+    and, for a finished step, its record.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+
+    def _make(
+        run_id: str = "spinup",
+        *,
+        outcome: str = "completed",
+        status: str = "",
+        launcher: str = "slurm",
+        job_id: str = "4242",
+        kind: t.Literal["workplan", "blueprint"] = "workplan",
+    ) -> ManifestOnlyRun:
+        root = StateDirectoryManager.workplan_runs_dir() / run_id
+        step = LiveStep(
+            name="outer",
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=root / "tasks" / "outer",
+        )
+        if kind == "workplan":
+            plan = LiveWorkplan(name=f"{run_id}-run", description="d", steps=[step])
+            assert serialize(root / f"{run_id}_transformed.yaml", plan)
+
+        manifest = RunManifest(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            name=run_id,
+            kind=kind,
+            created_at=EXTERNAL_START_AT,
+            attempts=[Attempt(start_at=EXTERNAL_START_AT)],
+            steps=[
+                StepEntry(
+                    name="outer",
+                    application="hello_world",
+                    working_dir="tasks/outer",
+                    launcher=launcher,
+                    job_id=job_id,
+                    status=status,
+                )
+            ],
+        )
+        write_run_manifest(root, manifest)
+        if outcome:
+            record = StepRecord(
+                step="outer",
+                application="hello_world",
+                blueprint=BlueprintIdentity(
+                    kind="Blueprint",
+                    application="hello_world",
+                    name="bp",
+                    content_hash="abc",
+                ),
+                outcome=outcome,
+                finished_at=EXTERNAL_START_AT,
+            )
+            write_step_record(step.working_dir, record)
+        return ManifestOnlyRun(run_id, manifest.id, root, step)
+
+    return _make
+
+
+class _NoQueryLauncher(_FakeSlurmLauncher):
+    """A launcher that fails when asked a status: a run known only by its
+    manifest must never reach it.
+    """
+
+    @classmethod
+    async def query_status(cls, item: t.Any) -> Status:
+        raise AssertionError("a manifest-backed step must not be queried")
+
+
+@pytest.mark.parametrize("spelling", ["run_id", "uuid", "path"])
+async def test_external_runs_done_step_of_an_untracked_run_is_usable(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    spelling: str,
+) -> None:
+    """Verify a step the manifest records as done can be depended on, however the
+    run is named, and is exposed as a done task holding the recorded submission,
+    without asking a launcher.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run: `run_id`, `uuid` or `path`.
+    """
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(fab.runs(spelling))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    assert registry.statuses() == {str(fab.ref): Status.Done}
+    task = registry.tasks()[str(fab.ref)]
+    assert task.step.working_dir == fab.step.working_dir
+    assert task.handle.status == Status.Done
+    assert task.handle.pid == "4242"
+    assert task.handle.launcher_name == "slurm"
+    assert task.handle.run_id == fab.run_id
+
+
+async def test_external_runs_done_step_handle_has_the_launchers_type(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify the synthesized handle is of the type the current launcher uses,
+    including the local launcher's.
+    """
+    fab = fabricate_manifest_run(launcher="local", job_id="")
+    registry = ExternalRuns(fab.runs())
+
+    await registry.refresh([fab.ref], LocalLauncher())
+
+    handle = registry.tasks()[str(fab.ref)].handle
+    assert isinstance(handle, LocalHandle)
+    assert (handle.pid, handle.launcher_name) == ("", "local")
+    assert registry.problem(fab.ref) == ""
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "recorded"),
+    [
+        ("failed", "", "is recorded as Failed"),
+        ("", "Running", "is recorded as Running"),
+        ("", "", "has no recorded status"),
+        # the snapshot is no evidence: a copy may lack the step's own record
+        ("", "Done", "has no recorded status"),
+    ],
+)
+async def test_external_runs_unfinished_step_of_an_untracked_run_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    outcome: str,
+    status: str,
+    recorded: str,
+) -> None:
+    """Verify a step the manifest does not record as done is a problem that says
+    what is recorded, where, and that an untracked run offers done steps only.
+
+    Parameters
+    ----------
+    outcome : str
+        The outcome of the step's record; empty for none.
+    status : str
+        The status the manifest holds for the step.
+    recorded : str
+        What the message says is recorded.
+    """
+    fab = fabricate_manifest_run(outcome=outcome, status=status)
+    registry = ExternalRuns(fab.runs("uuid"))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+    problem = registry.problem(fab.ref)
+
+    assert not registry.is_done(fab.ref)
+    assert registry.tasks() == {}
+    for expected in ("'outer'", "'spinup'", recorded, str(fab.root), "done steps only"):
+        assert expected in problem
+
+
+def _attach(fab: ManifestOnlyRun) -> WorkplanRun:
+    """Track the run `fab` laid out as one attached from elsewhere: no sentinels."""
+    record = WorkplanRun(
+        output_path=fab.root,
+        run_id=fab.run_id,
+        metadata={KEY_RUN_UUID: fab.uuid},
+        attached=True,
+    )
+    TrackingRepository().put_workplan_run_sync(record)
+    return record
+
+
+@pytest.mark.parametrize("spelling", ["run_id", "uuid", "path"])
+async def test_external_runs_done_step_of_an_attached_run_is_usable(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    spelling: str,
+) -> None:
+    """Verify an attached run, tracked but with no sentinels, is probed through
+    its manifest and step records, and never asked of a launcher.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run: `run_id`, `uuid` or `path`.
+    """
+    fab = fabricate_manifest_run()
+    attached = _attach(fab)
+    registry = ExternalRuns(fab.runs(spelling))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert isinstance(registry.record("spinup"), WorkplanRun)
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    task = registry.tasks()[str(fab.ref)]
+    assert task.handle.status == Status.Done
+    assert task.handle.pid == "4242"
+    assert task.handle.run_id == attached.run_id
+    assert registry.pinned()["spinup"].id == fab.uuid
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "recorded"),
+    [
+        ("failed", "", "is recorded as Failed"),
+        ("", "Running", "is recorded as Running"),
+        ("", "Done", "has no recorded status"),
+    ],
+)
+async def test_external_runs_unfinished_step_of_an_attached_run_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    outcome: str,
+    status: str,
+    recorded: str,
+) -> None:
+    """Verify an attached run's step that its records do not show done is a
+    problem that says what is recorded, as for a run known only by its manifest.
+
+    Parameters
+    ----------
+    outcome : str
+        The outcome of the step's record; empty for none.
+    status : str
+        The status the manifest holds for the step.
+    recorded : str
+        What the message says is recorded.
+    """
+    fab = fabricate_manifest_run(outcome=outcome, status=status)
+    _attach(fab)
+    registry = ExternalRuns(fab.runs())
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+    problem = registry.problem(fab.ref)
+
+    assert not registry.is_done(fab.ref)
+    assert registry.tasks() == {}
+    for expected in ("'outer'", "'spinup'", recorded, str(fab.root)):
+        assert expected in problem
+
+
+async def test_external_runs_attached_run_without_a_manifest_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify an attached run whose manifest is gone is reported, not crashed on."""
+    fab = fabricate_manifest_run()
+    _attach(fab)
+    (fab.root / "cstar-run.yaml").unlink()
+    registry = ExternalRuns(fab.runs())
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert not registry.is_done(fab.ref)
+    assert "manifest" in registry.problem(fab.ref)
+
+
+async def test_external_runs_run_id_spelled_as_a_title_is_the_run_tracking_names(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify an alias spelled `Spin Up` finds the run directory `spin-up`, as
+    tracking, which slugifies run-ids, would.
+    """
+    fab = fabricate_manifest_run("spin-up")
+    registry = ExternalRuns({"spinup": RunRef(run_id="Spin Up")})
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    assert registry.pinned()["spinup"].id == fab.uuid
+
+
+async def test_external_runs_missing_step_of_an_untracked_run_is_reported(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a step the run's workplan does not have is reported as missing."""
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(fab.runs())
+    ref = StepRef(step="absent", run="spinup")
+
+    await registry.refresh([ref], _NoQueryLauncher())
+
+    assert "'absent' not found" in registry.problem(ref)
+
+
+async def test_external_runs_standalone_blueprint_run_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a run that was a standalone blueprint run has no steps to depend on."""
+    fab = fabricate_manifest_run(kind="blueprint")
+    registry = ExternalRuns(fab.runs("path"))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert "standalone blueprint run" in registry.problem(fab.ref)
+    assert registry.tasks() == {}
+
+
+async def test_external_runs_unknown_uuid_and_directory_are_problems(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    tmp_path: Path,
+) -> None:
+    """Verify a uuid no manifest holds and a directory that is no run are
+    problems that name the alias, not crashes.
+    """
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(
+        {
+            "spinup": RunRef(run_id=f"run://{uuid.uuid4()}"),
+            "dir": RunRef(run_id=str(tmp_path / "nothing-here")),
+        }
+    )
+    refs = [fab.ref, StepRef(step="outer", run="dir")]
+
+    await registry.refresh(refs, _NoQueryLauncher())
+
+    assert "No run has the uuid" in registry.problem(refs[0])
+    assert "'dir'" in registry.problem(refs[1])
+    assert "is not a directory" in registry.problem(refs[1])
+
+
+async def test_external_runs_bad_reference_is_a_problem() -> None:
+    """Verify a reference no handle can be read from is a problem naming the alias."""
+    registry = ExternalRuns({"spinup": RunRef(run_id="run://nonsense")})
+    ref = StepRef(step="outer", run="spinup")
+
+    await registry.refresh([ref], _NoQueryLauncher())
+
+    assert "'spinup' does not name a run" in registry.problem(ref)
+
+
+@pytest.mark.parametrize(
+    ("spelling", "path"),
+    [("run_id", False), ("uuid", False), ("path", True)],
+)
+async def test_external_runs_pinned_names_the_run_that_was_resolved(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    spelling: str,
+    path: bool,
+) -> None:
+    """Verify `pinned` records an untracked run's run-id, uuid and start whatever
+    it was called, and its directory when it was called by one.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run: `run_id`, `uuid` or `path`.
+    path : bool
+        Whether the pin also records the run directory.
+    """
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(fab.runs(spelling))
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    pinned = registry.pinned()["spinup"]
+
+    assert pinned.run_id == fab.run_id
+    assert pinned.id == fab.uuid
+    assert pinned.start_at == EXTERNAL_START_AT
+    assert pinned.path == (str(fab.root) if path else "")
+
+
+async def test_external_runs_pinned_runs_resolve_again_without_a_scan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pin made from `run://<uuid>` resolves in a fresh registry through
+    the run's directory, never by scanning every run directory for the uuid.
+    """
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("uuid"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+
+    with mock.patch.object(
+        RunIndex, "locations", autospec=True, side_effect=AssertionError("scanned")
+    ):
+        again = ExternalRuns(first.pinned())
+        await again.refresh([fab.ref], _NoQueryLauncher())
+
+    assert again.problem(fab.ref) == ""
+    assert again.record("spinup").uuid == fab.uuid
+
+
+async def test_external_runs_pinned_directory_is_read_without_a_scan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pinned directory is read as it is, whatever the run-id says."""
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("path"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+
+    with mock.patch.object(
+        RunIndex, "locations", autospec=True, side_effect=AssertionError("scanned")
+    ):
+        again = ExternalRuns(first.pinned())
+        await again.refresh([fab.ref], _NoQueryLauncher())
+
+    assert again.problem(fab.ref) == ""
+    assert again.record("spinup").output_path == fab.root
+
+
+async def test_external_runs_pinned_directory_that_is_another_run_now_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pinned directory whose manifest now holds another uuid is not
+    taken for the run that was pinned.
+    """
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("path"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+    pinned = first.pinned()
+    replaced = fabricate_manifest_run()  # the same directory, a new manifest
+    assert replaced.uuid != fab.uuid
+
+    again = ExternalRuns(pinned)
+    await again.refresh([fab.ref], _NoQueryLauncher())
+
+    assert "not the run that was asked for" in again.problem(fab.ref)
+    assert again.tasks() == {}
+
+
+async def test_external_runs_pinned_uuid_that_another_run_holds_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pinned run-id that now names a run with another uuid is refused."""
+    fab = fabricate_manifest_run()
+    pin = RunRef(run_id=fab.run_id, id=str(uuid.uuid4()))
+    registry = ExternalRuns({"spinup": pin})
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert "No run found" in registry.problem(fab.ref)
+
+
+async def test_external_runs_tracked_run_keeps_the_launcher_path(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a run tracked on this machine is still asked of the launcher through
+    its sentinel, whatever its manifest says, and its pin carries the manifest's uuid.
+    """
+    fab = fabricate_external_run(status=Status.Submitted)
+    manifest = RunManifest(
+        id=str(uuid.uuid4()),
+        run_id=fab.run_id,
+        name=fab.run_id,
+        kind="workplan",
+        created_at=EXTERNAL_START_AT,
+        attempts=[],
+        steps=[
+            StepEntry(
+                name="outer",
+                application="hello_world",
+                working_dir="tasks/outer",
+                status="Done",
+                job_id="9999",
+            )
+        ],
+    )
+    write_run_manifest(fab.record.output_path, manifest)
+
+    class _RunningLauncher(_FakeSlurmLauncher):
+        @classmethod
+        async def query_status(cls, item: t.Any) -> Status:
+            return Status.Running
+
+    registry = ExternalRuns(fab.runs)
+    await registry.refresh([fab.ref], _RunningLauncher())
+
+    assert registry.statuses() == {str(fab.ref): Status.Running}
+    assert registry.tasks()[str(fab.ref)].handle.pid == "1234"
+    pinned = registry.pinned()["spinup"]
+    assert (pinned.id, pinned.path, pinned.start_at) == (
+        manifest.id,
+        "",
+        EXTERNAL_START_AT,
+    )
+
+
+async def test_external_runs_tracked_run_pin_uses_the_cached_uuid(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a tracked run's pin holds the uuid its record caches."""
+    fab = fabricate_external_run()
+    cached = str(uuid.uuid4())
+    TrackingRepository().put_workplan_run_sync(
+        fab.record.model_copy(update={"metadata": {KEY_RUN_UUID: cached}})
+    )
+    registry = ExternalRuns(fab.runs)
+    await registry.refresh([fab.ref], _FakeSlurmLauncher())
+
+    assert registry.pinned()["spinup"].id == cached
 
 
 def test_external_dependencies_distinct_in_first_seen_order(
@@ -6711,12 +8462,10 @@ async def test_resolve_deferred_blueprint_external_step(
         }
     )
     plan = _live_plan_with_external(fab, consumer)
-    trx_path = tmp_path / "consumer_trx.yaml"
+    trx_path = tmp_path / "consumer_transformed.yaml"
     assert serialize(trx_path, plan)
     await TrackingRepository().put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "consumer.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         )
@@ -6767,7 +8516,7 @@ def test_continuance_directive_step_from_external_run(
     config = t.cast("dict[str, str]", child.directives[ContinuanceDirective.key()])
     altered = ContinuanceDirective(config, workplan=plan)(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert Path(bp_after.initial_conditions.data[0].location) == restart.resolve()
 
 
@@ -6825,7 +8574,7 @@ def test_nesting_directive_step_from_external_run(
     config = t.cast("dict[str, str]", child.directives[NestingDirective.key()])
     altered = NestingDirective(config, workplan=plan)(child)[0]
 
-    data = deserialize(altered.blueprint_path, RomsMarblBlueprint).forcing.boundary.data
+    data = deserialize(altered.blueprint_path, UclaRomsBlueprint).forcing.boundary.data
     assert len(data) == 2
     assert Path(data[0].location).is_relative_to(local_fsm.output_dir)
     assert Path(data[1].location).is_relative_to(external_out)
@@ -6854,7 +8603,7 @@ async def test_prepare_workplan_pins_external_run(
         "cstar.orchestration.dag_runner.get_launcher",
         return_value=_FakeSlurmLauncher(),
     ):
-        wp, trx_path, _ = await prepare_workplan(
+        wp, trx_path, _, _ = await prepare_workplan(
             wp_path, output_dir, {"spin_id": "spinup"}
         )
 
@@ -6862,6 +8611,245 @@ async def test_prepare_workplan_pins_external_run(
     assert wp.runs["spinup"].start_at == EXTERNAL_START_AT
     assert persisted.runs["spinup"] == wp.runs["spinup"]
     assert persisted.runs["spinup"].run_id == "spinup"
+
+
+@pytest.mark.parametrize("spelling", ["run_id", "uuid", "relative_path"])
+async def test_prepare_workplan_pins_the_run_an_alias_resolved_to(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+    spelling: str,
+) -> None:
+    """Verify `prepare_workplan` resolves an alias that names an untracked run by
+    run-id, `run://<uuid>` or a directory relative to the workplan, pins the run
+    it resolved to in the transformed workplan, and that pin survives writing,
+    reading and moving the transformed workplan.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run.
+    """
+    fab = fabricate_manifest_run()
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    reference = {
+        "run_id": fab.run_id,
+        "uuid": f"run://{fab.uuid}",
+        "relative_path": os.path.relpath(fab.root, plans),
+    }[spelling]
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=reference)},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+    wp_path = plans / "consumer.yaml"
+    assert serialize(wp_path, workplan)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    with mock.patch(
+        "cstar.orchestration.dag_runner.get_launcher",
+        return_value=_NoQueryLauncher(),
+    ):
+        wp, trx_path, external, _ = await prepare_workplan(wp_path, output_dir, {})
+
+    expected = RunRef(
+        run_id=fab.run_id,
+        id=fab.uuid,
+        path=str(fab.root.resolve()) if spelling == "relative_path" else "",
+        start_at=EXTERNAL_START_AT,
+    )
+    assert wp.runs == {"spinup": expected}
+    assert deserialize(trx_path, LiveWorkplan).runs == wp.runs
+    assert LiveWorkplan.load(trx_path).runs == wp.runs
+    assert [task.handle.status for task in external.tasks().values()] == [Status.Done]
+
+    moved = tmp_path / "moved" / trx_path.name
+    moved.parent.mkdir()
+    shutil.copy(trx_path, moved)
+    assert LiveWorkplan.load(moved).runs == wp.runs
+
+    reloaded = ExternalRuns(wp.runs)
+    await reloaded.refresh([StepRef.parse("outer@spinup")], _NoQueryLauncher())
+    assert reloaded.problem(StepRef.parse("outer@spinup")) == ""
+
+
+async def test_prepare_workplan_refuses_a_run_that_is_not_done(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify scheduling stops, naming the problem, when the untracked run it
+    depends on has not finished the step.
+    """
+    fab = fabricate_manifest_run(outcome="failed")
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=f"run://{fab.uuid}")},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+    wp_path = tmp_path / "consumer.yaml"
+    assert serialize(wp_path, workplan)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_NoQueryLauncher(),
+        ),
+        pytest.raises(ValueError, match="done steps only"),
+    ):
+        _ = await prepare_workplan(wp_path, output_dir, {})
+
+
+async def test_scheduling_records_the_uuid_of_the_run_a_workplan_follows(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+    tmp_path: Path,
+) -> None:
+    """Verify the manifest of a scheduled run holds the run each alias resolved
+    to, with its uuid, as the scheduled workplan pinned it.
+
+    Parameters
+    ----------
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    fab = fabricate_manifest_run()
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=f"run://{fab.uuid}")},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+    wp_path = tmp_path / "consumer.yaml"
+    assert serialize(wp_path, workplan)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_NoQueryLauncher(),
+        ),
+    ):
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        wp_run = await run_dag(
+            wp_path,
+            trx_path,
+            mock_run_id,
+            planner,
+            step_facts=facts,
+            carried=carried,
+        )
+
+    manifest = read_run_manifest(wp_run.output_path)
+    assert manifest is not None
+    assert manifest.external.runs == [
+        ExternalRun(
+            alias="spinup", run_id=fab.run_id, id=fab.uuid, start_at=EXTERNAL_START_AT
+        )
+    ]
+
+
+async def test_lookup_step_of_a_pinned_untracked_run_does_not_scan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify a step process finds a step of an untracked run through the pins in
+    its transformed workplan, without scanning the run directories.
+    """
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("uuid"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+    child = LiveStep(
+        name="child",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        depends_on=["outer@spinup"],
+    )
+    plan = LiveWorkplan(
+        name="child-run", description="d", runs=first.pinned(), steps=[child]
+    )
+
+    with mock.patch.object(
+        RunIndex, "locations", autospec=True, side_effect=AssertionError("scanned")
+    ):
+        found = lookup_step(plan, "outer@spinup")
+
+    assert found.working_dir == fab.step.working_dir
+
+
+async def test_deep_check_anchors_a_relative_run_directory_to_the_workplan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify `check` resolves a relative run directory against the workplan's
+    directory, as `run` does, not against the working directory.
+    """
+    fab = fabricate_manifest_run()
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=os.path.relpath(fab.root, plans))},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+
+    transformed, problems = await deep_check(
+        workplan, None, lambda: _NoQueryLauncher(), wp_path=plans / "consumer.yaml"
+    )
+
+    assert problems == []
+    assert transformed is not None
+    assert transformed.runs["spinup"].id == fab.uuid
+    assert transformed.runs["spinup"].path == str(fab.root.resolve())
 
 
 def test_inject_compute_defaults_step_value_wins() -> None:
@@ -6968,7 +8956,7 @@ async def test_prepare_workplan_injects_compute_defaults(
     output_dir = tmp_path / "prepared"
     output_dir.mkdir()
 
-    _, trx_path, _ = await prepare_workplan(wp_path, output_dir, {})
+    _, trx_path, _, _ = await prepare_workplan(wp_path, output_dir, {})
 
     slurm = {
         s.name: t.cast("dict[str, t.Any]", s.compute_overrides["slurm"])
@@ -7143,3 +9131,144 @@ def test_workplan_transformer_anchors_after_filling_placeholders(
     transformed = WorkplanTransformer(wp, fill, wp_path=wp_path).apply()
 
     assert Path(transformed.steps[0].blueprint_path) == (plans / "hw.yaml").resolve()
+
+
+async def test_external_runs_pinned_directory_that_lost_the_run_falls_back_to_the_uuid(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Verify a run pinned to a directory that no longer holds it is found by the
+    uuid the pin also holds, with a warning naming the directory and the uuid,
+    and is then pinned without the directory.
+
+    Parameters
+    ----------
+    fabricate_manifest_run : Callable[..., ManifestOnlyRun]
+        Factory laying out a run in the data home.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    fab = fabricate_manifest_run()
+    moved_from = tmp_path / "moved-from"
+    moved_from.mkdir()
+    declared = {
+        "spinup": RunRef(
+            run_id=fab.run_id,
+            id=fab.uuid,
+            path=str(moved_from),
+            start_at=EXTERNAL_START_AT,
+        )
+    }
+    registry = ExternalRuns(declared)
+
+    with caplog.at_level(logging.WARNING):
+        await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.record("spinup").output_path == fab.root
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    [warning] = [w for w in warnings if str(moved_from) in w]
+    assert f"run://{fab.uuid}" in warning
+
+    pinned = registry.pinned()["spinup"]
+
+    assert pinned.path == ""
+    assert pinned.id == fab.uuid
+    assert pinned.run_id == fab.run_id
+
+
+async def test_external_runs_pinned_directory_holding_another_run_is_an_error(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a run pinned to a directory that holds another run's manifest is
+    not looked for by its uuid: the step has a problem naming the mismatch, no
+    fallback is warned of, and the record is refused.
+
+    Parameters
+    ----------
+    fabricate_manifest_run : Callable[..., ManifestOnlyRun]
+        Factory laying out a run in the data home.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    """
+    fab = fabricate_manifest_run()
+    other = fabricate_manifest_run()
+    assert other.uuid != fab.uuid
+    registry = ExternalRuns(
+        {
+            "spinup": RunRef(
+                run_id=fab.run_id,
+                id=fab.uuid,
+                path=str(other.root),
+                start_at=EXTERNAL_START_AT,
+            )
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    problem = registry.problem(fab.ref)
+    assert problem
+    assert fab.uuid in problem
+    assert other.uuid in problem
+    assert not [r for r in caplog.records if "looking for the run by" in r.getMessage()]
+    with pytest.raises(CstarError, match="spinup"):
+        registry.record("spinup")
+
+
+@pytest.mark.parametrize(
+    "holds",
+    [
+        pytest.param(None, id="directory-is-gone"),
+        pytest.param("notes.txt", id="directory-has-no-manifest"),
+    ],
+)
+async def test_external_runs_pinned_directory_without_a_manifest_falls_back_to_the_uuid(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    holds: str | None,
+) -> None:
+    """Verify a pinned directory that is gone, or exists with files but no
+    `cstar-run.yaml`, is a run that moved: it is found by its uuid, with a warning.
+
+    Parameters
+    ----------
+    fabricate_manifest_run : Callable[..., ManifestOnlyRun]
+        Factory laying out a run in the data home.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    tmp_path : Path
+        Temporary directory for test outputs.
+    holds : str | None
+        A file the pinned directory holds, or `None` for a directory that is gone.
+    """
+    fab = fabricate_manifest_run()
+    pinned_dir = tmp_path / "moved-from"
+    if holds is not None:
+        pinned_dir.mkdir()
+        (pinned_dir / holds).write_text("not a run")
+    registry = ExternalRuns(
+        {
+            "spinup": RunRef(
+                run_id=fab.run_id,
+                id=fab.uuid,
+                path=str(pinned_dir),
+                start_at=EXTERNAL_START_AT,
+            )
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.record("spinup").output_path == fab.root
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [w for w in warnings if str(pinned_dir) in w and fab.uuid in w]
+    assert registry.pinned()["spinup"].path == ""

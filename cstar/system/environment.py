@@ -8,7 +8,9 @@ from dotenv import dotenv_values
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cstar.base.env import get_env_item
 from cstar.base.utils import _run_cmd
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_MAX_WALLTIME
 
 
 class EnvSettingsBase(BaseSettings):
@@ -63,8 +65,29 @@ class SlurmSettingsBase(EnvSettingsBase):
     """The SLURM account name."""
     SLURM_QUEUE: str = Field(default="", frozen=True, min_length=1)
     """The SLURM queue name."""
-    SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
-    """The SLURM queue name."""
+    SLURM_MAX_WALLTIME: str = Field(
+        default_factory=lambda: get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).default,
+        frozen=True,
+    )
+    """The maximum walltime of a SLURM job."""
+
+    @classmethod
+    def required_settings(cls) -> set[str]:
+        """Return the environment variables the system refuses to submit a job without.
+
+        A setting is required when its field declares a `min_length`; a system
+        that does not need one (e.g. *Elja* has no SLURM accounts) overrides the
+        field without it.
+
+        Returns
+        -------
+        set[str]
+        """
+        return {
+            get_envfield_alias(cls, field_name)
+            for field_name, field in cls.model_fields.items()
+            if any(getattr(m, "min_length", 0) for m in field.metadata)
+        }
 
 
 def get_envfield_alias(
@@ -289,15 +312,23 @@ class CStarEnvironment:
 
     @property
     def uses_lmod(self) -> bool:
-        """Checks if the system uses Linux Environment Modules (Lmod) based on OS type
-        and presence of `LMOD_DIR` in environment variables.
+        """Checks if the system uses Linux Environment Modules (Lmod): the OS is Linux,
+        `LMOD_CMD` is set, and C-Star has a module list for the system.
+
+        A generic context (`linux_x86_64`, say) has no module list: on a cluster C-Star
+        does not recognise it keeps the modules the user loaded and builds with the
+        conda environment's toolchain, as on a laptop.
 
         Returns
         -------
         bool
-            True if the OS is Linux and `LMOD_DIR` is present in environment variables.
+            True if the OS is Linux, `LMOD_CMD` is set, and `lmod_path` exists.
         """
-        return platform.system() == "Linux" and bool(self._lmod_settings.CMD)
+        return (
+            platform.system() == "Linux"
+            and bool(self._lmod_settings.CMD)
+            and self.lmod_path.is_file()
+        )
 
     @property
     def system_env_path(self) -> Path:

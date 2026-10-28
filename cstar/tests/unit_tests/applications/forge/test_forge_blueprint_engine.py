@@ -141,7 +141,7 @@ def test_content_hash_ignores_bgc_serialize_dask_and_section_bypass_validation()
 
 def test_esper_salinity_conditioning_reaches_forcing_override_as_a_switch():
     """``SourceSpec.esper_salinity_conditioning`` travels to roms-tools' source dict
-    as ``salinity_conditioning: True`` (input_data later swaps in the staged WOA23
+    as ``salinity_conditioning: True`` (input_generator later swaps in the staged WOA23
     file's path); off/unset emits nothing, matching esper_method/esper_equation.
     """
     cfg = _build()

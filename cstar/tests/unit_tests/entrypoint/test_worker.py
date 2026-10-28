@@ -11,22 +11,17 @@ from unittest import mock
 import pytest
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
-from cstar.applications.roms_marbl.app import RomsMarblRunner, main
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import ContinuanceDirective
+from cstar.applications.ucla_roms.app import UclaRomsRunner, main
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
-from cstar.entrypoint.config import (
-    JobConfig,
-    ServiceConfiguration,
-    get_job_config,
-    get_service_config,
-)
+from cstar.entrypoint.config import ServiceConfiguration, get_service_config
 from cstar.entrypoint.runner import (
     BlueprintRunner,
     create_parser,
 )
 from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
     ARG_DIRECTIVES_URI_LONG,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
@@ -36,13 +31,11 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.manifest import STEP_RECORD_NAME
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
-)
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.simulation import ROMSSimulation
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
@@ -51,7 +44,7 @@ DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
 @pytest.fixture(scope="module", autouse=True)
 def clean_up_logs() -> Generator[None, None, None]:
     """
-    RomsMarblRunner sets up a log file during init. I could try to mock it out, but
+    UclaRomsRunner sets up a log file during init. I could try to mock it out, but
     it's a bit hard to get at. For now, just clean things up after the module is done.
     """
     yield
@@ -60,7 +53,7 @@ def clean_up_logs() -> Generator[None, None, None]:
 
 @pytest.fixture
 def valid_args() -> dict[str, str]:
-    """Fixture to provide valid arguments for the RomsMarblRunner."""
+    """Fixture to provide valid arguments for the UclaRomsRunner."""
     return {
         ARG_URI_LONG: "blueprint.yaml",
         ARG_LOGLEVEL_LONG: "INFO",
@@ -69,7 +62,7 @@ def valid_args() -> dict[str, str]:
 
 @pytest.fixture
 def valid_args_short() -> dict[str, str]:
-    """Fixture to provide valid arguments for the RomsMarblRunner."""
+    """Fixture to provide valid arguments for the UclaRomsRunner."""
     return {
         ARG_URI_SHORT: "blueprint.yaml",
         ARG_LOGLEVEL_SHORT: "INFO",
@@ -77,37 +70,20 @@ def valid_args_short() -> dict[str, str]:
 
 
 @pytest.fixture
-def fake_job_config() -> Generator[JobConfig, None, None]:
-    """Return a `JobConfig` instance configured with mocked
-    values for account, priority, and walltime.
-    """
-    with mock.patch.dict(
-        os.environ,
-        {
-            ENV_CSTAR_SLURM_ACCOUNT: "mock-account",
-            ENV_CSTAR_SLURM_MAX_WALLTIME: "01:00:00",
-            ENV_CSTAR_SLURM_QUEUE: "debug",
-        },
-    ):
-        yield get_job_config()
-
-
-@pytest.fixture
 def sim_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
-    fake_job_config: JobConfig,
-) -> RomsMarblRunner:
-    """Fixture to create a RomsMarblRunner instance.
+) -> UclaRomsRunner:
+    """Fixture to create a UclaRomsRunner instance.
 
     Returns
     -------
-    RomsMarblRunner
-        An initialized instance of RomsMarblRunner, configured via blueprint.
+    UclaRomsRunner
+        An initialized instance of UclaRomsRunner, configured via blueprint.
     """
     request = RunnerRequest(
         str(blueprint_path),
-        RomsMarblBlueprint,
+        UclaRomsBlueprint,
     )
 
     service_config = ServiceConfiguration(
@@ -120,7 +96,7 @@ def sim_runner(
     )
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = RomsMarblRunner(request, service_config, fake_job_config)
+        runner = UclaRomsRunner(request, service_config)
 
     output_dir = runner.simulation.fs_manager.output_dir
 
@@ -200,13 +176,28 @@ def test_create_parser_accepts_pre_run_flag() -> None:
     assert parsed_pre_run.pre_run is True
 
 
+def test_create_parser_accepts_clobber_flag() -> None:
+    """Verify the parser accepts `--clobber` as a boolean flag, defaulting to
+    `False` when omitted.
+    """
+    parser = create_parser()
+
+    assert ARG_CLOBBER in parser._option_string_actions
+
+    parsed_default = parser.parse_args([ARG_URI_LONG, "blueprint.yaml"])
+    assert parsed_default.clobber is False
+
+    parsed_clobber = parser.parse_args([ARG_URI_LONG, "blueprint.yaml", ARG_CLOBBER])
+    assert parsed_clobber.clobber is True
+
+
 def test_runner_request_rejects_resume_with_pre_run() -> None:
     """Verify the request itself refuses resume together with pre-run, so the
     argparse entrypoint (which has no CLI-level exclusion) cannot reach a
     runner that would attach and then launch.
     """
     with pytest.raises(ValueError, match="pre_run"):
-        RunnerRequest("blueprint.yaml", RomsMarblBlueprint, resume=True, pre_run=True)
+        RunnerRequest("blueprint.yaml", UclaRomsBlueprint, resume=True, pre_run=True)
 
 
 @pytest.mark.parametrize(
@@ -328,7 +319,7 @@ def test_get_service_config(
         ],
     )
 
-    config = get_service_config(parsed_args.log_level, name="RomsMarblRunner")
+    config = get_service_config(parsed_args.log_level, name="UclaRomsRunner")
 
     # some values are currently hardcoded for the worker service
     assert config.as_service
@@ -363,7 +354,7 @@ def test_get_request(
 
     config = RunnerRequest(
         parsed_args.blueprint_uri,
-        RomsMarblBlueprint,
+        UclaRomsBlueprint,
     )
 
     assert config.blueprint_uri == blueprint_uri
@@ -372,9 +363,8 @@ def test_get_request(
 def test_start_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
-    fake_job_config: JobConfig,
 ) -> None:
-    """Test creating a RomsMarblRunner and starting it.
+    """Test creating a UclaRomsRunner and starting it.
 
     Parameters
     ----------
@@ -383,7 +373,7 @@ def test_start_runner(
     """
     request = RunnerRequest(
         str(blueprint_path),
-        RomsMarblBlueprint,
+        UclaRomsBlueprint,
     )
 
     service_config = ServiceConfiguration(
@@ -396,13 +386,13 @@ def test_start_runner(
     )
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = RomsMarblRunner(request, service_config, fake_job_config)
+        runner = UclaRomsRunner(request, service_config)
 
     assert runner.request.blueprint_uri == request.blueprint_uri
 
 
 def test_runner_directory_check_ignore_logs(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -411,8 +401,8 @@ def test_runner_directory_check_ignore_logs(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     output_dir = sim_runner.simulation.fs_manager.output_dir
 
@@ -425,7 +415,7 @@ def test_runner_directory_check_ignore_logs(
 
 
 def test_runner_directory_prep(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
     """Test the simulation runner's file system preparation.
 
@@ -433,8 +423,8 @@ def test_runner_directory_prep(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     output_dir = sim_runner.simulation.fs_manager.output_dir
 
@@ -453,19 +443,19 @@ def test_runner_directory_prep(
 
 @pytest.mark.asyncio
 async def test_runner_can_shutdown_as_task(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
     """Test the shutdown override of the base Service class.
 
-    Verifies that a RomsMarblRunner configured as a task will
+    Verifies that a UclaRomsRunner configured as a task will
     automatically exit after a single event loop.
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
-    # Configure the RomsMarblRunner to run as a task
+    # Configure the UclaRomsRunner to run as a task
     sim_runner._config.as_service = False
 
     # don't let it perform any real work
@@ -492,22 +482,22 @@ async def test_runner_can_shutdown_as_task(
 )
 @pytest.mark.asyncio
 async def test_runner_shutdown_handler_complete(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
     status: ExecutionStatus,
 ) -> None:
-    """Test the shutdown criteria of the RomsMarblRunner.
+    """Test the shutdown criteria of the UclaRomsRunner.
 
-    This test verifies that the RomsMarblRunner will
+    This test verifies that the UclaRomsRunner will
     shut down if the update handler reports that it is completed.
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    # Configure the RomsMarblRunner to run as a service
+    # Configure the UclaRomsRunner to run as a service
     sim_runner._config.as_service = True
 
     mock_status_attr = mock.PropertyMock(return_value=status)
@@ -544,26 +534,26 @@ async def test_runner_shutdown_handler_complete(
 )
 @pytest.mark.asyncio
 async def test_runner_shutdown_handler_not_complete(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
     status: ExecutionStatus,
 ) -> None:
-    """Test the shutdown criteria of the RomsMarblRunner.
+    """Test the shutdown criteria of the UclaRomsRunner.
 
-    This test verifies that the RomsMarblRunner will not
+    This test verifies that the UclaRomsRunner will not
     shut down if the update handler reports that it is not done.
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    # Configure the RomsMarblRunner to run as a service
+    # Configure the UclaRomsRunner to run as a service
     sim_runner._config.as_service = True
 
     state = RunnerState(status)
-    result = RunnerResult[RomsMarblBlueprint](
+    result = RunnerResult[UclaRomsBlueprint](
         mock.MagicMock(),
         state=state,
     )
@@ -588,18 +578,18 @@ async def test_runner_shutdown_handler_not_complete(
 )
 @pytest.mark.asyncio
 async def test_runner_shutdown_side_effects(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
     status: ExecutionStatus,
 ) -> None:
-    """Test the shutdown behavior of the RomsMarblRunner.
+    """Test the shutdown behavior of the UclaRomsRunner.
 
-    This test verifies that the RomsMarblRunner executes the desired
+    This test verifies that the UclaRomsRunner executes the desired
     behaviors during shutdown.
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
@@ -625,17 +615,17 @@ async def test_runner_shutdown_side_effects(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_without_uri(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
-    """Test the error handling behavior of the RomsMarblRunner.
+    """Test the error handling behavior of the UclaRomsRunner.
 
     This test verifies that the simulation runner will raise an error
     if a URI for a blueprint is not provided.
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
@@ -649,7 +639,7 @@ async def test_runner_on_start_without_uri(
         mock.patch.object(sim_runner, "_handler", mock_handler),
         mock.patch.object(sim_runner, "simulation", mock_simulation),
     ):
-        # clear blueprint URI from the default RomsMarblRunner from the fixture
+        # clear blueprint URI from the default UclaRomsRunner from the fixture
         # use `setattr` to force-change the Final
         setattr(sim_runner.request, "blueprint_uri", None)
 
@@ -665,9 +655,9 @@ async def test_runner_on_start_without_uri(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_without_simulation(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
-    """Test the error handling behavior of the RomsMarblRunner.
+    """Test the error handling behavior of the UclaRomsRunner.
 
     This test verifies that the simulation runner will raise an error
     if the Blueprint URI isn't provided, but it will fail gracefully and
@@ -675,8 +665,8 @@ async def test_runner_on_start_without_simulation(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
@@ -701,9 +691,9 @@ async def test_runner_on_start_without_simulation(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_setup(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
-    """Test the error handling behavior of the RomsMarblRunner.
+    """Test the error handling behavior of the UclaRomsRunner.
 
     This test verifies that the simulation runner will raise an error
     if the simulation setup fails, but it will fail gracefully and
@@ -711,8 +701,8 @@ async def test_runner_on_start_user_unhandled_setup(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     # configure the simulation to raise an exception during SETUP
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
@@ -747,7 +737,7 @@ async def test_runner_on_start_user_unhandled_setup(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_resume_attaches_instead_of_setup(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
     """A resumed runner adopts the existing working directory via `attach()`
     and never stages, builds or partitions.
@@ -773,8 +763,39 @@ async def test_runner_on_start_resume_attaches_instead_of_setup(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("clobber", [False, True])
+async def test_runner_on_start_passes_clobber_to_setup(
+    sim_runner: UclaRomsRunner,
+    clobber: bool,
+) -> None:
+    """The runner stages the simulation with the clobber choice of its request.
+
+    Parameters
+    ----------
+    sim_runner : UclaRomsRunner
+        A runner whose simulation is replaced for the test.
+    clobber : bool
+        The value of `clobber` on the request.
+    """
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_simulation = mock.Mock(
+        run=mock.Mock(return_value=mock_handler), initial_conditions=None
+    )
+    sim_runner.request.clobber = clobber
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+    ):
+        await sim_runner.execute()
+
+    mock_simulation.setup.assert_called_once_with(clobber=clobber)
+
+
+@pytest.mark.asyncio
 async def test_runner_on_start_pre_run_prepares_without_launching(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
     """A pre-run request stages, builds, partitions and prepares the launch,
     then completes cleanly without launching or post-processing.
@@ -807,7 +828,7 @@ async def test_runner_on_start_pre_run_prepares_without_launching(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_without_pre_run_launches(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
     """Without `pre_run` the launch is not prepared separately; `run` launches."""
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
@@ -826,9 +847,80 @@ async def test_runner_on_start_without_pre_run_launches(
     mock_simulation.prepare_launch.assert_not_called()
 
 
+def _runner_request(
+    blueprint_path: Path, *, resume: bool = False, pre_run: bool = False
+) -> tuple[RunnerRequest[UclaRomsBlueprint], ServiceConfiguration]:
+    """Build the arguments of a `UclaRomsRunner` for a blueprint."""
+    request = RunnerRequest(
+        str(blueprint_path), UclaRomsBlueprint, resume=resume, pre_run=pre_run
+    )
+    service_config = ServiceConfiguration(
+        as_service=False, loop_delay=0, health_check_frequency=0, name="launch-rule"
+    )
+    return request, service_config
+
+
+@pytest.mark.usefixtures("login_node")
+@pytest.mark.parametrize("resume", [False, True])
+def test_runner_init_refuses_outside_scheduler_job(
+    blueprint_path: Path, resume: bool
+) -> None:
+    """On a system with a scheduler, outside a scheduler job, constructing the
+    runner raises before it derives a resumed blueprint or builds a simulation.
+    """
+    request, service_config = _runner_request(blueprint_path, resume=resume)
+
+    with (
+        mock.patch(
+            "cstar.applications.ucla_roms.app.prepare_resume_blueprint"
+        ) as mock_prepare,
+        mock.patch.object(ROMSSimulation, "from_blueprint") as mock_from_blueprint,
+        pytest.raises(CstarError, match="Refusing to launch ROMS"),
+    ):
+        UclaRomsRunner(request, service_config)
+
+    mock_prepare.assert_not_called()
+    mock_from_blueprint.assert_not_called()
+
+
+@pytest.mark.usefixtures("login_node")
+def test_runner_init_pre_run_is_allowed_outside_scheduler_job(
+    blueprint_path: Path,
+) -> None:
+    """A pre-run never launches the model, so a login node may prepare one."""
+    request, service_config = _runner_request(blueprint_path, pre_run=True)
+
+    with mock.patch.object(ROMSSimulation, "from_blueprint") as mock_from_blueprint:
+        mock_from_blueprint.return_value.name = "sim"
+        UclaRomsRunner(request, service_config)
+
+    mock_from_blueprint.assert_called_once_with(str(blueprint_path))
+
+
+@pytest.mark.usefixtures("login_node", "offline_remote_files")
+def test_worker_main_refusal_leaves_the_step_record_untouched(
+    blueprint_path: Path,
+    working_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A launch refused outside a scheduler job exits non-zero with its message,
+    and does not replace the step record a prior attempt left in the working
+    directory (as the shutdown of a started runner would).
+    """
+    record_path = working_dir / STEP_RECORD_NAME
+    record_path.write_text("a prior attempt's record")
+    args = ["cstar.applications.ucla_roms", ARG_URI_LONG, str(blueprint_path)]
+
+    with mock.patch.object(sys, "argv", args):
+        return_code = main()
+
+    assert return_code == 1
+    assert "Refusing to launch ROMS" in capsys.readouterr().out
+    assert record_path.read_text() == "a prior attempt's record"
+
+
 def test_runner_init_resume_builds_simulation_from_resume_blueprint(
     blueprint_path: Path,
-    fake_job_config: JobConfig,
 ) -> None:
     """A resume request derives the blueprint through `prepare_resume_blueprint`
     and builds the simulation from the derived path, not the original.
@@ -838,19 +930,19 @@ def test_runner_init_resume_builds_simulation_from_resume_blueprint(
     mock_sim_instance.name = "sim"
     mock_sim_class = mock.Mock()
     mock_sim_class.from_blueprint.return_value = mock_sim_instance
-    request = RunnerRequest(str(blueprint_path), RomsMarblBlueprint, resume=True)
+    request = RunnerRequest(str(blueprint_path), UclaRomsBlueprint, resume=True)
     service_config = ServiceConfiguration(
         as_service=False, loop_delay=0, health_check_frequency=0, name="resume"
     )
 
     with (
         mock.patch(
-            "cstar.applications.roms_marbl.app.prepare_resume_blueprint",
+            "cstar.applications.ucla_roms.app.prepare_resume_blueprint",
             return_value=resumed_uri,
         ) as mock_prepare,
         mock.patch("cstar.roms.simulation.ROMSSimulation", mock_sim_class),
     ):
-        RomsMarblRunner(request, service_config, fake_job_config)
+        UclaRomsRunner(request, service_config)
 
     mock_prepare.assert_called_once_with(str(blueprint_path))
     mock_sim_class.from_blueprint.assert_called_once_with(resumed_uri)
@@ -859,9 +951,9 @@ def test_runner_init_resume_builds_simulation_from_resume_blueprint(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_build(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
-    """Test the error handling behavior of the RomsMarblRunner.
+    """Test the error handling behavior of the UclaRomsRunner.
 
     This test verifies that the simulation runner will raise an error
     if the simulation setup fails, but it will fail gracefully and
@@ -869,8 +961,8 @@ async def test_runner_on_start_user_unhandled_build(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
@@ -907,9 +999,9 @@ async def test_runner_on_start_user_unhandled_build(
 
 @pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_pre_run(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
 ) -> None:
-    """Test the error handling behavior of the RomsMarblRunner.
+    """Test the error handling behavior of the UclaRomsRunner.
 
     This test verifies that the simulation runner will raise an error
     if the simulation setup fails, but it will fail gracefully and
@@ -917,8 +1009,8 @@ async def test_runner_on_start_user_unhandled_pre_run(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     """
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
@@ -956,18 +1048,18 @@ async def test_runner_on_start_user_unhandled_pre_run(
 
 @pytest.mark.asyncio
 async def test_runner_on_iteration(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
     tmp_path: Path,
 ) -> None:
-    """Test the main iteration behavior of the RomsMarblRunner.
+    """Test the main iteration behavior of the UclaRomsRunner.
 
-    This test verifies that the RomsMarblRunner triggers
+    This test verifies that the UclaRomsRunner triggers
     execution of the simulation.
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     tmp_path : Path
         The step root, holding one joined output file.
     """
@@ -1014,7 +1106,7 @@ async def test_runner_on_iteration(
         ]
 
 
-def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
+def test_worker_main(tmp_path: Path, sim_runner: UclaRomsRunner) -> None:
     """Test the main entrypoint of the worker service.
 
     This test verifies that the the main function will fail to run when called without
@@ -1028,7 +1120,7 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     output_dir = sim_runner.simulation.fs_manager.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    args = ["cstar.applications.roms_marbl.py"]
+    args = ["cstar.applications.ucla_roms.py"]
 
     with (
         mock.patch.dict(os.environ, {}),
@@ -1054,12 +1146,12 @@ def test_worker_main_exec(
     """
     mock_execute = mock.AsyncMock(
         return_value=RunnerResult(
-            RunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
+            RunnerRequest(blueprint_path.as_posix(), UclaRomsBlueprint),
             RunnerState(ExecutionStatus.COMPLETED),
         ),
     )
     args = [
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1069,7 +1161,7 @@ def test_worker_main_exec(
     # don't let it perform any real work; mock out runner.execute
     with (
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             mock_execute,
         ),
@@ -1090,26 +1182,26 @@ def test_worker_main_exec_passes_resume_flag(
     blueprint_path: Path,
 ) -> None:
     """Verify `main()` passes `--resume` through to the `RunnerRequest` given
-    to `RomsMarblRunner`.
+    to `UclaRomsRunner`.
     """
     mock_execute = mock.AsyncMock(
         return_value=RunnerResult(
-            RunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
+            RunnerRequest(blueprint_path.as_posix(), UclaRomsBlueprint),
             RunnerState(ExecutionStatus.COMPLETED),
         ),
     )
     args = [
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_RESUME,
     ]
 
     with (
-        mock.patch.object(RomsMarblRunner, "execute", mock_execute),
+        mock.patch.object(UclaRomsRunner, "execute", mock_execute),
         mock.patch.object(sys, "argv", args),
         mock.patch(
-            "cstar.applications.roms_marbl.app.RunnerRequest",
+            "cstar.applications.ucla_roms.app.RunnerRequest",
             wraps=RunnerRequest,
         ) as mock_request_cls,
     ):
@@ -1134,7 +1226,7 @@ def test_worker_main_exec_continue_from(
     mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
 
     args = [
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1144,8 +1236,8 @@ def test_worker_main_exec_continue_from(
     ]
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
@@ -1153,11 +1245,11 @@ def test_worker_main_exec_continue_from(
         assert ContinuanceDirective.suffix() in str(self.request.blueprint_uri)
         return self.result
 
-    # don't let it perform any real work; mock out RomsMarblRunner
+    # don't let it perform any real work; mock out UclaRomsRunner
     with (
         mock.patch.object(sys, "argv", args),
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             side_effect=modify_runner,
             autospec=True,
@@ -1206,7 +1298,7 @@ def test_worker_main_cstar_error(
     gracefully.
     """
     args = [
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1217,7 +1309,7 @@ def test_worker_main_cstar_error(
     with (
         mock.patch.object(sys, "argv", args),
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             mock.AsyncMock(side_effect=exception_type),
         ),
@@ -1251,7 +1343,7 @@ def test_worker_main_directive_args_parsed(
     mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
 
     args = [
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         ARG_URI_LONG,
         str(bp_path),
         ARG_DIRECTIVES_URI_LONG,
@@ -1259,8 +1351,8 @@ def test_worker_main_directive_args_parsed(
     ]
 
     async def modify_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         """Mock the main execution method to avoid `real work` and ensure the result
         attribute is updated.
         """
@@ -1270,7 +1362,7 @@ def test_worker_main_directive_args_parsed(
     with (
         mock.patch.object(sys, "argv", args),
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             side_effect=modify_runner,
             autospec=True,
@@ -1311,7 +1403,7 @@ def test_worker_main_directive_args_parsed(
     assert ContinuanceDirective.suffix() in modified_uri
 
     # verify initial conditions now point to the --continue-from location
-    blueprint = deserialize(modified_uri, RomsMarblBlueprint)
+    blueprint = deserialize(modified_uri, UclaRomsBlueprint)
     assert str(reset_dir) in str(blueprint.initial_conditions.data[0].location)
 
 
@@ -1329,7 +1421,7 @@ def test_worker_main_directive_args_parsed(
 )
 @pytest.mark.asyncio
 async def test_bluerintrunner_can_shutdown(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
     runner_state: RunnerState,
 ) -> None:
     """Test that the runner recognizes it should shut down if terminal
@@ -1337,12 +1429,12 @@ async def test_bluerintrunner_can_shutdown(
 
     Parameters
     ----------
-    sim_runner: RomsMarblRunner
-        An instance of RomsMarblRunner to be used for the test.
+    sim_runner: UclaRomsRunner
+        An instance of UclaRomsRunner to be used for the test.
     runner_state : RunnerState
         A runner state that should trigger shutdown.
     """
-    result = RunnerResult[RomsMarblBlueprint](
+    result = RunnerResult[UclaRomsBlueprint](
         mock.MagicMock(),
         state=runner_state,
     )
@@ -1362,7 +1454,7 @@ async def test_bluerintrunner_can_shutdown(
 )
 @pytest.mark.asyncio
 async def test_run_records_error_on_failed_handler_status(
-    sim_runner: RomsMarblRunner,
+    sim_runner: UclaRomsRunner,
     handler_status: ExecutionStatus,
     expect_errors: bool,
 ) -> None:
@@ -1393,14 +1485,14 @@ def test_worker_main_returns_nonzero_on_failed_status(
     """
 
     async def fail_runner(
-        self: BlueprintRunner[RomsMarblBlueprint],
-    ) -> RunnerResult[RomsMarblBlueprint]:
+        self: BlueprintRunner[UclaRomsBlueprint],
+    ) -> RunnerResult[UclaRomsBlueprint]:
         # terminal FAILED state with NO errors recorded
         self.add_state(ExecutionStatus.FAILED)
         return self.result
 
     args = [
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         ARG_URI_LONG,
         str(blueprint_path),
         ARG_LOGLEVEL_LONG,
@@ -1409,7 +1501,7 @@ def test_worker_main_returns_nonzero_on_failed_status(
 
     with (
         mock.patch.object(
-            RomsMarblRunner,
+            UclaRomsRunner,
             "execute",
             side_effect=fail_runner,
             autospec=True,

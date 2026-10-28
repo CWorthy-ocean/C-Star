@@ -13,6 +13,16 @@ update_status() {
     sed "s/^status:.*$/status: $1/" "$2" > "$2.tmp" && mv "$2.tmp" "$2"
 }
 
+# the launcher records this attempt (its pid, `Submitted`) in the sentinel just
+# after starting this script; a status written before that would be lost to it,
+# leaving a running step recorded as queued. Wait for it, but not for long: a
+# sentinel that could not be written must not stop the step.
+TRIES=0
+while [ $TRIES -lt 50 ] && ! grep -q "^pid: '*$$'*$" "$SENTINEL_PATH" 2>/dev/null; do
+    TRIES=$((TRIES + 1))
+    sleep 0.2
+done
+
 # wait for each dependency to complete, then verify that it succeeded --
 # a dependency that exited without reaching `Done` must abort this step.
 # POSIX sh has no arrays: the sentinel paths sit in the positional
@@ -21,10 +31,12 @@ set -- {dep_sentinels}
 for DEP_PID in {pids}; do
     DEP_SENTINEL=$1
     shift
-    while kill -0 "$DEP_PID" 2>/dev/null; do
+    if kill -0 "$DEP_PID" 2>/dev/null; then
         echo "Awaiting process $DEP_PID"
-        sleep {delay}
-    done
+        while kill -0 "$DEP_PID" 2>/dev/null; do
+            sleep {delay}
+        done
+    fi
 
     DEP_STATUS=$(sed -n 's/^status: *//p' "$DEP_SENTINEL" 2>/dev/null)
     if [ "$DEP_STATUS" != "$DONE" ]; then

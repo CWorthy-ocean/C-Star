@@ -1,20 +1,21 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.2.0.json
+schema_version: '1.2.0'
 name: fan-out-workplan
 description: A workplan that uses dependencies to gate execution of parallel steps.
 steps:
 - name: Step A
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 - name: Step B_1
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on: ["Step A"]
 - name: Step B_2
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on: ["Step A"]
 - name: Step B_3
-  application: roms_marbl
+  application: ucla_roms
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on: ["Step A"]
 state: draft

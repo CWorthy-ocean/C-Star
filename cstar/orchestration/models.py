@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -37,17 +38,27 @@ from pydantic.json_schema import GetJsonSchemaHandler, JsonSchemaValue
 from pydantic_core import CoreSchema
 
 from cstar.base.adapter import CstarAdaptationError
+from cstar.base.application_names import canonical_application
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.provenance import canonical_hash
+from cstar.base.provenance import HASH_RECIPE_VERSION, canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
+from cstar.system.migration import VersionedDocument
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
 """A non-empty string with no leading or trailing whitespace."""
+
+ApplicationName: t.TypeAlias = t.Annotated[
+    RequiredString, AfterValidator(canonical_application)
+]
+"""An application name, stripped, with an earlier name replaced by the current one."""
+
+CONTENT_HASH_SCHEME: t.Final[str] = f"bp-v{HASH_RECIPE_VERSION}"
+"""The scheme every `Blueprint.content_hash` is tagged with."""
 
 LEGACY_TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
 """The suffix releases before 0.17 appended to a workplan's name in its transformed copy."""
@@ -125,6 +136,28 @@ class ConfiguredBaseModel(BaseModel):
     """Configures the behavior of the pydantic model."""
 
 
+class PathLocation(ConfiguredBaseModel):
+    """A file or directory path in a blueprint, under a `location` key.
+
+    The key is named `location` so that a relative value in a blueprint file is
+    anchored to the blueprint file's directory by
+    `cstar.orchestration.serialization.anchor_locations` when the file is
+    loaded, the same rule as for dataset locations. In a workplan, placeholders
+    such as ``{{output_dir: <step>}}`` are filled before validation. The path
+    is not checked for existence: a placeholder's path does not exist until
+    its step has run. Compare `Resource`, a data resource that may also be
+    remote or pre-partitioned.
+    """
+
+    location: Path
+    """The path; relative values are anchored to the blueprint file's directory."""
+
+    @field_validator("location", mode="after")
+    @classmethod
+    def _expand_user(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
 class Resource(ConfiguredBaseModel):
     location: FilePath | HttpUrl | str
     """Location of the file to retrieve."""
@@ -198,8 +231,8 @@ class BlueprintState(StrEnum):
 class Application(StrEnum):
     """The supported application types."""
 
-    ROMS_MARBL = "roms_marbl"
-    """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
+    UCLA_ROMS = "ucla_roms"
+    """A UCLA-ROMS simulation, in any ucla-roms configuration (MARBL, no BGC, or CDR-LiTE)."""
     HELLO_WORLD = "hello_world"
     """Sample custom application."""
     PLOTTER = "plotter"
@@ -216,7 +249,7 @@ class BlueprintCore(ConfiguredBaseModel):
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
 
-    application: RequiredString
+    application: ApplicationName
     """The process type to be executed by the blueprint."""
 
     schema_version: str = "1.0.0"
@@ -274,7 +307,7 @@ class BlueprintIdentity(ConfiguredBaseModel):
     kind: t.Literal["Blueprint"]
     """The kind of document referenced; selects the model a reference loads as."""
 
-    application: RequiredString
+    application: ApplicationName
     """The application the referenced blueprint belongs to."""
 
     name: RequiredString
@@ -355,8 +388,10 @@ class Provenance(ConfiguredBaseModel):
     """The blueprints and catalog specs the document was derived from."""
 
 
-class Blueprint(ConfiguredBaseModel, ABC):
+class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """Common elements of all blueprints."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "blueprint"
 
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
@@ -416,20 +451,94 @@ class Blueprint(ConfiguredBaseModel, ABC):
         return StateDirectoryManager.blueprint_run_dir(self.application, self.name)
 
     def content_hash(self) -> str:
-        """A fingerprint of the blueprint's configuration.
-
-        The metadata fields (`BLUEPRINT_METADATA_FIELDS`) and the schema reference
-        are excluded, so renaming or moving a blueprint does not change it.
+        """A fingerprint of the blueprint's configuration (see `_hashed_content`).
 
         Returns
         -------
         str
-            The SHA-256 hex digest of the configuration.
+            ``<CONTENT_HASH_SCHEME>:<hex>``, the SHA-256 hex digest of the
+            configuration tagged with the recipe that computed it.
         """
-        data = self.model_dump(mode="json")
-        for key in (*BLUEPRINT_METADATA_FIELDS, "$schema"):
-            data.pop(key, None)
-        return canonical_hash(data)
+        return f"{CONTENT_HASH_SCHEME}:{canonical_hash(self._hashed_content())}"
+
+    def integrity_problem(self) -> str | None:
+        """Describe how the blueprint's recorded integrity check fails, if it does.
+
+        The base provenance records no hash, so there is nothing to check and this
+        returns `None`. An application whose provenance records a content hash
+        overrides it to compare the record with the content it holds, so a loader
+        can report a file edited by hand since it was written.
+
+        Returns
+        -------
+        str | None
+            A message for the user when the check fails, otherwise `None`.
+        """
+        return None
+
+    def stamped_for_write(self) -> t.Self:
+        """Return the blueprint as it is to be written, with its provenance completed.
+
+        The generic write path (`model_to_yaml`) calls this on every blueprint, so
+        whatever the file records about its content is true of the content it
+        holds, however the blueprint was built (loaded, overridden, rewritten). The
+        base provenance records nothing derived from the content, so this returns
+        `self`. An application that records, for example, a content hash overrides
+        it to return a copy carrying the current one; it never changes `self`.
+
+        Returns
+        -------
+        Self
+            `self`, or a copy with its provenance completed.
+        """
+        return self
+
+    def _hashed_content(self) -> dict[str, t.Any]:
+        """The configuration `content_hash` covers.
+
+        Only the fields that differ from their defaults count, so a field added
+        with a default (a minor schema bump) leaves the hash of every existing
+        blueprint unchanged, and writing a default out is not an edit. The
+        metadata fields (`BLUEPRINT_METADATA_FIELDS`) and the schema reference
+        are excluded, so renaming or moving a blueprint does not change it.
+
+        An application that leaves more out overrides this, starting from the
+        base dump. A change to what it returns changes recorded hashes: bump
+        `HASH_RECIPE_VERSION` with it.
+
+        Returns
+        -------
+        dict[str, Any]
+            The JSON-able configuration.
+        """
+        return self.model_dump(
+            mode="json",
+            exclude_defaults=True,
+            exclude={*BLUEPRINT_METADATA_FIELDS, "$schema"},
+        )
+
+    @property
+    def schema_ref(self) -> str:
+        """The URL of the published JSON schema the blueprint's ``$schema`` names."""
+        return generate_schema_ref(self.application, self.schema_version)
+
+    @classmethod
+    @t.override
+    def schema_label(cls) -> str:
+        """Name a blueprint in messages by its application."""
+        application = cls.model_fields["application"].default
+        return application if isinstance(application, str) else cls.SCHEMA_LABEL
+
+    @field_validator("application", mode="after")
+    @classmethod
+    def _canonicalize_application(cls, value: str) -> str:
+        """Replace an earlier application name with the current one.
+
+        A validator rather than the `ApplicationName` annotation: every concrete
+        blueprint redeclares `application`, and a redeclared field takes the
+        subclass's annotation, dropping annotation-level validators.
+        """
+        return canonical_application(value)
 
     @field_validator("working_dir", mode="after")
     @classmethod
@@ -448,13 +557,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     ) -> dict[str, t.Any]:
         data = handler(self)
         if not info.exclude or "$schema" not in info.exclude:
-            return {
-                "$schema": generate_schema_ref(
-                    self.application,
-                    self.schema_version,
-                ),
-                **data,
-            }
+            return {"$schema": self.schema_ref, **data}
         return data
 
 
@@ -704,8 +807,18 @@ class RunRef(ConfiguredBaseModel):
     """A reference to an external workplan run."""
 
     run_id: RequiredString
-    """The run-id of the external workplan run; may be a `{{name}}`
-    runtime-variable placeholder filled when the workplan is scheduled."""
+    """The run referenced: its run-id, `run://<uuid>`, or the path of its run
+    directory (a relative path is resolved against the workplan file's
+    directory). May be a `{{name}}` runtime-variable placeholder filled when the
+    workplan is scheduled; scheduling replaces it with the run's run-id."""
+
+    id: str = Field(default="")
+    """The uuid of the run resolved when the workplan was scheduled; empty in an
+    authored workplan."""
+
+    path: str = Field(default="")
+    """The run directory a reference by path resolved to when the workplan was
+    scheduled; empty otherwise."""
 
     start_at: datetime | None = Field(default=None)
     """The start time of the exact run record resolved when the workplan was
@@ -724,7 +837,7 @@ class Step(ConfiguredBaseModel):
     name: StepName
     """The user-friendly name of the step."""
 
-    application: RequiredString
+    application: ApplicationName
     """The user-friendly name of the application executed in the step."""
 
     blueprint_path: FilePath | DeferredBlueprintRef | InlineBlueprintRef | str = Field(
@@ -924,8 +1037,16 @@ class Step(ConfiguredBaseModel):
         return value
 
 
-class Workplan(ConfiguredBaseModel):
+class Workplan(ConfiguredBaseModel, VersionedDocument):
     """A collection of executable steps and the associated configuration to run them."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "workplan"
+
+    schema_version: str = Field(default="1.2.0")
+    """The version of the workplan schema the document was written with. A
+    document without one predates versioning and reads as 1.0.0; a newer one
+    than this build's loads only when it holds nothing this build does not know
+    (see `VersionedDocument`)."""
 
     name: RequiredString
     """The name of the workplan, written as a slug: it is the default run-id."""
@@ -1013,7 +1134,7 @@ class Workplan(ConfiguredBaseModel):
     @property
     def pre_run(self) -> bool:
         """Return `True` if every step in this workplan is a pre-run step, as
-        produced by `cstar workplan run --pre-run`.
+        produced by `cstar workplan submit --pre-run`.
 
         Returns
         -------

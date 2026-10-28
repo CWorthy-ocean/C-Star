@@ -1,7 +1,8 @@
 """
 Pydantic models for the ModelSpec catalog format.
 
-A ModelSpec is a single YAML (``model.yaml``) with two top-level sections:
+A ModelSpec is a single YAML file (``specs/ModelSpec/<name>.yaml`` in a catalog) with
+two top-level sections:
 ``code`` (roms/marbl/pio source pins + template refs) and ``model_settings``
 (flat, mirrors ``ForgeBlueprint.model_settings`` 1:1). It intentionally holds
 nothing a Domain/Forcing/Output spec already provides -- no grid/initial-
@@ -83,7 +84,7 @@ class ModelTemplates(BaseModel):
     files: list[str] = Field(default_factory=list)
     # sha256 hex digest of each of ``files``, *as they exist at the ModelSpec's own
     # ``templates_commit`` pin* -- authored by hand (not computed from the bundled
-    # copy, which may be a newer commit -- see roms-marbl-0.8-default/model.yaml for
+    # copy, which may be a newer commit -- see ModelSpec/roms-marbl-0.8-default.yaml for
     # the regeneration recipe), keyed by filename. ``resolve.py``'s ``_build_code``
     # copies this straight into ``TemplateRepo.file_hashes``: the executor's local
     # fast path only fires when the bundled copy matches these hashes exactly, so a
@@ -120,7 +121,7 @@ class ModelSpec(BaseModel):
     Parameters
     ----------
     name : str
-        Logical name of the model (e.g., "cson_roms-marbl_v0.1").
+        Logical name of the model (e.g., "roms-marbl-0.13-default").
     description : str, optional
         Human-readable one-liner for catalogs/wizard display.
     code : ModelCode
@@ -139,6 +140,10 @@ class ModelSpec(BaseModel):
         and to decide whether ``code.pio`` is populated (raising if PIO is
         requested but the model has no ``code.pio`` pin). Not part of
         ``model_settings`` -- it's a build mode, not a namelist section.
+    archived : bool
+        Hide this spec from the wizard's model dropdown (it stays loadable, and
+        blueprints that compose it by name keep working). For specs pinned to
+        superseded ucla-roms releases.
     model_settings : dict[str, Any]
         Flat model-specific physics/numerics defaults, mirroring
         ``ForgeBlueprint.model_settings`` 1:1. Contains nothing a Domain/Forcing/
@@ -152,6 +157,7 @@ class ModelSpec(BaseModel):
     code: ModelCode
     bgc_mode: BgcMode = "marbl"
     use_pio: bool = False
+    archived: bool = Field(default=False)
     model_settings: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -212,17 +218,60 @@ class ModelSpec(BaseModel):
         return self
 
 
+def read_model_spec(
+    data: dict[str, Any], model_name: str, where: Path | str
+) -> dict[str, Any]:
+    """Return a ModelSpec file's block at the current schema, without ``schema_version``.
+
+    A file with top-level ``code``/``model_settings`` is the block itself. Any
+    other file is a multi-model file: the block is ``data[model_name]``, or the
+    only value of a one-key file.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        The parsed ModelSpec file.
+    model_name : str
+        The model's name: the multi-model block key, or the catalog entry name.
+    where : Path | str
+        The file the content came from, for messages.
+
+    Returns
+    -------
+    dict[str, Any]
+
+    Raises
+    ------
+    KeyError
+        If the file is a multi-model file without a `model_name` block.
+    """
+    # Deferred, as cstar.catalog is not otherwise needed to read a ModelSpec.
+    from cstar.catalog.spec_schema import read_spec
+
+    block = data
+    if not {"code", "model_settings"}.intersection(data):
+        if model_name in data:
+            block = data[model_name]
+        elif len(data) == 1:
+            block = next(iter(data.values()))
+        else:
+            raise KeyError(
+                f"Model '{model_name}' not found in models YAML file: {where}"
+            )
+    return read_spec("ModelSpec", block, where)
+
+
 def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
-    """Load a ModelSpec from a ``model.yaml`` file.
+    """Load a ModelSpec from its YAML file.
 
     Parameters
     ----------
     path : Path
-        Path to the model.yaml file.
+        Path to the ModelSpec file.
     model_name : str
         Name of the model (used as ``ModelSpec.name``; either the multi-model
-        block key, or -- for a single-model file -- the directory/file's logical
-        name).
+        block key, or -- for a single-model file -- the catalog entry name,
+        the file's stem).
 
     Returns
     -------
@@ -233,60 +282,16 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
     KeyError
         If the requested model is not present in a multi-model YAML file.
     ValueError
-        If required fields are missing.
+        If a key is not a ModelSpec key, or a required field is missing.
     """
     with path.open() as f:
         data = yaml.safe_load(f) or {}
 
-    _SINGLE_MODEL_KEYS = frozenset({"code", "model_settings"})
-    if model_name in data:
-        block = data[model_name]  # multi-model file
-    elif _SINGLE_MODEL_KEYS.intersection(data.keys()):
-        block = data  # single-model file: content at top level, filename is model name
-    else:
-        raise KeyError(f"Model '{model_name}' not found in models YAML file: {path}")
-
-    if "code" not in block:
-        raise ValueError(f"Model '{model_name}' must specify 'code' in model.yaml")
-
-    code_block = block["code"]
-
-    def _repo(val: dict[str, Any] | None) -> CodeRepo | None:
-        if not val:
-            return None
-        commit = val.get("commit")
-        return CodeRepo(
-            location=val.get("location"),
-            commit=str(commit) if commit is not None else None,
-            branch=val.get("branch"),
-        )
-
-    roms = _repo(code_block.get("roms"))
-    if roms is None:
-        raise ValueError(f"Model '{model_name}' must include 'roms' in code")
-
-    def _templates(stage: str) -> ModelTemplates:
-        t = code_block.get(f"templates_{stage}", {}) or {}
-        return ModelTemplates(
-            directory=t.get("directory"),
-            files=t.get("files", []),
-            file_hashes=t.get("file_hashes", {}),
-        )
-
-    model_code = ModelCode(
-        roms=roms,
-        marbl=_repo(code_block.get("marbl")),
-        pio=_repo(code_block.get("pio")),
-        templates_commit=code_block.get("templates_commit"),
-        templates_compile_time=_templates("compile_time"),
-        templates_run_time=_templates("run_time"),
-    )
-
-    return ModelSpec(
-        name=model_name,
-        description=block.get("description"),
-        code=model_code,
-        bgc_mode=block.get("bgc_mode", "marbl"),
-        use_pio=block.get("use_pio", False),
-        model_settings=block.get("model_settings", {}) or {},
-    )
+    content = read_model_spec(data, model_name, path)
+    # YAML parses a commit hash of digits as an int.
+    for repo in (content.get("code") or {}).values():
+        if isinstance(repo, dict) and repo.get("commit") is not None:
+            repo["commit"] = str(repo["commit"])
+    if content.get("model_settings") is None:
+        content.pop("model_settings", None)
+    return ModelSpec.model_validate({**content, "name": model_name})

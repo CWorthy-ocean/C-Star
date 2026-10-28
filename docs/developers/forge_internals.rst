@@ -16,15 +16,22 @@ Forge is split into two layers along a hard boundary:
   (``cstar.applications.forge.resolve``) that assembles them into a single
   reviewable file, and a **wizard** UI (``cstar.wizard``).
 - **Execution** (``cstar.applications.forge``): an **engine** that turns
-  that file into ROMS-MARBL input NetCDFs, a namelist, and a downstream
+  that file into UCLA-ROMS input NetCDFs, a namelist, and a downstream
   blueprint, plus the **executor** that does the actual work. Execution
   never touches the catalog.
 
 The file that crosses the boundary is ``ForgeBlueprint`` -- **the forge
 application's own blueprint**. Terminology trap to avoid: C-Star also has an
-existing, unrelated ``roms_marbl`` application whose blueprint
-(``RomsMarblBlueprint``) forge *emits as an output artifact*. "Building a
+existing, unrelated ``ucla_roms`` application whose blueprint
+(``UclaRomsBlueprint``) forge *emits as an output artifact*. "Building a
 blueprint" means producing that downstream artifact, not forge's own input.
+
+Two invariants keep the boundary honest. A forge blueprint **snapshots** the
+values it took from the catalog (grid parameters, forcing selections, settings)
+rather than referencing catalog entries, so a saved blueprint keeps producing
+the same domain however the catalog is later edited, moved or relayered. And
+the **executor never reads the catalog**: only the resolver and the wizard do,
+which a boundary-guard test enforces.
 
 .. code-block:: text
 
@@ -34,7 +41,7 @@ blueprint" means producing that downstream artifact, not forge's own input.
                     |                             portable)           |
     wizard UI ------+                                                 v
                                                         input NetCDFs, namelist.nml,
-                                                        cppdefs.opt, roms_marbl blueprint
+                                                        cppdefs.opt, ucla_roms blueprint
 
 Directory map
 --------------------
@@ -52,7 +59,7 @@ Directory map
     |   |   |                              # sources_to_forcing_override()
     |   |   +-- executor.py                # ForgeExecutor -- the processing engine
     |   |   +-- host.py                    # HostPaths -- frozen host-boundary contract injected into the executor
-    |   |   +-- input_data.py              # Input file generation
+    |   |   +-- input_generator.py         # Input file generation
     |   |   +-- source_datasets.py         # Dataset download and preparation
     |   |   +-- source_registry.py         # Dataset alias map / provenance metadata (stdlib-only)
     |   |   +-- glorys_subchunk.py         # Just-in-time kerchunk subchunking for GLORYS
@@ -70,13 +77,16 @@ Directory map
     |   |                                  # already-parsed option values (called by cli/forge's 'run');
     |   |                                  # publish_emitted_blueprint(): copies B_{name}.yaml to output/
     |   +-- core.py                    # get_application() / register_application / ApplicationDefinition
-    |   +-- roms_marbl/                # the roms_marbl application forge's output feeds into
-    +-- catalog/                       # Bundled + layered spec catalog (see docs/developers/catalog_design.rst)
+    |   +-- ucla_roms/                 # package of the ucla_roms application forge's output feeds into
+    +-- roms/
+    |   +-- outputs.py                 # Names and models of the files a ROMS step writes
+    |   +-- file_system.py             # RomsFileSystemManager: run-directory layout
+    +-- catalog/                       # Bundled + layered spec catalog (see docs/catalog_wizard/catalog.rst)
     |   +-- bundled/
-    |   |   +-- ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
-    |   |   +-- DomainSpec/{grid}/Domain.yaml   # Grid definitions
-    |   |   +-- ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
-    |   |   +-- OutputSpec/{name}/Output.yaml   # Output configurations
+    |   |   +-- specs/ModelSpec/{model}.yaml    # Code repos, templates, settings, defaults
+    |   |   +-- specs/DomainSpec/{grid}.yaml    # Grid definitions
+    |   |   +-- specs/ForcingSpec/{name}.yaml   # Forcing source configurations
+    |   |   +-- specs/OutputSpec/{name}.yaml    # Output configurations
     |   |   +-- blueprints/forge/{name}.yaml    # Example blueprints (bundled, read-only layer;
     |   |                                        # user saves go to the user catalog layer instead)
     |   +-- domain_catalog.py          # DomainCatalog / LayeredCatalog
@@ -96,7 +106,7 @@ Directory map
     +-- additional_files/templates/forge/  # Bundled render templates (compile-time/run-time);
                                             # see forge_templates.rst.
 
-``glorys_subchunk.py`` is called from ``input_data.py`` and is covered by the
+``glorys_subchunk.py`` is called from ``input_generator.py`` and is covered by the
 boundary guard test (below) like any other execution module: the guard's
 module list is every ``.py`` file in ``cstar/applications/forge`` minus a
 small, fixed exclusion set for the authoring/host modules (``resolve``,
@@ -173,21 +183,29 @@ filenames off it.
   default, ``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. It's
   host/location, not results-affecting, so it's excluded from
   ``content_hash``.
-- **``content_hash()``** -- sha256 over everything *except*
-  ``forge_blueprint_version``, ``name``, ``description``, ``composition``,
-  ``provenance``, ``working_dir``, ``state``, ``schema_version``,
-  ``$schema`` (see ``_HASH_EXCLUDE``); each code repo's ``location`` (fetch
+- **``content_hash()``** -- ``bp-v<N>:`` (``N`` = ``HASH_RECIPE_VERSION``,
+  ``cstar/base/provenance.py``, bumped with any change to the recipe) plus the
+  sha256 of the fields that differ from their defaults, so an additive field
+  with a default changes no recorded hash (``Blueprint._hashed_content``). It
+  hashes everything *except* the base metadata (``BLUEPRINT_METADATA_FIELDS``:
+  ``application``, ``name``, ``description``, ``provenance``, ``working_dir``,
+  ``state``, ``schema_version``) and ``$schema``;
+  ``forge_blueprint_version`` and ``composition`` (``_HASH_EXCLUDE``); each
+  code repo's ``location`` (fetch
   address) and ``file_hashes`` (a derived cache, not independent content);
   each user-provided file's ``location`` (host path, not its pinned
   ``content_hash``); and, on ``initial_conditions``/``boundary``, the
   execution-environment knobs ``bypass_validation`` and each bgc source's
   ``serialize_dask`` -- none of these change what the run produces, only how
-  or where it's produced. Recorded on ``to_yaml``; ``verify_content_hash``
-  warns (doesn't block) on a mismatched hand-edit at load.
+  or where it's produced. Recorded on every write (``to_yaml`` or the generic ``serialize``, via
+  ``stamped_for_write``); ``verify_content_hash``
+  warns (doesn't block) on a mismatched hand-edit at load, and skips a hash
+  recorded under another scheme (another release's recipe).
 - **``stamp_provenance(tool)``** -- the one place a blueprint's provenance is
-  stamped. When the recomputed ``content_hash`` equals the recorded one and a
-  ``generated_by`` is recorded it returns ``self`` (a matching hash alone is not
-  enough: ``to_yaml_str`` records it on every write, stamped or not); otherwise a
+  stamped. When the recomputed ``content_hash`` equals the recorded one (never
+  true for a hash of another scheme, so the first save after an upgrade stamps
+  anew) and a ``generated_by`` is recorded it returns ``self`` (a matching hash alone is not
+  enough: any write records it, stamped or not); otherwise a
   copy with the new hash, ``generated_at`` now (UTC) and a fresh ``generated_by``
   from ``new_generated_by(tool)`` (the tool, a uuid4 minted once, the system, and
   ``generation_versions()``: the ``cstar-ocean`` and ``roms-tools`` versions),
@@ -198,7 +216,7 @@ filenames off it.
   every write of its config to disk goes through, and carries the stamp through
   re-resolves (``build_forge_blueprint(provenance=...)``).
 - **``emitted_provenance(blueprint, run_id=..., working_dir=...)``** -- the one
-  place the *emitted* ``roms_marbl`` blueprint's provenance is assembled (and
+  place the *emitted* ``ucla_roms`` blueprint's provenance is assembled (and
   ``emitted_blueprint_description(name, description)`` its description), built
   from ``producer_ref``, ``composition_refs`` and ``new_generated_by``. Unlike a
   forge blueprint's, it is minted afresh by every run, never carried over:
@@ -221,7 +239,7 @@ Forge as a real C-Star application
 
 ``cstar/applications/forge/app.py`` (excluded from the ``test_forge_app_boundary.py``
 guard described below -- like ``runtime.py``, it's disposable host-resolution glue)
-defines the pieces the :doc:`custom-applications contract <../custom_applications>`
+defines the pieces the :doc:`custom-applications contract <custom_applications>`
 requires:
 
 - ``ForgeRunner(BlueprintRunner[ForgeBlueprint])`` -- ``run()`` delegates to
@@ -229,14 +247,14 @@ requires:
   ``process_forge_blueprint`` -> ``ensure_source_data``/``generate_inputs``/
   ``configure_build``, publishes the emitted blueprint (below), then reports
   ``ExecutionStatus.COMPLETED``. Scope: generates inputs and emits the
-  downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- the
-  existing ``roms_marbl`` application consumes that blueprint separately.
+  downstream ``ucla_roms`` blueprint (``B_{name}.yaml``), then stops -- the
+  existing ``ucla_roms`` application consumes that blueprint separately.
 - ``ForgeApplication`` -- ``@register_application``-decorated
   ``ApplicationDefinition`` wiring ``ForgeBlueprint`` + ``ForgeRunner``
   together under ``name = "forge"``.
 
 Forge is discovered by ``cstar.applications.core.get_application`` as a
-**built-in** application, the same way ``roms_marbl`` is: ``get_application``
+**built-in** application, the same way ``ucla_roms`` is: ``get_application``
 imports the in-tree
 ``cstar.applications.forge`` package, whose ``__init__.py`` imports
 ``app.py`` so its ``@register_application`` decorator runs. No entry point
@@ -300,7 +318,7 @@ The call chain end to end
    grid/boundaries/partitioning/dates from ``catalog.domain_data(name)``.
 3. Every edit -> ``_rebuild()`` -> ``build_forge_blueprint(**self._gather())``
    (``cstar/applications/forge/resolve.py``) -- reads the single
-   consolidated ``model.yaml`` directly as a dict (no Pydantic here;
+   consolidated ModelSpec file directly as a dict (no Pydantic here;
    ``code`` + flat ``model_settings``, no embedded forcing/output defaults
    -- a ForcingSpec and OutputSpec must always be supplied explicitly),
    resolves dataset keys via ``source_registry``, computes pure-derived
@@ -322,11 +340,11 @@ The call chain end to end
    minted once for the call (``emitted_provenance``; ``run_id`` is read from the
    ``CSTAR_RUNID`` a workplan step inherits, and is empty for a standalone run).
 7. Outputs land under ``host.working_dir``: input NetCDFs, ``namelist.nml``,
-   ``cppdefs.opt``, and the emitted downstream ``roms_marbl`` blueprint YAML
+   ``cppdefs.opt``, and the emitted downstream ``ucla_roms`` blueprint YAML
    (``B_{name}.yaml``, persisted once by ``configure_build()`` -- there is
    no per-stage blueprint file). The emitted blueprint leaves ``working_dir``
    unset, so it runs under
-   ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``. Its ``description``
+   ``CSTAR_DATA_HOME/blueprint_runs/ucla_roms/<name>``. Its ``description``
    says it was generated by forge from the forge blueprint of that name, and its
    ``provenance`` is the one the engine handed ``configure_build``; ``persist()``
    leaves the block out when none was supplied (a direct use of the executor),
@@ -349,237 +367,49 @@ still being worked off) is currently empty. ``namelist_model.py`` and
 ``util.py`` are same-package siblings inside ``cstar.applications.forge`` and
 are covered by this module list like any other execution module.
 
-Versioned namelist schemas (ucla-roms 0.4.0+)
--------------------------------------------------------
+Versioned namelist schemas
+--------------------------
 
-ucla-roms 0.4.0 added ``nt_cdr_oae``/``nt_cdr_dor`` (passive CDR tracer
-counts) to ``&PARAM_SETTINGS``, both defaulting to 0 (the Fortran
-initializer) so a namelist without them still validates; 0.5.0 made the
-first breaking namelist change (``nrpf_rst`` removed from
-``&BASIC_OUTPUT_SETTINGS``; ``&PARTICLES_SETTINGS``
-``output_period``/``nrpf`` renamed to
-``output_period_particles``/``nrpf_particles``); 0.6.0 added
-``&PIO_SETTINGS`` (``pio_stride``, required under ``PARALLEL_IO``); 0.7.0
-adds ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
-(ucla-roms PR #351 -- two dedicated CDR output streams); 0.9.0 renames the
-former ``&CDR_LITE_OUTPUT_SETTINGS`` (PR #372: five keys renamed, plus PR
-#370's ``wrt_gas_exchange``; now compiled without MARBL/CDR_FORCING) and adds
-the optional ``&CDR_LITE_SETTINGS``; 0.11.0 adds the constant-iron option
-(``use_constant_Fe``/``constant_Fe_value``, PR #391) to
-``&MARBL_BIOGEOCHEMISTRY_SETTINGS``. C-Star versions the
-namelist schema by ucla-roms release (``cstar.roms.namelist``:
-``RomsNamelist`` for < 0.4.0, ``RomsNamelistV0_4_0`` for 0.4.0 <= ucla-roms
-< 0.5.0 (adds the CDR tracer counts to ``&PARAM_SETTINGS``),
-``RomsNamelistV0_5_0`` for 0.5.0 <= ucla-roms < 0.6.0, ``RomsNamelistV0_6_0``
-for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for 0.7.0 <= ucla-roms
-< 0.9.0, ``RomsNamelistV0_9_0`` for 0.9.0 <= ucla-roms < 0.11.0 (a
-``RomsNamelistV0_6_0`` subclass, since a subclass can't drop V0_7_0's renamed
-group), ``RomsNamelistV0_11_0`` for >= 0.11.0 (a ``RomsNamelistV0_9_0``
-subclass; adds ``use_constant_Fe``/``constant_Fe_value`` to
-``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, written lowercased as f90nml writes
-them -- both keys are always written, so a release before 0.11.0 stops on the
-unknown keys and keeps the 0.9.0 schema), selected
-by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; a commit
-hash selects the release it descends from, via ``git describe`` in a clone;
-branch names and unresolved hashes warn and fall back to the latest schema).
-Forge mirrors this in
-``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
-``RunTimeSettingsV0_4_0`` (adds ``param.nt_cdr_oae``/``param.nt_cdr_dor``),
-``RunTimeSettingsV0_5_0``, ``RunTimeSettingsV0_6_0`` (adds ``pio_settings``),
-``RunTimeSettingsV0_7_0`` (adds ``cdr_lite_output``/``cdr_gas_exch_output``),
-``RunTimeSettingsV0_9_0`` (``cdr_lite_output`` with the 0.9 key names and
-``wrt_gas_exchange``, plus ``cdr_lite``; a ``RunTimeSettingsV0_6_0`` subclass
-like its C-Star counterpart), and ``RunTimeSettingsV0_11_0`` (``marbl_bgc`` is
-typed ``MarblBgcCfgV0_11_0``, which gains ``use_constant_fe``/
-``constant_fe_value``; the earlier tiers' ``MarblBgcCfg`` rejects a requested
-``use_constant_fe`` rather than dropping it, and ``check_constant_fe`` rejects
-it in a build without MARBL -- resolver, ``validate_run_time_sections`` and
-``configure_build``),
-selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
-the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
-``write_roms_namelist``). Forge has no ucla-roms clone, so
-``process_forge_blueprint`` and ``configure_build`` first resolve a commit
-hash to its release tag with ``release_ref_for_remote`` (a throwaway treeless
-clone of ``code.roms.location``, cached per process); Forge then writes the
-namelist of the tier roms_marbl reads it with. The resolver, which the wizard
-calls on every keystroke, keeps the latest tier for a hash and leaves an
-upscaled run's ``cdr_nz_chd`` at its seeded value; the executor re-prunes and
-sets ``cdr_nz_chd = 0`` if the resolved release reads the level count from the
-file. C-Star's registry is the single source of
-version-boundary truth -- forge only maps its result to the matching
-settings class. The forge **settings vocabulary is version-stable**: YAML
-keys (``particles.output_period``, ``particles.nrpf``,
-``cdr_lite_output.do_avg``) don't change; only
-the ``serialization_alias`` to namelist names differs per version, and
-``nrpf_rst`` (still present in the shared ``OutputSpec/standard``) is
-silently ignored for 0.5.0+ models via ``extra="ignore"``. A key matching a
-field only up to case or by its namelist name (``LLm``, ``akv_bak``) is not
-ignored but rejected, every offender in one error
-(``_SettingsSection._reject_misspelled_keys``); a section's
-``_other_tier_keys()`` extends that to keys only another tier models, so a
-version gate never sees a case variant. The one
-exception is ``cdr_lite_output``, which was named ``cdr_tracer_output``
-(enable flag ``do_cdr_tracer_output``) before ucla-roms 0.9.0's CDR_LITE
-rename: forge blueprint v10 migrates stored blueprints, and the resolver
-renames the old section in an OutputSpec/ModelSpec/override with a warning
-(``normalize_legacy_sections``, the only place the old names live). Total tracer
-count (``n_tracers``, threaded into ``build_namelist``/``render_roms_settings``
-to size the per-tracer mixing/diffusion arrays) is derived by
-``n_tracers_from_param``: T + S + ``ntrc_bio`` + ``nt_passive`` +
-``2*nt_cdr_oae + nt_cdr_dor`` (each OAE tracer is an ALK/DIC pair, mirroring
-ucla-roms ``param.F90``); below 0.4.0, a non-zero ``nt_cdr_oae``/
-``nt_cdr_dor`` in the settings dict is rejected outright (``ParamCfg``'s
-before-validator) rather than silently miscounted. One ModelSpec per tagged
-ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
-``roms-marbl-0.6-default`` pins ``0.6.4``, ``roms-marbl-0.7-default`` pins
-``0.7.0``, ``roms-marbl-0.8-default`` pins ``0.8.0`` (adds the
-``parabolic_splines``/``upstream_ts_land_curv`` advection cppdefs flags, PR
-#361, with no new settings tier -- it still resolves to
-``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
-(``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
-not declare it, see below), ``roms-marbl-0.10-default`` pins ``0.10.1`` (same
-tier and same templates as the 0.9 spec; the first that runs
-``bgc_mode: cdr_lite``), and ``roms-marbl-0.11-default`` pins ``0.11.0``
-(``RunTimeSettingsV0_11_0``; same templates as the 0.9/0.10 specs; the
-default); older specs stay
-fixed and keep emitting
-byte-identical legacy namelists. ``version_gated_section_names()``
-(``namelist_model.py``) collects every section modeled by at least one
-non-legacy tier (``pio_settings``, ``cdr_lite_output``,
-``cdr_gas_exch_output``, ``cdr_lite``) -- used by the wizard's ``_SettingsEditor``
-(``cstar/wizard/wizard.py``) to skip rendering a widget for a
-version-gated section absent from the *active* schema, and by
-``prune_version_gated_sections()``, which drops such a section from the
-settings dict before the CDR output nets and the output-stream precheck read
-it -- called by both the resolver and the executor's ``configure_build``
-(the net for stored blueprints; it logs what it drops at INFO). Dropping a
-section whose enable switch is on (e.g. ``cdr_lite.cdr_online_carbonate_sensitivity``
-under a 0.8 pin) raises instead: the pinned release can't honor it. ``param`` is
-modeled by every tier (with a different sub-model above/below 0.4.0), so it is
-never section-gated; no bundled ModelSpec declares ``nt_cdr_oae``/``nt_cdr_dor``,
-so the editor shows no widget for them, but a loaded blueprint's values are
-carried through unchanged.
+Each ucla-roms release that changes ``namelist.nml`` gets its own schema
+**tier**: a class that models exactly the keys that release reads, because an
+older ROMS stops on a key it doesn't know.
 
-``CDR_LITE`` (ucla-roms >= 0.9.0, formerly ``CDR_TRACER``) is a
-resolver-owned cppdef with two sources. In ``bgc_mode: marbl``,
-``cdr_lite.cdr_online_carbonate_sensitivity`` turns it on (MARBL computes the
-carbonate sensitivities from its ALT_CO2 state). In ``bgc_mode: cdr_lite`` it
-is on for the mode itself, with the sensitivities read from forcing files
-(the online knob is rejected there; a separate package documents the files).
-``check_cdr_lite_sections`` derives it and rejects the combinations ucla-roms
-would abort on at init: the online sensitivity without MARBL;
-``wrt_gas_exchange`` without ``CDR_LITE``; CDR-lite output or the online
-sensitivity with no CDR-lite tracers; and, on a tier that models ``cdr_lite``
-(``settings_cls``), CDR tracers (``nt_cdr_oae + nt_cdr_dor > 0``) in a build
-without ``CDR_LITE`` ("Forcing type not supported"). A user ``cppdefs.cdr_lite``
-that neither source needs is rejected at resolve time. Unlike ucla-roms
-0.7/0.8's stream, 0.9's ``cdr_lite_output`` does not force ``CDR_FORCING`` on:
-the per-tier rows of ``CDR_OUTPUT_SECTIONS`` and of the precheck section table
-apply only when the row's settings class is the pinned tier's own annotation
-for that section.
-From ucla-roms 0.9.1 an active CDR mode no longer requires MARBL: the
-parameterized releases (``simple``/``yaml``/``netcdf``) run in physics-only
-builds with ``cppdefs.cdr_forcing`` on and ``cdr_output.do_cdr_output`` left
-off (that module needs MARBL). Pins below 0.9.1 are rejected without MARBL by
-``check_cdr_forcing_mode`` (``namelist_model.py``), called by both the resolver
-and ``configure_build``. ``upscaled`` (depth profiles) needs MARBL before
-ucla-roms 0.11.0 (``UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS``). From 0.11.0
-(ucla-roms #390) each column of ``cdr_trcflx_profile`` goes to the tracer named
-in the file's ``cdr_trc_name``, so a ``cdr_lite`` build runs it too, while a
-physics-only build still has no tracer to receive it and is rejected. The
-upscaled mode writes ``cdr_nz_chd = 0`` from 0.11.0 (the level count then comes
-from the file's ``s_rho``, and any other value that disagrees with the file
-aborts at init; ``cdr_nz_chd_from_file``) and always sets
-``cdr_relocate_to_wet_pts`` (a child-boundary profile whose nearest parent point
-is land moves to the nearest wet point instead of aborting).
-``&TRACER_DIFF2`` is read from 0.9.0 on (earlier releases skipped it through
-an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
-takes effect there; every bundled ModelSpec uses 0.0.
+- **C-Star** keeps the tiers in ``cstar/roms/namelist.py`` (``RomsNamelist`` and
+  ``RomsNamelistV0_4_0`` through ``RomsNamelistV0_13_0``, each a subclass of an
+  earlier one), registered in ``NAMELIST_SCHEMA_REGISTRY``.
+  ``namelist_schema_for_ref`` picks the tier for a ucla-roms pin: a release tag
+  selects that release; a commit hash the release it descends from (``git
+  describe``); a branch, an unresolvable hash, or a release newer than
+  ``NEWEST_KNOWN_UCLA_ROMS`` gets the newest tier with a warning.
+- **Forge** mirrors the tiers in ``namelist_model.py`` (``RunTimeSettings`` through
+  ``RunTimeSettingsV0_13_0``), selected by ``run_time_settings_for_ref``. C-Star's
+  registry is the single source of the version boundaries. Forge has no ucla-roms
+  clone, so ``process_forge_blueprint`` and ``configure_build`` resolve a hash pin
+  to its release tag with ``release_ref_for_remote``; the resolver, called on every
+  wizard keystroke, does not, and uses the newest tier.
+- **Forge's setting names are stable across tiers.** Only the namelist spelling a
+  field serializes to changes per release. A key that matches a setting only by
+  case or by its namelist spelling (``LLm``, ``akv_bak``) is rejected rather than
+  ignored. ``namelist_field_for`` is the one map from a Forge setting to its
+  namelist group and key.
+- **Version-gated sections** (``pio_settings``, ``cdr_lite_output``,
+  ``cdr_gas_exch_output``, ``cdr_lite``) exist only in some tiers.
+  ``prune_version_gated_sections`` drops one the pinned release doesn't read,
+  and raises if it was switched on, since that release can't honor it.
 
-``bgc_mode`` is a three-valued build mode (``BgcMode`` in ``namelist_model.py``):
-``marbl`` (MARBL tracers), ``none`` (physics only) and ``cdr_lite`` (no MARBL; the
-only extra tracers are ucla-roms' dedicated CDR-lite tracers). The resolver
-records it as ``cppdefs.marbl``/``cppdefs.cdr_lite`` only, and
-``bgc_mode_from_cppdefs`` is the one derivation of the mode back from a stored
-blueprint's cppdefs (``marbl`` wins, so MARBL with the online sensitivity is
-still ``marbl``); the executor and the generation step use it rather than
-re-reading the two flags. The resolver, for ``cdr_lite``: sets ``marbl`` off and
-``cdr_lite`` on, zeroes ``param.ntrc_bio``, turns ``nhy_forcing``/``nox_forcing``
-off, drops ``code.marbl``, rejects BGC forcing (as for ``none``), requires a CDR
-forcing with ``cdr_lite`` releases, and, in the ``simple`` CDR mode, defaults
-each release's ``tracer_set`` to ``cdr_lite`` (``yaml``/``netcdf`` carry their
-own). The mode is gated on ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS`` (0.10.0: the
-``CDR_LITE`` key exists from 0.9.0, CDR forcing without MARBL from 0.9.1;
-0.10.0 writes forcing-ready ``_cdrgas`` files and zero-fills the
-``<CDR tracer>_flx`` surface fluxes a CDR-lite tracer has no forcing for, which
-Forge's CDR-lite mode relies on because it generates neither;
-``check_cdr_lite_mode_roms``, resolver and ``configure_build``).
+Rules that span sections (the CDR-LiTE switches, ``bgc_mode``, CDR forcing without
+MARBL, upscaled CDR) are ``check_*`` functions in ``namelist_model.py``, each called
+by the resolver, ``validate_run_time_sections`` and ``configure_build``.
+``bgc_mode`` (``marbl``, ``none`` or ``cdr_lite``) is stored only as the
+``marbl``/``cdr_lite`` cppdefs and read back with ``bgc_mode_from_cppdefs``. In
+``cdr_lite`` mode the CDR tracer counts are read from the generated CDR forcing
+during input generation, not at resolve time. The output-period checks ucla-roms
+runs at start-up live once, in ``cstar.roms.precheck``. Forge runs them as it
+resolves and generates a blueprint; the ``ucla_roms`` path runs the output-stream
+and the MARBL-step average rules in ``roms_runtime_settings``, just before launch.
 
-What the mode derives is not knowable at resolve time, so it is derived where
-it becomes known. The tracer counts come from the CDR forcing during
-generation: ``cdr_tracer_counts`` reads ``passive_tracer<i>``,
-``CDR_OAE_ALK<k>``/``CDR_OAE_DIC<k>`` and ``CDR_DOR_DIC<j>`` off the file's
-``tracer_name`` coordinate (roms-tools >= 5.1 writes it on ``ntracers``, in ROMS
-order), and ``_generate_cdr_forcing``/``_generate_cdr_forcing_from_custom_file``
-write ``param.nt_cdr_oae``/``nt_cdr_dor`` into the live settings
-(``GENERATION_DERIVED_LEAF_KEYS`` keeps ``configure_build``'s overlay of the
-stored zeros from reverting them, and ``configure_build`` sizes ``n_tracers``
-from the live ``param`` rather than the stored blueprint). ``param.nt_passive``
-is user-owned, so a file whose passive count differs from it is rejected, not
-overwritten. Under ``cdr_lite`` the handlers also reject MARBL tracer names and
-volume releases, and in every mode the file's ``ntracers`` must equal the
-build's tracer count (a file without ``tracer_name`` is an error under
-``cdr_lite`` and left alone otherwise). ``configure_build`` then forces
-``cdr_lite_output.do_cdr_lite_output`` on (the ``_cdrtrc`` stream is the only
-output the CDR tracers appear in, and ROMS aborts at init if it is on with zero
-CDR tracers) and rejects a CDR-lite build whose forcing defined no CDR-lite
-tracers. The ``upscaled`` mode generates no CDR forcing, so there the counts are
-user-stated (``run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor":
-...}}``, matching the child's CDR-lite tracers): they reach the build through
-the stored ``resolved_settings``, which the overlay exclusion leaves alone, and
-``check_upscaled_cdr_lite_tracer_counts`` rejects a build without them at
-resolve time and in ``configure_build``. The resolver does not force the stream (the counts are unknown), so
-the output-stream precheck sees it only at build time. The bundled ModelSpecs do
-not declare ``cdr_lite``: the online knob is absent from the wizard and
-``&CDR_LITE_SETTINGS`` is written at its default (off), which is what
-``bgc_mode: cdr_lite`` runs with; the section can still be set through
-``run_time_overrides``.
-
-ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
-each enabled output stream's ``nrpf x output_period`` must evenly divide
-``output_period_rst`` (vacuous for monthly restarts / a 0 period). ``cstar.roms.precheck``
-is the sole home for this and the sibling restart-period rule -- both C-Star
-(``ROMSSimulation.roms_runtime_settings``) and Forge (the resolver, and the
-executor's ``configure_build`` net for stored blueprints) call straight into
-it rather than keeping their own copies:
-
-* ``check_output_streams_divide_rst`` reproduces the full ``do_precheck`` call
-  list (every stream, including the nesting ``extract`` stream) against
-  either a live ``RomsNamelistBase`` or a canonical namelist-vocabulary
-  mapping; ``applies_to(schema)`` owns the ">= 0.5.0" schema gate, and a
-  violation raises ``NamelistConsistencyError`` (a ``ValueError`` subclass)
-  carrying the canonical ``section``/``keys`` of the offending stream.
-* ``check_restart_period_divisible_by_dt`` is a separate, ungated C-Star
-  reproducibility convention (not a ucla-roms abort -- ucla-roms' restart
-  trigger is a running-clock threshold, not a step-count division): restart
-  writes must land on a timestep.
-
-Three bundled OutputSpecs conform for every stream -- ``daily-restarts`` (the
-wizard default, see ``_DEFAULT_OUTPUT_SPEC``), ``weekly-restarts``, and
-``monthly-restarts`` (upstream's own convention: ``monthly_restarts=T``,
-``output_period_rst=0``). ``OutputSpec/standard`` predates the precheck and
-is kept unchanged for blueprints that reference it -- enabling its his/avg
-streams under a 0.5.0+ model trips the precheck. A guard test
-(``test_bundled_output_specs_satisfy_roms_divides_rst_precheck``) pins the
-conforming specs, including ``roms-marbl-0.5-default``'s ModelSpec-owned
-sponge/particles streams. The nesting extract stream is resolve-time-derived
-(child DomainSpec metadata ``period`` x a seeded ``nrpf``); the resolver runs
-the same canonical checker as everything else, but catches
-``NamelistConsistencyError`` and, when ``exc.section == "extract_data_settings"``,
-appends a hint naming the DomainSpec ``period`` knob before re-raising.
-The forward translation, forge settings section/field to namelist group/key,
-is ``namelist_field_for`` (``namelist_model.py``): ``build_namelist``, the
-precheck and the wizard's Advanced-settings tooltips all read it.
+A namelist key from a new ucla-roms release therefore means a new tier on both
+sides, not an edit to an existing one, plus a golden namelist for it (see below).
 
 ``models.py`` vs ``blueprint.py``
 ------------------------------------------
@@ -588,7 +418,7 @@ The forcing/IC item models (``BoundaryForcing``, ``SurfaceForcingItem``,
 ``InitialConditions``, ``BgcSourceItem``, ``OpenBoundaries``, etc.) are
 defined once, in ``cstar/applications/forge/blueprint.py``; ``models.py``
 imports and re-exports them -- single source of truth, no duplication. What
-``models.py`` owns is the ``model.yaml`` *wrapper* shape (``ModelSpec``,
+``models.py`` owns is the ModelSpec file's *wrapper* shape (``ModelSpec``,
 ``ModelCode``, ``ModelTemplates``, ``load_models_yaml``) used by
 ``DomainCatalog.load_model_spec()`` for full Pydantic validation at
 catalog-registration time -- a heavier, separate path from the resolver's
@@ -599,72 +429,20 @@ What guards drift today: a roms-tools option coverage test and a
 resolver/executor settings-parity assertion in the forge blueprint test
 suite.
 
-Known gaps / open items
--------------------------------
-
-1. **The flat-staging contract with ``AdditionalCode`` is verified only by
-   hash.** Rendering reads ``template_dir/<file>`` directly, so it relies on
-   C-Star staging fetched files flat; the per-file hash check catches a wrong
-   layout as a mismatch, but every staging test patches ``AdditionalCode`` --
-   no test stages from the real remote. (This path only runs for a blueprint
-   whose pinned commit doesn't match the bundled templates; see
-   :doc:`forge_templates`.)
-2. **No real-generated-data integration test** (actual GLORYS/ERA5/TPXO
-   network fetch with no roms-tools mocking) -- the golden tests below mock
-   roms-tools construction classes.
-
 Golden fixtures
------------------------
+---------------
 
-Two committed unit goldens pin the resolved-settings and namelist contracts
-(treat any diff as a behavior change to justify, not noise):
+Committed goldens pin what Forge produces for the small ``test-tiny`` domain, and a
+diff is a behavior change to justify, not noise:
 
-- **Settings-level**: ``test_golden_model_settings_test_tiny`` diffs
-  resolved ``model_settings`` against
-  ``golden_model_settings_test-tiny.json``. No regeneration hook -- update
-  manually. Six sibling tests pin the same comparison for each
-  versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
-  ``_roms060``, ``_roms070``, ``_roms090``, and ``_roms0110``
-  (``roms-marbl-0.{5,6,7,9,11}-default``, against
-  ``golden_model_settings_test-tiny-roms0{50,60,70,90,110}.json``), and for
-  the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.10-default``,
-  ``_roms090_cdr_lite`` (against
-  ``golden_model_settings_test-tiny-roms090-cdr-lite.json``).
-- **Byte-exact namelist**: ``TestGoldenNamelist::test_golden_namelist_test_tiny``
-  drives the real ``generate_inputs()`` -> ``configure_build()`` chain (real
-  ``write_roms_namelist``; only roms-tools construction classes are mocked)
-  and diffs the rendered ``namelist.nml`` against
-  ``golden_namelist_test-tiny.nml`` (host-rooted absolute paths normalized
-  to a ``<WORKDIR>`` token). Six sibling tests pin the versioned-namelist
-  schemas against the same test-tiny domain/forcing/output setup:
-  ``test_golden_namelist_test_tiny_roms050`` (``roms-marbl-0.5-default``,
-  ``golden_namelist_test-tiny-roms050.nml``),
-  ``test_golden_namelist_test_tiny_roms060`` (``roms-marbl-0.6-default``,
-  adds ``&PIO_SETTINGS``, ``golden_namelist_test-tiny-roms060.nml``),
-  ``test_golden_namelist_test_tiny_roms070`` (``roms-marbl-0.7-default``,
-  adds ``&CDR_TRACER_OUTPUT_SETTINGS``/``&CDR_GAS_EXCH_OUTPUT_SETTINGS``,
-  ``golden_namelist_test-tiny-roms070.nml``),
-  ``test_golden_namelist_test_tiny_roms090`` (``roms-marbl-0.9-default``,
-  ``&CDR_LITE_OUTPUT_SETTINGS``/``&CDR_LITE_SETTINGS`` in place of the
-  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``),
-  ``test_golden_namelist_test_tiny_roms090_cdr_lite`` (``bgc_mode: cdr_lite``
-  on ``roms-marbl-0.10-default`` with a physics-only forcing and a real
-  roms-tools CDR forcing: ``nt_bgc = 0``, ``nt_cdr_oae``/``nt_cdr_dor`` read off
-  the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``), and
-  ``test_golden_namelist_test_tiny_roms0110`` (``roms-marbl-0.11-default``, the
-  0.9 golden plus ``use_constant_fe``/``constant_fe_value`` in
-  ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, ``golden_namelist_test-tiny-roms0110.nml``).
-  Regenerate one at a time via
-  ``UPDATE_GOLDEN=1 pytest <path> -k <test name>`` (the run intentionally
-  fails after writing; rerun without the env var to confirm). To select
-  *only* the legacy test, use ``-k "golden_namelist_test_tiny and not
-  roms050 and not roms060 and not roms070 and not roms090 and not roms0110"``
-  -- a bare ``-k golden_namelist_test_tiny`` matches all seven, and ``-k
-  golden_namelist_test_tiny_roms090`` matches the ``cdr_lite`` test too (add
-  ``and not cdr_lite`` to select only the ``roms090`` one).
+- ``golden_model_settings_test-tiny*.json``: the resolved ``model_settings``.
+- ``golden_namelist_test-tiny*.nml``: the rendered ``namelist.nml``, byte for
+  byte, from the real ``generate_inputs()`` -> ``configure_build()`` chain with
+  only the roms-tools classes mocked.
 
-The integration suite pins the rendered namelist of each of its forge cases
-(``unified``, ``constants`` and ``cdr_lite``) the same way, from real
-roms-tools output, in
-``cstar/tests/integration_tests/forge/fixtures/golden_namelist_<case>.nml``;
-see :doc:`../contributing`.
+Each comes in one variant per namelist tier (``-roms050`` through ``-roms0130``)
+plus a ``bgc_mode: cdr_lite`` variant, all under
+``cstar/tests/unit_tests/applications/forge/fixtures/``. Regenerate one at a time
+with ``UPDATE_GOLDEN=1`` and ``-k <test name>``; the run fails after writing, and a
+rerun without the variable confirms it. The integration tests keep namelist goldens
+of their own; see :doc:`../contributing`.

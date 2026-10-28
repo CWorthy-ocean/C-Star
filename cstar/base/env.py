@@ -1,20 +1,21 @@
 import os
 import sys
+import textwrap
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 
+from dotenv import dotenv_values
+
+from cstar.base.exceptions import CstarUserConfigError
+
 if t.TYPE_CHECKING:
     from types import ModuleType
-
-import logging
-
-log = logging.getLogger(__name__)
 
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
@@ -24,6 +25,8 @@ GROUP_SIM: t.Final[str] = "Simulation Configuration"
 """Group name for simulation-specific environment variables in documentation."""
 GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
 """Group name for uncategorized environment variables in documentation."""
+GROUP_INTERNAL: t.Final[str] = "Internal"
+"""Group name for variables C-Star sets for its own processes; hidden from users."""
 
 FLAG_ON: t.Final[str] = "1"
 """Value indicating a toggle is enabled."""
@@ -36,6 +39,8 @@ CONSTANT_PREFIX: t.Final[str] = "ENV_"
 """The common prefix used to name an annotated environment variable constant."""
 NOT_SET: t.Final[str] = "<not-set>"
 """Default description and default for variables missing annotations."""
+USER_CONFIG_FILENAME: t.Final[str] = "config.env"
+"""The name of the user's configuration file under the config home."""
 
 
 @dataclass(slots=True)
@@ -52,6 +57,8 @@ class EnvVar:
     """A function used at run-time to generate the default value."""
     indirect_var: str = ""
     """An environment variable name to be used when the primary variable is not set."""
+    persistable: bool = True
+    """Whether the setting may be stored in the user's configuration file."""
 
 
 @dataclass(slots=True)
@@ -77,12 +84,13 @@ class EnvItem(EnvVar):
     @classmethod
     def from_env_var(cls, env_var: EnvVar, name: str) -> "EnvItem":
         return EnvItem(
-            env_var.description,
-            env_var.group,
-            env_var.default,
-            env_var.default_factory,
-            env_var.indirect_var,
-            name,
+            description=env_var.description,
+            group=env_var.group,
+            default=env_var.default,
+            default_factory=env_var.default_factory,
+            indirect_var=env_var.indirect_var,
+            persistable=env_var.persistable,
+            name=name,
         )
 
 
@@ -161,9 +169,9 @@ def _system_scratch_root() -> str | None:
 
     Imported lazily: ``cstar.system.manager`` imports this module (through
     ``cstar.base.log``), so a module-level import would be circular. A system
-    that cannot be identified (``CstarError`` for an unregistered name,
-    ``OSError`` when no name can be determined at all) has no context and
-    contributes nothing.
+    that cannot be identified (``CstarError`` for an unknown ``CSTAR_SYSTEM`` or
+    a platform with no generic context, ``OSError`` when no name can be
+    determined at all) has no context and contributes nothing.
     """
     from cstar.base.exceptions import CstarError
     from cstar.system.manager import get_system_context
@@ -192,11 +200,6 @@ def hpc_data_directory() -> str | None:
     return find_scratch_dir(os.environ) or _system_scratch_root()
 
 
-def nprocs_factory() -> str:
-    """Return the number of processors on the current machine, divided by 3."""
-    return str((os.cpu_count() or 3) // 3)
-
-
 def generate_run_id() -> str:
     """Generate a unique run identifier based on the current time."""
     return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -205,42 +208,13 @@ def generate_run_id() -> str:
 ENV_CSTAR_LOG_LEVEL: t.Annotated[
     t.Literal["CSTAR_LOG_LEVEL"],
     EnvVar(
-        "Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+        "Specify the logging level for terminal messages. Options: TRACE, DEBUG, "
+        "INFO, WARNING, ERROR, CRITICAL; any case is accepted.",
         GROUP_SIM,
         default="INFO",
     ),
 ] = "CSTAR_LOG_LEVEL"
-"""Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
-
-ENV_CSTAR_CLI_DRY_RUN: t.Annotated[
-    t.Literal["CSTAR_CLI_DRY_RUN"],
-    EnvVar(
-        "Set to `1` to short-circuit CLI operations after planning steps are completed",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_CLI_DRY_RUN"
-"""Set to `1` to short-circuit CLI operations after planning steps are completed."""
-
-ENV_CSTAR_CLI_VERBOSE: t.Annotated[
-    t.Literal["CSTAR_CLI_VERBOSE"],
-    EnvVar(
-        "Set to `1` to produce verbose CLI outputs.",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_CLI_VERBOSE"
-"""Set to `1` to produce verbose CLI outputs."""
-
-ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
-    t.Literal["CSTAR_CLOBBER_WORKING_DIR"],
-    EnvVar(
-        "Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk.",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_CLOBBER_WORKING_DIR"
-"""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
+"""Specify the logging level for terminal messages. Options: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL; any case is accepted."""
 
 ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
     t.Literal["CSTAR_DISABLE_BUILD_VERIFICATION"],
@@ -254,6 +228,54 @@ ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
 ] = "CSTAR_DISABLE_BUILD_VERIFICATION"
 """Set to `1` to skip the pre- and post-build toolchain consistency checks performed when compiling ROMS."""
 
+ENV_CSTAR_ALLOW_LOGIN_NODE_RUN: t.Annotated[
+    t.Literal["CSTAR_ALLOW_LOGIN_NODE_RUN"],
+    EnvVar(
+        "Set to `1` to let ROMS launch outside a scheduler job on a system that "
+        "has a scheduler (for example on a login node), and to launch it there "
+        "without a warning on a cluster C-Star does not recognise. Use it only "
+        "for a run small enough for a login node, or when C-Star wrongly "
+        "concludes it is not inside a job.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_ALLOW_LOGIN_NODE_RUN"
+"""Set to `1` to let ROMS launch outside a scheduler job on a system that has a scheduler."""
+
+ENV_CSTAR_SYSTEM: t.Annotated[
+    t.Literal["CSTAR_SYSTEM"],
+    EnvVar(
+        "The name of the system C-Star should use on this machine (for example "
+        "`perlmutter`, or `linux_x86_64` for a generic Linux machine) instead of "
+        "the one it detects. Unset, C-Star detects the system, and uses the "
+        "generic context for the platform when it does not recognise it.",
+        GROUP_SIM,
+    ),
+] = "CSTAR_SYSTEM"
+"""The name of the system C-Star should use on this machine instead of the one it detects."""
+
+ENV_CSTAR_DEBUG_BUILD_MODE: t.Annotated[
+    t.Literal["CSTAR_DEBUG_BUILD_MODE"],
+    EnvVar(
+        "Set to `1` to build ROMS and its dependencies in debug mode "
+        "(`BUILD_MODE=debug`).",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_DEBUG_BUILD_MODE"
+"""Set to `1` to build ROMS and its dependencies in debug mode."""
+
+ENV_CSTAR_SLURM_DISABLE_MT: t.Annotated[
+    t.Literal["CSTAR_SLURM_DISABLE_MT"],
+    EnvVar(
+        "Set to `1` to pass SLURM the hint `--hint=nomultithread`, which "
+        "disables hardware multi-threading for submitted jobs.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_SLURM_DISABLE_MT"
+"""Set to `1` to pass SLURM a hint that disables multi-threading."""
+
 ENV_CSTAR_DISABLE_MIGRATION: t.Annotated[
     t.Literal["CSTAR_DISABLE_MIGRATION"],
     EnvVar(
@@ -265,36 +287,6 @@ ENV_CSTAR_DISABLE_MIGRATION: t.Annotated[
     ),
 ] = "CSTAR_DISABLE_MIGRATION"
 """Set to `1` to disable automatic blueprint schema migration; commands fail early on out-of-date blueprints."""
-
-ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
-    t.Literal["CSTAR_FRESH_CODEBASES"],
-    EnvVar(
-        "Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`.",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FRESH_CODEBASES"
-"""Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`."""
-
-ENV_CSTAR_IN_ACTIVE_ALLOCATION: t.Annotated[
-    t.Literal["CSTAR_IN_ACTIVE_ALLOCATION"],
-    EnvVar(
-        "Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation.",
-        GROUP_SIM,
-        default="",
-    ),
-] = "CSTAR_IN_ACTIVE_ALLOCATION"
-"""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
-
-ENV_CSTAR_NPROCS_POST: t.Annotated[
-    t.Literal["CSTAR_NPROCS_POST"],
-    EnvVar(
-        "Specify the number of processes to be used for post-processing simulation output files. Dynamic default ``os.cpu_count() // 3``",
-        GROUP_SIM,
-        default_factory=lambda _: nprocs_factory(),  # type: ignore[reportOptionalOperand]
-    ),
-] = "CSTAR_NPROCS_POST"
-"""Specify the number of processes to be used for post-processing simulation output files."""
 
 ENV_CSTAR_SCRATCH_DIRS: t.Annotated[
     t.Literal["CSTAR_SCRATCH_DIRS"],
@@ -326,6 +318,7 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
         "~/.config/cstar",
         default_factory=indirect_default_factory,
         indirect_var="XDG_CONFIG_HOME",
+        persistable=False,
     ),
 ] = "CSTAR_CONFIG_HOME"
 """Environment variable used to override the home directory for C-Star config storage."""
@@ -399,42 +392,103 @@ ENV_CSTAR_RUNID: t.Annotated[
     t.Literal["CSTAR_RUNID"],
     EnvVar(
         description="Unique run identifier used by the orchestrator.",
-        group=GROUP_SIM,
+        group=GROUP_INTERNAL,
         default_factory=lambda _: generate_run_id(),
+        persistable=False,
     ),
 ] = "CSTAR_RUNID"
 """Environment variable containing a unique run identifier used by the orchestrator."""
 
-ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
-    t.Literal["CSTAR_SLURM_POST_SUBMIT_DELAY"],
+ENV_CSTAR_CONFIG_REPORTED: t.Annotated[
+    t.Literal["CSTAR_CONFIG_REPORTED"],
     EnvVar(
-        "Delay (in seconds) after a submission to ensure status for a SLURM job can be queried.",
-        GROUP_SIM,
-        default="1.0",
+        description="The configuration file whose ignored lines this process tree "
+        "has already reported, so step subprocesses do not repeat the warning.",
+        group=GROUP_INTERNAL,
+        persistable=False,
     ),
-] = "CSTAR_SLURM_POST_SUBMIT_DELAY"
-"""Delay (in seconds) after a submission to ensure status for a SLURM job can be queried."""
-
-ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
-    t.Literal["CSTAR_ORCH_LOCAL_DELAY"],
-    EnvVar(
-        "Delay (in seconds) between status queries in the local launcher proxy script",
-        GROUP_SIM,
-        default="10.0",
-    ),
-] = "CSTAR_ORCH_LOCAL_DELAY"
-"""Delay (in seconds) between status queries in the local launcher proxy script."""
+] = "CSTAR_CONFIG_REPORTED"
+"""The configuration file whose ignored lines have been reported to the user."""
 
 
-ENV_CSTAR_ORCH_MAX_CONC: t.Annotated[
-    t.Literal["CSTAR_ORCH_MAX_CONC"],
-    EnvVar(
-        "The maximum number of concurrent disk IO operations.",
-        GROUP_SIM,
-        default="10",
+@dataclass(frozen=True, slots=True)
+class RemovedSetting:
+    """What to tell someone who still exports a setting C-Star no longer reads."""
+
+    guidance: str
+    """What to do instead; read after "<NAME> has no effect; "."""
+    refused: bool = False
+    """Whether the commands it used to change refuse to run while it is exported
+    (`cstar.cli.common.exit_on_refused_settings`), because ignoring it there would
+    do more than was asked (a dry run becoming a real one)."""
+
+
+REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
+    "CSTAR_CLI_DRY_RUN": RemovedSetting(
+        "pass --dry-run to `cstar blueprint migrate` or `cstar admin clean`, or "
+        "check a workplan without running it with `cstar workplan check`.",
+        refused=True,
     ),
-] = "CSTAR_ORCH_MAX_CONC"
-"""The maximum number of concurrent disk IO operations."""
+    "CSTAR_CLI_VERBOSE": RemovedSetting(
+        "pass --verbose to `cstar blueprint run` or `cstar blueprint migrate` instead."
+    ),
+    "CSTAR_CLOBBER_WORKING_DIR": RemovedSetting(
+        "pass --clobber to `cstar blueprint run` or `cstar blueprint migrate` "
+        "instead (`--clobber <step|all>` for `cstar workplan submit`)."
+    ),
+    "CSTAR_FF_CLI_TEMPLATE_CREATE": RemovedSetting(
+        "the `cstar template create` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_COMPOSE": RemovedSetting(
+        "the `cstar workplan compose` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_GEN": RemovedSetting(
+        "the `cstar workplan generate` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_PLAN": RemovedSetting(
+        "the `cstar workplan plan` command was removed."
+    ),
+    "CSTAR_FF_DEBUG_BUILD_MODE": RemovedSetting(
+        "set CSTAR_DEBUG_BUILD_MODE=1 instead; developer mode no longer enables it."
+    ),
+    "CSTAR_FF_SLURM_DISABLE_MT": RemovedSetting(
+        "set CSTAR_SLURM_DISABLE_MT=1 instead; developer mode no longer enables it."
+    ),
+    "CSTAR_FRESH_CODEBASES": RemovedSetting(
+        "pass --clobber to `cstar blueprint run` (`--clobber <step|all>` for "
+        "`cstar workplan submit`) to start from an empty working directory instead."
+    ),
+    "CSTAR_IN_ACTIVE_ALLOCATION": RemovedSetting(
+        "`cstar blueprint run` no longer submits a scheduler job; submit the "
+        "blueprint with `cstar blueprint submit`, or run it inside an allocation."
+    ),
+    "CSTAR_NPROCS_POST": RemovedSetting(
+        "output post-processing uses the cores available to the process, which "
+        "runs on the same node as the model."
+    ),
+    "CSTAR_ORCH_DELAYS": RemovedSetting(
+        "the orchestrator's polling intervals are fixed."
+    ),
+    "CSTAR_ORCH_LOCAL_DELAY": RemovedSetting(
+        "the local launcher's polling interval is fixed."
+    ),
+    "CSTAR_ORCH_MAX_CONC": RemovedSetting(
+        "the limit on concurrent disk operations is fixed."
+    ),
+    "CSTAR_ORCH_TRX_FREQ": RemovedSetting(
+        "set the feature flag CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ instead (it is read "
+        "only while CSTAR_FF_ORCH_TRX_TIMESPLIT is on)."
+    ),
+    "CSTAR_SLURM_POST_SUBMIT_DELAY": RemovedSetting(
+        "the delay after a SLURM submission is fixed."
+    ),
+}
+"""Settings that were removed, mapped to guidance for anyone still exporting one.
+
+An exported removed setting has no effect; the CLI warns about it, and the
+commands a `refused` one used to change refuse to run while it is exported or
+named in the configuration file (which skips it).
+"""
 
 
 @lru_cache
@@ -462,56 +516,400 @@ def discover_env_vars() -> dict[str, EnvItem]:
     return container
 
 
-def env_var_groups() -> dict[str, list[EnvItem]]:
-    """Return a mapping from group-name to the associated list of env variables."""
+def env_var_groups(include_internal: bool = False) -> dict[str, list[EnvItem]]:
+    """Return a mapping from group-name to the associated list of env variables.
+
+    Parameters
+    ----------
+    include_internal : bool
+        Include the internal group, which C-Star sets for its own processes and
+        which users never set.
+    """
     groups: dict[str, list[EnvItem]] = defaultdict(list)
 
     for item in discover_env_vars().values():
-        groups[item.group].append(item)
+        if include_internal or item.group != GROUP_INTERNAL:
+            groups[item.group].append(item)
 
     return groups
 
 
-def unset(key: str) -> str | None:
-    """Unset an environment variable.
+def user_config_path() -> Path:
+    """The user's configuration file, ``config.env`` under the config home.
+
+    The config home is resolved from the process environment alone
+    (``CSTAR_CONFIG_HOME``, then ``XDG_CONFIG_HOME``): the file cannot relocate
+    itself. Imported lazily because ``cstar.execution.file_system`` imports this
+    module.
+    """
+    from cstar.execution.file_system import DirectoryManager
+
+    return DirectoryManager.config_home() / USER_CONFIG_FILENAME
+
+
+def user_config_problems(names: Iterable[str]) -> list[str]:
+    """Explain why each of `names` may not appear in the configuration file.
+
+    A name passes when it is a registered, persistable setting that is not a
+    feature flag; the list is empty when every name passes. An unregistered
+    ``CSTAR_*`` name is reported with this build's version: it may be a typo, or
+    a setting another version of C-Star reads.
 
     Parameters
     ----------
-    key : str
-        The key to unset
+    names : Iterable[str]
+        The keys to check, in the order to report them.
+
+    Returns
+    -------
+    list[str]
+        One message per offending name.
+    """
+    import cstar
+
+    registry = discover_env_vars()
+    problems: list[str] = []
+    for name in names:
+        if name in REMOVED_SETTINGS:
+            problems.append(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}")
+        elif (item := registry.get(name)) is None:
+            if name.startswith(ENVVAR_PREFIX):
+                version = cstar.__version__
+                problems.append(f"{name} is not a setting C-Star {version} knows")
+            else:
+                problems.append(f"{name} is not a C-Star setting")
+        elif item.group == GROUP_FF:
+            problems.append(f"{name} is a feature flag; export it in the shell instead")
+        elif not item.persistable:
+            problems.append(f"{name} cannot be set from the configuration file")
+    return problems
+
+
+def missing_value_problem(name: str) -> str:
+    """Explain a line that names a setting without ``=``."""
+    return f"{name} has no value; write {name}=<value> or comment the line out"
+
+
+def canonical_user_config_value(name: str, value: str) -> str:
+    """Return `value` as the configuration file stores it for the setting `name`.
+
+    A setting whose reader accepts several spellings of one value is stored in
+    one: a log level in upper case. Every other setting's value is returned as
+    it is.
+
+    Parameters
+    ----------
+    name : str
+        The setting's name.
+    value : str
+        The value as given.
 
     Returns
     -------
     str
-        The value that was previously stored for the key
+        The value to store.
+
+    Raises
+    ------
+    ValueError
+        Naming the setting, the value and what the setting accepts, when `value`
+        is not one the setting can take.
     """
-    return os.environ.pop(key, None)
+    if name == ENV_CSTAR_LOG_LEVEL:
+        # imported lazily: cstar.base.log imports this module
+        from cstar.base.log import LogLevelChoices
+
+        try:
+            return LogLevelChoices(value).value
+        except ValueError as ex:
+            accepted = ", ".join(LogLevelChoices)
+            msg = f"{name}={value!r} is not a log level; use one of {accepted}"
+            raise ValueError(msg) from ex
+    return value
 
 
-def max_concurrency() -> int:
-    """Utility to get commonly used max-concurrency value from env vars
-    for bounding simultaneous IO operations.
+def parse_user_config(path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """Parse the configuration file at `path`, sorting its keys.
 
-    A value that cannot be parsed as an integer, or is less than 1, is
-    replaced with the environment variable's default; a warning is logged.
+    A key that `user_config_problems` rejects is skipped rather than refused:
+    the file may be shared with another version of C-Star, which may read a
+    name this one removed or does not know yet. Values have ``~`` and ``$VAR``
+    references expanded against the process environment, then go through
+    `canonical_user_config_value`; a value it rejects is skipped like a bad
+    name. A key written without a value (``CSTAR_X=``) yields an empty string,
+    as an exported empty variable would; a name with no ``=`` is skipped too,
+    rather than guessed at.
+
+    Parameters
+    ----------
+    path : Path
+        The file to read; a missing file reads as empty.
 
     Returns
     -------
-    int
-        The maximum number of concurrent disk IO operations.
+    tuple[dict[str, str], dict[str, str]]
+        The settings to apply, in file order, and the keys skipped, each mapped
+        to why.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming the file and why it cannot be read.
     """
-    env_item = get_env_item(ENV_CSTAR_ORCH_MAX_CONC)
+    if not path.is_file():
+        return {}, {}
 
     try:
-        value = int(env_item.value)
-    except ValueError:
-        msg = f"Unable to parse value of {ENV_CSTAR_ORCH_MAX_CONC}: {env_item.value}"
-        log.warning(msg)
-        value = -1
+        entries = dotenv_values(path)
+    except (OSError, UnicodeDecodeError) as ex:
+        msg = f"The configuration file {path} cannot be read: {ex}"
+        raise CstarUserConfigError(msg) from ex
 
-    if value < 1:
-        # fall back to the default if it's specified as a value that will blow up
-        msg = f"The configured value of {ENV_CSTAR_ORCH_MAX_CONC} is invalid. Using default"
-        log.warning(msg)
-        value = int(env_item.default)
+    values: dict[str, str] = {}
+    skipped: dict[str, str] = {}
+    for name, value in entries.items():
+        if problems := user_config_problems([name]):
+            skipped[name] = problems[0]
+        elif value is None:
+            skipped[name] = missing_value_problem(name)
+        else:
+            expanded = os.path.expandvars(os.path.expanduser(value))
+            try:
+                values[name] = canonical_user_config_value(name, expanded)
+            except ValueError as ex:
+                skipped[name] = str(ex)
+    return values, skipped
+
+
+def read_user_config(path: Path) -> dict[str, str]:
+    """The settings the configuration file at `path` supplies, in file order.
+
+    The keys `parse_user_config` skips are left out.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming the file and why it cannot be read.
+    """
+    return parse_user_config(path)[0]
+
+
+@dataclass(frozen=True, slots=True)
+class UserConfig:
+    """What `load_user_config` found and exported."""
+
+    path: Path
+    """The configuration file that was looked for."""
+    applied: Mapping[str, str]
+    """The settings the file supplied to the environment, with the values it gave
+    them; a setting the shell had already exported is not among them."""
+    skipped: Mapping[str, str]
+    """The keys the file names that were not applied, each mapped to why."""
+
+
+@lru_cache
+def load_user_config() -> UserConfig:
+    """Export the user's configuration file into the environment, once per process.
+
+    Each entry is applied with ``os.environ.setdefault``, so an exported variable
+    always wins over the file, and the file over the defaults every reader of the
+    environment falls back to (`EnvItem.value`, ``os.getenv``, pydantic settings,
+    typer ``envvar`` bindings). Loading into the environment also means step
+    subprocesses inherit the settings and a run record captures them.
+
+    Each skipped key gets one line on stderr. The file's path is then exported as
+    ``CSTAR_CONFIG_REPORTED``, so the step subprocesses that inherit it, which
+    read the same file, do not repeat the lines.
+
+    Called from the CLI root callback and from `CStarSystemManager` so library
+    use loads it too; never at import time.
+
+    Returns
+    -------
+    UserConfig
+        The file's path, the settings it supplied and the keys it skipped.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming the file and why it cannot be read.
+    """
+    path = user_config_path()
+    values, skipped = parse_user_config(path)
+    if skipped and os.environ.get(ENV_CSTAR_CONFIG_REPORTED) != str(path):
+        for problem in skipped.values():
+            print(f"Ignoring a line in {path}: {problem}", file=sys.stderr)
+        os.environ[ENV_CSTAR_CONFIG_REPORTED] = str(path)
+
+    applied = {name: value for name, value in values.items() if name not in os.environ}
+    for name, value in applied.items():
+        os.environ.setdefault(name, value)
+    return UserConfig(path=path, applied=applied, skipped=skipped)
+
+
+def load_user_config_for_repair() -> UserConfig:
+    """`load_user_config`, or an empty record of the same file when it refuses it.
+
+    For the commands that repair the file (``cstar init``, ``cstar env``), which
+    the CLI root callback lets run when the file is refused; the callback has
+    already printed why.
+    """
+    try:
+        return load_user_config()
+    except CstarUserConfigError:
+        return UserConfig(path=user_config_path(), applied={}, skipped={})
+
+
+USER_CONFIG_HEADER: t.Final[str] = """\
+# C-Star configuration. Settings here apply to every cstar command; an exported
+# environment variable of the same name takes precedence. Lines starting with
+# `#` are comments; uncomment a setting and give it a value to use it.
+"""
+"""The comment block that opens a rendered configuration file."""
+
+
+def render_setting_block(item: EnvItem, value: str | None = None) -> str:
+    """Render one setting as a commented description followed by its line.
+
+    Parameters
+    ----------
+    item : EnvItem
+        The setting to render.
+    value : str | None
+        The value to set; `None` renders the setting commented out (``# NAME=``).
+
+    Returns
+    -------
+    str
+        The block, ending in a newline.
+    """
+    description = textwrap.fill(
+        item.description, width=78, initial_indent="# ", subsequent_indent="# "
+    )
+    default = f"# Default: {item.default or NOT_SET}"
+    line = (
+        f"{item.name}={format_user_config_value(value)}"
+        if value is not None
+        else f"# {item.name}="
+    )
+    return f"{description}\n{default}\n{line}\n"
+
+
+def format_user_config_value(value: str) -> str:
+    """Quote a value when the dotenv format would otherwise misread it.
+
+    A bare value runs to the end of the line, except that `` #`` begins a
+    comment and a leading quote starts a quoted value; quoting protects
+    whitespace, ``#`` and a quote character. ``~`` and ``$VAR`` are still
+    expanded when the file is read, quoted or not.
+    """
+    if (
+        not value
+        or any(c.isspace() for c in value)
+        or "#" in value
+        or value[0] in "\"'"
+    ):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
     return value
+
+
+def read_by_another_version(name: str) -> bool:
+    """Whether another version of C-Star may read `name` from the file.
+
+    True for a setting this version removed (an older one reads it) and for a
+    ``CSTAR_*`` name this version does not know (a newer one may read it).
+    """
+    return name in REMOVED_SETTINGS or (
+        name.startswith(ENVVAR_PREFIX) and name not in discover_env_vars()
+    )
+
+
+def render_unrecognised_block(name: str, value: str | None, problem: str) -> str:
+    """Render a line this version will not apply, under `problem`, the reason
+    `parse_user_config` skips it.
+
+    The line stays active when another version of C-Star may read it (a name this
+    version removed or does not know, or a value this version does not accept),
+    so a file shared between versions keeps working for both; otherwise it is
+    commented out.
+    """
+    reason = textwrap.fill(
+        problem, width=78, initial_indent="# ", subsequent_indent="# "
+    )
+    if value is None:
+        line = f"# {name}"
+    # a name this version accepts was skipped for its value
+    elif read_by_another_version(name) or not user_config_problems([name]):
+        line = f"{name}={format_user_config_value(value)}"
+    else:
+        line = f"# {name}={format_user_config_value(value)}"
+    return f"{reason}\n{line}\n"
+
+
+UNRECOGNISED_SECTION_NOTE: t.Final[str] = """\
+# C-Star skips these lines with a warning. A setting another version of C-Star
+# may read is kept as it was; the others are commented out, and a later rewrite
+# of this file drops them.
+"""
+"""The note that opens the section of lines a rendered file kept but will not apply."""
+
+
+def render_user_config(
+    values: Mapping[str, str],
+    unrecognised: Mapping[str, tuple[str | None, str]] | None = None,
+) -> str:
+    """Render a whole configuration file from the registry.
+
+    Every persistable, user-facing setting gets a block; those in `values` are
+    set, the rest are commented out so the file documents what can be set. The
+    lines in `unrecognised` follow in a section of their own, each under the
+    reason this version will not apply it (`render_unrecognised_block`).
+
+    Parameters
+    ----------
+    values : Mapping[str, str]
+        The settings to set, by name; each must pass `user_config_problems`.
+    unrecognised : Mapping[str, tuple[str | None, str]] | None
+        Lines from an earlier file that this version will not apply, by name, with
+        their values as written (`None` for a name written without ``=``) and the
+        reason `parse_user_config` skips each.
+
+    Returns
+    -------
+    str
+        The file content.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming every key that may not be set.
+    """
+    if problems := user_config_problems(values.keys()):
+        listing = "\n".join(f"  - {problem}" for problem in problems)
+        raise CstarUserConfigError(f"Settings that cannot be written:\n{listing}")
+
+    sections = [USER_CONFIG_HEADER]
+    for group, items in env_var_groups(include_internal=False).items():
+        blocks = [
+            render_setting_block(item, values.get(item.name))
+            for item in sorted(items, key=lambda x: x.name)
+            if item.persistable and item.group != GROUP_FF
+        ]
+        if blocks:
+            sections.append(
+                f"\n# {'-' * 76}\n# {group}\n# {'-' * 76}\n\n" + "\n".join(blocks)
+            )
+    if unrecognised:
+        import cstar
+
+        blocks = [
+            render_unrecognised_block(name, value, problem)
+            for name, (value, problem) in unrecognised.items()
+        ]
+        title = f"Not applied by C-Star {cstar.__version__}"
+        sections.append(
+            f"\n# {'-' * 76}\n# {title}\n# {'-' * 76}\n{UNRECOGNISED_SECTION_NOTE}\n"
+            + "\n".join(blocks)
+        )
+    return "".join(sections)

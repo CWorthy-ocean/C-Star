@@ -3,11 +3,13 @@
 import hashlib
 import logging
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_STATE_HOME
 from cstar.base.utils import slugify
 from cstar.execution.file_system import (
@@ -16,15 +18,20 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.manifest import (
+    ATTEMPTS_DIR_NAME,
+    TRANSFORMED_WORKPLAN_SUFFIX,
     Attempt,
     Product,
     RunManifest,
     StepEntry,
     StepRecord,
+    carried_digest,
+    product_digest,
 )
 from cstar.orchestration.models import BlueprintIdentity, Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.run_check import (
+    DigestTally,
     Finding,
     FindingKind,
     Orphans,
@@ -32,10 +39,13 @@ from cstar.orchestration.run_check import (
     check_run,
     find_absolute_paths,
     find_bad_symlinks,
+    find_input_findings,
     find_missing_step_dirs,
     find_orphans,
     find_product_findings,
     gathered_output_dir,
+    is_run_path,
+    recorded_run_root,
     repair_symlinks,
     report_orphans,
     steps_inside_run,
@@ -50,13 +60,16 @@ from cstar.tests.unit_tests.orchestration.run_tree import (
 )
 
 ABSOLUTE = FindingKind.ABSOLUTE_PATH
+RUN_PATH = FindingKind.RUN_PATH
 
 PRODUCT_KINDS = {
     FindingKind.PRODUCT_MISSING,
     FindingKind.PRODUCT_SIZE,
-    FindingKind.HASH_MISMATCH,
+    FindingKind.DIGEST_MISMATCH,
+    FindingKind.INPUT_MISMATCH,
     FindingKind.RECORD_MISSING,
     FindingKind.ATTEMPT_OPEN,
+    FindingKind.INPUT_MISSING,
 }
 """The kinds that come from the run manifest, which `run` has none of."""
 
@@ -93,7 +106,11 @@ def test_absolute_paths_are_found_in_the_reference_files_only(run: FakeRun) -> N
         (f"{step}/tasks/sub/output/n.yaml", 2),
         (f"{step}/work/cstar_generated_roms.nml", 2),
     }
-    assert all(f.kind is ABSOLUTE for f in findings)
+    # only the other run under the data home is outside this one
+    assert {(run.rel(f.file), f.line) for f in findings if f.kind is ABSOLUTE} == {
+        (f"{step}/output/result.yaml", 3)
+    }
+    assert {f.kind for f in findings} == {ABSOLUTE, RUN_PATH}
 
 
 def test_absolute_paths_name_the_offending_path(run: FakeRun) -> None:
@@ -190,9 +207,10 @@ def test_symlinks_are_reported_once_each(run: FakeRun) -> None:
         (FindingKind.ABSOLUTE_LINK, "gathered_output/a.nc"),
         (FindingKind.DANGLING_LINK, f"{inputs}/abs_dangling"),
         (FindingKind.DANGLING_LINK, f"{inputs}/rel_dangling"),
+        (FindingKind.CODEBASE_LINK, f"{inputs}/codebases/roms/.libs/lib.la"),
         (FindingKind.EXTERNAL_LINK, f"{inputs}/abs_outside"),
     }
-    assert len(findings) == 6
+    assert len(findings) == 7
 
 
 def test_a_relative_link_that_climbs_out_of_the_run_is_external(
@@ -227,14 +245,19 @@ def test_symlink_findings_carry_the_link_text(run: FakeRun) -> None:
     assert findings["abs_outside"] == str(run.elsewhere)
 
 
-def test_only_a_link_out_or_a_gap_in_the_record_is_informational() -> None:
-    """Verify the kinds that cannot fail the check are the link that leaves the
-    run, a done step without a record and an attempt that has not finished.
+def test_only_what_moves_with_the_run_or_a_gap_in_the_record_is_informational() -> None:
+    """Verify the kinds that cannot fail the check are a path into the run
+    itself, a dangling link a cloned codebase holds, the link that leaves the
+    run, a done step without a record, an attempt that has not finished and
+    carried inputs that are gone.
     """
     assert {k for k in FindingKind if k.informational} == {
+        FindingKind.RUN_PATH,
+        FindingKind.CODEBASE_LINK,
         FindingKind.EXTERNAL_LINK,
         FindingKind.RECORD_MISSING,
         FindingKind.ATTEMPT_OPEN,
+        FindingKind.INPUT_MISSING,
     }
 
 
@@ -247,7 +270,7 @@ def test_a_link_back_into_the_run_is_not_followed(run: FakeRun) -> None:
     assert (FindingKind.ABSOLUTE_LINK, "tasks/spin-up/tasks/loop") in kinds(
         run, findings
     )
-    assert len(findings) == 7
+    assert len(findings) == 8
 
 
 def test_missing_step_dirs_follow_the_slug_not_the_recorded_directory(
@@ -338,6 +361,7 @@ def test_repair_leaves_nothing_to_do_the_second_time(run: FakeRun) -> None:
     assert repair_symlinks(run.root) == []
     assert {f.kind for f in find_bad_symlinks(run.root)} == {
         FindingKind.DANGLING_LINK,
+        FindingKind.CODEBASE_LINK,
         FindingKind.EXTERNAL_LINK,
     }
 
@@ -364,8 +388,8 @@ def test_a_run_report_knows_the_spelling_it_was_given(
     run: FakeRun, tmp_path: Path
 ) -> None:
     """Verify a report for a run reached through a symlinked alias still
-    recognizes paths and links spelled through that alias, which a report for the
-    resolved directory cannot.
+    recognizes paths and links spelled through that alias as the run's own, which
+    a report for the resolved directory cannot.
     """
     alias = tmp_path / "alias"
     alias.symlink_to(run.root)
@@ -374,12 +398,17 @@ def test_a_run_report_knows_the_spelling_it_was_given(
     )
     aliased = write(run.spin_up / "output" / "aliased.yaml", f"where: {alias}/x\n")
 
-    def problem_files(root: Path) -> set[Path]:
+    def found(root: Path) -> dict[Path, FindingKind]:
         report = check_run(root, workplan=None, run_id=None, all_files=False)
-        return {f.file for f in report.problems} & {via_alias, aliased}
+        return {
+            f.file: f.kind for f in report.findings if f.file in {via_alias, aliased}
+        }
 
-    assert problem_files(alias) == {via_alias, aliased}
-    assert problem_files(run.root) == set()
+    assert found(alias) == {
+        via_alias: FindingKind.ABSOLUTE_LINK,
+        aliased: FindingKind.RUN_PATH,
+    }
+    assert found(run.root) == {via_alias: FindingKind.EXTERNAL_LINK}
 
 
 def test_a_run_report_orders_findings_by_kind(run: FakeRun) -> None:
@@ -394,7 +423,7 @@ def test_a_run_report_orders_findings_by_kind(run: FakeRun) -> None:
     assert all(f.kind is not FindingKind.EXTERNAL_LINK for f in report.problems)
     assert not report.clean
     assert report.orphans
-    assert report.skipped == ("products: no run manifest",)
+    assert report.skipped == ("products and carried inputs: no run manifest",)
 
 
 def test_a_run_report_counts_all_files_on_request(run: FakeRun) -> None:
@@ -415,7 +444,7 @@ def test_checks_that_need_the_workplan_are_skipped_without_one(run: FakeRun) -> 
     assert not report.orphans
     assert [s.split(":")[0] for s in report.skipped] == [
         "step directories and orphans",
-        "products",
+        "products and carried inputs",
     ]
 
 
@@ -428,7 +457,7 @@ def test_sentinels_are_only_checked_for_a_tracked_run(run: FakeRun) -> None:
     assert report.orphans == Orphans(step_dirs=(run.root / "tasks" / "stale",))
     assert [s.split(":")[0] for s in report.skipped] == [
         "orphaned sentinels",
-        "products",
+        "products and carried inputs",
     ]
 
 
@@ -637,9 +666,11 @@ def test_report_orphans_is_quiet_without_orphans(
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-def product(path: str, size: int = 0, sha256: str = "") -> Product:
+def product(path: str, size: int = 0, sha256: str = "", digest: str = "") -> Product:
     """A product record of the given kind-less file."""
-    return Product(kind="other", path=path, size_bytes=size, sha256=sha256)
+    return Product(
+        kind="other", path=path, size_bytes=size, sha256=sha256, digest=digest
+    )
 
 
 def manifest_of(
@@ -785,13 +816,17 @@ def test_only_the_latest_attempt_is_considered(recorded: Path) -> None:
     assert find_product_findings(recorded, manifest, verify=False) == []
 
 
-def test_verify_compares_the_recorded_hash(recorded: Path) -> None:
-    """Verify a differing hash is a mismatch carrying the digest found, a
-    matching one is silent, and nothing is hashed without `verify`.
+def test_verify_compares_the_recorded_sha256_of_an_older_record(
+    recorded: Path,
+) -> None:
+    """Verify a bare sha256, as records before `digest` hold, is still compared
+    as the sha256 of the bytes whatever the file's suffix, a differing one is a
+    mismatch carrying the digest found, and nothing is hashed without `verify`.
     """
-    good = hashlib.sha256(b"data").hexdigest()
+    good = f"{SHA256_SCHEME}:{hashlib.sha256(b'data').hexdigest()}"
     manifest = manifest_of(
-        product("output/a.nc", 4, "0" * 64), product("output/b.nc", 4, good)
+        product("output/a.nc", 4, "0" * 64),
+        product("output/b.nc", 4, good.partition(":")[2]),
     )
 
     verified = find_product_findings(recorded, manifest, verify=True)
@@ -799,11 +834,89 @@ def test_verify_compares_the_recorded_hash(recorded: Path) -> None:
 
     assert verified == [
         Finding(
-            FindingKind.HASH_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
+            FindingKind.DIGEST_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
         )
     ]
     assert unverified == []
     assert not RunCheckReport(recorded, tuple(verified)).clean
+
+
+def test_verify_compares_the_recorded_digest(recorded: Path) -> None:
+    """Verify `digest` is compared in its own scheme, and wins over a `sha256`."""
+    good = f"{SHA256_SCHEME}:{hashlib.sha256(b'data').hexdigest()}"
+    manifest = manifest_of(
+        product("output/a.nc", 4, digest=f"{SHA256_SCHEME}:{'0' * 64}"),
+        product("output/b.nc", 4, digest=good),
+        product("output/c.nc", 4, sha256="0" * 64, digest=good),
+    )
+
+    findings = find_product_findings(recorded, manifest, verify=True)
+
+    assert findings == [
+        Finding(
+            FindingKind.DIGEST_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
+        )
+    ]
+
+
+def test_verify_digests_a_netcdf_product_by_its_content(recorded: Path) -> None:
+    """Verify an `nc-sample-v2` digest is recomputed from the file's content, so a
+    re-encoded copy matches and a changed one does not.
+    """
+    import numpy as np
+    import xarray as xr
+
+    nc = recorded / "tasks/one/output/field.nc"
+    data = {"temp": (["x"], np.array([1.0, 2.0, 3.0]))}
+    xr.Dataset(data).to_netcdf(nc, format="NETCDF4", engine="netcdf4")
+    wanted = product_digest(nc)
+    manifest = manifest_of(product("output/field.nc", digest=wanted))
+    assert wanted.startswith(f"{HASH_SCHEME}:")
+
+    xr.Dataset(data).to_netcdf(nc, format="NETCDF3_64BIT", engine="netcdf4")
+    assert find_product_findings(recorded, manifest, verify=True) == []
+
+    xr.Dataset({"temp": (["x"], np.array([1.0, 2.0, 4.0]))}).to_netcdf(
+        nc, format="NETCDF4", engine="netcdf4"
+    )
+    findings = find_product_findings(recorded, manifest, verify=True)
+    assert [(f.kind, f.file) for f in findings] == [(FindingKind.DIGEST_MISMATCH, nc)]
+    assert findings[0].path == product_digest(nc) != wanted
+
+
+def test_verify_notes_a_scheme_this_build_does_not_compute(recorded: Path) -> None:
+    """Verify products recorded with an unknown scheme are skipped, not failed,
+    and counted by scheme.
+    """
+    manifest = manifest_of(
+        product("output/a.nc", 4, digest="blake3:" + "0" * 64),
+        product("output/b.nc", 4, digest="blake3:" + "1" * 64),
+        product("output/c.nc", 4, digest="xxh:" + "2" * 16),
+    )
+
+    report = check_run(
+        recorded,
+        workplan=None,
+        run_id=None,
+        all_files=False,
+        manifest=manifest,
+        verify=True,
+    )
+
+    assert report.clean
+    assert report.verification == DigestTally(foreign={"blake3": 2, "xxh": 1})
+    assert not any("digest" in s for s in report.skipped)
+
+
+def test_verify_reports_a_product_it_cannot_read(recorded: Path) -> None:
+    """Verify a product that cannot be digested is a finding naming why, not a crash."""
+    (recorded / "tasks/one/output/a.nc").write_bytes(b"not netcdf")
+    manifest = manifest_of(product("output/a.nc", digest=f"{HASH_SCHEME}:{'0' * 64}"))
+
+    findings = find_product_findings(recorded, manifest, verify=True)
+
+    assert [f.kind for f in findings] == [FindingKind.DIGEST_MISMATCH]
+    assert findings[0].path.startswith("unreadable: ")
 
 
 def test_verify_skips_a_product_recorded_without_a_hash(recorded: Path) -> None:
@@ -831,7 +944,7 @@ def test_a_run_without_a_manifest_skips_the_product_checks(recorded: Path) -> No
         recorded, workplan=None, run_id=None, all_files=False, manifest=None
     )
 
-    assert "products: no run manifest" in report.skipped
+    assert "products and carried inputs: no run manifest" in report.skipped
     assert not PRODUCT_KINDS & {f.kind for f in report.findings}
 
 
@@ -854,8 +967,10 @@ def test_a_run_report_holds_the_product_findings(recorded: Path) -> None:
     assert not any("products" in s for s in report.skipped)
 
 
-def test_verify_without_any_recorded_hash_says_so(recorded: Path) -> None:
-    """Verify `verify` against records that hold no sha256 names the skipped check."""
+def test_verify_without_any_recorded_digest_says_so(recorded: Path) -> None:
+    """Verify `verify` against records that hold no digest counts each product as
+    skipped for it, and that without `verify` nothing is counted.
+    """
     manifest = manifest_of(product("output/a.nc", 4))
 
     def check(*, verify: bool) -> RunCheckReport:
@@ -871,14 +986,20 @@ def test_verify_without_any_recorded_hash_says_so(recorded: Path) -> None:
     verified = check(verify=True)
     plain = check(verify=False)
 
-    assert "hash verification: no product records a hash" in verified.skipped
-    assert not any("hash" in s for s in plain.skipped)
+    assert verified.verification == DigestTally(no_digest=1)
+    assert plain.verification is None
 
 
-def test_verify_with_a_recorded_hash_has_nothing_to_skip(recorded: Path) -> None:
-    """Verify the hash skip is said only when no product records a hash."""
+@pytest.mark.parametrize("field", ["sha256", "digest"])
+def test_verify_with_a_recorded_digest_has_nothing_to_skip(
+    recorded: Path, field: str
+) -> None:
+    """Verify the skip is said only when no product records a digest or sha256."""
+    good = hashlib.sha256(b"data").hexdigest()
     manifest = manifest_of(
-        product("output/a.nc", 4, hashlib.sha256(b"data").hexdigest())
+        product(
+            "output/a.nc", 4, **{field: good if field == "sha256" else f"sha256:{good}"}
+        )
     )
 
     report = check_run(
@@ -890,5 +1011,341 @@ def test_verify_with_a_recorded_hash_has_nothing_to_skip(recorded: Path) -> None
         verify=True,
     )
 
-    assert not any("hash" in s for s in report.skipped)
+    assert not any("digest" in s for s in report.skipped)
+    assert report.verification == DigestTally(matched=1)
+    assert report.clean
+
+
+def test_verify_counts_every_product_once(recorded: Path) -> None:
+    """Verify each recorded product lands in one count: matched, differed, no
+    digest, a scheme this build does not compute, or not compared because it is
+    missing, resized or not a regular file.
+    """
+    good = hashlib.sha256(b"data").hexdigest()
+    (recorded / "tasks/one/output/dir").mkdir()
+    manifest = manifest_of(
+        product("output/a.nc", 4, digest=f"{SHA256_SCHEME}:{good}"),
+        product("output/b.nc", 4, digest=f"{SHA256_SCHEME}:{'0' * 64}"),
+        product("output/c.nc", 4),
+        product("output/c.nc", 4, digest="blake3:" + "0" * 64),
+        product("output/gone.nc", 4, digest=f"{SHA256_SCHEME}:{good}"),
+        product("output/a.nc", 9, digest=f"{SHA256_SCHEME}:{good}"),
+        product("output/dir", 0, digest=f"{SHA256_SCHEME}:{good}"),
+    )
+
+    report = check_run(
+        recorded,
+        workplan=None,
+        run_id=None,
+        all_files=False,
+        manifest=manifest,
+        verify=True,
+    )
+
+    assert report.verification == DigestTally(
+        matched=1, differed=1, no_digest=1, foreign={"blake3": 1}, not_compared=3
+    )
+    assert report.verification.compared == 2
+    assert [f.kind for f in report.problems] == [
+        FindingKind.PRODUCT_MISSING,
+        FindingKind.PRODUCT_SIZE,
+        FindingKind.DIGEST_MISMATCH,
+    ]
+
+
+def test_a_check_without_a_manifest_has_no_verification(recorded: Path) -> None:
+    """Verify there is nothing to count when the run has no manifest."""
+    report = check_run(
+        recorded, workplan=None, run_id=None, all_files=False, verify=True
+    )
+
+    assert report.verification is None
+
+
+def paths_run(root: Path, other: Path) -> Path:
+    """Write a run whose transformed workplan records `root` and whose step
+    output names a file of its own and one of the run `other`; return the output.
+    """
+    write(root / f"wp{TRANSFORMED_WORKPLAN_SUFFIX}.yaml", f"name: wp\nroot: {root}\n")
+    return write(
+        root / "tasks" / "a" / "output" / "r.yaml",
+        f"""\
+        own: {root}/tasks/a/output/x.nc
+        other: {other}/tasks/b/output/y.nc
+        """,
+    )
+
+
+def test_in_place_a_path_into_the_run_is_informational_one_out_of_it_a_problem(
+    tmp_path: Path,
+) -> None:
+    """Verify a run checked where it was written lists its paths into itself for
+    information, and a path to another run in the data home as a problem.
+    """
+    runs = StateDirectoryManager.workplan_runs_dir()
+    root, other = runs / "src", runs / "other"
+    output = paths_run(root, other)
+
+    report = check_run(root, workplan=None, run_id=None, all_files=False)
+
+    assert {(f.kind, f.file.name, f.path) for f in report.findings} == {
+        (RUN_PATH, f"wp{TRANSFORMED_WORKPLAN_SUFFIX}.yaml", str(root)),
+        (RUN_PATH, output.name, f"{root}/tasks/a/output/x.nc"),
+        (ABSOLUTE, output.name, f"{other}/tasks/b/output/y.nc"),
+    }
+    assert [f.path for f in report.problems] == [f"{other}/tasks/b/output/y.nc"]
+
+
+def test_a_copy_counts_paths_into_its_source_as_its_own(tmp_path: Path) -> None:
+    """Verify the same files checked as a copy outside the data home classify
+    alike: a path into the source the transformed workplan recorded is the run's
+    own, a path to another run is still a problem.
+    """
+    runs = StateDirectoryManager.workplan_runs_dir()
+    source, other = runs / "src", runs / "other"
+    paths_run(source, other)
+    copy = tmp_path / "project" / "src"
+    shutil.copytree(source, copy, symlinks=True)
+
+    report = check_run(copy, workplan=None, run_id=None, all_files=False)
+
+    assert recorded_run_root(copy) == source
+    assert {(f.kind, f.path) for f in report.findings} == {
+        (RUN_PATH, str(source)),
+        (RUN_PATH, f"{source}/tasks/a/output/x.nc"),
+        (ABSOLUTE, f"{other}/tasks/b/output/y.nc"),
+    }
+    assert [f.path for f in report.problems] == [f"{other}/tasks/b/output/y.nc"]
+
+
+def test_a_run_path_is_bounded_by_the_run_and_its_recorded_root(
+    tmp_path: Path,
+) -> None:
+    """Verify a sibling with a longer name, or a path climbing out, is not the run's."""
+    root, recorded = tmp_path / "run-1", tmp_path / "old" / "run-1"
+
+    assert is_run_path(f"{root}/x", root, None)
+    assert is_run_path(f"{recorded}/x", root, recorded)
+    assert not is_run_path(f"{recorded}/x", root, None)
+    assert not is_run_path(f"{tmp_path}/run-10/x", root, recorded)
+    assert not is_run_path(f"{root}/../run-2/x", root, recorded)
+
+
+def test_a_path_through_an_alias_of_the_data_home_is_the_runs_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a run whose files name it through a symlinked data home, while its
+    transformed workplan records the resolved root, is checked by its physical
+    directory with those paths counted as its own.
+    """
+    real = tmp_path / "scratch" / "data"
+    alias = tmp_path / "home-data"
+    real.mkdir(parents=True)
+    alias.symlink_to(real)
+    monkeypatch.setattr(DirectoryManager, "data_home", classmethod(lambda cls: alias))
+    root = real / "workplan_runs" / "src"
+    write(root / f"wp{TRANSFORMED_WORKPLAN_SUFFIX}.yaml", f"name: wp\nroot: {root}\n")
+    output = write(
+        root / "tasks" / "a" / "output" / "r.yaml",
+        f"own: {alias}/workplan_runs/src/tasks/a/output/x.nc\n",
+    )
+
+    report = check_run(root, workplan=None, run_id=None, all_files=False)
+
+    assert [(f.kind, f.file) for f in report.findings if f.file == output] == [
+        (RUN_PATH, output)
+    ]
+    assert report.clean
+
+
+def test_a_workplan_without_a_recorded_root_records_none(run: FakeRun) -> None:
+    """Verify a transformed workplan written before the root was recorded has none."""
+    assert recorded_run_root(run.root) is None
+
+
+@pytest.mark.parametrize(
+    "where", ["tasks/a/input/codebases/roms/NHMG/src/.libs", "input/codebases/roms"]
+)
+def test_a_dangling_link_in_a_cloned_codebase_is_informational(
+    tmp_path: Path, where: str
+) -> None:
+    """Verify a dangling link under a step's cloned codebases, or under a
+    standalone run's own, is the codebase's, while one in the step's output is
+    still a problem, and an absolute link in a codebase keeps its kind.
+    """
+    root = tmp_path / "run"
+    (root / "tasks" / "a" / "output").mkdir(parents=True)
+    libtool = link(root / where / "libnhmg.la", "../libnhmg.la")
+    output = link(root / "tasks" / "a" / "output" / "gone.nc", "../nothing.nc")
+    absolute = link(root / where / "abs", root / "tasks" / "a" / "output")
+
+    report = check_run(root, workplan=None, run_id=None, all_files=False)
+
+    assert {(f.kind, f.file) for f in report.findings} == {
+        (FindingKind.CODEBASE_LINK, libtool),
+        (FindingKind.DANGLING_LINK, output),
+        (FindingKind.ABSOLUTE_LINK, absolute),
+    }
+    assert {f.file for f in report.problems} == {output, absolute}
+
+
+ATTEMPT_DIR = f"{ATTEMPTS_DIR_NAME}/20261019T120000"
+"""The directory, in the run root, of the attempt that carried inputs."""
+OLDER_ATTEMPT_DIR = f"{ATTEMPTS_DIR_NAME}/20261018T090000"
+"""The directory of an attempt before it."""
+
+
+def carry(root: Path, directory: str, files: dict[str, str]) -> Attempt:
+    """An attempt that carried `files`, by relative path, into `directory`."""
+    carried = {
+        relative: carried_digest(write(root / directory / relative, text))
+        for relative, text in files.items()
+    }
+    return Attempt(start_at=NOW, finished_at=NOW, directory=directory, carried=carried)
+
+
+def manifest_with(*attempts: Attempt) -> RunManifest:
+    """A manifest of the given attempts and no steps."""
+    return RunManifest(
+        run_id="run",
+        name="run",
+        kind="workplan",
+        created_at=NOW,
+        attempts=list(attempts),
+        steps=[],
+    )
+
+
+@pytest.fixture
+def carried(tmp_path: Path) -> RunManifest:
+    """The manifest of a run whose one attempt carried a workplan and a blueprint."""
+    return manifest_with(
+        carry(
+            tmp_path,
+            ATTEMPT_DIR,
+            {"workplan.yaml": "name: wp\n", "blueprints/step-a/bp.yaml": "a: 1\n"},
+        )
+    )
+
+
+def test_carried_inputs_that_are_as_recorded_have_no_finding(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify an attempt whose carried files match the manifest is silent, and
+    a file in its directory that the manifest does not list is never looked at.
+    """
+    write(tmp_path / ATTEMPT_DIR / "unlisted.txt", "not carried")
+
+    assert find_input_findings(tmp_path, carried) == []
+
+
+def test_an_edited_carried_blueprint_is_a_mismatch_carrying_the_digest(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify a carried file whose content changed is named with the digest now
+    found, the untouched one is silent, and the finding fails the check.
+    """
+    edited = write(tmp_path / ATTEMPT_DIR / "blueprints/step-a/bp.yaml", "a: 2\n")
+
+    findings = find_input_findings(tmp_path, carried)
+
+    assert findings == [
+        Finding(FindingKind.INPUT_MISMATCH, edited, path=carried_digest(edited))
+    ]
+    assert findings[0].path != carried.attempts[0].carried["blueprints/step-a/bp.yaml"]
+    assert not RunCheckReport(tmp_path, tuple(findings)).clean
+
+
+def test_a_deleted_attempt_directory_is_one_informational_finding(
+    tmp_path: Path,
+) -> None:
+    """Verify an older attempt deleted by hand is reported once, however many
+    files it carried, never fails the check, and leaves a newer attempt's
+    inputs checked.
+    """
+    manifest = manifest_with(
+        carry(
+            tmp_path,
+            OLDER_ATTEMPT_DIR,
+            {"workplan.yaml": "name: wp\n", "blueprints/step-a/bp.yaml": "a: 1\n"},
+        ),
+        carry(tmp_path, ATTEMPT_DIR, {"workplan.yaml": "name: wp\n"}),
+    )
+    shutil.rmtree(tmp_path / OLDER_ATTEMPT_DIR)
+
+    findings = find_input_findings(tmp_path, manifest)
+
+    assert findings == [
+        Finding(FindingKind.INPUT_MISSING, tmp_path / OLDER_ATTEMPT_DIR)
+    ]
+    assert RunCheckReport(tmp_path, tuple(findings)).clean
+
+    (tmp_path / ATTEMPT_DIR / "workplan.yaml").write_text("name: edited\n")
+
+    assert [f.kind for f in find_input_findings(tmp_path, manifest)] == [
+        FindingKind.INPUT_MISSING,
+        FindingKind.INPUT_MISMATCH,
+    ]
+
+
+def test_a_deleted_carried_file_is_informational(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify one carried file gone from an attempt that is still there is named
+    on its own, and does not fail the check.
+    """
+    gone = tmp_path / ATTEMPT_DIR / "blueprints/step-a/bp.yaml"
+    gone.unlink()
+
+    findings = find_input_findings(tmp_path, carried)
+
+    assert findings == [Finding(FindingKind.INPUT_MISSING, gone)]
+    assert RunCheckReport(tmp_path, tuple(findings)).clean
+
+
+def test_an_attempt_that_carried_nothing_has_nothing_to_check(tmp_path: Path) -> None:
+    """Verify an attempt without a directory, as a re-entry replaying the recorded
+    plan has, produces no finding, and the run's `attempts` need not exist.
+    """
+    manifest = manifest_with(Attempt(start_at=NOW, finished_at=NOW))
+
+    assert not (tmp_path / ATTEMPTS_DIR_NAME).exists()
+    assert find_input_findings(tmp_path, manifest) == []
+
+
+def test_a_run_report_holds_the_carried_input_findings(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify `check_run` folds the carried-input findings in without `verify`,
+    ordered by kind around the other manifest findings, and that only the
+    mismatch fails the run.
+    """
+    older = carry(tmp_path, OLDER_ATTEMPT_DIR, {"workplan.yaml": "name: wp\n"})
+    shutil.rmtree(tmp_path / OLDER_ATTEMPT_DIR)
+    carried.attempts.insert(0, older)
+    carried.attempts[-1].finished_at = None
+    (tmp_path / ATTEMPT_DIR / "workplan.yaml").write_text("name: edited\n")
+
+    report = check_run(
+        tmp_path, workplan=None, run_id=None, all_files=False, manifest=carried
+    )
+
+    assert [f.kind for f in report.findings] == [
+        FindingKind.INPUT_MISMATCH,
+        FindingKind.ATTEMPT_OPEN,
+        FindingKind.INPUT_MISSING,
+    ]
+    assert [f.kind for f in report.problems] == [FindingKind.INPUT_MISMATCH]
+    assert not report.clean
+
+
+def test_a_run_report_with_intact_carried_inputs_is_clean(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify a manifest whose carried inputs are all as recorded adds nothing."""
+    report = check_run(
+        tmp_path, workplan=None, run_id=None, all_files=False, manifest=carried
+    )
+
+    assert report.findings == ()
     assert report.clean

@@ -27,7 +27,7 @@ import threading
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -38,13 +38,14 @@ from cstar.applications.core import get_application, get_application_name
 from cstar.applications.forge.blueprint import DEFAULT_APPLICATION as FORGE
 from cstar.applications.hello_world import APP_NAME as HELLO_WORLD
 from cstar.applications.nest_ic import APP_NAME as NEST_IC
-from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS
+from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
 )
 from cstar.applications.upscaler import APP_NAME as UPSCALER
+from cstar.base.application_names import canonical_application
 from cstar.base.utils import deep_merge, slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN, ARG_RUN_ID, ARG_VAR_LONG
 from cstar.orchestration.check import deep_check
@@ -79,7 +80,6 @@ from cstar.orchestration.patterns import (
     month_windows,
     normalize_legacy,
     spinup_ramp,
-    upscale_chain,
 )
 from cstar.orchestration.serialization import (
     deserialize,
@@ -108,6 +108,8 @@ if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
     from cstar.applications.core import EmittedBlueprint
+    from cstar.orchestration.index import ManifestRecord, RunRecord
+    from cstar.orchestration.tracking import WorkplanRun
     from cstar.system.scheduler import Scheduler
 
 PAGE = "workplan-builder"
@@ -115,11 +117,11 @@ PAGE = "workplan-builder"
 
 WORKPLAN_SCHEMA_REF = (
     "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/"
-    "docs/schemas/wp/workplan_schema.1.0.0.json"
+    f"docs/schemas/wp/workplan_schema.{Workplan.model_fields['schema_version'].default}.json"
 )
 """The JSON schema editors validate a workplan file against."""
 
-APPLICATIONS = (ROMS_MARBL, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
+APPLICATIONS = (UCLA_ROMS, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
 """The applications a step may be authored for."""
 
 VIEW_YAML, VIEW_DAG, VIEW_BOTH = "YAML", "DAG", "Both"
@@ -133,7 +135,7 @@ PLACEMENTS = [PLACE_RIGHT, PLACE_BOTTOM, PLACE_TOP, PLACE_HIDDEN]
 _SIDE_CLASSES = ("forge-side-right", "forge-side-bottom", "forge-side-top")
 """The placement classes of the preview pane, one at a time."""
 
-CHECK, RUN = "check", "run"
+CHECK, SUBMIT = "check", "submit"
 """The ``cstar workplan`` subcommands the Run subsection streams."""
 
 FREQUENT_RESTARTS = {"output_period_rst": 86400.0, "monthly_restarts": False}
@@ -162,7 +164,7 @@ SOURCE_DEFERRED = "deferred"
 SOURCE_INLINE = "inline"
 SOURCE_CURRENT = "current"
 _SOURCES = [
-    ("catalog roms_marbl", SOURCE_CATALOG_ROMS),
+    ("catalog ucla_roms", SOURCE_CATALOG_ROMS),
     ("catalog forge", SOURCE_CATALOG_FORGE),
     ("path", SOURCE_PATH),
     ("upload", SOURCE_UPLOAD),
@@ -207,6 +209,11 @@ def _show(widget: Any, visible: bool) -> None:
 def _esc(text: object) -> str:
     """HTML-escape ``text``."""
     return html.escape(str(text))
+
+
+def _aware(moment: datetime) -> datetime:
+    """``moment``, taken as UTC when it carries no time zone, so runs sort together."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def _as_datetime(value: object) -> datetime | None:
@@ -259,7 +266,7 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
     runtime = _section("runtime_params")
     use_pio = partitioning.get("use_pio")
     return BlueprintFacts(
-        application=str(raw.get("application", "")),
+        application=canonical_application(str(raw.get("application", ""))),
         start_date=_as_datetime(runtime.get("start_date")),
         end_date=_as_datetime(runtime.get("end_date")),
         cpus_needed=int(cpus) if isinstance(cpus, int) else 0,
@@ -494,7 +501,7 @@ def unsupported_machines() -> list[str]:
 # dependency graph
 # ---------------------------------------------------------------------------
 _DAG_FILLS = {
-    ROMS_MARBL: "#cfe3f7",
+    UCLA_ROMS: "#cfe3f7",
     FORGE: "#d5ecd0",
     NEST_IC: "#f6e3c4",
     UPSCALER: "#e6d4f2",
@@ -789,7 +796,7 @@ class _StepPane:
         self._current_path = ""
         self._cpus_touched = False
         self._cpus_prefilled = 0
-        self._app_fallback: str = ROMS_MARBL
+        self._app_fallback: str = UCLA_ROMS
         self._form_app = ""
         self._form: dict[str, tuple[Any, type, Any]] = {}
         self._form_touched: set[str] = set()
@@ -812,7 +819,7 @@ class _StepPane:
         self.upload_note = W.HTML("")
         self.producer = W.Dropdown(options=[])
         self.filename = text(placeholder="B_<name>.yaml")
-        self.application = W.Dropdown(options=list(APPLICATIONS), value=ROMS_MARBL)
+        self.application = W.Dropdown(options=list(APPLICATIONS), value=UCLA_ROMS)
         self.current_note = W.HTML("")
         self.source_note = W.HTML("")
 
@@ -821,7 +828,7 @@ class _StepPane:
         )
         self.locked_deps = W.HTML("")
 
-        # roms_marbl overrides
+        # ucla_roms overrides
         self.start_note = W.HTML("")
         self.end_date = text(placeholder="ISO date, blank = from the blueprint")
         self.cdr_location = text(placeholder="path to a CDR forcing netCDF")
@@ -1195,7 +1202,7 @@ class _StepPane:
                 cpus = emitted.cpus_needed
                 if not self.filename.value:
                     self.filename.value = emitted.filename
-                if self.app == ROMS_MARBL or self.app not in APPLICATIONS:
+                if self.app == UCLA_ROMS or self.app not in APPLICATIONS:
                     self.application.value = emitted.application
         elif facts := self.facts():
             cpus = facts.cpus_needed
@@ -1223,7 +1230,7 @@ class _StepPane:
             self._schema_ref = facts.roms_ref if facts else None
             for row in self._rows:
                 row.refresh_sections()
-        roms = app == ROMS_MARBL
+        roms = app == UCLA_ROMS
         for widget in (
             self.end_date,
             self.cdr_location,
@@ -1586,7 +1593,7 @@ class _StepPane:
     def _gather_overrides(self, app: str) -> dict[str, Any]:
         """The ``blueprint_overrides`` the widgets describe, raw YAML merged last."""
         out: dict[str, Any] = {}
-        if app == ROMS_MARBL:
+        if app == UCLA_ROMS:
             if end := self.end_date.value.strip():
                 out["runtime_params"] = {"end_date": _parse_datetime(end)}
             for row in self._rows:
@@ -1701,7 +1708,7 @@ class _StepPane:
                 if n not in self._form_touched
                 and _read_field_widget(*self._form[n][:2]) in ("", None)
             ]
-            if missing and self.app != ROMS_MARBL:
+            if missing and self.app != UCLA_ROMS:
                 lines.append(f"inline blueprint fields missing: {', '.join(missing)}")
         self.problem_lines = lines
         return lines
@@ -1710,7 +1717,7 @@ class _StepPane:
     def title(self) -> str:
         """``<name> · <application> · <window>`` for the accordion header."""
         window = ""
-        if self.app == ROMS_MARBL:
+        if self.app == UCLA_ROMS:
             facts = self.facts()
             end = self.end_date.value.strip() or (
                 str(facts.end_date) if facts and facts.end_date else ""
@@ -1766,7 +1773,7 @@ class _StepPane:
         self.raw_overrides.value = ""
         self._rows, self._form_app, self._form_touched = [], "", set()
         self.rows_box.children = []
-        if app == ROMS_MARBL:
+        if app == UCLA_ROMS:
             end = _pop_path(rest, "runtime_params", "end_date")
             self.end_date.value = "" if end is None else str(end)
             for section, fields in list(rest.get("namelist_overrides", {}).items()):
@@ -1931,7 +1938,7 @@ class _BaseChooser:
     """Form fields choosing the base of a time recipe: a step or a blueprint.
 
     A blueprint is turned into a base step on demand; a forge blueprint yields
-    a forge step plus the deferred roms_marbl step that runs what it emits.
+    a forge step plus the deferred ucla_roms step that runs what it emits.
     """
 
     def __init__(
@@ -1943,8 +1950,8 @@ class _BaseChooser:
         self._on_change = on_change
         self.kind = W.Dropdown(
             options=[
-                ("an existing roms_marbl step", _KIND_STEP),
-                ("a catalog roms_marbl blueprint", SOURCE_CATALOG_ROMS),
+                ("an existing ucla_roms step", _KIND_STEP),
+                ("a catalog ucla_roms blueprint", SOURCE_CATALOG_ROMS),
                 ("a catalog forge blueprint (forge, then run)", SOURCE_CATALOG_FORGE),
                 ("a blueprint path", SOURCE_PATH),
             ],
@@ -1998,7 +2005,7 @@ class _BaseChooser:
         self._on_change()
 
     def refresh(self, step_names: list[str]) -> None:
-        """Reload the choices from the page's roms_marbl steps and the catalog."""
+        """Reload the choices from the page's ucla_roms steps and the catalog."""
         page = self.page
         _set_options(self.step, [("(choose a step)", ""), *step_names])
         _set_options(
@@ -2097,15 +2104,15 @@ class _BaseChooser:
             emitted = emitted_for(path, FORGE)
             if emitted is None:
                 raise ValueError(f"cannot read a forge blueprint at {path!r}")
-            names = page.unique_names(FORGE, ROMS_MARBL)
+            names = page.unique_names(FORGE, UCLA_ROMS)
             forge, run = forge_then_run(
                 Path(path), emitted, names=(names[0], names[1])
             ).steps
             return run, [forge]
-        if app != ROMS_MARBL:
+        if app != UCLA_ROMS:
             raise ValueError(
                 f"the base blueprint is a {app!r} blueprint; time recipes need "
-                "roms_marbl (or forge, which generates one)"
+                "ucla_roms (or forge, which generates one)"
             )
         facts = blueprint_facts(path)
         compute = (
@@ -2117,7 +2124,7 @@ class _BaseChooser:
         return (
             Step(
                 name=name,
-                application=ROMS_MARBL,
+                application=UCLA_ROMS,
                 blueprint=path,
                 compute_overrides=compute,
             ),
@@ -2297,7 +2304,8 @@ class WorkplanBuilderPage:
         self.run_rows: list[_RunRow] = []
         self.run_steps: dict[str, list[str]] = {}
         self.run_workplans: dict[str, Any] = {}
-        self.recorded_runs: list[Any] = []
+        self.recorded_runs: list[WorkplanRun] = []
+        self.indexed_runs: list[ManifestRecord] = []
         self._suspended = 0
         self._accordion: Any = None
         self._shown: list[_StepPane] = []
@@ -2360,18 +2368,18 @@ class WorkplanBuilderPage:
         return list(names(application)) if names else []
 
     def roms_blueprint_names(self) -> list[str]:
-        """The catalog's roms_marbl blueprint names."""
-        return self._blueprint_names(ROMS_MARBL)
+        """The catalog's ucla_roms blueprint names."""
+        return self._blueprint_names(UCLA_ROMS)
 
     def forge_blueprint_names(self) -> list[str]:
         """The catalog's forge blueprint names."""
         return self._blueprint_names(FORGE)
 
     def roms_blueprint_file(self, name: str) -> tuple[str, list[str]]:
-        """The roms_marbl blueprint file of a catalog entry, and any problems."""
+        """The ucla_roms blueprint file of a catalog entry, and any problems."""
         if not name:
             return "", []
-        return str(self.catalog.blueprint_path(ROMS_MARBL, name)), []
+        return str(self.catalog.blueprint_path(UCLA_ROMS, name)), []
 
     def external_tokens(self) -> list[str]:
         """``step@alias`` tokens for the steps of the declared runs."""
@@ -2677,10 +2685,28 @@ class WorkplanBuilderPage:
             self._load_recorded(row)
         self._rebuild()
 
+    def _recorded_for(self, text: str) -> RunRecord | None:
+        """The listed run a row's text names: a run-id or ``run://<uuid>``.
+
+        A run-id is looked up among the tracked runs, a ``run://`` handle among
+        the runs only the index found; nothing here reads the run directories.
+        """
+        if record := next((r for r in self.recorded_runs if r.run_id == text), None):
+            return record
+        from cstar.orchestration.index import HandleKind, parse_run_handle
+
+        try:
+            handle = parse_run_handle(text)
+        except ValueError:
+            return None
+        if handle.kind is not HandleKind.uuid:
+            return None
+        return next((r for r in self.indexed_runs if r.uuid == handle.value), None)
+
     def _load_recorded(self, row: _RunRow) -> None:
-        """Load the steps of the recorded run matching ``row``'s run-id."""
-        alias, run_id = row.alias.value.strip(), row.run_id.value.strip()
-        record = next((r for r in self.recorded_runs if r.run_id == run_id), None)
+        """Load the steps of the listed run matching ``row``'s run-id."""
+        alias = row.alias.value.strip()
+        record = self._recorded_for(row.run_id.value.strip())
         if not alias or record is None:
             row.status.value = ""
             return
@@ -2695,31 +2721,46 @@ class WorkplanBuilderPage:
         typed = self.run_steps.get(alias, [])
         names = [s.name for s in live.steps]
         self.run_steps[alias] = [*names, *[t for t in typed if t not in names]]
-        statuses = {n: self._step_status(run_id, n) for n in names}
+        statuses = {n: record.step_status(n) or "recorded" for n in names}
         unfinished = [n for n, s in statuses.items() if s != "Done"]
         row.status.value = ", ".join(
             f"<code>{_esc(n)}</code> {_esc(s)}" for n, s in statuses.items()
         ) + (" " + components.chip("not finished", "warn") if unfinished else "")
 
-    @staticmethod
-    def _step_status(run_id: str, step: str) -> str:
-        """The persisted status of a recorded step, or ``recorded`` when unreadable."""
-        try:
-            from cstar.orchestration.orchestration import ProcessHandle
-            from cstar.orchestration.state import StateRepository
-
-            handle = deserialize(
-                StateRepository.sentinel_path(step, run_id=run_id), ProcessHandle
-            )
-            return handle.status.name
-        except Exception:
-            return "recorded"
-
     def refresh_runs(self) -> None:
-        """Load the recorded runs (newest first) into every row's picker."""
+        """Load the tracked and indexed runs (newest first) into every row's picker."""
         _schedule_coroutine(self._load_runs_async())
 
+    @staticmethod
+    def _scan_index(tracked: Sequence[WorkplanRun]) -> list[ManifestRecord]:
+        """The workplan runs the run directories hold that are not tracked here.
+
+        Scans the project's runs area and the data home with a fresh index: the
+        kernel outlives the runs made since the last click, so a scan is never
+        reused. Does file-system work, so it runs off the event loop.
+
+        Parameters
+        ----------
+        tracked
+            The tracked runs; a found run in the directory of one of them, or
+            with its uuid, is that run.
+        """
+        from cstar.orchestration.index import (
+            ManifestRecord,
+            RunIndex,
+            untracked_locations,
+        )
+
+        # a standalone blueprint run has no workplan steps to reference
+        found = [loc for loc in RunIndex().locations() if loc.kind == "workplan"]
+        # a run kept in more than one place is one run; the project's copy,
+        # found after the data home's, is the durable one
+        found = list({loc.uuid: loc for loc in found}.values())
+        return [ManifestRecord(loc) for loc in untracked_locations(found, tracked)]
+
     async def _load_runs_async(self) -> None:
+        import asyncio
+
         try:
             from cstar.orchestration.tracking import TrackingRepository
 
@@ -2729,16 +2770,40 @@ class WorkplanBuilderPage:
                 f"<span class='forge-msg-warn'>Could not list runs: {_esc(ex)}</span>"
             )
             return
-        self.recorded_runs = sorted(runs, key=lambda r: r.start_at, reverse=True)
-        options = [("recorded runs…", "")] + [
-            (f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M})", r.run_id)
+        from cstar.orchestration.index import run_uri, where_kept
+
+        self.recorded_runs = list(runs)
+        try:
+            self.indexed_runs = await asyncio.to_thread(
+                self._scan_index, self.recorded_runs
+            )
+            found = f"{len(self.indexed_runs)} more found in run directories"
+        except Exception as ex:
+            self.indexed_runs = []
+            found = (
+                "<span class='forge-msg-warn'>Could not scan the run "
+                f"directories: {_esc(ex)}</span>"
+            )
+        entries = [
+            (r.start_at, f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M})", r.run_id)
             for r in self.recorded_runs
+        ] + [
+            (
+                r.start_at,
+                f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M}, {where_kept(r.location)})",
+                run_uri(r.uuid),
+            )
+            for r in self.indexed_runs
+        ]
+        entries.sort(key=lambda entry: _aware(entry[0]), reverse=True)
+        options = [("recorded runs…", "")] + [
+            (label, value) for _, label, value in entries
         ]
         with self.suspended():
             for row in self.run_rows:
                 row.pick.options = options
                 self._load_recorded(row)
-        self.runs_status.value = f"{len(self.recorded_runs)} recorded run(s)"
+        self.runs_status.value = f"{len(self.recorded_runs)} recorded run(s), {found}"
         self._rebuild()
 
     # ---- compute card ----------------------------------------------------
@@ -3244,10 +3309,12 @@ class WorkplanBuilderPage:
             description=_caption("add_steps", "Add steps"), icon="plus"
         )
         self.forge_status = W.HTML("")
-        # upscale a nested chain
-        self.upscale_levels = W.TagsInput(allowed_tags=[], allow_duplicates=False)
+        # upscale a nested chain: not yet supported, so both controls stay disabled
+        # (`_upscale` still refuses, as a backstop)
+        # (a SelectMultiple, as TagsInput has no `disabled` trait)
+        self.upscale_levels = W.SelectMultiple(options=[], disabled=True)
         self.upscale_btn = W.Button(
-            description=_caption("add_steps", "Add steps"), icon="plus"
+            description=_caption("add_steps", "Add steps"), icon="plus", disabled=True
         )
         self.upscale_status = W.HTML("")
 
@@ -3284,11 +3351,11 @@ class WorkplanBuilderPage:
         remove.on_click(_remove)
 
     def roms_step_names(self) -> list[str]:
-        """The names of the roms_marbl steps (the bases the time recipes accept)."""
+        """The names of the ucla_roms steps (the bases the time recipes accept)."""
         return [
             p.name.value.strip()
             for p in self.panes
-            if p.name.value.strip() and p.app == ROMS_MARBL
+            if p.name.value.strip() and p.app == UCLA_ROMS
         ]
 
     def _refresh_recipes(self) -> None:
@@ -3301,17 +3368,15 @@ class WorkplanBuilderPage:
             [("a path…", ""), *self.forge_blueprint_names()],
         )
         _show(self.forge_path, not self.forge_source.value)
-        if list(self.upscale_levels.allowed_tags) != names:
-            self.upscale_levels.allowed_tags = names
+        self.upscale_levels.options = names
         self.chunk_first.refresh()
         self.ramp_first.refresh()
         self.recipe_hint.value = (
             ""
             if names
             else "<span class='forge-hint'>Chunk and ramp can start from a "
-            "blueprint; upscaling needs roms_marbl steps in the Steps card.</span>"
+            "blueprint.</span>"
         )
-        self.upscale_btn.disabled = not names
 
     def _on_chunk_base(self) -> None:
         self._prefill_window(self.chunk_base, self.chunk_start, self.chunk_end)
@@ -3457,23 +3522,17 @@ class WorkplanBuilderPage:
         emitted = emitted_for(path, FORGE)
         if emitted is None:
             raise ValueError(f"cannot read a forge blueprint at {path!r}")
-        forge_name, run_name = self.unique_names(FORGE, ROMS_MARBL)
+        forge_name, run_name = self.unique_names(FORGE, UCLA_ROMS)
         return forge_then_run(Path(path), emitted, names=(forge_name, run_name))
 
     def _upscale(self) -> Generated:
-        names = list(self.upscale_levels.value)
-        levels = [self.base_step(n) for n in names]
-
-        def use_pio(step: Step) -> bool:
-            # an unreadable level takes the blueprint model's default (off)
-            pane = self.pane_named(step.name)
-            if pane is not None and pane.source.value == SOURCE_DEFERRED:
-                emitted = self.emitted_for_token(pane.producer.value)
-                return emitted.use_pio if emitted is not None else False
-            facts = pane.facts() if pane else None
-            return bool(facts.use_pio) if facts is not None else False
-
-        return upscale_chain(levels, use_pio_of=use_pio)
+        raise ValueError(
+            "upscaling a nested run from the wizard is not yet supported: the "
+            "generated rerun would ignore the upscaled CDR forcing. Build it by "
+            "hand instead, as in the nesting and upscaling tutorial: a forge step "
+            "with cdr.mode: upscaled for the parent, and a continue-from on the "
+            "parent at the child's start."
+        )
 
     @staticmethod
     def _window_date(text: str, label: str) -> datetime:
@@ -3505,7 +3564,7 @@ class WorkplanBuilderPage:
         return {k.strip(): v.strip() for k, _sep, v in pairs}
 
     async def _deep_check_async(self) -> None:
-        """Resolve the draft as ``cstar workplan run`` would, listing every problem."""
+        """Resolve the draft as ``cstar workplan submit`` would, listing every problem."""
         draft = self.draft
         if draft is None:
             self.diagnostics.value = components.banner(
@@ -3603,7 +3662,7 @@ class WorkplanBuilderPage:
         self.pre_run_first = W.Checkbox(value=False, indent=False)
         self.check_btn = W.Button(description=_caption("check", "Check"), icon="check")
         self.run_btn = W.Button(
-            description=_caption("run", "Run"), icon="play", button_style="primary"
+            description=_caption("run", "Submit"), icon="play", button_style="primary"
         )
         self.run_status = W.HTML("")
         self._run_id_touched = False
@@ -3625,7 +3684,7 @@ class WorkplanBuilderPage:
         )
         self.run_id.observe(self._on_run_id, names="value")
         self.check_btn.on_click(lambda _b: self._start_run(CHECK))
-        self.run_btn.on_click(lambda _b: self._start_run(RUN))
+        self.run_btn.on_click(lambda _b: self._start_run(SUBMIT))
 
     def _on_run_id(self, _change: Any) -> None:
         if not self.is_suspended:
@@ -3656,11 +3715,11 @@ class WorkplanBuilderPage:
         exe = Path(sys.executable).with_name("cstar")
         cmd = [str(exe)] if exe.exists() else [sys.executable, "-m", "cstar.cli.cli"]
         cmd += ["workplan", action, str(path)]
-        if action == RUN and self.run_id.value.strip():
+        if action == SUBMIT and self.run_id.value.strip():
             cmd += [ARG_RUN_ID, self.run_id.value.strip()]
         for key, value in self.parsed_vars().items():
             cmd += [ARG_VAR_LONG, f"{key}={value}"]
-        if action == RUN and self.pre_run_first.value and self._pre_run_offered:
+        if action == SUBMIT and self.pre_run_first.value and self._pre_run_offered:
             cmd.append(ARG_PRE_RUN)
         return cmd
 
@@ -3985,7 +4044,14 @@ class WorkplanBuilderPage:
         self.sticky_bar.add_class("forge-sticky-html")
         sticky = W.HBox([self.sticky_bar, self.sticky_download])
         sticky.add_class("forge-sticky")
-        self._head = [components.style_widget(W), sticky]
+        # in the head, so every preview placement keeps it at the top
+        notice = components.banner_widget(
+            W,
+            "warn",
+            "<b>Under development.</b> The Workplan page works, but is still being "
+            "improved. Check the saved workplan before you run it.",
+        )
+        self._head = [components.style_widget(W), sticky, notice]
         self._intro = intro
         self.widget = W.VBox([*self._head, intro, self.columns])
         self.widget.add_class("forge-app")

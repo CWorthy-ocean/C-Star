@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.core import get_application
@@ -15,21 +16,19 @@ from cstar.applications.plotter import APP_NAME as APP_PLOTTER
 from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_1_0_0,
 )
-from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
+from cstar.applications.ucla_roms.app import APP_NAME as APP_ROMS
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_STATE_HOME,
-    FLAG_OFF,
     FLAG_ON,
+    REMOVED_SETTINGS,
 )
 from cstar.cli.blueprint.migrate import (
     app,
     report_inplace_conflicts,
     target_callback,
 )
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DRY_RUN
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DRY_RUN, ARG_VERBOSE
 from cstar.system.migration import KEY_APP
 
 ARG_INPLACE = "--inplace"
@@ -44,7 +43,8 @@ def blueprint_1_0_0(
     work_dir.mkdir(parents=True)
 
     versioned_file_name = "blueprint.1.0.0.yaml"
-    bp_2025_1 = bp_templates_dir / APP_ROMS / versioned_file_name
+    # The 1.0.0 template stays under the earlier application name's directory.
+    bp_2025_1 = bp_templates_dir / "roms_marbl" / versioned_file_name
     bp_path = work_dir / versioned_file_name
     content = bp_2025_1.read_text()
     bp_path.write_text(content)
@@ -103,14 +103,14 @@ def test_blueprint_migrate_persist_to_default(
 ) -> None:
     """Verify that a request to migrate a blueprint without specifying an output
     path explicitly results in the creation of a file matching the expected naming
-    convention `<input_file_stem>_<latest_version>.<ext>` in `$CSTAR_STATE_HOME`
+    convention `<input_file_stem>-<digest>_<latest_version>.<ext>` in
+    `$CSTAR_STATE_HOME`
     """
     app_name = APP_PLOTTER
     latest = get_application(app_name).schema_version
 
     bp_path = plotter_v1_0_0_bp
     state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
-    expected_output_path = state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
 
     runner = CliRunner()
     result = runner.invoke(
@@ -120,7 +120,9 @@ def test_blueprint_migrate_persist_to_default(
     )
 
     assert not result.stderr, result.stderr
-    assert expected_output_path.exists()
+    [expected_output_path] = state_dir.glob(
+        f"{bp_path.stem}-*_{latest}{bp_path.suffix}"
+    )
     assert expected_output_path.is_file()
 
     # sanity check content is not empty
@@ -173,17 +175,45 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
     assert set(state_dir.glob("*")) == before
 
 
+@pytest.mark.parametrize("new_key", [False, True])
+def test_blueprint_migrate_newer_minor(
+    tmp_path: Path, hello_world_bp_path: Path, new_key: bool
+) -> None:
+    """Verify a blueprint a newer minor release wrote needs nothing when it sets
+    only what this build knows, and is refused as too new, naming the key, when
+    it sets a key this build does not know.
+    """
+    latest = get_application(APP_HELLO_WORLD).schema_version
+    major, minor, _ = latest.split(".")
+    newer = f"{major}.{int(minor) + 1}.0"
+    document = yaml.safe_load(hello_world_bp_path.read_text())
+    document["schema_version"] = newer
+    if new_key:
+        document["future_field"] = True
+    bp_path = tmp_path / "newer.yaml"
+    bp_path.write_text(yaml.safe_dump(document))
+
+    result = CliRunner().invoke(app, [bp_path.as_posix()], color=False)
+
+    output = " ".join(result.stdout.split())
+    if new_key:
+        assert result.exit_code == 1, result.output
+        assert f"schema {newer} is newer" in output
+        assert "sets future_field" in output
+        assert "nothing to migrate" not in output
+    else:
+        assert result.exit_code == 0, result.output
+        assert f"compatible with this build ({latest}); nothing to migrate." in output
+
+
 @pytest.mark.parametrize("flag", ["--inplace", ARG_DRY_RUN])
 def test_blueprint_migrate_compatible_untouched(
     hello_world_bp_path: Path,
     flag: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that migrating a compatible blueprint in place or as a dry-run
     leaves the file byte-identical and writes no backup.
     """
-    # the dry-run flag sets an environment variable; restore it afterwards
-    monkeypatch.delenv(ENV_CSTAR_CLI_DRY_RUN, raising=False)
     original = hello_world_bp_path.read_bytes()
     siblings = set(hello_world_bp_path.parent.glob("*"))
 
@@ -198,6 +228,29 @@ def test_blueprint_migrate_compatible_untouched(
     assert "nothing to migrate" in " ".join(result.stdout.split())
     assert hello_world_bp_path.read_bytes() == original
     assert set(hello_world_bp_path.parent.glob("*")) == siblings
+
+
+@pytest.mark.parametrize("flag", ["--inplace", ARG_DRY_RUN])
+def test_blueprint_migrate_compatible_earlier_application_name_untouched(
+    blueprint_path: Path,
+    flag: str,
+) -> None:
+    """Verify a compatible blueprint authored under an earlier application name
+    is reported as nothing to migrate and is not rewritten.
+    """
+    original = blueprint_path.read_bytes()
+    assert b"application: roms_marbl" in original
+    siblings = set(blueprint_path.parent.glob("*"))
+
+    runner = CliRunner()
+    result = runner.invoke(app, [blueprint_path.as_posix(), flag], color=False)
+
+    assert result.exit_code == 0
+    output = " ".join(result.stdout.split())
+    assert f"is {APP_ROMS} schema 3.0.0" in output
+    assert "nothing to migrate" in output
+    assert blueprint_path.read_bytes() == original
+    assert set(blueprint_path.parent.glob("*")) == siblings
 
 
 def test_blueprint_migrate_custom_output(
@@ -254,6 +307,31 @@ def test_blueprint_migrate_dry_run(
     assert not expected_output_path.exists()
     assert f"Migrating {source!r}->{target!r}" in result.stdout
     assert "will be ignored during dry-run" in " ".join(result.stdout.split())
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_blueprint_migrate_verbose_shows_the_plan_table(
+    plotter_v1_0_0_bp: Path,
+    verbose: bool,
+) -> None:
+    """Verify `--verbose` displays every step of the migration plan in a table,
+    and its absence a one-line summary.
+
+    Parameters
+    ----------
+    plotter_v1_0_0_bp : Path
+        The path to an out-of-date blueprint
+    verbose : bool
+        Whether `--verbose` is passed.
+    """
+    args = [plotter_v1_0_0_bp.as_posix(), ARG_DRY_RUN, *([ARG_VERBOSE] * verbose)]
+
+    result = CliRunner().invoke(app, args, color=False)
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.stdout.split())
+    assert ("Migration Plan for" in output) is verbose
+    assert ("Migrating " in output) is not verbose
 
 
 @pytest.mark.parametrize(
@@ -322,43 +400,6 @@ def test_target_callback_dryrun_notifies(
     assert "will be ignored during dry-run" in flatten_cli_output(
         capsys.readouterr().out
     )
-
-
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON})
-def test_target_callback_dryrun_env_notifies(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    flatten_cli_output: Callable[[str], str],
-) -> None:
-    """Verify that dry-run mode enabled only through the environment variable
-    is detected even though the parameter is not yet processed.
-    """
-    output_path = tmp_path / "out.yaml"
-
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {}
-
-    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    assert "will be ignored during dry-run" in flatten_cli_output(
-        capsys.readouterr().out
-    )
-
-
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_ON})
-def test_target_callback_clobber_env_removes_existing(
-    tmp_path: Path,
-) -> None:
-    """Verify that clobber mode enabled only through the environment variable
-    is detected even though the parameter is not yet processed.
-    """
-    output_path = tmp_path / "output.yaml"
-    output_path.touch()
-
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {}
-
-    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    assert not output_path.exists()
 
 
 def test_target_callback_clobber_removes_existing(tmp_path: Path) -> None:
@@ -473,7 +514,6 @@ def test_blueprint_migrate_inplace_ignores_output(
     assert "will be ignored in in-place mode" in " ".join(result.stdout.split())
 
 
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_OFF})
 @pytest.mark.parametrize(
     "flags",
     [
@@ -508,30 +548,6 @@ def test_blueprint_migrate_inplace_clobber_conflict(
     assert not bp_path.with_suffix(f"{bp_path.suffix}.bak").exists()
 
 
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_ON})
-def test_blueprint_migrate_inplace_env_clobber_conflict(
-    plotter_v1_0_0_bp: Path,
-) -> None:
-    """Verify that clobber enabled via the environment variable also cancels
-    an in-place migration.
-    """
-    bp_path = plotter_v1_0_0_bp
-    original_content = bp_path.read_text()
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [bp_path.as_posix(), ARG_INPLACE],
-        color=False,
-    )
-
-    assert result.exit_code != 0
-    plain_stderr = " ".join(result.stderr.replace("│", " ").split())
-    assert "Clobbering in-place will result in loss of the input file" in plain_stderr
-    assert bp_path.read_text() == original_content
-
-
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_OFF})
 def test_blueprint_migrate_clobber_output(
     tmp_path: Path,
     plotter_v1_0_0_bp: Path,
@@ -555,7 +571,6 @@ def test_blueprint_migrate_clobber_output(
     assert output_path.read_text() != "pre-existing content"
 
 
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_OFF})
 def test_blueprint_migrate_dry_run_clobber_preserves_output(
     tmp_path: Path,
     plotter_v1_0_0_bp: Path,
@@ -579,27 +594,77 @@ def test_blueprint_migrate_dry_run_clobber_preserves_output(
     assert output_path.read_text() == "pre-existing content"
 
 
-@mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON})
-def test_blueprint_migrate_dry_run_env(
+@pytest.mark.parametrize(
+    "order",
+    [
+        ("source", "output", ARG_CLOBBER, ARG_DRY_RUN),
+        (ARG_CLOBBER, ARG_DRY_RUN, "source", "output"),
+        (ARG_DRY_RUN, "source", ARG_CLOBBER, "output"),
+    ],
+)
+def test_blueprint_migrate_dry_run_wins_in_any_order(
     tmp_path: Path,
     plotter_v1_0_0_bp: Path,
+    order: tuple[str, ...],
 ) -> None:
-    """Verify that dry-run mode enabled only through the environment variable
-    still reports the ignored output path and produces no file.
+    """Verify that a dry run keeps a pre-existing output file whatever the order
+    of `--dry-run` and `--clobber` relative to each other and to the paths.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test assets
+    plotter_v1_0_0_bp : Path
+        The path to an out-of-date blueprint
+    order : tuple[str, ...]
+        The command-line tokens, where `source` and `output` stand for the paths.
     """
-    bp_path = plotter_v1_0_0_bp
-    expected_output_path = tmp_path / "upgraded.yaml"
+    output_path = tmp_path / "output.json"
+    output_path.write_text("pre-existing content")
+    paths = {"source": plotter_v1_0_0_bp.as_posix(), "output": output_path.as_posix()}
 
     runner = CliRunner()
     result = runner.invoke(
         app,
-        [bp_path.as_posix(), expected_output_path.as_posix()],
+        [paths.get(token, token) for token in order],
         color=False,
     )
 
     assert not result.stderr, result.stderr
-    assert not expected_output_path.exists()
-    assert "will be ignored during dry-run" in " ".join(result.stdout.split())
+    assert result.exit_code == 0, result.output
+    assert output_path.read_text() == "pre-existing content"
+
+
+def test_blueprint_migrate_refuses_a_removed_dry_run_setting(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `blueprint migrate` exits 2 before clobbering or writing anything
+    while a removed setting that used to make it a dry run is still exported.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test assets
+    plotter_v1_0_0_bp : Path
+        The path to an out-of-date blueprint
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, "1")
+    output_path = tmp_path / "output.json"
+    output_path.write_text("pre-existing content")
+
+    result = CliRunner().invoke(
+        app,
+        [plotter_v1_0_0_bp.as_posix(), output_path.as_posix(), ARG_CLOBBER],
+        color=False,
+    )
+
+    assert result.exit_code == 2
+    assert output_path.read_text() == "pre-existing content"
 
 
 def test_blueprint_migrate_unplannable(
