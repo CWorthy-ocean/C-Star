@@ -71,13 +71,13 @@ WOA23_SALINITY_URL = (
 # ``longitude``/``latitude``/``depth`` and stores ``month`` as an integer index 1-12;
 # roms-tools still reads earlier files but logs a "predates v2.1" warning, and the
 # oldest ones lack the ``temp_WOA``/``salt_WOA`` fields that density-space BGC
-# interpolation and SSS restoring need. v2.2 (2026-10) corrects the ALK and DIC
-# fields of v2.1 and keeps its layout, so the roms-tools v2.1 reader applies as is;
+# interpolation and SSS restoring need. v2.1a (2026-10) corrects a unit error in v2.1
+# and keeps its layout, so the roms-tools v2.1 reader applies as is;
 # it was uploaded as a new version of the same Drive file, so the id is unchanged.
 # The version is not derivable from the Drive id, so both constants are literal —
 # bump them together. Every version bump re-downloads the 10 GB file on every host
 # (see the filename below), so bump only for a file whose content changed.
-UNIFIED_BGC_VERSION = "v2_2"
+UNIFIED_BGC_VERSION = "v2_1a"
 UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgdcef"
 # Versioned filename so bumping the URL actually re-downloads: the handler skips the
 # download when the target path already exists, so an unversioned name would leave
