@@ -353,6 +353,15 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
     "initial conditions. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
     "nearest source point. Ignored when a prefill is set.",
+    (
+        "ic",
+        "bottom_fill_blend_m",
+    ): "Metres over which tracers below a source column's bottom blend from that column's "
+    "own bottom value to the value of the nearest source column at the same depth. Blank = "
+    "roms-tools' default (25 m), right for most domains. Use 100 or more for shelf-only "
+    "domains, especially on a grid much finer than its source. '0' takes the neighbour's "
+    "value at once; 'inf' copies each column's bottom value down, as roms-tools releases "
+    "before this option did. Setting a value needs a roms-tools release with this option.",
     # ---- surface forcing -------------------------------------------------------
     (
         "surface",
@@ -455,6 +464,16 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
     "boundaries. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
     "nearest source point. Ignored when a prefill is set.",
+    (
+        "boundary",
+        "bottom_fill_blend_m",
+    ): "Metres over which tracers below a source column's bottom blend from that column's "
+    "own bottom value to the value of the nearest source column at the same depth. Blank = "
+    "roms-tools' default (25 m), right for most domains. Use 0 to 25 on deep, steep-slope "
+    "domains, and 100 or more for shelf-only domains, especially on a grid much finer than "
+    "its source. '0' takes the neighbour's value at once; 'inf' copies each column's bottom "
+    "value down, as roms-tools releases before this option did. Setting a value needs a "
+    "roms-tools release with this option.",
     # ---- tidal forcing ---------------------------------------------------------
     (
         "tidal",
@@ -2412,6 +2431,32 @@ def _parse_options(text: str) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _parse_blend_m(text: str) -> float | str | None:
+    """Parse the ``bottom_fill_blend_m`` text box (blank → ``None``, i.e. unset).
+
+    Text ``float()`` accepts (``inf`` included) → that float; anything else → the
+    stripped text, so blueprint validation reports it instead of dropping it.
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def _blend_m_text(value: Any) -> str:
+    """Show a loaded ``bottom_fill_blend_m`` in its text box (unset → '').
+
+    A float uses ``repr`` (the shortest text that reads back as the same float), minus
+    a trailing ``.0``, so a re-save never changes the value.
+    """
+    if value is None:
+        return ""
+    return repr(value).removesuffix(".0") if isinstance(value, float) else str(value)
+
+
 def _dump_options(options: Any) -> str:
     """Serialize an item's `options` dict back into the editor (empty → '')."""
     if not options:
@@ -2790,6 +2835,13 @@ class _ForcingEditor:
             style={"description_width": "110px"},
             tooltip=_tip("ic", "extrap_method"),
         )
+        self.ic_bottom_fill_blend_m = W.Text(
+            value=_blend_m_text(ic.get("bottom_fill_blend_m")),
+            description="bottom blend (m):",
+            placeholder="(default)",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "bottom_fill_blend_m"),
+        )
         self.ic_options = _options_editor(W, ic.get("options"))
         for _w in (
             self.ic_name,
@@ -2801,6 +2853,7 @@ class _ForcingEditor:
             self.ic_prefill,
             self.ic_regrid_method,
             self.ic_extrap_method,
+            self.ic_bottom_fill_blend_m,
             self.ic_options,
         ):
             _w.observe(lambda _ch: on_change(), names="value")
@@ -2820,6 +2873,7 @@ class _ForcingEditor:
                 self.ic_prefill,
                 self.ic_regrid_method,
                 self.ic_extrap_method,
+                self.ic_bottom_fill_blend_m,
                 self.ic_options,
             ):
                 w.layout.display = "" if has_ic else "none"
@@ -2921,6 +2975,13 @@ class _ForcingEditor:
             style={"description_width": "110px"},
             tooltip=_tip("boundary", "extrap_method"),
         )
+        self.boundary_bottom_fill_blend_m = W.Text(
+            value=_blend_m_text(boundary_block.get("bottom_fill_blend_m")),
+            description="bottom blend (m):",
+            placeholder="(default)",
+            style={"description_width": "110px"},
+            tooltip=_tip("boundary", "bottom_fill_blend_m"),
+        )
         self.boundary_options = _options_editor(W, boundary_block.get("options"))
         self.boundary_validate = W.Checkbox(
             value=not bool(boundary_block.get("bypass_validation", False)),
@@ -2937,6 +2998,7 @@ class _ForcingEditor:
             self.boundary_prefill,
             self.boundary_regrid_method,
             self.boundary_extrap_method,
+            self.boundary_bottom_fill_blend_m,
             self.boundary_options,
         ):
             _w.observe(lambda _ch: on_change(), names="value")
@@ -2953,6 +3015,7 @@ class _ForcingEditor:
                 self.boundary_prefill,
                 self.boundary_regrid_method,
                 self.boundary_extrap_method,
+                self.boundary_bottom_fill_blend_m,
                 self.boundary_options,
             ):
                 w.layout.display = "" if has_boundary else "none"
@@ -3874,6 +3937,9 @@ class _ForcingEditor:
             ic["regrid_method"] = self.ic_regrid_method.value
         if self.ic_extrap_method.value:
             ic["extrap_method"] = self.ic_extrap_method.value
+        ic_blend = _parse_blend_m(self.ic_bottom_fill_blend_m.value)
+        if ic_blend is not None:  # blank = leave unset (roms-tools' default)
+            ic["bottom_fill_blend_m"] = ic_blend
         ic_opts = _parse_options(self.ic_options.value)
         if ic_opts:
             ic["options"] = ic_opts
@@ -3912,6 +3978,9 @@ class _ForcingEditor:
                 boundary["regrid_method"] = self.boundary_regrid_method.value
             if self.boundary_extrap_method.value:
                 boundary["extrap_method"] = self.boundary_extrap_method.value
+            boundary_blend = _parse_blend_m(self.boundary_bottom_fill_blend_m.value)
+            if boundary_blend is not None:
+                boundary["bottom_fill_blend_m"] = boundary_blend
             boundary_opts = _parse_options(self.boundary_options.value)
             if boundary_opts:
                 boundary["options"] = boundary_opts
@@ -3954,6 +4023,9 @@ class _ForcingEditor:
                     ),
                     components.field_row(
                         W, "ic.ic_extrap_method", self.ic_extrap_method
+                    ),
+                    components.field_row(
+                        W, "ic.ic_bottom_fill_blend_m", self.ic_bottom_fill_blend_m
                     ),
                 ],
             ),
@@ -4003,6 +4075,11 @@ class _ForcingEditor:
                         W,
                         "boundary.boundary_extrap_method",
                         self.boundary_extrap_method,
+                    ),
+                    components.field_row(
+                        W,
+                        "boundary.boundary_bottom_fill_blend_m",
+                        self.boundary_bottom_fill_blend_m,
                     ),
                 ],
             ),

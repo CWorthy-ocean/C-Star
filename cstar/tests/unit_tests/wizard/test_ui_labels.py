@@ -38,6 +38,7 @@ _IC_ATTRS = (
     "ic_prefill",
     "ic_regrid_method",
     "ic_extrap_method",
+    "ic_bottom_fill_blend_m",
     "ic_options",
 )
 _BOUNDARY_ATTRS = (
@@ -48,6 +49,7 @@ _BOUNDARY_ATTRS = (
     "boundary_prefill",
     "boundary_regrid_method",
     "boundary_extrap_method",
+    "boundary_bottom_fill_blend_m",
     "boundary_validate",
     "boundary_options",
 )
