@@ -802,13 +802,6 @@ class SourceSpec(_Section):
     the content hash** (``exclude_if``), so blueprints written before the field
     existed keep their hash, and blueprints saved with it off still load on builds
     that do not know it -- the same arrangement as an unset ``carbonate_sensitivity``."""
-    esper_groom: bool | None = Field(default=None, exclude_if=lambda v: v is None)
-    """Groom the ESPER-derived tracers: roms-tools detects implausible values (spikes,
-    zeros beside ordinary water, DIC inconsistent with ALK, ...) and refills them from
-    the surrounding water (``roms_tools.setup.bgc_groom``). Unset (``None``) leaves the
-    choice to roms-tools' own default (``ESPER_GROOM_DEFAULT``, on); ``False`` turns it
-    off. Only valid when ``name == "ESPER"``. Unset is **left out of saved blueprints and
-    the content hash** (``exclude_if``), so existing blueprints keep their hash."""
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
@@ -837,11 +830,10 @@ class SourceSpec(_Section):
             self.esper_method is not None
             or self.esper_equation is not None
             or self.esper_salinity_conditioning
-            or self.esper_groom is not None
         ) and not is_esper:
             raise ValueError(
-                "esper_method/esper_equation/esper_salinity_conditioning/esper_groom "
-                "are only valid when name is 'ESPER'"
+                "esper_method/esper_equation/esper_salinity_conditioning are only "
+                "valid when name is 'ESPER'"
             )
         # No path requirement for ESPER: without one, roms-tools imports PyESPER
         # from the environment and PyESPER resolves its own data directories
@@ -1057,6 +1049,24 @@ class BgcSourceItem(_Section):
     initial-conditions write."""
 
 
+def _check_groom_settings(settings: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate a section's ``groom_settings`` early with roms-tools' own checker.
+
+    ``roms_tools.setup.bgc_groom.resolve_groom_settings`` raises ``ValueError`` on an
+    unknown key, so a typo fails when the blueprint loads rather than at generation.
+    Imported lazily and skipped when the installed roms-tools does not have it (or
+    is absent): roms-tools validates again when it builds the forcing.
+    """
+    if settings is None:
+        return None
+    try:
+        from roms_tools.setup.bgc_groom import resolve_groom_settings
+    except (ImportError, AttributeError):
+        return settings
+    resolve_groom_settings(settings)
+    return settings
+
+
 def _require_partitioned_bgc_use_vars(
     bgc_sources: list[BgcSourceItem], section_label: str
 ) -> None:
@@ -1117,6 +1127,26 @@ class InitialConditions(_Section):
     across physics + every bgc source). Off (validation runs) by default;
     the wizard exposes this as a checked "Validate" box, so checking it off
     corresponds to setting this True."""
+    groom: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    """Groom the ESPER-derived tracers: roms-tools detects implausible values and
+    refills them from the surrounding water (see ``roms_tools.setup.bgc_groom``).
+    Passed to roms-tools' ``groom`` only when set; unset (``None``) leaves roms-tools'
+    own default (on) in charge. The wizard's "Groom ESPER tracers" checkbox writes
+    ``False`` when unchecked. Unset is **left out of saved blueprints and the content
+    hash** (``exclude_if``), so existing blueprints keep their hash."""
+    groom_settings: dict[str, Any] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    """Optional overrides of roms-tools' grooming thresholds, passed to roms-tools'
+    ``groom_settings`` only when set (unset = roms-tools' built-in defaults). Set only
+    by hand-editing a forge blueprint YAML -- the wizard does not expose it, but keeps
+    one it loads. See the ROMS-Tools docs for the keys. Unset is left out of saved
+    blueprints and the content hash."""
+
+    @field_validator("groom_settings")
+    @classmethod
+    def _groom_settings_known(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _check_groom_settings(v)
 
     @model_validator(mode="after")
     def _bgc_sources_use_vars_partitioned(self) -> InitialConditions:
@@ -1154,6 +1184,26 @@ class BoundaryForcing(_Section):
     across physics + every bgc source). Off (validation runs) by default;
     the wizard exposes this as a checked "Validate" box, so checking it off
     corresponds to setting this True."""
+    groom: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    """Groom the ESPER-derived tracers: roms-tools detects implausible values and
+    refills them from the surrounding water (see ``roms_tools.setup.bgc_groom``).
+    Passed to roms-tools' ``groom`` only when set; unset (``None``) leaves roms-tools'
+    own default (on) in charge. The wizard's "Groom ESPER tracers" checkbox writes
+    ``False`` when unchecked. Unset is **left out of saved blueprints and the content
+    hash** (``exclude_if``), so existing blueprints keep their hash."""
+    groom_settings: dict[str, Any] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    """Optional overrides of roms-tools' grooming thresholds, passed to roms-tools'
+    ``groom_settings`` only when set (unset = roms-tools' built-in defaults). Set only
+    by hand-editing a forge blueprint YAML -- the wizard does not expose it, but keeps
+    one it loads. See the ROMS-Tools docs for the keys. Unset is left out of saved
+    blueprints and the content hash."""
+
+    @field_validator("groom_settings")
+    @classmethod
+    def _groom_settings_known(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _check_groom_settings(v)
 
     @model_validator(mode="after")
     def _bgc_sources_use_vars_partitioned(self) -> BoundaryForcing:

@@ -541,7 +541,6 @@ def test_surface_bgc_row_never_gets_use_vars_or_bgc_source_widgets(editor):
     assert "esper_method" not in w
     assert "esper_equation" not in w
     assert "esper_salinity_conditioning" not in w
-    assert "esper_groom" not in w
 
 
 def test_surface_bgc_row_gathers_a_validating_surface_forcing_item(editor):
@@ -616,24 +615,110 @@ def test_esper_salinity_conditioning_unchecked_is_not_emitted(editor, cat):
 
 
 @pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
-def test_esper_groom_round_trips_off_and_leaves_default_unset(editor, cat):
-    """Checked = unset (roms-tools default, on) and emits nothing; an explicit
-    ``esper_groom: False`` loads unchecked and gathers back as ``False``; a non-ESPER
-    source never emits it.
+def test_esper_rows_have_no_groom_control(editor, cat):
+    """Grooming is a section setting (one checkbox per IC/boundary pane), not a
+    per-source one: an ESPER row neither offers nor emits a ``groom`` key.
     """
     w = editor._make_row(cat, {"source": {"name": "ESPER"}})
-    assert w["esper_groom"].value is True
-    assert "esper_groom" not in editor._gather_item(cat, w)["source"]
-
-    w = editor._make_row(cat, {"source": {"name": "ESPER", "esper_groom": False}})
-    assert w["esper_groom"].value is False
+    assert "esper_groom" not in w and "groom" not in w
     item = editor._gather_item(cat, w)
-    assert item["source"]["esper_groom"] is False
-    BgcSourceItem(**item)
+    assert "groom" not in item["source"] and "esper_groom" not in item["source"]
+    assert "groom" not in item
 
-    w["name"].value = "GLODAP"
-    editor._apply_row_visibility(w)
-    assert "esper_groom" not in editor._gather_item(cat, w)["source"]
+
+def _groom_section(gathered, section):
+    return (
+        gathered["initial_conditions"]
+        if section == "ic"
+        else gathered["forcing"]["boundary"]
+    )
+
+
+def _groom_seed(section, block):
+    block = {"source": {"name": "GLORYS"}, **block}
+    if section == "ic":
+        return {"initial_conditions": block}
+    return {
+        "initial_conditions": {"source": {"name": "GLORYS"}},
+        "forcing": {"boundary": block},
+    }
+
+
+@pytest.mark.parametrize("section", ["ic", "boundary"])
+def test_groom_checkbox_round_trips_through_editor(section):
+    """The "Groom ESPER tracers" box is checked by default and then writes nothing
+    (roms-tools' default, on); unchecking writes ``groom: False``, which reloads
+    unchecked; an explicit ``groom: True`` is kept on re-save.
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, _groom_seed(section, {}), on_change=lambda: None)
+    box = getattr(ed, f"{section}_groom")
+    assert box.value is True
+    assert "groom" not in _groom_section(ed.gather(), section)
+
+    box.value = False
+    gathered = ed.gather()
+    assert _groom_section(gathered, section)["groom"] is False
+    ed2 = _ForcingEditor(W, gathered, on_change=lambda: None)
+    assert getattr(ed2, f"{section}_groom").value is False
+
+    ed3 = _ForcingEditor(
+        W, _groom_seed(section, {"groom": True}), on_change=lambda: None
+    )
+    assert getattr(ed3, f"{section}_groom").value is True
+    assert _groom_section(ed3.gather(), section)["groom"] is True
+
+
+def test_groom_checkbox_is_in_each_section_pane(editor):
+    found = set()
+
+    def _walk(node):
+        found.add(id(node))
+        for c in getattr(node, "children", []):
+            _walk(c)
+
+    _walk(editor.widget)
+    assert id(editor.ic_groom) in found
+    assert id(editor.boundary_groom) in found
+
+
+def _build_with_forcing(inputs):
+    """A blueprint-shaped stand-in carrying just the resolver-built ``forcing``."""
+    from cstar.applications.forge.resolve import _build_forcing
+
+    return SimpleNamespace(forcing=_build_forcing(copy.deepcopy(inputs)))
+
+
+def test_groom_settings_survive_wizard_load_and_resave():
+    """``groom_settings`` has no widget, but a blueprint hand-edited to carry it
+    must keep it through the wizard: blueprint -> ``_sources_to_inputs`` ->
+    ``_ForcingEditor`` -> ``gather()`` -> resolver.
+    """
+    import ipywidgets as W
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    fdata["initial_conditions"]["groom_settings"] = {"some_threshold": 3.0}
+    fdata["initial_conditions"]["groom"] = False
+    fdata["forcing"]["boundary"]["groom_settings"] = {"other": 1}
+    cfg = _build_with_forcing(fdata)
+
+    seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    assert ed.ic_groom.value is False
+    assert ed.boundary_groom.value is True
+    gathered = ed.gather()
+    assert gathered["initial_conditions"]["groom_settings"] == {"some_threshold": 3.0}
+    assert gathered["initial_conditions"]["groom"] is False
+    assert gathered["forcing"]["boundary"]["groom_settings"] == {"other": 1}
+    assert "groom" not in gathered["forcing"]["boundary"]
+
+    cfg2 = _build_with_forcing(gathered)
+    for sec in ("initial_conditions", "boundary"):
+        a, b = getattr(cfg.forcing, sec), getattr(cfg2.forcing, sec)
+        assert (a.groom, a.groom_settings) == (b.groom, b.groom_settings)
 
 
 @pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])

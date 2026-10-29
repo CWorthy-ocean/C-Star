@@ -181,35 +181,56 @@ def test_esper_salinity_conditioning_reaches_forcing_override_as_a_switch():
     )
 
 
-def test_esper_groom_reaches_roms_tools_only_when_set():
-    """``SourceSpec.esper_groom`` travels as roms-tools' ``groom`` key; unset emits
-    nothing, so roms-tools' own default applies.
+def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
+    """``groom``/``groom_settings`` on the IC/boundary sections become the
+    roms-tools ``InitialConditions``/``BoundaryForcing`` kwargs of the same name
+    (``RomsInputGenerator`` passes each section dict through as constructor kwargs);
+    unset emits nothing, so roms-tools' own defaults apply. No source dict, ESPER
+    or otherwise, ever carries a ``groom`` key.
     """
     cfg = _build()
-    boundary = cfg.forcing.boundary
+    f = cfg.forcing
+    esper = SourceSpec(name="ESPER")
 
-    def _src(source):
-        changed = cfg.model_copy(
+    def _sec(sec, **update):
+        bgc = [sec.bgc_sources[0].model_copy(update={"source": esper})]
+        return sec.model_copy(update={"bgc_sources": bgc, **update})
+
+    unset = sources_to_forcing_override(
+        cfg.model_copy(
             update={
-                "forcing": cfg.forcing.model_copy(
+                "forcing": f.model_copy(
                     update={
-                        "boundary": boundary.model_copy(
-                            update={
-                                "bgc_sources": [
-                                    boundary.bgc_sources[0].model_copy(
-                                        update={"source": source}
-                                    )
-                                ]
-                            }
-                        )
+                        "initial_conditions": _sec(f.initial_conditions),
+                        "boundary": _sec(f.boundary),
                     }
                 )
             }
         )
-        out = sources_to_forcing_override(changed)
-        return out["forcing"]["boundary"]["bgc_sources"][0]["source"]
-
-    assert _src(SourceSpec(name="ESPER", esper_groom=False))["groom"] is False
-    assert _src(SourceSpec(name="ESPER", esper_groom=True))["groom"] is True
-    unset = _src(SourceSpec(name="ESPER"))
-    assert "groom" not in unset and "esper_groom" not in unset
+    )
+    settings = {"some_threshold": 3.0}
+    set_ = sources_to_forcing_override(
+        cfg.model_copy(
+            update={
+                "forcing": f.model_copy(
+                    update={
+                        "initial_conditions": _sec(
+                            f.initial_conditions, groom=False, groom_settings=settings
+                        ),
+                        "boundary": _sec(f.boundary, groom=True),
+                    }
+                )
+            }
+        )
+    )
+    for ov in (unset, set_):
+        for sec in (ov["initial_conditions"], ov["forcing"]["boundary"]):
+            assert sec["bgc_sources"][0]["source"]["name"] == "ESPER"
+            assert "groom" not in sec["source"]
+            assert all("groom" not in bs["source"] for bs in sec["bgc_sources"])
+    for sec in (unset["initial_conditions"], unset["forcing"]["boundary"]):
+        assert "groom" not in sec and "groom_settings" not in sec
+    assert set_["initial_conditions"]["groom"] is False
+    assert set_["initial_conditions"]["groom_settings"] == settings
+    assert set_["forcing"]["boundary"]["groom"] is True
+    assert "groom_settings" not in set_["forcing"]["boundary"]

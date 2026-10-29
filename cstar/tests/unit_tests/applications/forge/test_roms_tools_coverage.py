@@ -63,6 +63,10 @@ _FORGE_FIELDS = {
         # roms-tools default); promoted from the SKIP_LIST after a real
         # production crash traced to _validate() running unprotected.
         "bypass_validation",
+        # ESPER grooming (wizard "Groom ESPER tracers" box; groom_settings is
+        # hand-edited YAML only). Passed only when set.
+        "groom",
+        "groom_settings",
     },
     "SurfaceForcing": {
         "type",
@@ -93,6 +97,10 @@ _FORGE_FIELDS = {
         # roms-tools default); promoted from the SKIP_LIST after a real
         # production crash traced to _validate() running unprotected.
         "bypass_validation",
+        # ESPER grooming (wizard "Groom ESPER tracers" box; groom_settings is
+        # hand-edited YAML only). Passed only when set.
+        "groom",
+        "groom_settings",
     },
     "TidalForcing": {
         "ntides",

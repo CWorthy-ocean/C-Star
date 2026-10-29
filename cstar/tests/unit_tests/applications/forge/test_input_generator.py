@@ -1485,6 +1485,55 @@ class TestRomsInputGeneratorGeneration:
         assert mock_ic_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
     @patch("cstar.applications.forge.input_generator.rt.InitialConditions")
+    def test_generate_initial_conditions_forwards_groom_only_when_set(
+        self, mock_ic_class, sample_roms_input_generator, tmp_path
+    ):
+        """The section's groom/groom_settings reach rt.InitialConditions as kwargs;
+        a section without them passes neither (roms-tools' defaults apply).
+        """
+        mock_ic = MagicMock()
+        ic_path = tmp_path / "ic.nc"
+        ic_path.touch()
+        mock_ic.save.return_value = [ic_path]
+        mock_ic_class.return_value = mock_ic
+
+        sample_roms_input_generator._generate_initial_conditions(
+            source={"name": "GLORYS"},
+            groom=False,
+            groom_settings={"some_threshold": 3.0},
+        )
+        kwargs = mock_ic_class.call_args.kwargs
+        assert kwargs["groom"] is False
+        assert kwargs["groom_settings"] == {"some_threshold": 3.0}
+
+        sample_roms_input_generator._generate_initial_conditions(
+            source={"name": "GLORYS"}
+        )
+        kwargs = mock_ic_class.call_args.kwargs
+        assert "groom" not in kwargs and "groom_settings" not in kwargs
+
+    @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
+    def test_generate_boundary_forcing_forwards_groom_only_when_set(
+        self, mock_bf_class, sample_roms_input_generator, tmp_path
+    ):
+        mock_bf = MagicMock()
+        mock_bf.bgc = []
+        boundary_path = tmp_path / "boundary.nc"
+        boundary_path.touch()
+        mock_bf.physics.save.return_value = [boundary_path]
+        mock_bf_class.return_value = mock_bf
+
+        sample_roms_input_generator._generate_boundary_forcing(
+            key="forcing.boundary",
+            source={"name": "GLORYS"},
+            groom=True,
+            groom_settings={"some_threshold": 3.0},
+        )
+        kwargs = mock_bf_class.call_args.kwargs
+        assert kwargs["groom"] is True
+        assert kwargs["groom_settings"] == {"some_threshold": 3.0}
+
+    @patch("cstar.applications.forge.input_generator.rt.InitialConditions")
     def test_generate_initial_conditions_multiple_paths(
         self, mock_ic_class, sample_roms_input_generator, tmp_path
     ):
