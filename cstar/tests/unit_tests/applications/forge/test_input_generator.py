@@ -1485,6 +1485,24 @@ class TestRomsInputGeneratorGeneration:
         assert mock_ic_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
     @patch("cstar.applications.forge.input_generator.rt.InitialConditions")
+    @pytest.mark.parametrize("value", [0, 25.0, float("inf")])
+    def test_generate_initial_conditions_forwards_bottom_fill_blend_m(
+        self, mock_ic_class, value, sample_roms_input_generator, tmp_path
+    ):
+        """bottom_fill_blend_m reaches rt.InitialConditions verbatim."""
+        mock_ic = MagicMock()
+        ic_path = tmp_path / "ic.nc"
+        ic_path.touch()
+        mock_ic.save.return_value = [ic_path]
+        mock_ic_class.return_value = mock_ic
+
+        sample_roms_input_generator._generate_initial_conditions(
+            source={"name": "GLORYS"}, bottom_fill_blend_m=value
+        )
+
+        assert mock_ic_class.call_args.kwargs["bottom_fill_blend_m"] == value
+
+    @patch("cstar.applications.forge.input_generator.rt.InitialConditions")
     def test_generate_initial_conditions_multiple_paths(
         self, mock_ic_class, sample_roms_input_generator, tmp_path
     ):
@@ -1674,6 +1692,54 @@ class TestRomsInputGeneratorGeneration:
             )
             > 0
         )
+
+    @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
+    @pytest.mark.parametrize("value", [0, 25.0, float("inf")])
+    def test_generate_boundary_forcing_forwards_bottom_fill_blend_m(
+        self, mock_bf_class, value, sample_roms_input_generator, tmp_path
+    ):
+        """bottom_fill_blend_m reaches rt.BoundaryForcing verbatim."""
+        mock_bf = MagicMock()
+        mock_bf.bgc = []
+        boundary_path = tmp_path / "boundary.nc"
+        boundary_path.touch()
+        mock_bf.physics.save.return_value = [boundary_path]
+        mock_bf_class.return_value = mock_bf
+
+        sample_roms_input_generator._generate_boundary_forcing(
+            key="forcing.boundary",
+            source={"name": "GLORYS"},
+            bottom_fill_blend_m=value,
+        )
+
+        assert mock_bf_class.call_args.kwargs["bottom_fill_blend_m"] == value
+
+    @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
+    def test_generate_boundary_forcing_yaml_sidecar_only_forwards_bottom_fill_blend_m(
+        self, mock_bf_class, sample_roms_input_generator
+    ):
+        """The yaml-sidecar-only rebuild (NetCDF on disk, sidecar missing) builds
+        rt.BoundaryForcing through the same kwargs, bottom_fill_blend_m included.
+        """
+        mock_bf = MagicMock()
+        mock_bf.bgc = []
+        mock_bf_class.return_value = mock_bf
+        data = sample_roms_input_generator
+
+        with (
+            patch.object(
+                data, "_existing_output_paths", return_value=["boundary-physics.nc"]
+            ),
+            pytest.warns(UserWarning, match="YAML sidecar"),
+        ):
+            data._generate_boundary_forcing(
+                key="forcing.boundary",
+                source={"name": "GLORYS"},
+                bottom_fill_blend_m=float("inf"),
+            )
+
+        assert mock_bf_class.call_args.kwargs["bottom_fill_blend_m"] == float("inf")
+        mock_bf.physics.save.assert_not_called()
 
     @patch("cstar.applications.forge.input_generator.rt.TidalForcing")
     def test_generate_tidal_forcing(

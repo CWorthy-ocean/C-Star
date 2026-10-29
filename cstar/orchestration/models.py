@@ -391,6 +391,11 @@ class Provenance(ConfiguredBaseModel):
 class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """Common elements of all blueprints."""
 
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(ser_json_inf_nan="constants")
+    """Keeps an infinite float (``.inf`` in YAML) as one in a JSON-mode dump. Under
+    pydantic's default the wrap serializer below turns it into ``None``, so a save,
+    copy or content hash would record a different setting."""
+
     SCHEMA_LABEL: t.ClassVar[str] = "blueprint"
 
     name: RequiredString
@@ -890,8 +895,11 @@ class Step(ConfiguredBaseModel):
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
         polymorphic_serialization=True,
+        ser_json_inf_nan="constants",
     )
-    """Configures the behavior of the pydantic model."""
+    """Configures the behavior of the pydantic model. An infinite override (``.inf``)
+    stays one through the JSON round trip that template filling makes; under
+    pydantic's default it becomes ``null`` and fails validation."""
 
     @field_validator("blueprint_path", mode="before")
     @classmethod
