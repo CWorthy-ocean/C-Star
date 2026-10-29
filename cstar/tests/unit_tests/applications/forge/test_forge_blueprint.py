@@ -9645,9 +9645,9 @@ def test_section_groom_fields_unset_by_default_and_left_out_of_the_hash(section)
     off = _with(groom=False)
     assert off.forcing.model_dump()[section]["groom"] is False
     assert off.content_hash() != cfg.content_hash()
-    tuned = _with(groom_settings={"some_threshold": 3.0})
+    tuned = _with(groom_settings={"passes": 2})
     assert tuned.forcing.model_dump()[section]["groom_settings"] == {
-        "some_threshold": 3.0
+        "passes": 2
     }
     assert tuned.content_hash() != cfg.content_hash()
 
@@ -9660,13 +9660,13 @@ def test_section_groom_fields_resolve_from_forcing_inputs():
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["groom"] = False
-    fdata["initial_conditions"]["groom_settings"] = {"some_threshold": 3.0}
-    fdata["forcing"]["boundary"]["groom_settings"] = {"other": 1}
+    fdata["initial_conditions"]["groom_settings"] = {"passes": 2}
+    fdata["forcing"]["boundary"]["groom_settings"] = {"relax_sweeps": 3}
     cfg = _build(forcing_inputs=fdata)
     assert cfg.forcing.initial_conditions.groom is False
-    assert cfg.forcing.initial_conditions.groom_settings == {"some_threshold": 3.0}
+    assert cfg.forcing.initial_conditions.groom_settings == {"passes": 2}
     assert cfg.forcing.boundary.groom is None
-    assert cfg.forcing.boundary.groom_settings == {"other": 1}
+    assert cfg.forcing.boundary.groom_settings == {"relax_sweeps": 3}
 
 
 def test_groom_settings_validated_by_roms_tools_when_available(monkeypatch):
@@ -9696,3 +9696,23 @@ def test_groom_settings_validated_by_roms_tools_when_available(monkeypatch):
     )
     assert _check_groom_settings({"bogus": 1}) == {"bogus": 1}
     assert _check_groom_settings(None) is None
+
+
+def test_empty_groom_settings_normalizes_to_unset():
+    """A hand-written ``groom_settings: {}`` means roms-tools' defaults, same as unset:
+    it loads as ``None``, so it stays out of the dump and the content hash (and a
+    wizard load/re-save, which drops empty dicts, leaves the hash unchanged).
+    """
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    base = _build(forcing_inputs=fdata)
+    fdata["initial_conditions"]["groom_settings"] = {}
+    fdata["forcing"]["boundary"]["groom_settings"] = {}
+    cfg = _build(forcing_inputs=fdata)
+    assert cfg.forcing.initial_conditions.groom_settings is None
+    assert cfg.forcing.boundary.groom_settings is None
+    dumped = cfg.forcing.model_dump()
+    assert "groom_settings" not in dumped["initial_conditions"]
+    assert "groom_settings" not in dumped["boundary"]
+    assert cfg.content_hash() == base.content_hash()

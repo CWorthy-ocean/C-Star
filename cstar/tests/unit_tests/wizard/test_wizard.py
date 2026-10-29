@@ -700,9 +700,9 @@ def test_groom_settings_survive_wizard_load_and_resave():
     from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = cat.forcing_data("glorys-era5-unified")
-    fdata["initial_conditions"]["groom_settings"] = {"some_threshold": 3.0}
+    fdata["initial_conditions"]["groom_settings"] = {"passes": 2}
     fdata["initial_conditions"]["groom"] = False
-    fdata["forcing"]["boundary"]["groom_settings"] = {"other": 1}
+    fdata["forcing"]["boundary"]["groom_settings"] = {"relax_sweeps": 3}
     cfg = _build_with_forcing(fdata)
 
     seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
@@ -710,9 +710,9 @@ def test_groom_settings_survive_wizard_load_and_resave():
     assert ed.ic_groom.value is False
     assert ed.boundary_groom.value is True
     gathered = ed.gather()
-    assert gathered["initial_conditions"]["groom_settings"] == {"some_threshold": 3.0}
+    assert gathered["initial_conditions"]["groom_settings"] == {"passes": 2}
     assert gathered["initial_conditions"]["groom"] is False
-    assert gathered["forcing"]["boundary"]["groom_settings"] == {"other": 1}
+    assert gathered["forcing"]["boundary"]["groom_settings"] == {"relax_sweeps": 3}
     assert "groom" not in gathered["forcing"]["boundary"]
 
     cfg2 = _build_with_forcing(gathered)

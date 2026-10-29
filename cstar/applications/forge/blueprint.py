@@ -1055,9 +1055,12 @@ def _check_groom_settings(settings: dict[str, Any] | None) -> dict[str, Any] | N
     ``roms_tools.setup.bgc_groom.resolve_groom_settings`` raises ``ValueError`` on an
     unknown key, so a typo fails when the blueprint loads rather than at generation.
     Imported lazily and skipped when the installed roms-tools does not have it (or
-    is absent): roms-tools validates again when it builds the forcing.
+    is absent): roms-tools validates again when it builds the forcing. An empty dict
+    means the same as unset (roms-tools' defaults), so it normalizes to ``None``: a
+    hand-written ``groom_settings: {}`` then stays out of the content hash and
+    survives a wizard load/re-save unchanged.
     """
-    if settings is None:
+    if not settings:
         return None
     try:
         from roms_tools.setup.bgc_groom import resolve_groom_settings

@@ -208,7 +208,7 @@ def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
             }
         )
     )
-    settings = {"some_threshold": 3.0}
+    settings = {"passes": 2}
     set_ = sources_to_forcing_override(
         cfg.model_copy(
             update={

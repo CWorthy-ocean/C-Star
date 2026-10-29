@@ -1500,11 +1500,11 @@ class TestRomsInputGeneratorGeneration:
         sample_roms_input_generator._generate_initial_conditions(
             source={"name": "GLORYS"},
             groom=False,
-            groom_settings={"some_threshold": 3.0},
+            groom_settings={"passes": 2},
         )
         kwargs = mock_ic_class.call_args.kwargs
         assert kwargs["groom"] is False
-        assert kwargs["groom_settings"] == {"some_threshold": 3.0}
+        assert kwargs["groom_settings"] == {"passes": 2}
 
         sample_roms_input_generator._generate_initial_conditions(
             source={"name": "GLORYS"}
@@ -1527,11 +1527,11 @@ class TestRomsInputGeneratorGeneration:
             key="forcing.boundary",
             source={"name": "GLORYS"},
             groom=True,
-            groom_settings={"some_threshold": 3.0},
+            groom_settings={"passes": 2},
         )
         kwargs = mock_bf_class.call_args.kwargs
         assert kwargs["groom"] is True
-        assert kwargs["groom_settings"] == {"some_threshold": 3.0}
+        assert kwargs["groom_settings"] == {"passes": 2}
 
     @patch("cstar.applications.forge.input_generator.rt.InitialConditions")
     def test_generate_initial_conditions_multiple_paths(
