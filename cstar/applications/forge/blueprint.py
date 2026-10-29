@@ -805,7 +805,7 @@ class SourceSpec(_Section):
     esper_groom: bool | None = Field(default=None, exclude_if=lambda v: v is None)
     """Groom the ESPER-derived tracers: roms-tools detects implausible values (spikes,
     zeros beside ordinary water, DIC inconsistent with ALK, ...) and refills them from
-    the surrounding water (``roms_tools.scripts.bgc_groom``). Unset (``None``) leaves the
+    the surrounding water (``roms_tools.setup.bgc_groom``). Unset (``None``) leaves the
     choice to roms-tools' own default (``ESPER_GROOM_DEFAULT``, on); ``False`` turns it
     off. Only valid when ``name == "ESPER"``. Unset is **left out of saved blueprints and
     the content hash** (``exclude_if``), so existing blueprints keep their hash."""
