@@ -179,3 +179,58 @@ def test_esper_salinity_conditioning_reaches_forcing_override_as_a_switch():
         "salinity_conditioning"
         not in off["forcing"]["boundary"]["bgc_sources"][0]["source"]
     )
+
+
+def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
+    """``groom``/``groom_settings`` on the IC/boundary sections become the
+    roms-tools ``InitialConditions``/``BoundaryForcing`` kwargs of the same name
+    (``RomsInputGenerator`` passes each section dict through as constructor kwargs);
+    unset emits nothing, so roms-tools' own defaults apply. No source dict, ESPER
+    or otherwise, ever carries a ``groom`` key.
+    """
+    cfg = _build()
+    f = cfg.forcing
+    esper = SourceSpec(name="ESPER")
+
+    def _sec(sec, **update):
+        bgc = [sec.bgc_sources[0].model_copy(update={"source": esper})]
+        return sec.model_copy(update={"bgc_sources": bgc, **update})
+
+    unset = sources_to_forcing_override(
+        cfg.model_copy(
+            update={
+                "forcing": f.model_copy(
+                    update={
+                        "initial_conditions": _sec(f.initial_conditions),
+                        "boundary": _sec(f.boundary),
+                    }
+                )
+            }
+        )
+    )
+    settings = {"passes": 2}
+    set_ = sources_to_forcing_override(
+        cfg.model_copy(
+            update={
+                "forcing": f.model_copy(
+                    update={
+                        "initial_conditions": _sec(
+                            f.initial_conditions, groom=False, groom_settings=settings
+                        ),
+                        "boundary": _sec(f.boundary, groom=True),
+                    }
+                )
+            }
+        )
+    )
+    for ov in (unset, set_):
+        for sec in (ov["initial_conditions"], ov["forcing"]["boundary"]):
+            assert sec["bgc_sources"][0]["source"]["name"] == "ESPER"
+            assert "groom" not in sec["source"]
+            assert all("groom" not in bs["source"] for bs in sec["bgc_sources"])
+    for sec in (unset["initial_conditions"], unset["forcing"]["boundary"]):
+        assert "groom" not in sec and "groom_settings" not in sec
+    assert set_["initial_conditions"]["groom"] is False
+    assert set_["initial_conditions"]["groom_settings"] == settings
+    assert set_["forcing"]["boundary"]["groom"] is True
+    assert "groom_settings" not in set_["forcing"]["boundary"]

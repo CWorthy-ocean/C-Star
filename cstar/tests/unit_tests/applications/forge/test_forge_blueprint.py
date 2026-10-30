@@ -9614,3 +9614,123 @@ class TestEmittedProvenance:
             if isinstance(ref, CatalogSpecRef)
             and ref.kind in ("ModelSpec", "DomainSpec")
         ] == [CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="")]
+
+
+@pytest.mark.parametrize("section", ["initial_conditions", "boundary"])
+def test_section_groom_fields_unset_by_default_and_left_out_of_the_hash(section):
+    """``groom``/``groom_settings`` live on the IC/boundary sections (not on an
+    ESPER ``SourceSpec``): unset is excluded from dumps and the content hash, so
+    existing blueprints keep their hash; set values are kept and hashed.
+    """
+    from cstar.applications.forge.blueprint import SourceSpec
+
+    cfg = _build()
+    sec = getattr(cfg.forcing, section)
+    assert sec.groom is None and sec.groom_settings is None
+    dumped = sec.model_dump()
+    assert "groom" not in dumped and "groom_settings" not in dumped
+    assert "groom" not in SourceSpec.model_fields
+    assert "esper_groom" not in SourceSpec.model_fields
+
+    def _with(**update):
+        return cfg.model_copy(
+            update={
+                "forcing": cfg.forcing.model_copy(
+                    update={section: sec.model_copy(update=update)}
+                )
+            }
+        )
+
+    assert _with(groom=None, groom_settings=None).content_hash() == cfg.content_hash()
+    off = _with(groom=False)
+    assert off.forcing.model_dump()[section]["groom"] is False
+    assert off.content_hash() != cfg.content_hash()
+    tuned = _with(groom_settings={"passes": 2})
+    assert tuned.forcing.model_dump()[section]["groom_settings"] == {
+        "passes": 2
+    }
+    assert tuned.content_hash() != cfg.content_hash()
+
+
+def test_section_groom_fields_resolve_from_forcing_inputs():
+    """The resolver (``_build_bgc_section``, model-field introspection) carries both
+    fields from a forcing selection onto the sections.
+    """
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    fdata["initial_conditions"]["groom"] = False
+    fdata["initial_conditions"]["groom_settings"] = {"passes": 2}
+    fdata["forcing"]["boundary"]["groom_settings"] = {"relax_sweeps": 3}
+    cfg = _build(forcing_inputs=fdata)
+    assert cfg.forcing.initial_conditions.groom is False
+    assert cfg.forcing.initial_conditions.groom_settings == {"passes": 2}
+    assert cfg.forcing.boundary.groom is None
+    assert cfg.forcing.boundary.groom_settings == {"relax_sweeps": 3}
+
+
+def test_groom_settings_validated_by_roms_tools_when_available(monkeypatch):
+    """Early validation calls roms-tools' ``resolve_groom_settings`` when it exists
+    and skips quietly when the installed roms-tools lacks it.
+    """
+    import sys
+    import types
+
+    from cstar.applications.forge.blueprint import _check_groom_settings
+
+    def _resolve(settings):
+        if "bogus" in settings:
+            raise ValueError("unknown groom_settings key 'bogus'")
+        return settings
+
+    fake = types.ModuleType("roms_tools.setup.bgc_groom")
+    fake.resolve_groom_settings = _resolve
+    monkeypatch.setitem(sys.modules, "roms_tools.setup.bgc_groom", fake)
+    assert _check_groom_settings({"ok": 1}) == {"ok": 1}
+    with pytest.raises(ValueError, match="bogus"):
+        _check_groom_settings({"bogus": 1})
+
+    # A roms-tools without the checker: no validation, no error.
+    monkeypatch.setitem(
+        sys.modules, "roms_tools.setup.bgc_groom", types.ModuleType("x")
+    )
+    assert _check_groom_settings({"bogus": 1}) == {"bogus": 1}
+    assert _check_groom_settings(None) is None
+
+
+def test_empty_groom_settings_normalizes_to_unset():
+    """A hand-written ``groom_settings: {}`` means roms-tools' defaults, same as unset:
+    it loads as ``None``, so it stays out of the dump and the content hash (and a
+    wizard load/re-save, which drops empty dicts, leaves the hash unchanged).
+    """
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    base = _build(forcing_inputs=fdata)
+    fdata["initial_conditions"]["groom_settings"] = {}
+    fdata["forcing"]["boundary"]["groom_settings"] = {}
+    cfg = _build(forcing_inputs=fdata)
+    assert cfg.forcing.initial_conditions.groom_settings is None
+    assert cfg.forcing.boundary.groom_settings is None
+    dumped = cfg.forcing.model_dump()
+    assert "groom_settings" not in dumped["initial_conditions"]
+    assert "groom_settings" not in dumped["boundary"]
+    assert cfg.content_hash() == base.content_hash()
+
+
+@pytest.mark.parametrize(
+    "settings", [{"checks": {"DIC": 5}}, {"checks": []}, {"dz_max": float("nan")}]
+)
+def test_malformed_groom_settings_fail_as_a_validation_error(settings):
+    """With a roms-tools that validates ``groom_settings``, a malformed value fails the
+    blueprint load as a pydantic ``ValidationError``, not a raw exception.
+    """
+    pytest.importorskip("roms_tools.setup.bgc_groom").resolve_groom_settings
+    from pydantic import ValidationError
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    fdata["initial_conditions"]["groom_settings"] = settings
+    with pytest.raises(ValidationError, match="groom_settings"):
+        _build(forcing_inputs=fdata)

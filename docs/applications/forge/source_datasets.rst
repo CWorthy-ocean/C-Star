@@ -81,7 +81,13 @@ ESPER *(experimental)*
    (``git clone --branch v1.1.1+cworthy.1 https://github.com/CWorthy-ocean/PyESPER``
    then ``pip install -e .``; the fork is not on PyPI or conda); the bundled
    ``glorys-era5-esper`` forcing spec has it on. ESPER oxygen is floored at
-   2.0 mmol/m³ by roms-tools regardless of this switch.
+   5.0 mmol/m³ (MARBL's default ``parm_o2_min``) by roms-tools regardless of
+   this switch. ESPER tracers are also groomed by default: ROMS-Tools detects
+   implausible values and refills them from the surrounding water. Turn this
+   off with ``groom: false`` on ``initial_conditions`` or ``boundary`` (the
+   wizard's "Groom ESPER tracers" checkbox); the thresholds can be overridden
+   by hand with ``groom_settings`` in the forge blueprint (see the ROMS-Tools
+   datasets overview).
 
 Provided by you
 ---------------

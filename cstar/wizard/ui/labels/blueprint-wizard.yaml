@@ -488,6 +488,10 @@ fields:
   ic.ic_validate:
     label: Validate initial conditions
     hint: Runs roms-tools' post-construction validation (NaN-at-wet-point checks).
+  ic.ic_groom:
+    label: Groom ESPER tracers
+    symbol: groom
+    hint: Detects implausible values in the tracers ESPER supplies and refills them from the surrounding water. On by default.
   ic.ic_prefill:
     label: Source prefill
     symbol: prefill
@@ -536,6 +540,10 @@ fields:
   boundary.boundary_validate:
     label: Validate boundary conditions
     hint: Runs roms-tools' post-construction validation (NaN-at-wet-point checks).
+  boundary.boundary_groom:
+    label: Groom ESPER tracers
+    symbol: groom
+    hint: Detects implausible values in the tracers ESPER supplies and refills them from the surrounding water. On by default.
   boundary.boundary_options:
     label: Additional options
 
