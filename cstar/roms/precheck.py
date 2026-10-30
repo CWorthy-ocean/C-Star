@@ -36,6 +36,16 @@ which selects the newest schema, is not checked; the ``ucla_roms`` path, which h
 resolved the schema, gates on it with
 :func:`averages_end_on_marbl_step_applies_to_schema`.
 
+Rule D -- :func:`check_file_name_lengths` mirrors ucla-roms' fixed-size file-name
+buffers (``max_name_size = 256`` in ``src/param.F90``): ucla-roms >= 0.13.0 aborts at
+startup if ``grdname``, ``inifile``, a ``frcfiles`` entry, ``cdr_file``,
+``extract_file`` or ``marbl_config_file`` fills its buffer (256 characters or more,
+which it takes to be cut off), or if ``output_root_name`` or ``extract_root_name``
+is longer than 220 characters (the longest output-file tail ROMS appends is 36);
+earlier releases cut a longer name off silently. C-Star applies the same limits to
+every release, with headroom for the rank suffix a non-PIO run appends, which
+ROMS's own check does not allow for. Ungated by schema version.
+
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
 A and C need an explicit, caller-supplied set of active cppdefs to know which
@@ -72,6 +82,34 @@ from cstar.roms.namelist import (
 
 AVERAGES_END_ON_MARBL_STEP_MIN_ROMS: tuple[int, int, int] = UCLA_ROMS_0_13_0
 """ucla-roms release from which ROMS checks Rule C at startup (PR #400)."""
+
+MAX_NAMELIST_FILE_NAME_LENGTH: int = 250
+"""Longest file name C-Star writes into a namelist key ROMS reads into a
+``character(len=max_name_size)`` buffer. Mirrors ``max_name_size = 256`` in ucla-roms
+``src/param.F90``, less headroom for the rank suffix a non-PIO ``PARALLEL_FILES`` run
+appends, which ROMS's own check (names of 256 or more characters) misses."""
+
+MAX_OUTPUT_ROOT_NAME_LENGTH: int = 220
+"""Longest ``output_root_name`` / ``extract_root_name``. Mirrors the limit ucla-roms
+>= 0.13.0 checks: ``max_name_size`` less 36, the longest tail ROMS appends."""
+
+_FILE_NAME_KEYS: tuple[tuple[str, str, int], ...] = (
+    ("grid_settings", "grdname", MAX_NAMELIST_FILE_NAME_LENGTH),
+    ("initial_conditions", "inifile", MAX_NAMELIST_FILE_NAME_LENGTH),
+    ("forcing_files", "frcfiles", MAX_NAMELIST_FILE_NAME_LENGTH),
+    ("cdr_frc_settings", "cdr_file", MAX_NAMELIST_FILE_NAME_LENGTH),
+    ("extract_data_settings", "extract_file", MAX_NAMELIST_FILE_NAME_LENGTH),
+    (
+        "marbl_biogeochemistry_settings",
+        "marbl_config_file",
+        MAX_NAMELIST_FILE_NAME_LENGTH,
+    ),
+    ("simulation_name_settings", "output_root_name", MAX_OUTPUT_ROOT_NAME_LENGTH),
+    ("extract_data_settings", "extract_root_name", MAX_OUTPUT_ROOT_NAME_LENGTH),
+)
+"""``(group, key, longest allowed)`` for every namelist value ROMS reads into a
+``max_name_size`` buffer. A key that holds several values (``frcfiles``, and the
+per-child ``extract_*`` keys of ucla-roms >= 0.12.0) is checked entry by entry."""
 
 
 class NamelistConsistencyError(ValueError):
@@ -701,3 +739,41 @@ def check_averages_end_on_marbl_step(
                 section=check.section,
                 keys=(check.period_field,),
             )
+
+
+def check_file_name_lengths(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if a file name in the namelist is too long
+    for ROMS to read -- mirrors ucla-roms' ``max_name_size`` buffers (see Rule D in
+    the module docstring).
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`.
+        Reads the keys in ``_FILE_NAME_KEYS``; a missing group or key is skipped.
+
+    Notes
+    -----
+    Reports every offending key, with its value and length, in one error.
+    """
+    too_long: list[tuple[str, str, str]] = []
+    for group, key, limit in _FILE_NAME_KEYS:
+        value = _section(_section(settings, group), key)
+        names = [value] if isinstance(value, str) else value or []
+        for i, name in enumerate(names):
+            if len(name) > limit:
+                label = f"{group}.{key}" + (f"[{i}]" if len(names) > 1 else "")
+                too_long.append(
+                    (group, key, f"{label} ({len(name)} > {limit}): {name}")
+                )
+    if too_long:
+        raise NamelistConsistencyError(
+            "ROMS reads these namelist file names into fixed-size buffers and "
+            "the names below are too long for them (ucla-roms >= 0.13.0 stops at "
+            "startup; earlier releases cut the name off silently):\n  "
+            + "\n  ".join(detail for _, _, detail in too_long)
+            + "\nUse a shorter run directory or shorter input file names.",
+            rule="file_name_lengths",
+            section=", ".join(dict.fromkeys(group for group, _, _ in too_long)),
+            keys=tuple(dict.fromkeys(key for _, key, _ in too_long)),
+        )

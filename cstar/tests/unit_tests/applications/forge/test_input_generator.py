@@ -14,6 +14,7 @@ Tests cover:
 
 import asyncio
 import logging
+import re
 import shutil
 import sys
 from contextlib import contextmanager
@@ -5069,6 +5070,205 @@ class TestBoundaryBgcSources:
         assert len({Path(p).stem for p in bgc_paths_arg}) == 2, (
             f"expected distinct filenames, got {bgc_paths_arg}"
         )
+
+
+class TestBgcOutputSuffix:
+    """``_bgc_output_suffix`` keeps a short ``use_vars`` tag readable and swaps a
+    long one for a count plus a digest, so file names stay short for ROMS.
+    """
+
+    _MANY_VARS: ClassVar[list[str]] = [f"TRACER_{i}" for i in range(25)]
+
+    def test_short_use_vars_keep_readable_tag(self):
+        assert (
+            RomsInputGenerator._bgc_output_suffix("GLODAP", ["DIC", "ALK"])
+            == "glodap-alk_dic"
+        )
+
+    def test_no_use_vars_is_source_name_only(self):
+        assert RomsInputGenerator._bgc_output_suffix("MBL_co2") == "mbl_co2"
+
+    def test_long_use_vars_become_count_and_digest(self):
+        suffix = RomsInputGenerator._bgc_output_suffix("UNIFIED", self._MANY_VARS)
+        assert re.fullmatch(r"unified-25vars_[0-9a-f]{8}", suffix)
+        assert len(suffix) <= len("unified-") + 40
+
+    def test_long_use_vars_suffix_is_deterministic_and_order_independent(self):
+        forward = RomsInputGenerator._bgc_output_suffix("UNIFIED", self._MANY_VARS)
+        assert forward == RomsInputGenerator._bgc_output_suffix(
+            "UNIFIED", list(reversed(self._MANY_VARS))
+        )
+        assert forward == RomsInputGenerator._bgc_output_suffix(
+            "UNIFIED", [v.lower() for v in self._MANY_VARS]
+        )
+
+    def test_different_long_lists_get_different_suffixes(self):
+        a = RomsInputGenerator._bgc_output_suffix("UNIFIED", self._MANY_VARS)
+        b = RomsInputGenerator._bgc_output_suffix("UNIFIED", self._MANY_VARS[:-1])
+        c = RomsInputGenerator._bgc_output_suffix(
+            "UNIFIED", [*self._MANY_VARS[:-1], "OTHER_TRACER"]
+        )
+        assert len({a, b, c}) == 3
+
+    def test_planned_and_detail_suffix_agree(self):
+        assert (
+            RomsInputGenerator._forcing_detail_suffix("bgc", "UNIFIED", self._MANY_VARS)
+            == f"bgc-{RomsInputGenerator._bgc_output_suffix('UNIFIED', self._MANY_VARS)}"
+        )
+
+
+class TestLegacyBgcFileNames:
+    """A bgc file generated before long ``use_vars`` tags were shortened keeps its
+    legacy (fully joined) name: planned, reused, recorded and registered as before,
+    rather than being missed (and, for boundaries, refused as a partial set).
+    """
+
+    _VARS: ClassVar[list[str]] = [f"TRACER_{i}" for i in range(25)]
+
+    @staticmethod
+    def _details(source_name="UNIFIED", use_vars=None):
+        short = RomsInputGenerator._forcing_detail_suffix("bgc", source_name, use_vars)
+        legacy = RomsInputGenerator._forcing_detail_suffix(
+            "bgc", source_name, use_vars, shorten=False
+        )
+        assert short != legacy
+        return short, legacy
+
+    @staticmethod
+    def _steps(category, use_vars):
+        bgc = {"source": {"name": "UNIFIED"}, "use_vars": use_vars}
+        if category == "surface":
+            return [(INPUT_REGISTRY["forcing.surface"], {"type": "bgc", **bgc})]
+        return [
+            (
+                INPUT_REGISTRY["forcing.boundary"],
+                {"source": {"name": "GLORYS"}, "bgc_sources": [bgc]},
+            )
+        ]
+
+    @staticmethod
+    def _planned_bgc(data, category, use_vars):
+        planned = data._planned_netcdf_outputs(
+            TestLegacyBgcFileNames._steps(category, use_vars)
+        )
+        (bgc,) = [p for p in planned if f"{category}-bgc" in p.name]
+        return bgc
+
+    @pytest.mark.parametrize("category", ["boundary", "surface"])
+    @pytest.mark.parametrize("tail", ["", "_202001"])
+    def test_legacy_file_on_disk_is_planned(
+        self, category, tail, sample_roms_input_generator
+    ):
+        data = sample_roms_input_generator
+        short, legacy = self._details(use_vars=self._VARS)
+        (data.input_data_dir / f"test_grid_{category}-{legacy}{tail}.nc").touch()
+
+        planned = self._planned_bgc(data, category, self._VARS)
+
+        assert planned == data.input_data_dir / f"test_grid_{category}-{legacy}.nc"
+
+    @pytest.mark.parametrize("category", ["boundary", "surface"])
+    def test_no_legacy_file_plans_the_short_name(
+        self, category, sample_roms_input_generator
+    ):
+        data = sample_roms_input_generator
+        short, _ = self._details(use_vars=self._VARS)
+
+        planned = self._planned_bgc(data, category, self._VARS)
+
+        assert planned == data.input_data_dir / f"test_grid_{category}-{short}.nc"
+
+    @pytest.mark.parametrize("category", ["boundary", "surface"])
+    def test_both_on_disk_prefers_the_short_name(
+        self, category, sample_roms_input_generator
+    ):
+        data = sample_roms_input_generator
+        short, legacy = self._details(use_vars=self._VARS)
+        for detail in (short, legacy):
+            (data.input_data_dir / f"test_grid_{category}-{detail}.nc").touch()
+
+        planned = self._planned_bgc(data, category, self._VARS)
+
+        assert planned == data.input_data_dir / f"test_grid_{category}-{short}.nc"
+
+    def test_short_use_vars_need_no_fallback_lookup(self, sample_roms_input_generator):
+        data = sample_roms_input_generator
+        with patch(
+            "cstar.applications.forge.input_generator._output_on_disk",
+            side_effect=AssertionError("looked on disk"),
+        ):
+            planned = self._planned_bgc(data, "boundary", ["ALK", "DIC"])
+
+        assert planned.name == "test_grid_boundary-bgc-unified-alk_dic.nc"
+
+    @pytest.mark.parametrize("tail", ["", "_202001"])
+    @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
+    def test_boundary_step_reuses_a_legacy_file(
+        self, mock_bf_class, tail, sample_roms_input_generator
+    ):
+        """Physics plus a legacy-named bgc file is a complete set: no error, no
+        rebuild, the legacy file recorded, and its legacy-named yaml sidecar kept.
+        """
+        data = sample_roms_input_generator
+        _, legacy = self._details(use_vars=self._VARS)
+        (data.input_data_dir / "test_grid_boundary-physics.nc").touch()
+        bgc_path = data.input_data_dir / f"test_grid_boundary-{legacy}{tail}.nc"
+        bgc_path.touch()
+        data._yaml_filename("forcing.boundary-physics").touch()
+        legacy_yaml = data._yaml_filename(f"forcing.boundary-{legacy}")
+        legacy_yaml.touch()
+
+        data._generate_boundary_forcing(
+            key="forcing.boundary",
+            source={"name": "GLORYS"},
+            bgc_sources=[{"source": {"name": "UNIFIED"}, "use_vars": self._VARS}],
+        )
+
+        mock_bf_class.assert_not_called()
+        assert data._settings_run_time["forcing"]["boundary_forcing_bgc_path"] == [
+            str(bgc_path)
+        ]
+        assert {p.name for p in data.ucla_roms_blueprint_dir.glob("*.yaml")} == {
+            "_forcing.boundary-physics.yaml",
+            legacy_yaml.name,
+        }
+
+    @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
+    def test_boundary_step_without_legacy_file_still_refuses_a_partial_set(
+        self, mock_bf_class, sample_roms_input_generator
+    ):
+        data = sample_roms_input_generator
+        (data.input_data_dir / "test_grid_boundary-physics.nc").touch()
+
+        with pytest.raises(RuntimeError, match="Some, but not all"):
+            data._generate_boundary_forcing(
+                key="forcing.boundary",
+                source={"name": "GLORYS"},
+                bgc_sources=[{"source": {"name": "UNIFIED"}, "use_vars": self._VARS}],
+            )
+
+        mock_bf_class.assert_not_called()
+
+    @patch("cstar.applications.forge.input_generator.rt.SurfaceForcing")
+    def test_surface_step_reuses_a_legacy_file(
+        self, mock_sf_class, sample_roms_input_generator
+    ):
+        data = sample_roms_input_generator
+        _, legacy = self._details(use_vars=self._VARS)
+        surface_path = data.input_data_dir / f"test_grid_surface-{legacy}.nc"
+        surface_path.touch()
+        data._yaml_filename(f"forcing.surface-{legacy}").touch()
+
+        data._generate_surface_forcing(
+            key="forcing.surface",
+            type="bgc",
+            source={"name": "UNIFIED"},
+            use_vars=self._VARS,
+        )
+
+        mock_sf_class.assert_not_called()
+        resources = data.ucla_roms_blueprint_elements.forcing.surface.data
+        assert [str(r.location) for r in resources] == [str(surface_path)]
 
 
 class TestInitialConditionsMultipleBgcSources:
