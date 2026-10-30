@@ -8,10 +8,14 @@ from unittest import mock
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
+from pydantic import ValidationError
 
+import cstar
 from cstar.applications.core import RunnerRequest
 from cstar.applications.nest_ic import NestIcBlueprint, NestIcRunner
 from cstar.entrypoint.config import ServiceConfiguration
+from cstar.orchestration.serialization import load_blueprint, serialize
 
 
 @pytest.fixture
@@ -88,6 +92,95 @@ class TestNestIcBlueprintPio:
         }
         bp = NestIcBlueprint.model_validate(data)
         assert bp.pio is True
+
+
+class TestNestIcBlueprintBottomFillBlend:
+    """Tests for the `bottom_fill_blend_m` field on `NestIcBlueprint`."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(0, id="zero"),
+            pytest.param(25, id="int"),
+            pytest.param(float("inf"), id="inf"),
+        ],
+    )
+    def test_accepts_a_non_negative_number(
+        self, blueprint_kwargs: dict[str, Any], value: float
+    ) -> None:
+        """Verify that zero, a whole number and infinity are all valid."""
+        bp = NestIcBlueprint(**blueprint_kwargs, bottom_fill_blend_m=value)
+        assert bp.bottom_fill_blend_m == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(-1, id="negative"),
+            pytest.param(float("nan"), id="nan"),
+            pytest.param(True, id="bool"),
+            pytest.param("25", id="string"),
+        ],
+    )
+    def test_rejects_other_values(
+        self, blueprint_kwargs: dict[str, Any], value: object
+    ) -> None:
+        """Verify that a negative number, NaN, a bool and a string are refused."""
+        with pytest.raises(ValidationError, match="bottom_fill_blend_m"):
+            NestIcBlueprint(**blueprint_kwargs, bottom_fill_blend_m=value)
+
+    def test_inf_survives_a_json_dump_and_a_saved_file(
+        self, blueprint_kwargs: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """Verify infinity stays infinity in a JSON-mode dump (which the content hash
+        uses) and through a saved file, rather than turning into an unset field.
+        """
+        bp = NestIcBlueprint(**blueprint_kwargs, bottom_fill_blend_m=float("inf"))
+        assert bp.model_dump(mode="json")["bottom_fill_blend_m"] == float("inf")
+
+        path = tmp_path / "nest_ic.yaml"
+        serialize(path, bp)
+
+        assert load_blueprint(path, NestIcBlueprint).bottom_fill_blend_m == float("inf")
+
+
+class TestNestIcBlueprintSchemaVersion:
+    """Tests for how a minor schema bump leaves earlier `nest_ic` files."""
+
+    def test_current_version_has_a_published_schema(
+        self, blueprint_kwargs: dict[str, Any]
+    ) -> None:
+        """Verify the schema the blueprint's header names is published in the docs."""
+        bp = NestIcBlueprint(**blueprint_kwargs)
+
+        published = bp.schema_ref.split("/docs/schemas/bp/")[1]
+
+        repo_root = Path(cstar.__file__).resolve().parents[1]
+        assert (repo_root / "docs" / "schemas" / "bp" / published).is_file()
+
+    def test_earlier_minor_loads_unchanged(
+        self, blueprint_kwargs: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """Verify a file written at 1.1.0, before `bottom_fill_blend_m` existed,
+        loads as it is: it keeps its version, leaves the new field unset and hashes
+        as the same configuration written at the current version.
+        """
+        data = {
+            k: str(v) if isinstance(v, Path) else v for k, v in blueprint_kwargs.items()
+        }
+        path = tmp_path / "nest_ic_1_1_0.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {**data, "application": "nest_ic", "schema_version": "1.1.0"}
+            )
+        )
+
+        loaded = load_blueprint(path, NestIcBlueprint)
+
+        assert loaded.schema_version == "1.1.0"
+        assert loaded.bottom_fill_blend_m is None
+        assert (
+            loaded.content_hash() == NestIcBlueprint(**blueprint_kwargs).content_hash()
+        )
 
 
 class TestModelReferenceDate:
@@ -247,6 +340,49 @@ class TestCreateInitialConditionsRouting:
 
         kwargs = nest_ic_module.roms_tools.InitialConditions.call_args.kwargs
         assert kwargs["model_reference_date"] == datetime(1990, 3, 15)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(0, id="zero"),
+            pytest.param(12.5, id="metres"),
+            pytest.param(float("inf"), id="inf"),
+        ],
+    )
+    def test_bottom_fill_blend_passed_to_initial_conditions(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        value: float,
+    ) -> None:
+        """A `bottom_fill_blend_m` the blueprint sets reaches `InitialConditions`
+        verbatim, zero included.
+        """
+        from cstar.applications import nest_ic as nest_ic_module
+
+        bp = NestIcBlueprint(**blueprint_kwargs, pio=False, bottom_fill_blend_m=value)
+        runner = _make_runner(bp)
+
+        runner._create_initial_conditions()
+
+        kwargs = nest_ic_module.roms_tools.InitialConditions.call_args.kwargs
+        assert kwargs["bottom_fill_blend_m"] == value
+
+    def test_unset_bottom_fill_blend_is_not_passed(
+        self,
+        blueprint_kwargs: dict[str, Any],
+    ) -> None:
+        """Without `bottom_fill_blend_m` the keyword is left out, so a roms-tools
+        release that predates the option keeps working.
+        """
+        from cstar.applications import nest_ic as nest_ic_module
+
+        bp = NestIcBlueprint(**blueprint_kwargs, pio=False)
+        runner = _make_runner(bp)
+
+        runner._create_initial_conditions()
+
+        kwargs = nest_ic_module.roms_tools.InitialConditions.call_args.kwargs
+        assert "bottom_fill_blend_m" not in kwargs
 
     def test_physics_only_parent_passes_no_bgc_kwargs(
         self,

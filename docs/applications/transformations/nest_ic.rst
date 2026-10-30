@@ -39,6 +39,12 @@ The blueprint
    The child's grid file.
 ``pio`` (optional, default ``true``)
    Whether the child's ROMS build reads its inputs through ParallelIO.
+``bottom_fill_blend_m`` (optional)
+   Where the child is deeper than the parent, tracers below the parent's
+   bottom blend into the nearest parent column's values over this many metres
+   (``0`` takes them at once, ``.inf`` copies the bottom value down). Leave it
+   out to use ROMS-Tools' default; setting it needs a ROMS-Tools release that
+   has the option.
 
 Example
 -------

@@ -1124,6 +1124,11 @@ class InitialConditions(_Section):
         None  # destination extrapolation (default path)
     )
     extrap_kwargs: dict[str, Any] | None = None
+    bottom_fill_blend_m: float | None = Field(default=None, ge=0, strict=True)
+    """Depth (m) below a source column's bottom over which a tracer blends from that
+    column's bottom value to the value of the nearest source column that has water
+    at that depth. ``0`` takes the neighbour's value at once; ``.inf`` copies the
+    bottom value down. Leave it unset to use roms-tools' default."""
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
     bypass_validation: bool = False
     """Skip roms-tools' post-construction validation (NaN-at-wet-point checks
@@ -1181,6 +1186,11 @@ class BoundaryForcing(_Section):
         None  # destination extrapolation (default path)
     )
     extrap_kwargs: dict[str, Any] | None = None
+    bottom_fill_blend_m: float | None = Field(default=None, ge=0, strict=True)
+    """Depth (m) below a source column's bottom over which a tracer blends from that
+    column's bottom value to the value of the nearest source column that has water
+    at that depth. ``0`` takes the neighbour's value at once; ``.inf`` copies the
+    bottom value down. Leave it unset to use roms-tools' default."""
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
     bypass_validation: bool = False
     """Skip roms-tools' post-construction validation (NaN-at-wet-point checks
@@ -1882,7 +1892,8 @@ class ForgeBlueprint(Blueprint):
         # ``exclude_none=False`` keeps explicit nulls, so a field that is unset by
         # default is dropped by name: a saved file simply has no such line (and an
         # earlier build, which forbids unknown keys, still reads a file that does
-        # not use the field).
+        # not use the field). The same goes for ``bottom_fill_blend_m`` inside the
+        # initial-conditions and boundary sections, dropped below once dumped.
         data = stamped.model_dump(
             mode="json",
             exclude_none=False,
@@ -1892,6 +1903,10 @@ class ForgeBlueprint(Blueprint):
                 if getattr(stamped, name) is None
             },
         )
+        for section in ("initial_conditions", "boundary"):
+            block = data["forcing"][section]
+            if block is not None and block["bottom_fill_blend_m"] is None:
+                del block["bottom_fill_blend_m"]
         # Pydantic keeps the narrowed ``provenance`` field at its ``Blueprint``
         # base position; saved files have it last. Forge files never populate
         # ``derived_from`` (``composition`` is their record): drop an empty one.

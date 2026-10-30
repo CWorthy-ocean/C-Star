@@ -504,6 +504,11 @@ fields:
     label: Extrapolation method
     symbol: extrap_method
     hint: Destination extrapolation on the default (no-prefill) path to guarantee NaN-free output.
+  ic.ic_bottom_fill_blend_m:
+    label: Below-bottom blend depth
+    symbol: bottom_fill_blend_m
+    unit: m
+    hint: How far below a source column's bottom tracers blend toward the nearest same-depth source column; blank uses roms-tools' default.
   ic.ic_options:
     label: Additional options
 
@@ -537,6 +542,11 @@ fields:
     label: Extrapolation method
     symbol: extrap_method
     hint: Destination extrapolation on the default (no-prefill) path to guarantee NaN-free boundaries.
+  boundary.boundary_bottom_fill_blend_m:
+    label: Below-bottom blend depth
+    symbol: bottom_fill_blend_m
+    unit: m
+    hint: How far below a source column's bottom tracers blend toward the nearest same-depth source column; blank uses roms-tools' default.
   boundary.boundary_validate:
     label: Validate boundary conditions
     hint: Runs roms-tools' post-construction validation (NaN-at-wet-point checks).
