@@ -34,11 +34,14 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.precheck import (
     _STREAM_CHECKS,
+    MAX_NAMELIST_FILE_NAME_LENGTH,
+    MAX_OUTPUT_ROOT_NAME_LENGTH,
     NamelistConsistencyError,
     applies_to,
     averages_end_on_marbl_step_applies_to,
     averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
+    check_file_name_lengths,
     check_output_streams_divide_rst,
     check_restart_period_divisible_by_dt,
 )
@@ -882,3 +885,52 @@ def test_averages_check_schema_gate_agrees_with_the_release_gate(lower, schema):
     assert averages_end_on_marbl_step_applies_to_schema(
         schema
     ) is averages_end_on_marbl_step_applies_to(tag)
+
+
+def test_file_name_lengths_accepts_the_longest_name_that_fits():
+    settings = {
+        "grid_settings": {"grdname": "g" * MAX_NAMELIST_FILE_NAME_LENGTH},
+        "forcing_files": {"frcfiles": ["f" * MAX_NAMELIST_FILE_NAME_LENGTH]},
+        "simulation_name_settings": {
+            "output_root_name": "o" * MAX_OUTPUT_ROOT_NAME_LENGTH
+        },
+    }
+    check_file_name_lengths(settings)
+
+
+def test_file_name_lengths_reports_every_offender():
+    """Each too-long key, with its value and length, is in the one error; a list
+    key names the offending entry, and per-child ``extract_*`` lists are checked.
+    """
+    long_name = "x" * (MAX_NAMELIST_FILE_NAME_LENGTH + 1)
+    long_root = "r" * (MAX_OUTPUT_ROOT_NAME_LENGTH + 1)
+    settings = {
+        "grid_settings": {"grdname": long_name},
+        "forcing_files": {"frcfiles": ["short.nc", long_name]},
+        "extract_data_settings": {
+            "extract_file": ["a.nc", long_name],
+            "extract_root_name": long_root,
+        },
+        "simulation_name_settings": {"output_root_name": "out"},
+    }
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_file_name_lengths(settings)
+    message = str(excinfo.value)
+    for label in (
+        "grid_settings.grdname",
+        "forcing_files.frcfiles[1]",
+        "extract_data_settings.extract_file[1]",
+        "extract_data_settings.extract_root_name",
+    ):
+        assert label in message
+    assert "forcing_files.frcfiles[0]" not in message
+    assert f"({len(long_name)} > {MAX_NAMELIST_FILE_NAME_LENGTH})" in message
+    assert excinfo.value.rule == "file_name_lengths"
+
+
+def test_file_name_lengths_checks_a_live_namelist():
+    nml = RomsNamelistV0_13_0.read(V0_13_0_NAMELIST)
+    check_file_name_lengths(nml)
+    nml.marbl_biogeochemistry_settings.marbl_config_file = "m" * 251
+    with pytest.raises(NamelistConsistencyError, match="marbl_config_file"):
+        check_file_name_lengths(nml)

@@ -23,6 +23,7 @@ import contextlib
 import copy
 import logging
 import os
+import re
 import sys
 import tempfile
 import warnings
@@ -44,7 +45,7 @@ import cstar.catalog
 from cstar.applications.core import RunnerRequest
 from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import runtime as forge_run
-from cstar.applications.forge.app import ForgeApplication, ForgeRunner
+from cstar.applications.forge.app import ForgeApplication, ForgeRunner, input_products
 from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
     emitted_blueprint_description,
@@ -53,7 +54,11 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar.applications.forge.host import HostPaths
-from cstar.applications.forge.input_generator import CHILD_IC_PLACEHOLDER_LOCATION
+from cstar.applications.forge.input_generator import (
+    CHILD_IC_PLACEHOLDER_LOCATION,
+    RomsInputGenerator,
+    netcdf_basename,
+)
 from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.applications.forge.templates import bundled_template_dir
@@ -165,6 +170,23 @@ _CDR_LITE_FORCING_INPUTS = {
         "river": [{"source": {"name": "DAI", "climatology": False}}],
     },
 }
+
+
+# Joined, these exceed the 40-character tag limit, yet a file name made from them
+# still fits a filesystem's name limit (unlike a 25-tracer list).
+_LONG_USE_VARS = [
+    "ALK",
+    "DIC",
+    "DOC",
+    "DON",
+    "DOP",
+    "FE",
+    "NO3",
+    "PO4",
+    "SIO3",
+    "O2",
+    "ZOOC",
+]
 
 
 def _make_builder(args, **overrides):
@@ -337,7 +359,8 @@ class TestForgeExecutorInitialization:
         # enum *value* (e.g. "physics"/"bgc"), not the enum repr — the bridge dumps with
         # mode="json", so filenames no longer leak "SurfaceType.PHYSICS".
         assert "_surface-physics.nc" in stdout
-        assert "_surface-bgc.nc" in stdout
+        assert "_surface-bgc-unified.nc" in stdout
+        assert "_surface-bgc-mbl_co2.nc" in stdout
         assert "_boundary-physics.nc" in stdout
         assert "_tidal.nc" in stdout
         planned_section = stdout.split("ForgeExecutor: planned NetCDF outputs", 1)[
@@ -429,6 +452,148 @@ class TestForgeExecutorProperties:
         """Test that the input data dir routes under host.working_dir."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
         assert builder.input_data_dir == builder.host.working_dir / "input_data"
+
+    def test_planned_boundary_bgc_names_match_the_generator(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """A long ``use_vars`` list is planned under the same shortened name
+        ``RomsInputGenerator`` writes.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        use_vars = [f"TRACER_{i}" for i in range(25)]
+        builder.forcing_override = {
+            "forcing": {
+                "boundary": {
+                    "source": {"name": "GLORYS"},
+                    "bgc_sources": [
+                        {"source": {"name": "UNIFIED"}, "use_vars": use_vars}
+                    ],
+                }
+            }
+        }
+        builder.open_boundaries = forge_models.OpenBoundaries(
+            north=True, south=True, east=True, west=True
+        )
+        detail = RomsInputGenerator._forcing_detail_suffix("bgc", "UNIFIED", use_vars)
+        expected = builder.input_data_dir / netcdf_basename(
+            builder.name, f"boundary-{detail}"
+        )
+
+        assert expected.resolve() in builder._planned_netcdf_outputs()
+        assert re.search(r"boundary-bgc-unified-25vars_[0-9a-f]{8}\.nc$", expected.name)
+
+    @pytest.mark.parametrize(
+        ("source_name", "use_vars", "expected_detail"),
+        [
+            ("MBL_co2", None, "bgc-mbl_co2"),
+            ("GLODAP", ["DIC", "ALK"], "bgc-glodap-alk_dic"),
+            ("UNIFIED", [f"TRACER_{i}" for i in range(25)], None),
+        ],
+    )
+    def test_planned_surface_bgc_names_match_the_generator(
+        self, minimal_cstar_spec_builder_args, source_name, use_vars, expected_detail
+    ):
+        """Surface bgc files are planned under the name ``RomsInputGenerator``
+        writes (``surface-bgc-{source}[-{use_vars}]``). The executor used to plan
+        ``surface-bgc`` / ``surface-bgc-co2`` instead, so ``input_products`` (which
+        only registers planned paths that exist) skipped the real files.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        entry: dict[str, Any] = {"type": "bgc", "source": {"name": source_name}}
+        if use_vars:
+            entry["use_vars"] = use_vars
+        builder.forcing_override = {"forcing": {"surface": [entry]}}
+        detail = RomsInputGenerator._forcing_detail_suffix("bgc", source_name, use_vars)
+        if expected_detail is not None:
+            assert detail == expected_detail
+
+        planned = builder._planned_netcdf_outputs()
+
+        expected = builder.input_data_dir / netcdf_basename(
+            builder.name, f"surface-{detail}"
+        )
+        assert expected.resolve() in planned
+
+    @pytest.mark.parametrize("category", ["boundary", "surface"])
+    @pytest.mark.parametrize("on_disk", ["legacy", "none", "both"])
+    def test_planned_bgc_names_honour_a_legacy_file(
+        self, minimal_cstar_spec_builder_args, category, on_disk
+    ):
+        """A file under the pre-shortening name is planned (and so registered) as
+        before; with none, or with both, the short name is planned.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        use_vars = _LONG_USE_VARS
+        bgc = {"source": {"name": "UNIFIED"}, "use_vars": use_vars}
+        if category == "surface":
+            builder.forcing_override = {
+                "forcing": {"surface": [{"type": "bgc", **bgc}]}
+            }
+        else:
+            builder.forcing_override = {
+                "forcing": {
+                    "boundary": {"source": {"name": "GLORYS"}, "bgc_sources": [bgc]}
+                }
+            }
+            builder.open_boundaries = forge_models.OpenBoundaries(
+                north=True, south=True, east=True, west=True
+            )
+        short = RomsInputGenerator._forcing_detail_suffix("bgc", "UNIFIED", use_vars)
+        legacy = RomsInputGenerator._forcing_detail_suffix(
+            "bgc", "UNIFIED", use_vars, shorten=False
+        )
+        builder.input_data_dir.mkdir(parents=True, exist_ok=True)
+        present = {"legacy": [legacy], "none": [], "both": [legacy, short]}[on_disk]
+        for detail in present:
+            # a grouped time-chunk file, as roms-tools may write
+            (
+                builder.input_data_dir
+                / netcdf_basename(builder.name, f"{category}-{detail}_202001")
+            ).touch()
+
+        planned = builder._planned_netcdf_outputs()
+
+        chosen = legacy if on_disk == "legacy" else short
+        other = short if chosen == legacy else legacy
+        assert (
+            builder.input_data_dir
+            / netcdf_basename(builder.name, f"{category}-{chosen}")
+        ).resolve() in planned
+        assert (
+            builder.input_data_dir
+            / netcdf_basename(builder.name, f"{category}-{other}")
+        ).resolve() not in planned
+
+    def test_legacy_named_boundary_bgc_file_is_registered_as_a_product(
+        self, minimal_cstar_spec_builder_args
+    ):
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        use_vars = _LONG_USE_VARS
+        builder.forcing_override = {
+            "forcing": {
+                "boundary": {
+                    "source": {"name": "GLORYS"},
+                    "bgc_sources": [
+                        {"source": {"name": "UNIFIED"}, "use_vars": use_vars}
+                    ],
+                }
+            }
+        }
+        builder.open_boundaries = forge_models.OpenBoundaries(
+            north=True, south=True, east=True, west=True
+        )
+        legacy = RomsInputGenerator._forcing_detail_suffix(
+            "bgc", "UNIFIED", use_vars, shorten=False
+        )
+        builder.input_data_dir.mkdir(parents=True, exist_ok=True)
+        name = netcdf_basename(builder.name, f"boundary-{legacy}")
+        (builder.input_data_dir / name).touch()
+
+        products = input_products(builder)
+
+        assert [(p.kind, Path(p.path).name) for p in products] == [
+            ("boundary_forcing", name)
+        ]
 
     def test_ucla_roms_blueprint_dir_property(self, minimal_cstar_spec_builder_args):
         """Test the ucla_roms_blueprint_dir property (under host.working_dir)."""

@@ -9,6 +9,7 @@ generates the ROMS input files.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import re
 import warnings
@@ -114,6 +115,12 @@ UPSCALED_CDR_PLACEHOLDER_LOCATION = "cstar-forge:upscaled-cdr-forcing-placeholde
 # ``RomsInputGenerator._matches_planned_output``.
 _PLANNED_OUTPUT_TAIL_RE = re.compile(r"^(_\d+|_clim|\.\d+)?$")
 
+# Longest ``use_vars`` tag kept readable in a BGC output file name. A longer list
+# (e.g. every MARBL tracer a unified source supplies) is replaced by a count plus a
+# short digest, so the file name -- which ROMS reads into a fixed-size buffer via its
+# namelist path -- stays short. See ``RomsInputGenerator._bgc_output_suffix``.
+_MAX_BGC_VARS_TAG_LENGTH = 40
+
 
 def _rename_for_roms_tools(out: dict[str, Any], name: str) -> dict[str, Any]:
     """Swap a Forge logical source name for the name roms-tools registers it under.
@@ -179,6 +186,31 @@ def netcdf_basename(domain_name: str, input_name: str) -> str:
     ``forge`` application's emitted-blueprint prediction.
     """
     return f"{netcdf_filename_component(domain_name)}_{netcdf_filename_component(input_name)}.nc"
+
+
+def _has_planned_output_tail(planned: Path, candidate: Path) -> bool:
+    """True if ``candidate`` is ``planned``'s stem plus an accepted multi-file tail.
+
+    The tail is one of ``_PLANNED_OUTPUT_TAIL_RE`` (grouped ``_YYYYMM``, ``_clim``,
+    or a partition ``.N``); an exact match has an empty tail.
+    """
+    if not candidate.stem.startswith(planned.stem):
+        return False
+    return bool(_PLANNED_OUTPUT_TAIL_RE.fullmatch(candidate.stem[len(planned.stem) :]))
+
+
+def _output_on_disk(planned: Path) -> bool:
+    """True if ``planned`` exists, exactly or with a grouped/climatology/partition tail.
+
+    Standalone version of ``RomsInputGenerator._planned_netcdf_already_present``
+    (without its other-planned-outputs exclusion), for naming decisions made before
+    the generator's planned-output set exists. Leftover ``_nc4`` intermediates
+    never count.
+    """
+    return planned.exists() or any(
+        "_nc4" not in candidate.name and _has_planned_output_tail(planned, candidate)
+        for candidate in planned.parent.glob(f"{planned.stem}*.nc")
+    )
 
 
 def carbonate_sensitivity_destinations(
@@ -1030,7 +1062,9 @@ class RomsInputGenerator(InputGenerator):
 
     @staticmethod
     def _bgc_output_suffix(
-        source_name: str | None, use_vars: list[str] | None = None
+        source_name: str | None,
+        use_vars: list[str] | None = None,
+        shorten: bool = True,
     ) -> str:
         """Sanitize a BGC source name (+ optional ``use_vars``) into an output-
         filename suffix.
@@ -1043,27 +1077,36 @@ class RomsInputGenerator(InputGenerator):
         pattern of splitting ONE source across multiple items (same
         ``source.name``, different ``use_vars``) -- without it, two such items
         would collide on this suffix alone; a short discriminator built from the
-        (sorted, so order-independent) variable names is appended. This still
-        doesn't guarantee uniqueness for two items with identical name AND
-        use_vars (a genuinely redundant config) -- see the ``__post_init__``
-        collision check for that final safety net.
+        (sorted, so order-independent) variable names is appended. When the
+        joined names exceed ``_MAX_BGC_VARS_TAG_LENGTH`` characters the
+        discriminator becomes ``"{n}vars_{first 8 hex of the sha256 of the
+        sorted, deduplicated names}"`` (e.g. ``"unified-25vars_1a2b3c4d"``): a
+        different variable list still gets a different name, and the same list
+        always the same one. This still doesn't guarantee uniqueness for two
+        items with identical name AND use_vars (a genuinely redundant config).
+        ``shorten=False`` always joins the names, i.e. the name used before the
+        digest existed (see ``_forcing_detail_in_dir``).
         """
         sanitized = re.sub(r"[^a-z0-9]+", "_", str(source_name or "").lower()).strip(
             "_"
         )
         sanitized = sanitized or "bgc"
         if use_vars:
-            vars_tag = "_".join(
-                re.sub(r"[^a-z0-9]+", "", v.lower()) for v in sorted(use_vars)
-            )
+            names = sorted(re.sub(r"[^a-z0-9]+", "", v.lower()) for v in use_vars)
+            vars_tag = "_".join(names)
+            if shorten and len(vars_tag) > _MAX_BGC_VARS_TAG_LENGTH:
+                unique = sorted(set(names))
+                digest = hashlib.sha256("_".join(unique).encode()).hexdigest()[:8]
+                vars_tag = f"{len(unique)}vars_{digest}"
             sanitized = f"{sanitized}-{vars_tag}"
         return sanitized
 
+    @staticmethod
     def _forcing_detail_suffix(
-        self,
         forcing_type: str | None,
         source_name: str | None,
         use_vars: list[str] | None = None,
+        shorten: bool = True,
     ) -> str:
         """The part of a surface/boundary forcing item's output filename after
         ``"{category}-"``: the plain ``forcing_type`` for physics/restoring, or
@@ -1076,8 +1119,46 @@ class RomsInputGenerator(InputGenerator):
         if forcing_type is None:
             return ""
         if forcing_type == "bgc":
-            return f"bgc-{self._bgc_output_suffix(source_name, use_vars)}"
+            suffix = RomsInputGenerator._bgc_output_suffix(
+                source_name, use_vars, shorten=shorten
+            )
+            return f"bgc-{suffix}"
         return forcing_type
+
+    @staticmethod
+    def _forcing_detail_in_dir(
+        input_data_dir: Path,
+        domain_name: str,
+        category: str,
+        forcing_type: str | None,
+        source_name: str | None,
+        use_vars: list[str] | None = None,
+    ) -> str:
+        """``_forcing_detail_suffix``, but keeping a pre-existing legacy file name.
+
+        The one place that decides between a bgc item's short name and its legacy
+        (unshortened, fully joined ``use_vars``) name; every planner and generation
+        step goes through it so they cannot disagree. A domain generated before
+        long ``use_vars`` tags were shortened holds its file under the legacy name;
+        renaming it would make a re-run see neither the file nor, for boundaries, a
+        complete set, so that name is honoured when it is on disk and the short one
+        is not. New domains and clobber runs (an empty directory) get the short
+        name.
+        """
+        detail = RomsInputGenerator._forcing_detail_suffix(
+            forcing_type, source_name, use_vars
+        )
+        legacy = RomsInputGenerator._forcing_detail_suffix(
+            forcing_type, source_name, use_vars, shorten=False
+        )
+        if legacy == detail:
+            return detail
+
+        def on_disk(name: str) -> bool:
+            basename = netcdf_basename(domain_name, f"{category}-{name}")
+            return _output_on_disk(Path(input_data_dir) / basename)
+
+        return legacy if on_disk(legacy) and not on_disk(detail) else detail
 
     @staticmethod
     def _item_source_name(kwargs: dict[str, Any] | None) -> str | None:
@@ -1131,7 +1212,10 @@ class RomsInputGenerator(InputGenerator):
 
             if step.name == "forcing.surface":
                 forcing_type = kwargs.get("type") if isinstance(kwargs, dict) else None
-                detail = self._forcing_detail_suffix(
+                detail = self._forcing_detail_in_dir(
+                    self.input_data_dir,
+                    self.domain_name,
+                    "surface",
                     forcing_type,
                     self._item_source_name(kwargs),
                     self._item_use_vars(kwargs),
@@ -1149,7 +1233,10 @@ class RomsInputGenerator(InputGenerator):
                     kwargs.get("bgc_sources") if isinstance(kwargs, dict) else None
                 )
                 for bs in bgc_sources or []:
-                    detail = self._forcing_detail_suffix(
+                    detail = self._forcing_detail_in_dir(
+                        self.input_data_dir,
+                        self.domain_name,
+                        "boundary",
                         "bgc",
                         self._item_source_name(bs),
                         self._item_use_vars(bs),
@@ -1214,10 +1301,7 @@ class RomsInputGenerator(InputGenerator):
         resolved = candidate.resolve()
         if resolved != planned.resolve() and resolved in self._planned_output_paths:
             return False
-        if not candidate.stem.startswith(planned.stem):
-            return False
-        tail = candidate.stem[len(planned.stem) :]
-        return bool(_PLANNED_OUTPUT_TAIL_RE.fullmatch(tail))
+        return _has_planned_output_tail(planned, candidate)
 
     def _planned_netcdf_already_present(self, path: Path) -> bool:
         """
@@ -1879,8 +1963,13 @@ class RomsInputGenerator(InputGenerator):
         # same run, including the documented same-source/different-use_vars
         # split -- the same mechanism _generate_boundary_forcing uses; see
         # _forcing_detail_suffix.
-        detail = self._forcing_detail_suffix(
-            type, source_name, input_args.get("use_vars")
+        detail = self._forcing_detail_in_dir(
+            self.input_data_dir,
+            self.domain_name,
+            "surface",
+            type,
+            source_name,
+            input_args.get("use_vars"),
         )
         yaml_path = self._yaml_filename(f"{key}-{detail}")
         output_path = self._forcing_filename(input_name=f"surface-{detail}")
@@ -2065,8 +2154,13 @@ class RomsInputGenerator(InputGenerator):
         # resolved/renamed name here made the generated suffix disagree with
         # what was planned.
         bgc_details = [
-            self._forcing_detail_suffix(
-                "bgc", self._item_source_name(bs), self._item_use_vars(bs)
+            self._forcing_detail_in_dir(
+                self.input_data_dir,
+                self.domain_name,
+                "boundary",
+                "bgc",
+                self._item_source_name(bs),
+                self._item_use_vars(bs),
             )
             for bs in (bgc_sources_raw or [])
         ]

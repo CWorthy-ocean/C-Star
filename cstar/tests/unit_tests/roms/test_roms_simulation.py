@@ -57,6 +57,10 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     namelist_schema_for_ref,
 )
+from cstar.roms.precheck import (
+    MAX_NAMELIST_FILE_NAME_LENGTH,
+    MAX_OUTPUT_ROOT_NAME_LENGTH,
+)
 from cstar.roms.simulation import ROMSSimulation, _join_workers
 from cstar.system.manager import (
     DOCS_MACHINES_URL,
@@ -876,6 +880,91 @@ class TestROMSSimulationInitialization:
             expected_output_root
         )
         assert result.extract_data_settings.extract_root_name == (expected_extract_root)
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_file_name_length(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """A file name ROMS cannot read is refused when the namelist is built,
+        so a pre-run (which never starts ROMS) catches it too; the longest name
+        that fits is accepted.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+
+        def forcing_path(length: int) -> Path:
+            return Path("/" + "a" * (length - 4) + ".nc")
+
+        mock_forcing_paths.return_value = [forcing_path(MAX_NAMELIST_FILE_NAME_LENGTH)]
+        assert len(sim.roms_runtime_settings.forcing_files.frcfiles[0]) == (
+            MAX_NAMELIST_FILE_NAME_LENGTH
+        )
+
+        too_long = forcing_path(MAX_NAMELIST_FILE_NAME_LENGTH + 1)
+        mock_forcing_paths.return_value = [Path("forcing1.nc"), too_long]
+        with pytest.raises(ValueError, match="shorter run directory") as exc:
+            _ = sim.roms_runtime_settings
+        message = str(exc.value)
+        assert "forcing_files.frcfiles[1]" in message
+        assert f"({MAX_NAMELIST_FILE_NAME_LENGTH + 1} > " in message
+        assert str(too_long) in message
+
+        # names as written: an override that lengthens one is caught as well
+        mock_forcing_paths.return_value = [Path("forcing1.nc")]
+        sim.namelist_overrides = {
+            "grid_settings": {"grdname": "g" * (MAX_NAMELIST_FILE_NAME_LENGTH + 1)}
+        }
+        with pytest.raises(ValueError, match=r"grid_settings\.grdname"):
+            _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_output_root_name_length(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An `output_root_name` over ROMS's 220-character limit is refused."""
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {
+            "simulation_name_settings": {
+                "output_root_name": "o" * (MAX_OUTPUT_ROOT_NAME_LENGTH + 1)
+            }
+        }
+        with pytest.raises(ValueError, match=r"simulation_name_settings\.output_root"):
+            _ = sim.roms_runtime_settings
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)

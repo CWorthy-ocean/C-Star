@@ -803,6 +803,7 @@ class ForgeExecutor(BaseModel):
         the grid from the injected grid object) — never from the catalog ModelSpec.
         """
         input_data_dir = self.input_data_dir
+        generator = input_generator.RomsInputGenerator
         planned_paths: list[Path] = []
 
         def _add_nc(stem: str) -> None:
@@ -840,11 +841,15 @@ class ForgeExecutor(BaseModel):
                     # RomsInputGenerator._generate_boundary_forcing).
                     _add_nc("boundary-physics")
                     for bs in entries.get("bgc_sources") or []:
-                        bs_source = bs.get("source") or {}
-                        suffix = input_generator.RomsInputGenerator._bgc_output_suffix(
-                            bs_source.get("name"), bs.get("use_vars")
+                        detail = generator._forcing_detail_in_dir(
+                            input_data_dir,
+                            self.name,
+                            "boundary",
+                            "bgc",
+                            generator._item_source_name(bs),
+                            generator._item_use_vars(bs),
                         )
-                        _add_nc(f"boundary-bgc-{suffix}")
+                        _add_nc(f"boundary-{detail}")
                     continue
 
                 if category == "surface" and isinstance(entries, list):
@@ -857,20 +862,15 @@ class ForgeExecutor(BaseModel):
                         elif hasattr(entry, "type"):
                             forcing_type = entry.type
 
-                        source_name = entry.get("source").get("name")
-                        if entry.get("type") == "bgc" and source_name == "MBL_co2":
-                            stem = (
-                                f"{category}-{forcing_type}-co2"
-                                if forcing_type
-                                else category
-                            )
-                        else:
-                            stem = (
-                                f"{category}-{forcing_type}"
-                                if forcing_type
-                                else category
-                            )
-                        _add_nc(stem)
+                        detail = generator._forcing_detail_in_dir(
+                            input_data_dir,
+                            self.name,
+                            category,
+                            forcing_type,
+                            generator._item_source_name(entry),
+                            generator._item_use_vars(entry),
+                        )
+                        _add_nc(f"{category}-{detail}" if detail else category)
                     continue
 
                 _add_nc(category)

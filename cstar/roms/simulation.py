@@ -103,6 +103,7 @@ from cstar.roms.precheck import (
     applies_to,
     averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
+    check_file_name_lengths,
     check_output_streams_divide_rst,
 )
 from cstar.simulation import Simulation
@@ -973,6 +974,12 @@ class ROMSSimulation(Simulation):
             `pydantic.ValidationError` is chained as `__cause__`.
             If the effective `time_stepping.dt` (after overrides) is not
             positive.
+            If a file name in the namelist is too long for ROMS to read (a
+            :class:`~cstar.roms.precheck.NamelistConsistencyError`, naming each
+            offending key with its value and length): a name longer than
+            :data:`~cstar.roms.precheck.MAX_NAMELIST_FILE_NAME_LENGTH`, or an
+            output or extract root name longer than
+            :data:`~cstar.roms.precheck.MAX_OUTPUT_ROOT_NAME_LENGTH`.
         pydantic.ValidationError
             If a simulation-derived override value is invalid for its namelist
             field (the namelist models re-validate on assignment).
@@ -1087,6 +1094,10 @@ class ROMSSimulation(Simulation):
             check_output_streams_divide_rst(nml, cppdefs)
         if averages_end_on_marbl_step_applies_to_schema(type(nml)):
             check_averages_end_on_marbl_step(nml, cppdefs)
+
+        # Names as written, after the override merge: ROMS cannot read one that
+        # fills its buffer, and a pre-run never starts ROMS to find out.
+        check_file_name_lengths(nml)
 
         return nml
 
