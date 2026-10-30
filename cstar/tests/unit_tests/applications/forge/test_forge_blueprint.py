@@ -9716,3 +9716,21 @@ def test_empty_groom_settings_normalizes_to_unset():
     assert "groom_settings" not in dumped["initial_conditions"]
     assert "groom_settings" not in dumped["boundary"]
     assert cfg.content_hash() == base.content_hash()
+
+
+@pytest.mark.parametrize(
+    "settings", [{"checks": {"DIC": 5}}, {"checks": []}, {"dz_max": float("nan")}]
+)
+def test_malformed_groom_settings_fail_as_a_validation_error(settings):
+    """With a roms-tools that validates ``groom_settings``, a malformed value fails the
+    blueprint load as a pydantic ``ValidationError``, not a raw exception.
+    """
+    pytest.importorskip("roms_tools.setup.bgc_groom").resolve_groom_settings
+    from pydantic import ValidationError
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    fdata["initial_conditions"]["groom_settings"] = settings
+    with pytest.raises(ValidationError, match="groom_settings"):
+        _build(forcing_inputs=fdata)
