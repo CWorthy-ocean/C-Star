@@ -2116,6 +2116,22 @@ class TestForgeExecutorBuildAndRun:
         ):
             self._run_configure_build(cfg, host)
 
+    def test_configure_build_rejects_diagnostics_with_pio(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """DIAGNOSTICS switched on after the resolver ran (a stored or hand-edited
+        blueprint) is refused here too while ParallelIO is on, for a ucla-roms pin
+        (this fixture's) before 0.13.1.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["cppdefs"]["diagnostics"] = True
+        cfg.model_settings["cppdefs"]["use_pio"] = True
+
+        with pytest.raises(ValueError, match=r"ucla-roms >= 0\.13\.1"):
+            self._run_configure_build(cfg, host)
+
     def test_configure_build_rejects_upscale_without_marbl(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):

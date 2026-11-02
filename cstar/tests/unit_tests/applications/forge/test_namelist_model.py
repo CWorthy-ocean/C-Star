@@ -22,6 +22,7 @@ from cstar.applications.forge.namelist_model import (
     _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
     CDR_LITE_MODE_MIN_ROMS,
     CDR_NZ_CHD_FROM_FILE_MIN_ROMS,
+    DIAGNOSTICS_PIO_MIN_ROMS,
     RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
     UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS,
     CdrGasExchOutputCfg,
@@ -57,6 +58,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_constant_fe,
+    check_diagnostics_pio,
     check_marbl_only_outputs,
     check_restoring_flux_output,
     check_river_tracer_counts,
@@ -1965,6 +1967,56 @@ def test_check_cdr_lite_sections_reports_every_problem_together():
 )
 def test_bgc_mode_from_cppdefs(cppdefs, expected):
     assert bgc_mode_from_cppdefs(cppdefs) == expected
+
+
+# ---------------------------------------------------------------------------
+# check_diagnostics_pio
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "cppdefs",
+    [
+        {"diagnostics": True, "use_pio": False},
+        {"diagnostics": False, "use_pio": True},
+        {"use_pio": True},
+        {"diagnostics": True},
+    ],
+)
+def test_check_diagnostics_pio_accepts_either_alone(cppdefs):
+    check_diagnostics_pio(cppdefs, "0.13.0")
+
+
+_DIAGNOSTICS_WITH_PIO = {"diagnostics": True, "use_pio": True}
+
+
+@pytest.mark.parametrize(
+    "ref", ["0.13.1", "v0.13.1", "0.14.0", "main", "abc1234", None]
+)
+def test_check_diagnostics_pio_accepts_both_from_the_minimum(ref):
+    assert DIAGNOSTICS_PIO_MIN_ROMS == (0, 13, 1)
+    check_diagnostics_pio(_DIAGNOSTICS_WITH_PIO, ref)
+
+
+@pytest.mark.parametrize("ref", ["0.13.0", "v0.12.0", "0.5.0"])
+def test_check_diagnostics_pio_rejects_both_on_older_releases(ref):
+    with pytest.raises(ValueError, match=r"ucla-roms >= 0\.13\.1"):
+        check_diagnostics_pio(_DIAGNOSTICS_WITH_PIO, ref)
+
+
+@pytest.mark.parametrize(
+    "use_pio, roms_ref, rejected",
+    [(True, "0.13.0", True), (True, "0.13.1", False), (False, "0.13.0", False)],
+)
+def test_validate_run_time_sections_reports_diagnostics_with_pio(
+    use_pio, roms_ref, rejected
+):
+    """A stored blueprint with DIAGNOSTICS and ParallelIO on a ucla-roms pin that
+    cannot write the _dia file is reported up front (engine/wizard), not first at
+    configure_build.
+    """
+    errs = validate_run_time_sections(
+        {"cppdefs": {"diagnostics": True, "use_pio": use_pio}}, roms_ref=roms_ref
+    )
+    assert any("first diagnostics output" in e for e in errs) is rejected
 
 
 # ---------------------------------------------------------------------------

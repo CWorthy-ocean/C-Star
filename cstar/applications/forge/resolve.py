@@ -79,6 +79,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_constant_fe,
+    check_diagnostics_pio,
     check_marbl_only_outputs,
     check_marbl_step_averages,
     check_output_streams_divide_rst,
@@ -1390,6 +1391,11 @@ def build_forge_blueprint(
         settings.get("marbl_bgc") or {},
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
+
+    # ----- DIAGNOSTICS with ParallelIO needs ucla-roms >= 0.13.1 -------------
+    # Keyed on the merged cppdefs (use_pio set above, diagnostics from the ModelSpec
+    # or an override), like configure_build.
+    check_diagnostics_pio(settings["cppdefs"], effective_roms_ref)
 
     # ----- restoring-flux output needs a restoring term ----------------------
     # ucla-roms >= 0.13.0 stops at startup on wrt_rstflx without one; in a Forge

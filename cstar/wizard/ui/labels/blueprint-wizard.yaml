@@ -1174,6 +1174,10 @@ fields:
     label: Drop UPSTREAM_TS curvature at land faces
     symbol: upstream_ts_land_curv
     hint: 'ucla-roms >= 0.8.0: zero the 3rd-order curvature term on tracer faces whose stencil touches land (UPSTREAM_TS_LAND_CURV), avoiding overshoots at the first wet point. Ignored by earlier releases.'
+  settings.cppdefs.diagnostics:
+    label: Diagnostics (DIAGNOSTICS)
+    symbol: diagnostics
+    hint: 'Compiles UCLA-ROMS with DIAGNOSTICS, which writes the _dia file of momentum (diag_uv) and tracer (diag_trc) term balances. Off: the diagnostics settings have no effect. With ParallelIO it needs UCLA-ROMS 0.13.1 or later.'
   settings.ocean_vars.wrt_avg_z:
     label: Sea surface height (zeta)
     symbol: wrt_avg_z

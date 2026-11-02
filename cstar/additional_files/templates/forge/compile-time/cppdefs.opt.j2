@@ -53,7 +53,9 @@
 
 ! Enable the calculation and writing of "diagnostics" (term-by-term momentum and tracer budgets)
 ! Usage notes: Options are set in diagnostics.opt
-#undef DIAGNOSTICS
+{% if cppdefs.diagnostics %}#define DIAGNOSTICS
+{% else %}#undef DIAGNOSTICS
+{% endif %}
 
 ! Enable the calculation and writing of "diagnostics" for the nonhydrostatic vertical velocity equation
 ! Usage notes: None

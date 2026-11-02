@@ -43,7 +43,7 @@ relative to that template repository's root. For example:
 .. code-block:: yaml
 
    code:
-     templates_commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4  # C-Star: drops the no-op EXACT_RESTARTS/PRINT_HOSTNAME keys
+     templates_commit: 1d3f643e03651e493369a68871012e5b980d66ee  # C-Star: templates DIAGNOSTICS on cppdefs.diagnostics
      templates_compile_time:
        directory: cstar/additional_files/templates/forge/compile-time
        files:

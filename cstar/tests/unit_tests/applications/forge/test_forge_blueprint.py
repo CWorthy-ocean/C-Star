@@ -2612,7 +2612,7 @@ def test_resolver_0_13_model_spec_carries_v_sponge_trc_beside_the_derived_v_spon
     the ModelSpec's, and is not derived.
     """
     cfg = _build(model_path=_MODEL_PATH_ROMS0130)
-    assert cfg.code.roms.commit == "0.13.0"
+    assert cfg.code.roms.commit == "0.13.1"
     assert cfg.model_settings["v_sponge"] == {
         "v_sponge": cfg.domain.v_sponge,
         "v_sponge_trc": -1.0,
@@ -4163,6 +4163,56 @@ def test_resolver_non_extract_stream_check_gated_off_for_legacy_roms():
         output_settings=_standard_output_settings_with_bad_frc(),
     )
     assert cfg.model_settings["frc_output"]["wrt_frc"] is True
+
+
+@pytest.mark.parametrize("diagnostics", [True, False])
+def test_resolver_diagnostics_stream_check_follows_cppdefs_diagnostics(diagnostics):
+    """The `diagnostics` stream's divides-rst check is gated on the DIAGNOSTICS
+    CPP key, which the template defines from `cppdefs.diagnostics`: tracer
+    diagnostics at 7 * 5000 s (does not divide 86400 s) only fail when compiled in.
+    """
+    settings = _CATALOG.output_data("standard")
+    settings["diagnostics"] = {
+        **settings["diagnostics"],
+        "diag_trc": True,
+        "output_period": 5000.0,
+    }
+    kw = dict(
+        model_path=_MODEL_PATH_ROMS050,
+        output_settings=settings,
+        use_pio=False,  # 0.5.0 cannot write DIAGNOSTICS under ParallelIO
+        compile_time_overrides={"cppdefs": {"diagnostics": diagnostics}},
+    )
+    if diagnostics:
+        with pytest.raises(ValueError, match="evenly divide"):
+            _build(**kw)
+    else:
+        assert _build(**kw).model_settings["cppdefs"]["diagnostics"] is False
+
+
+def test_resolver_rejects_diagnostics_with_pio_before_roms_0131():
+    """ucla-roms before 0.13.1 aborts at the first _dia write under ParallelIO, so
+    the resolver (and with it the wizard) refuses the combination up front.
+    """
+    with pytest.raises(ValueError, match=r"ucla-roms >= 0\.13\.1"):
+        _build(
+            model_path=_MODEL_PATH_ROMS050,
+            use_pio=True,
+            compile_time_overrides={"cppdefs": {"diagnostics": True}},
+        )
+
+
+def test_resolver_accepts_diagnostics_with_pio_on_the_0130_default():
+    """The bundled 0.13 default pins ucla-roms 0.13.1, which writes the _dia file
+    under ParallelIO.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        use_pio=True,
+        compile_time_overrides={"cppdefs": {"diagnostics": True}},
+    )
+    assert cfg.code.roms.commit == "0.13.1"
+    assert cfg.model_settings["cppdefs"]["diagnostics"] is True
 
 
 def test_resolver_output_settings_override():

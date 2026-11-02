@@ -67,13 +67,13 @@ code:
   # the executor fetches these via C-Star's AdditionalCode from the pinned C-Star commit.
   # Pin the serving C-Star commit with `templates_commit:` (until pinned, the resolver
   # defaults to branch `main`).
-  templates_commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4  # C-Star: drops the no-op EXACT_RESTARTS/PRINT_HOSTNAME keys
+  templates_commit: 1d3f643e03651e493369a68871012e5b980d66ee  # C-Star: templates DIAGNOSTICS on cppdefs.diagnostics
   templates_compile_time:
     directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: 7665373d4eaad6d94215660775ca66dd87f1c2309e15edc0039c9051b20b0f00
+      cppdefs.opt.j2: 883be2e2a9d87837300e0b7c995e639d8edd90af1b3bd1fd03dede5c514bd004
   templates_run_time:
     directory: cstar/additional_files/templates/forge/run-time
     files:
@@ -96,6 +96,7 @@ model_settings:
     nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
     nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"
     auto_tiling: false  # MPI_MASKING (ucla-roms 0.5.0); resolver always overwrites this from partitioning["auto_tiling"]
+    diagnostics: false  # DIAGNOSTICS: momentum/tracer term-balance (_dia) output; the wizard's diagnostics switch
 
   lateral_visc:
     visc2: 0.0  # m^2/sec

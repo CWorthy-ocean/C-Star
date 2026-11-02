@@ -118,7 +118,7 @@
     diag_trc = .false.
     diag_uv = .false.
     nrpf_diag = 7
-    output_period_diag = 86400.0
+    output_period_diag = 86400
 /
 
 &dic_alk_correction

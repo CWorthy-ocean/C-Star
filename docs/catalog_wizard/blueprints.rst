@@ -98,10 +98,12 @@ Output
    biogeochemistry output controls, and the CDR streams. The biogeochemistry
    and CDR streams are shown only in the modes that produce them: all of them
    with MARBL, and only the CDR-lite tracer output in ``cdr_lite`` mode. The
-   less common streams (diagnostics, temperature and salinity, forcing fields,
-   depth slices, random output, particle tracking, the pressure-flux
-   calculation and runtime diagnostics) are collected in a collapsed **More
-   output streams** group.
+   less common streams (diagnostics, forcing fields, depth slices, random
+   output, particle tracking, the pressure-flux calculation and runtime
+   diagnostics) are collected in a collapsed **More output streams** group.
+   Temperature and salinity are among the variables written to the history
+   files, and the diagnostics stream has its own on/off switch, which compiles
+   UCLA-ROMS with ``DIAGNOSTICS`` (with ParallelIO, from UCLA-ROMS 0.13.1).
 
    Two streams depend on nesting. **Child-grid boundary extraction**
    (``extract_data``) appears only while *This grid is a parent* is on in the

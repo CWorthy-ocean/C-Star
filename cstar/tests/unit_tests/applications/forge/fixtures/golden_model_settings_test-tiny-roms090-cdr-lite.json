@@ -85,6 +85,7 @@
     "cdr_forcing": true,
     "cdr_lite": true,
     "co2_tvarying": false,
+    "diagnostics": false,
     "marbl": false,
     "nhy_forcing": false,
     "nox_forcing": false,

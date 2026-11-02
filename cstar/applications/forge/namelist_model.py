@@ -601,10 +601,11 @@ def cppdefs_for_precheck(
       ``upscale_output.do_upscale`` is true; there is no ``cppdefs.upscaling``
       key at all, so it's read off the run-time section instead.
 
-    ``diagnostics`` and ``biology_bec2`` need no such derivation: forge's
-    template hardcodes ``#undef DIAGNOSTICS``/``#undef BIOLOGY_BEC2`` (no BEC2
-    or ROMS term-budget diagnostics support yet), so their absence from
-    ``cppdefs`` already correctly reads as "inactive" to the checker.
+    ``diagnostics`` and ``biology_bec2`` need no such derivation:
+    ``cppdefs.diagnostics`` is the literal key the template ``#define``s
+    ``DIAGNOSTICS`` from (absent reads as off, as in the template), and the
+    template hardcodes ``#undef BIOLOGY_BEC2`` (no BEC2 support yet), so its
+    absence already correctly reads as "inactive" to the checker.
 
     Both derived keys are always OVERWRITTEN (not just filled in when absent):
     ``cppdefs`` is an unvalidated dict, so a hand-edited/legacy blueprint could
@@ -907,6 +908,37 @@ def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
         raise ValueError(
             f'bgc_mode "cdr_lite" on ucla-roms {roms_ref}: CDR-lite without MARBL '
             f"needs ucla-roms >= {minimum}."
+        )
+
+
+# ucla-roms release from which a PARALLEL_IO build writes its DIAGNOSTICS ``_dia``
+# file (#411): earlier releases define its variables outside netCDF define mode,
+# which CDF-5 refuses, and write the u/v terms in the wrong array shape. A non-PIO
+# build writes netCDF-4, where every release works.
+DIAGNOSTICS_PIO_MIN_ROMS: tuple[int, int, int] = (0, 13, 1)
+
+
+def check_diagnostics_pio(cppdefs: Mapping[str, Any], roms_ref: str | None) -> None:
+    """Reject ``cppdefs.diagnostics`` together with ``cppdefs.use_pio`` on a
+    ucla-roms pin older than :data:`DIAGNOSTICS_PIO_MIN_ROMS`, which aborts at the
+    first diagnostics output. A ``roms_ref`` that is not a release tag (branch,
+    commit hash, ``None``) counts as the latest release, like
+    :func:`check_cdr_lite_mode_roms`.
+
+    The resolver, ``validate_run_time_sections`` and ``configure_build`` call this.
+
+    Raises ``ValueError`` when both are on below the minimum.
+    """
+    if not (cppdefs.get("diagnostics") and cppdefs.get("use_pio")):
+        return
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < DIAGNOSTICS_PIO_MIN_ROMS:
+        minimum = ".".join(str(part) for part in DIAGNOSTICS_PIO_MIN_ROMS)
+        raise ValueError(
+            f"cppdefs.diagnostics (DIAGNOSTICS) with use_pio on ucla-roms {roms_ref}: "
+            "ucla-roms aborts at the first diagnostics output under ParallelIO "
+            f"before {minimum}. Pin ucla-roms >= {minimum}, or turn off use_pio or "
+            "cppdefs.diagnostics."
         )
 
 
@@ -1508,7 +1540,7 @@ class DicAlkCorrectionCfg(_SettingsSection):
 
 class DiagnosticsCfg(_SettingsSection):
     diag_avg: bool
-    output_period: float = Field(serialization_alias="output_period_diag")
+    output_period: int = Field(serialization_alias="output_period_diag")
     nrpf: int = Field(serialization_alias="nrpf_diag")
     diag_uv: bool
     diag_trc: bool
@@ -2524,6 +2556,10 @@ def validate_run_time_sections(
             check_cdr_lite_mode_roms(roms_ref)
         except ValueError as exc:
             errors.append(str(exc))
+    try:
+        check_diagnostics_pio(settings.get("cppdefs") or {}, roms_ref)
+    except ValueError as exc:
+        errors.append(str(exc))
     # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
     # blueprint fails before data staging/generation, not at configure_build.
     if "param" in settings and "cppdefs" in settings:

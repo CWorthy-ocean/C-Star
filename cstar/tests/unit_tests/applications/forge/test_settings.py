@@ -487,6 +487,19 @@ class TestCppdefsTemplate:
         assert "#define MARBL\n" not in text
         assert "#define MARBL_DIAGS" not in text
 
+    def test_diagnostics_true_defines_diagnostics(self, tmp_path):
+        text = self._render(tmp_path, {"diagnostics": True})
+        assert "#define DIAGNOSTICS\n" in text
+        assert "#undef DIAGNOSTICS\n" not in text
+        assert "#undef DIAGNOSTICS_NHMG\n" in text
+
+    @pytest.mark.parametrize("cppdefs", [{"diagnostics": False}, {}])
+    def test_diagnostics_false_or_absent_undefs_diagnostics(self, tmp_path, cppdefs):
+        """A blueprint whose ModelSpec predates the key renders as before."""
+        text = self._render(tmp_path, cppdefs)
+        assert "#undef DIAGNOSTICS\n" in text
+        assert "#define DIAGNOSTICS\n" not in text
+
     def test_tides_true_defines_tides(self, tmp_path):
         text = self._render(tmp_path, {"tides": True})
         assert "#define TIDES" in text
