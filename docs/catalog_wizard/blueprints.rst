@@ -103,7 +103,7 @@ Output
    diagnostics) are collected in a collapsed **More output streams** group.
    Temperature and salinity are among the variables written to the history
    files, and the diagnostics stream has its own on/off switch, which compiles
-   UCLA-ROMS with ``DIAGNOSTICS`` (not yet available together with ParallelIO).
+   UCLA-ROMS with ``DIAGNOSTICS`` (with ParallelIO, from UCLA-ROMS 0.13.1).
 
    Two streams depend on nesting. **Child-grid boundary extraction**
    (``extract_data``) appears only while *This grid is a parent* is on in the

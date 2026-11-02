@@ -1392,10 +1392,10 @@ def build_forge_blueprint(
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
 
-    # ----- DIAGNOSTICS needs ParallelIO off -----------------------------------
+    # ----- DIAGNOSTICS with ParallelIO needs ucla-roms >= 0.13.1 -------------
     # Keyed on the merged cppdefs (use_pio set above, diagnostics from the ModelSpec
     # or an override), like configure_build.
-    check_diagnostics_pio(settings["cppdefs"])
+    check_diagnostics_pio(settings["cppdefs"], effective_roms_ref)
 
     # ----- restoring-flux output needs a restoring term ----------------------
     # ucla-roms >= 0.13.0 stops at startup on wrt_rstflx without one; in a Forge

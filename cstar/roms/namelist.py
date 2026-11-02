@@ -1354,7 +1354,7 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
 # with every new tier (recipe step 4 above) and also for a release that changes
 # no namelist key (a patch release such as 0.12.1), once checked. Never below the last entry's
 # lower bound.
-NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_13_0
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = (0, 13, 1)  # no namelist change
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:

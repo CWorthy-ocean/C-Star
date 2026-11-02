@@ -2488,7 +2488,10 @@ class ForgeExecutor(BaseModel):
             check_cdr_lite_mode_roms(
                 str(effective_roms_ref) if effective_roms_ref is not None else None
             )
-        check_diagnostics_pio(cppdefs)
+        check_diagnostics_pio(
+            cppdefs,
+            str(effective_roms_ref) if effective_roms_ref is not None else None,
+        )
         if cdr_active and not cppdefs.get("cdr_forcing"):
             cppdefs["cdr_forcing"] = True
             log.info(

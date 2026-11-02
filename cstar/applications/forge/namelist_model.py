@@ -911,23 +911,33 @@ def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
         )
 
 
-def check_diagnostics_pio(cppdefs: Mapping[str, Any]) -> None:
-    """Reject ``cppdefs.diagnostics`` together with ``cppdefs.use_pio``. Under
-    PARALLEL_IO ucla-roms writes CDF-5 files, and its ``create_diagnostics_file``
-    defines the ``_dia`` file's variables without ``nf90_redef``, so the run aborts
-    at the first diagnostics output (every release through 0.13.0; a non-PIO build
-    writes netCDF-4, where that works). Gate this on the fixing release once one
-    exists.
+# ucla-roms release from which a PARALLEL_IO build writes its DIAGNOSTICS ``_dia``
+# file (#411): earlier releases define its variables outside netCDF define mode,
+# which CDF-5 refuses, and write the u/v terms in the wrong array shape. A non-PIO
+# build writes netCDF-4, where every release works.
+DIAGNOSTICS_PIO_MIN_ROMS: tuple[int, int, int] = (0, 13, 1)
+
+
+def check_diagnostics_pio(cppdefs: Mapping[str, Any], roms_ref: str | None) -> None:
+    """Reject ``cppdefs.diagnostics`` together with ``cppdefs.use_pio`` on a
+    ucla-roms pin older than :data:`DIAGNOSTICS_PIO_MIN_ROMS`, which aborts at the
+    first diagnostics output. A ``roms_ref`` that is not a release tag (branch,
+    commit hash, ``None``) counts as the latest release, like
+    :func:`check_cdr_lite_mode_roms`.
 
     The resolver, ``validate_run_time_sections`` and ``configure_build`` call this.
 
-    Raises ``ValueError`` when both are on.
+    Raises ``ValueError`` when both are on below the minimum.
     """
-    if cppdefs.get("diagnostics") and cppdefs.get("use_pio"):
+    if not (cppdefs.get("diagnostics") and cppdefs.get("use_pio")):
+        return
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < DIAGNOSTICS_PIO_MIN_ROMS:
+        minimum = ".".join(str(part) for part in DIAGNOSTICS_PIO_MIN_ROMS)
         raise ValueError(
-            "cppdefs.diagnostics (DIAGNOSTICS) needs ParallelIO off: with use_pio, "
-            "ucla-roms aborts at the first diagnostics output (it defines the _dia "
-            "file's variables outside netCDF define mode). Turn off use_pio or "
+            f"cppdefs.diagnostics (DIAGNOSTICS) with use_pio on ucla-roms {roms_ref}: "
+            "ucla-roms aborts at the first diagnostics output under ParallelIO "
+            f"before {minimum}. Pin ucla-roms >= {minimum}, or turn off use_pio or "
             "cppdefs.diagnostics."
         )
 
@@ -2547,7 +2557,7 @@ def validate_run_time_sections(
         except ValueError as exc:
             errors.append(str(exc))
     try:
-        check_diagnostics_pio(settings.get("cppdefs") or {})
+        check_diagnostics_pio(settings.get("cppdefs") or {}, roms_ref)
     except ValueError as exc:
         errors.append(str(exc))
     # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
