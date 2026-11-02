@@ -1085,7 +1085,7 @@ class RomsInputGenerator(InputGenerator):
         always the same one. This still doesn't guarantee uniqueness for two
         items with identical name AND use_vars (a genuinely redundant config).
         ``shorten=False`` always joins the names, i.e. the name used before the
-        digest existed (see ``_forcing_detail_in_dir``).
+        digest existed (see ``forcing_detail_in_dir``).
         """
         sanitized = re.sub(r"[^a-z0-9]+", "_", str(source_name or "").lower()).strip(
             "_"
@@ -1128,7 +1128,7 @@ class RomsInputGenerator(InputGenerator):
         return forcing_type
 
     @staticmethod
-    def _forcing_detail_in_dir(
+    def forcing_detail_in_dir(
         input_data_dir: Path,
         domain_name: str,
         category: str,
@@ -1139,8 +1139,9 @@ class RomsInputGenerator(InputGenerator):
         """``_forcing_detail_suffix``, but keeping a pre-existing legacy file name.
 
         The one place that decides between a bgc item's short name and its legacy
-        (unshortened, fully joined ``use_vars``) name; every planner and generation
-        step goes through it so they cannot disagree. A domain generated before
+        (unshortened, fully joined ``use_vars``) name; every planner (this class's
+        and ``ForgeExecutor._planned_netcdf_outputs``) and generation step goes
+        through it so they cannot disagree. A domain generated before
         long ``use_vars`` tags were shortened holds its file under the legacy name;
         renaming it would make a re-run see neither the file nor, for boundaries, a
         complete set, so that name is honoured when it is on disk and the short one
@@ -1174,7 +1175,7 @@ class RomsInputGenerator(InputGenerator):
         return detail
 
     @staticmethod
-    def _item_source_name(kwargs: dict[str, Any] | None) -> str | None:
+    def item_source_name(kwargs: dict[str, Any] | None) -> str | None:
         """Best-effort ``source.name`` lookup from a raw (unresolved) input_list
         item's kwargs dict, for planning purposes -- ``source`` may be a plain
         dict (the normal case) or, in some direct-call/test contexts, a
@@ -1188,9 +1189,9 @@ class RomsInputGenerator(InputGenerator):
         return getattr(src, "name", None)
 
     @staticmethod
-    def _item_use_vars(kwargs: dict[str, Any] | None) -> list[str] | None:
+    def item_use_vars(kwargs: dict[str, Any] | None) -> list[str] | None:
         """Best-effort ``use_vars`` lookup from a raw (unresolved) input_list
-        item's kwargs dict, mirroring ``_item_source_name``.
+        item's kwargs dict, mirroring ``item_source_name``.
         """
         if not isinstance(kwargs, dict):
             return None
@@ -1225,13 +1226,13 @@ class RomsInputGenerator(InputGenerator):
 
             if step.name == "forcing.surface":
                 forcing_type = kwargs.get("type") if isinstance(kwargs, dict) else None
-                detail = self._forcing_detail_in_dir(
+                detail = self.forcing_detail_in_dir(
                     self.input_data_dir,
                     self.domain_name,
                     "surface",
                     forcing_type,
-                    self._item_source_name(kwargs),
-                    self._item_use_vars(kwargs),
+                    self.item_source_name(kwargs),
+                    self.item_use_vars(kwargs),
                 )
                 suffix = f"surface-{detail}" if detail else "surface"
                 planned.append(self._forcing_filename(suffix))
@@ -1246,13 +1247,13 @@ class RomsInputGenerator(InputGenerator):
                     kwargs.get("bgc_sources") if isinstance(kwargs, dict) else None
                 )
                 for bs in bgc_sources or []:
-                    detail = self._forcing_detail_in_dir(
+                    detail = self.forcing_detail_in_dir(
                         self.input_data_dir,
                         self.domain_name,
                         "boundary",
                         "bgc",
-                        self._item_source_name(bs),
-                        self._item_use_vars(bs),
+                        self.item_source_name(bs),
+                        self.item_use_vars(bs),
                     )
                     planned.append(self._forcing_filename(f"boundary-{detail}"))
                 continue
@@ -1976,7 +1977,7 @@ class RomsInputGenerator(InputGenerator):
         # same run, including the documented same-source/different-use_vars
         # split -- the same mechanism _generate_boundary_forcing uses; see
         # _forcing_detail_suffix.
-        detail = self._forcing_detail_in_dir(
+        detail = self.forcing_detail_in_dir(
             self.input_data_dir,
             self.domain_name,
             "surface",
@@ -2163,17 +2164,17 @@ class RomsInputGenerator(InputGenerator):
         # via `_resolve_source_block`), which for some sources differs from
         # Forge's logical name. `_planned_netcdf_outputs`/`executor.
         # _planned_netcdf_outputs` both plan off the raw name (via
-        # `_item_source_name`), so building the actual filename off the
+        # `item_source_name`), so building the actual filename off the
         # resolved/renamed name here made the generated suffix disagree with
         # what was planned.
         bgc_details = [
-            self._forcing_detail_in_dir(
+            self.forcing_detail_in_dir(
                 self.input_data_dir,
                 self.domain_name,
                 "boundary",
                 "bgc",
-                self._item_source_name(bs),
-                self._item_use_vars(bs),
+                self.item_source_name(bs),
+                self.item_use_vars(bs),
             )
             for bs in (bgc_sources_raw or [])
         ]

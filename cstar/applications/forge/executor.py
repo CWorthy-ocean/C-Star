@@ -841,13 +841,13 @@ class ForgeExecutor(BaseModel):
                     # RomsInputGenerator._generate_boundary_forcing).
                     _add_nc("boundary-physics")
                     for bs in entries.get("bgc_sources") or []:
-                        detail = generator._forcing_detail_in_dir(
+                        detail = generator.forcing_detail_in_dir(
                             input_data_dir,
                             self.name,
                             "boundary",
                             "bgc",
-                            generator._item_source_name(bs),
-                            generator._item_use_vars(bs),
+                            generator.item_source_name(bs),
+                            generator.item_use_vars(bs),
                         )
                         _add_nc(f"boundary-{detail}")
                     continue
@@ -862,13 +862,13 @@ class ForgeExecutor(BaseModel):
                         elif hasattr(entry, "type"):
                             forcing_type = entry.type
 
-                        detail = generator._forcing_detail_in_dir(
+                        detail = generator.forcing_detail_in_dir(
                             input_data_dir,
                             self.name,
                             category,
                             forcing_type,
-                            generator._item_source_name(entry),
-                            generator._item_use_vars(entry),
+                            generator.item_source_name(entry),
+                            generator.item_use_vars(entry),
                         )
                         _add_nc(f"{category}-{detail}" if detail else category)
                     continue

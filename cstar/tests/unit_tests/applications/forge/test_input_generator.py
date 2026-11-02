@@ -4880,7 +4880,7 @@ class TestBoundaryBgcSources:
         used to build the suffix from the RESOLVED source (after
         `_rename_for_roms_tools` -- e.g. WOA_BGC becomes roms-tools' bare "WOA"),
         which disagreed with the planners (both use the raw name via
-        `_item_source_name`) whenever a source's `ROMS_TOOLS_SOURCE_NAME` entry
+        `item_source_name`) whenever a source's `ROMS_TOOLS_SOURCE_NAME` entry
         renames it. Parametrized over a renamed source (WOA_BGC -> WOA) and an
         unrenamed one (UNIFIED) as a control.
         """
