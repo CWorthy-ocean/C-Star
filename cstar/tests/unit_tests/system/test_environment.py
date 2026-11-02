@@ -155,7 +155,50 @@ class TestSetupEnvironmentFromFiles:
         lmod_list: Module names to be loaded, based on the system's `.lmod` file.
         """
         with open(env.lmod_path) as file:
-            return file.readlines()
+            lines = (line.partition("#")[0].strip() for line in file)
+            return [line for line in lines if line]
+
+    @patch("cstar.base.utils.subprocess.run", autospec=True)
+    @patch.object(
+        CStarEnvironment, "uses_lmod", new_callable=PropertyMock, return_value=True
+    )
+    @patch.dict(
+        "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
+    )
+    def test_load_lmod_modules_skips_comments_and_blank_lines(
+        self, mock_uses_lmod: bool, mock_run: Mock, tmp_path: Path
+    ):
+        """A `.lmod` file may carry `#` comments and blank lines; only the module
+        names are passed to `module load`, each stripped of its trailing comment.
+        """
+        lmod_file = tmp_path / "commented.lmod"
+        lmod_file.write_text(
+            "# toolchain verified 2026-11-02\n"
+            "cpu/1.0  # swaps out gpu/1.0\n"
+            "\n"
+            "   \n"
+            "cray-netcdf/4.9.2.3\n"
+            "#cray-hdf5/1.14.3.9 is pulled in by cray-netcdf\n"
+        )
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        with patch.object(
+            CStarEnvironment, "lmod_path", new_callable=PropertyMock
+        ) as mock_lmod_path:
+            mock_lmod_path.return_value = lmod_file
+            MockEnvironment(system_name="commented")
+
+        loads = [
+            c.args[0]
+            for c in mock_run.call_args_list
+            if c.args[0].startswith("/mock/lmod python load")
+        ]
+        assert loads == [
+            "/mock/lmod python load cpu/1.0",
+            "/mock/lmod python load cray-netcdf/4.9.2.3",
+        ]
 
     @patch.dict(
         "os.environ",
