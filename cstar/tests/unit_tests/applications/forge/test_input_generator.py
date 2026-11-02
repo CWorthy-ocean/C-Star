@@ -5072,12 +5072,62 @@ class TestBoundaryBgcSources:
         )
 
 
+# A mixed-case MARBL tracer list (UNIFIED offers lowercase-initial names such as
+# ``diatC``) and the ``use_vars`` tag C-Star wrote for it before long tags were
+# shortened. Pinned literally: deriving it from the code under test can't catch a
+# change that renames files already on disk.
+_MARBL_USE_VARS = [
+    "ALK",
+    "ALK_ALT_CO2",
+    "DIC",
+    "DIC_ALT_CO2",
+    "DOC",
+    "DOCr",
+    "DON",
+    "DONr",
+    "DOP",
+    "DOPr",
+    "Fe",
+    "Lig",
+    "NH4",
+    "NO3",
+    "O2",
+    "PO4",
+    "SiO3",
+    "diatC",
+    "diatChl",
+    "diatFe",
+    "diatP",
+    "diatSi",
+    "zooC",
+]
+_MARBL_LEGACY_TAG = (
+    "alk_alkaltco2_dic_dicaltco2_doc_docr_don_donr_dop_dopr_fe_lig_nh4_no3_o2_po4"
+    "_sio3_diatc_diatchl_diatfe_diatp_diatsi_zooc"
+)
+
+
 class TestBgcOutputSuffix:
     """``_bgc_output_suffix`` keeps a short ``use_vars`` tag readable and swaps a
     long one for a count plus a digest, so file names stay short for ROMS.
     """
 
     _MANY_VARS: ClassVar[list[str]] = [f"TRACER_{i}" for i in range(25)]
+
+    def test_mixed_case_use_vars_keep_the_order_existing_files_use(self):
+        """Raw names sort before they are lower-cased, as when existing domains
+        were generated: ``DOC`` before ``diatC``.
+        """
+        assert (
+            RomsInputGenerator._bgc_output_suffix("UNIFIED", ["diatC", "DOC"])
+            == "unified-doc_diatc"
+        )
+        assert (
+            RomsInputGenerator._bgc_output_suffix(
+                "UNIFIED", _MARBL_USE_VARS, shorten=False
+            )
+            == f"unified-{_MARBL_LEGACY_TAG}"
+        )
 
     def test_short_use_vars_keep_readable_tag(self):
         assert (

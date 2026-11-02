@@ -1092,7 +1092,9 @@ class RomsInputGenerator(InputGenerator):
         )
         sanitized = sanitized or "bgc"
         if use_vars:
-            names = sorted(re.sub(r"[^a-z0-9]+", "", v.lower()) for v in use_vars)
+            # Sort the raw names, then normalize: the order domains already on disk
+            # were named in ("DOC" sorts before "diatC", "doc" after "diatc").
+            names = [re.sub(r"[^a-z0-9]+", "", v.lower()) for v in sorted(use_vars)]
             vars_tag = "_".join(names)
             if shorten and len(vars_tag) > _MAX_BGC_VARS_TAG_LENGTH:
                 unique = sorted(set(names))
