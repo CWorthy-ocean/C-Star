@@ -392,6 +392,62 @@ class Provenance(ConfiguredBaseModel):
     """The blueprints and catalog specs the document was derived from."""
 
 
+class ComputeNeeds(ConfiguredBaseModel):
+    """What a run asks of the scheduler: its tasks, which of them need a GPU,
+    and whether it must stay on one node.
+    """
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        **ConfiguredBaseModel.model_config,
+        frozen=True,
+    )
+    """Configures the behavior of the pydantic model."""
+
+    tasks: int = Field(default=1, ge=1)
+    """The MPI tasks, or processes, the run needs."""
+
+    gpu_tasks: int = Field(default=0, ge=0)
+    """Of those tasks, how many each need one GPU; zero for a CPU run."""
+
+    single_node: bool = Field(default=False)
+    """Whether the run's work is confined to a single node.
+
+    `True` marks an application that runs as one process (threads, or a
+    local dask scheduler) rather than an MPI job, so its CPU requirement
+    cannot usefully span nodes. The scheduler launcher then pins the job
+    to one node and clamps the task count to the target queue's CPUs per
+    node instead of requesting additional nodes it could never use.
+    """
+
+    @model_validator(mode="after")
+    def _gpu_tasks_within_tasks(self) -> t.Self:
+        """Reject a run that asks for more GPU tasks than it has tasks."""
+        if self.gpu_tasks > self.tasks:
+            msg = f"gpu_tasks ({self.gpu_tasks}) cannot exceed tasks ({self.tasks})"
+            raise ValueError(msg)
+        return self
+
+    def slurm_overrides(self) -> dict[str, int | bool]:
+        """Return these needs as the step's ``compute_overrides["slurm"]`` entries.
+
+        This is the one place that shape is derived from a blueprint's needs.
+        Flags that are off are omitted, so an explicitly declared value is never
+        overwritten when the result is merged into a step's overrides.
+
+        Returns
+        -------
+        dict[str, int | bool]
+            ``num_cpus``, plus ``single_node`` when set and ``num_gpus`` when
+            the run needs GPUs.
+        """
+        overrides: dict[str, int | bool] = {"num_cpus": self.tasks}
+        if self.single_node:
+            overrides["single_node"] = True
+        if self.gpu_tasks > 0:
+            overrides["num_gpus"] = self.gpu_tasks
+        return overrides
+
+
 class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """Common elements of all blueprints."""
 
@@ -419,26 +475,24 @@ class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """What produced this blueprint and what it was derived from; empty when not recorded."""
 
     @property
-    def cpus_needed(self) -> int:
-        """The number of CPUs needed to run this blueprint.
+    def compute_needs(self) -> ComputeNeeds:
+        """What a run of this blueprint asks of the scheduler.
 
-        Defaults to 1. Can be overridden by subclasses.
+        Defaults to one CPU task. Subclasses override this.
         """
-        return 1
+        return ComputeNeeds()
+
+    @property
+    def cpus_needed(self) -> int:
+        """The number of CPUs needed to run this blueprint (``compute_needs.tasks``)."""
+        return self.compute_needs.tasks
 
     @property
     def single_node(self) -> bool:
-        """Whether this blueprint's work is confined to a single node.
-
-        `True` marks an application that runs as one process (threads, or a
-        local dask scheduler) rather than an MPI job, so its CPU requirement
-        cannot usefully span nodes. The scheduler launcher then pins the job
-        to one node and clamps `cpus_needed` to the target queue's CPUs per
-        node instead of requesting additional nodes it could never use.
-
-        Defaults to `False`. Can be overridden by subclasses.
+        """Whether this blueprint's work is confined to a single node
+        (``compute_needs.single_node``).
         """
-        return False
+        return self.compute_needs.single_node
 
     @property
     def effective_working_dir(self) -> Path:

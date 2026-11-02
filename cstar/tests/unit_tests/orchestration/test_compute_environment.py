@@ -1,6 +1,7 @@
 import typing as t
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.base.adapter import CstarAdaptationError
 from cstar.base.exceptions import CstarExpectationFailed
@@ -110,3 +111,68 @@ def test_legacy_template_keys_are_dropped_with_a_warning(caplog) -> None:
     assert env.launcher == "local"
     assert "num_cpus_per_process" in caplog.text and "num_nodes" in caplog.text
     assert "legacy" in caplog.text
+
+
+def test_adapter_rejects_unknown_slurm_key() -> None:
+    """A misspelt `slurm` key is reported, not dropped: a typo'd `num_gpus` would
+    otherwise run a CPU job.
+    """
+    with pytest.raises(CstarAdaptationError, match="num_gpu"):
+        ComputeEnvironmentAdapter().adapt({"slurm": {"num_gpu": 2}})
+
+
+def test_slurm_spec_unknown_key_is_rejected() -> None:
+    """The spec forbids keys it does not define."""
+    with pytest.raises(ValidationError, match="num_gpu"):
+        SlurmComputeSpec.model_validate({"num_cpus": 4, "num_gpu": 2})
+
+
+def test_slurm_spec_gpus_per_node_needs_gpus() -> None:
+    """Naming GPUs per node for a CPU job is a contradiction."""
+    with pytest.raises(ValidationError, match="gpus_per_node is set .* num_gpus=0"):
+        SlurmComputeSpec(gpus_per_node=4)
+
+
+def test_slurm_spec_single_node_gpus_must_fit_one_node() -> None:
+    """A single-node job cannot ask for more GPUs than the planned node holds."""
+    with pytest.raises(ValidationError, match="num_gpus=5 exceeds gpus_per_node=4"):
+        SlurmComputeSpec(num_cpus=5, num_gpus=5, gpus_per_node=4, single_node=True)
+
+    spec = SlurmComputeSpec(num_cpus=4, num_gpus=4, gpus_per_node=4, single_node=True)
+    assert spec.num_gpus == 4
+
+
+def test_slurm_spec_gpus_need_a_task_each() -> None:
+    """More GPUs than tasks is rejected, naming `num_cpus`."""
+    with pytest.raises(
+        ValidationError, match=r"num_gpus=8 exceeds num_cpus=1.*num_cpus"
+    ):
+        SlurmComputeSpec(num_gpus=8)
+
+    assert SlurmComputeSpec(num_cpus=8, num_gpus=8).num_gpus == 8
+
+
+@pytest.mark.parametrize(
+    "content",
+    [{"num_gpus": -1}, {"num_gpus": 2, "gpus_per_node": 0}],
+    ids=["negative-gpus", "zero-gpus-per-node"],
+)
+def test_slurm_spec_gpu_counts_are_bounded(content: dict[str, int]) -> None:
+    """GPU counts must be non-negative (and `gpus_per_node` positive)."""
+    with pytest.raises(ValidationError):
+        SlurmComputeSpec.model_validate(content)
+
+
+def test_slurm_spec_gpus_round_trip() -> None:
+    """A GPU request survives the non-default dump the launcher overlays on its
+    defaults, and a CPU spec dumps no GPU keys.
+    """
+    spec = SlurmComputeSpec(num_cpus=8, num_gpus=2)
+
+    dumped = spec.model_dump(exclude_defaults=True)
+
+    assert dumped == {"num_cpus": 8, "num_gpus": 2}
+    assert SlurmComputeSpec.model_validate(dumped) == spec
+    assert "num_gpus" not in SlurmComputeSpec(num_cpus=8).model_dump(
+        exclude_defaults=True
+    )

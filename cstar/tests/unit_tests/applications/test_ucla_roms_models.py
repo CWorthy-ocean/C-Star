@@ -428,6 +428,8 @@ class TestCpusNeeded:
         """Test that `cpus_needed` returns `n_procs_x * n_procs_y` by default."""
         bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == (bp.partitioning.n_procs_x * bp.partitioning.n_procs_y)
+        assert bp.compute_needs.tasks == bp.cpus_needed
+        assert bp.compute_needs.gpu_tasks == 0
 
     def test_returns_n_cores_when_set(self, complete_blueprint_dict):
         """Test that `cpus_needed` returns `n_cores` when it is set."""
@@ -438,6 +440,7 @@ class TestCpusNeeded:
         }
         bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == 16
+        assert bp.compute_needs.tasks == 16
 
 
 class TestProvenance:

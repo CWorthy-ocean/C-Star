@@ -664,7 +664,13 @@ def test_compute_target_writes_the_block_and_omits_it_when_unspecified(page, rom
 
     page.compute_target.value = wb.TARGET_SLURM
     page.machine.value = "anvil"
-    assert _values(page.queue)[1:] == ["wholenode", "shared", "debug"]
+    assert _values(page.queue)[1:] == [
+        "wholenode",
+        "shared",
+        "debug",
+        "gpu",
+        "gpu-debug",
+    ]
     page.queue.value = "wholenode"
     page.account.value = "x-abc"
     page.walltime.value = "04:00:00"

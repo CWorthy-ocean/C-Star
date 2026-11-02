@@ -37,6 +37,27 @@ ENV_CSTAR_SLURM_QUEUE: t.Annotated[
 ] = "CSTAR_SLURM_QUEUE"
 """Environment variable containing the SLURM priority (queue) used by the SLURM scheduler."""
 
+ENV_CSTAR_SLURM_GPU_ACCOUNT: t.Annotated[
+    t.Literal["CSTAR_SLURM_GPU_ACCOUNT"],
+    EnvVar(
+        "Account charged for GPU jobs; unset, GPU jobs use CSTAR_SLURM_ACCOUNT. "
+        "On Perlmutter GPU projects end in `_g`.",
+        _GROUP_ORCH,
+        "",
+    ),
+] = "CSTAR_SLURM_GPU_ACCOUNT"
+"""Environment variable containing the account charged for GPU jobs."""
+
+ENV_CSTAR_SLURM_GPU_QUEUE: t.Annotated[
+    t.Literal["CSTAR_SLURM_GPU_QUEUE"],
+    EnvVar(
+        "Partition or QOS for GPU jobs; unset, the system's registered GPU queue.",
+        _GROUP_ORCH,
+        "",
+    ),
+] = "CSTAR_SLURM_GPU_QUEUE"
+"""Environment variable containing the partition or QOS used for GPU jobs."""
+
 
 def get_run_id() -> str:
     """Retrieve the current run-id.

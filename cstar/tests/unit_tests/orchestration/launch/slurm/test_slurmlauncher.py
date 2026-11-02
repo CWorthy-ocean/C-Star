@@ -31,12 +31,15 @@ from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_QUEUE,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.environment import EnvSettingsBase
 from cstar.system.manager import EljaSystemContext
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
+from cstar.system.toolchain import GpuNodes
 
 
 class FakePartition(SlurmPartition):
@@ -423,6 +426,159 @@ def test_compute_spec_invalid_overrides_fail_loudly(
 
     with pytest.raises(CstarError):
         _ = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+
+@pytest.mark.parametrize(
+    ("env", "exp_queue", "exp_account"),
+    [
+        pytest.param({}, "", "cpu-account", id="gpu-settings-unset"),
+        pytest.param(
+            {ENV_CSTAR_SLURM_GPU_QUEUE: "gpu-q"}, "gpu-q", "cpu-account", id="queue"
+        ),
+        pytest.param(
+            {ENV_CSTAR_SLURM_GPU_ACCOUNT: "gpu-account"},
+            "",
+            "gpu-account",
+            id="account",
+        ),
+    ],
+)
+def test_compute_spec_gpu_step_takes_gpu_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    deferred_live_step: LiveStep,
+    env: dict[str, str],
+    exp_queue: str,
+    exp_account: str,
+) -> None:
+    """A step asking for GPUs defaults to the GPU queue and account, never the CPU
+    queue; the account falls back to the CPU one, and an unset queue stays empty
+    so the job takes the system's GPU queue.
+    """
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "cpu-account")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "cpu-q")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_MAX_WALLTIME, "04:00:00")
+    monkeypatch.delenv(ENV_CSTAR_SLURM_GPU_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_GPU_QUEUE, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={"compute_overrides": {"slurm": {"num_cpus": 8, "num_gpus": 2}}},
+    )
+
+    spec = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+    assert spec.num_gpus == 2
+    assert spec.num_cpus == 8
+    assert spec.queue_name == exp_queue
+    assert spec.account_name == exp_account
+    assert spec.max_walltime == "04:00:00"
+
+
+def test_compute_spec_gpu_step_override_beats_gpu_defaults(
+    monkeypatch: pytest.MonkeyPatch, deferred_live_step: LiveStep
+) -> None:
+    """A queue or account in the step's own overrides wins over the GPU settings."""
+    monkeypatch.setenv(ENV_CSTAR_SLURM_GPU_QUEUE, "gpu-q")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_GPU_ACCOUNT, "gpu-account")
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={
+            "compute_overrides": {
+                "slurm": {
+                    "num_cpus": 2,
+                    "num_gpus": 2,
+                    "queue_name": "debug-q",
+                    "account_name": "step-account",
+                }
+            }
+        },
+    )
+
+    spec = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+    assert spec.queue_name == "debug-q"
+    assert spec.account_name == "step-account"
+
+
+def test_compute_spec_cpu_step_ignores_gpu_settings(
+    monkeypatch: pytest.MonkeyPatch, deferred_live_step: LiveStep
+) -> None:
+    """A CPU step, with or without overrides, keeps the CPU queue and account."""
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "cpu-account")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "cpu-q")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_GPU_QUEUE, "gpu-q")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_GPU_ACCOUNT, "gpu-account")
+    with_overrides = LiveStep.from_step(
+        deferred_live_step,
+        update={"compute_overrides": {"slurm": {"num_cpus": 8}}},
+    )
+
+    for step in (deferred_live_step, with_overrides):
+        spec = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+        assert spec.num_gpus == 0
+        assert spec.queue_name == "cpu-q"
+        assert spec.account_name == "cpu-account"
+
+
+def test_compute_spec_unknown_override_key_fails_loudly(
+    deferred_live_step: LiveStep,
+) -> None:
+    """A misspelt override aborts submission rather than running a CPU job."""
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={"compute_overrides": {"slurm": {"num_gpu": 2}}},
+    )
+
+    with pytest.raises(CstarError):
+        _ = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_slurmlauncher_adapt_step_gpu_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """A step asking for GPUs becomes a job on the system's GPU nodes."""
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "cpu-account")
+    monkeypatch.delenv(ENV_CSTAR_SLURM_QUEUE, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_GPU_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_GPU_QUEUE, raising=False)
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"compute_overrides": {"slurm": {"num_cpus": 6, "num_gpus": 6}}},
+    )
+
+    mock_mgr = mock.Mock()
+    mock_mgr.environment.package_root = tmp_path
+    mock_mgr.environment.settings_klass = EnvSettingsBase
+    mock_mgr.scheduler = SlurmScheduler(
+        queues=[fake_get_queue("cpu-q"), fake_get_queue("gpu-q")],
+        primary_queue_name="cpu-q",
+        other_scheduler_directives={"-C": "cpu"},
+        requires_task_distribution=False,
+        max_cpus_per_node=64,
+        gpu=GpuNodes(4, "gpu-q", {"-C": "gpu"}, 64),
+    )
+
+    with (
+        mock.patch(
+            "cstar.execution.scheduler_job.get_sysmgr",
+            mock.Mock(return_value=mock_mgr),
+        ),
+        mock.patch.object(mock_mgr.scheduler, "get_queue", fake_get_queue),
+    ):
+        job = SlurmLauncher.adapt_step(live_step, [])
+
+    assert job.queue_name == "gpu-q"
+    assert job.account_key == "cpu-account"
+    assert (job.gpus, job.gpus_per_node, job.nodes) == (6, 3, 2)
+    assert "#SBATCH --gpus-per-node=3" in job.script
+    assert "#SBATCH --ntasks-per-node=3" in job.script
+    assert "#SBATCH -C gpu" in job.script
 
 
 def test_compute_spec_single_node_rejects_multiple_nodes() -> None:

@@ -19,6 +19,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import (
     BlueprintCore,
     BlueprintIdentity,
+    ComputeNeeds,
     ConfiguredBaseModel,
 )
 from cstar.orchestration.serialization import (
@@ -30,6 +31,7 @@ from cstar.orchestration.serialization import (
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import ServiceConfiguration
     from cstar.orchestration.transforms import Directive
+    from cstar.system.toolchain import ToolchainName
 
 JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
 """The `strftime` format of the timestamp in a generated job name."""
@@ -437,10 +439,9 @@ class EmittedBlueprint(ConfiguredBaseModel):
     producer: BlueprintIdentity
     """The reference the emitted blueprint's `provenance.derived_from` records
     for the blueprint that produces it."""
-    cpus_needed: int
-    """The CPU count the emitted blueprint's run requires."""
-    single_node: bool = Field(default=False)
-    """Whether the emitted blueprint's run must fit on a single node."""
+    compute_needs: ComputeNeeds
+    """What the emitted blueprint's run needs; the workplan records it on the
+    deferred step."""
     start_date: datetime
     """The start of the emitted blueprint's run."""
     end_date: datetime
@@ -450,6 +451,18 @@ class EmittedBlueprint(ConfiguredBaseModel):
     grid_filename: str
     """Base name of the grid netCDF the emitted blueprint references, under the
     producing step's `input_datasets`."""
+
+    @property
+    def cpus_needed(self) -> int:
+        """The CPU count the emitted blueprint's run requires (``compute_needs.tasks``)."""
+        return self.compute_needs.tasks
+
+    @property
+    def single_node(self) -> bool:
+        """Whether the emitted blueprint's run must fit on a single node
+        (``compute_needs.single_node``).
+        """
+        return self.compute_needs.single_node
 
 
 class ArtifactSpec(ConfiguredBaseModel):
@@ -492,6 +505,9 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """Whether the runner honours `RunnerRequest.pre_run`, performing every
     stage before its model launch and then stopping so a later attempt can
     attach to the prepared working directory."""
+    toolchain: "ToolchainName" = "cpu"
+    """The system toolchain profile (compiler, MPI, modules) the runner builds
+    and runs with; `cpu` for every application today."""
 
     @property
     def schema_version(self) -> str:

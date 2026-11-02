@@ -16,6 +16,7 @@ from cstar.base.application_names import legacy_names
 from cstar.base.utils import generate_schema_ref
 from cstar.orchestration.models import (
     Blueprint,
+    ComputeNeeds,
     ConfiguredBaseModel,
     Dataset,
     DocLocMixin,
@@ -421,13 +422,13 @@ class UclaRomsBlueprint(Blueprint):
             raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
 
     @property
-    def cpus_needed(self) -> int:
-        """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
+    def compute_needs(self) -> ComputeNeeds:
+        """The MPI tasks ROMS needs (derived from the partitioning parameters)."""
         if self.partitioning.n_cores is not None:
-            return self.partitioning.n_cores
+            return ComputeNeeds(tasks=self.partitioning.n_cores)
 
         if (dims := self.partitioning.dims) is None:
             msg = "partitioning must supply n_cores or both n_procs_x and n_procs_y"
             raise ValueError(msg)
 
-        return dims[0] * dims[1]
+        return ComputeNeeds(tasks=dims[0] * dims[1])

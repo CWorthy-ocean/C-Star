@@ -476,7 +476,7 @@ def forge_then_run(
         blueprint=DeferredBlueprintRef(from_step=forge_name, filename=emitted.filename),
         # a deferred blueprint cannot be inspected at submit time; size the step
         # from the emitted blueprint's partitioning
-        compute_overrides={"slurm": {"num_cpus": emitted.cpus_needed}},
+        compute_overrides={"slurm": emitted.compute_needs.slurm_overrides()},
     )
     return Generated(steps=[forge_step, run_step], runs={})
 

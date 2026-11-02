@@ -357,11 +357,31 @@ general-purpose queue and ROMS steps to an MPI queue:
 
 The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
 (``HH:MM:SS`` or SLURM's ``D-HH:MM:SS``), ``num_cpus``, ``num_nodes``,
-``cpus_per_node`` and ``single_node``. The ``local`` launcher accepts
-``max_walltime`` and ``force_kill_timeout``, enforced with GNU ``timeout``
-(on macOS, install ``coreutils`` from conda-forge or Homebrew, which
-provides ``gtimeout``). ``num_cpus`` is also where a deferred-blueprint step
-declares its allocation.
+``cpus_per_node``, ``single_node``, ``num_gpus`` and ``gpus_per_node``. The
+``local`` launcher accepts ``max_walltime`` and ``force_kill_timeout``,
+enforced with GNU ``timeout`` (on macOS, install ``coreutils`` from
+conda-forge or Homebrew, which provides ``gtimeout``). ``num_cpus`` is also
+where a deferred-blueprint step declares its allocation.
+
+To run a step on GPUs, give it ``num_gpus`` and a task for each GPU
+(``num_cpus``); a GPU job needs at least one task per GPU:
+
+.. code-block:: yaml
+
+    - name: simulate
+      application: hello_world
+      blueprint: hello.yaml
+      compute_overrides:
+        slurm:
+          num_cpus: 4        # total tasks
+          num_gpus: 4        # tasks that each need one GPU
+
+C-Star requests as many nodes as the GPUs need, from the GPUs per node the
+system registers (``gpus_per_node`` overrides it), submits to the system's GPU
+queue with its GPU directives, and charges ``CSTAR_SLURM_GPU_ACCOUNT`` when it
+is set. A GPU step does not take the workplan's ``queue_name``,
+``account_name``, ``num_nodes`` or ``cpus_per_node``, which describe CPU nodes.
+See :doc:`../deployments/hpc` for the settings.
 
 The SLURM settings layer, lowest to highest precedence: the
 ``CSTAR_SLURM_*`` settings from your :doc:`configuration <../getting_started/configuration>`,
