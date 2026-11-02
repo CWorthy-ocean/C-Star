@@ -43,3 +43,6 @@ class GpuNodes:
     These replace the scheduler's CPU ``other_scheduler_directives`` for GPU jobs."""
     cores_per_node: int | None = None
     """The CPU cores on each GPU node, for PBS ``ncpus=``; ``None`` when not needed."""
+    account_required: bool = False
+    """Whether the scheduler refuses a GPU job that names no account, so C-Star
+    must insist on one."""

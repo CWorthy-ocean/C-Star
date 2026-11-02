@@ -57,9 +57,11 @@ What each system needs:
 - **Elja**: no account is used; an unset queue submits to ``any_cpu``.
 - **Expanse**: the account is required; an unset queue submits to ``compute``.
 - **Perlmutter**: an unset account charges your default NERSC project; an
-  unset queue submits to the ``regular`` QOS. GPU projects end in ``_g``, and
-  GPU jobs carry ``-C gpu``.
-- **Anvil** GPU jobs: the GPU partition is ``gpu``.
+  unset queue submits to the ``regular`` QOS. GPU jobs must name an account
+  (``CSTAR_SLURM_GPU_ACCOUNT`` or ``CSTAR_SLURM_ACCOUNT``); projects have a
+  ``_g`` twin for GPU hours. GPU jobs carry ``-C gpu``.
+- **Anvil** GPU jobs: need a ``<allocation>-gpu`` account in
+  ``CSTAR_SLURM_GPU_ACCOUNT``; the ``gpu`` partition is the default.
 
 Set the walltime to fit your queue: left unset, a job asks for 48 hours,
 which is more than some queues allow. These settings are the defaults for
