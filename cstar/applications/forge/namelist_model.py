@@ -601,10 +601,11 @@ def cppdefs_for_precheck(
       ``upscale_output.do_upscale`` is true; there is no ``cppdefs.upscaling``
       key at all, so it's read off the run-time section instead.
 
-    ``diagnostics`` and ``biology_bec2`` need no such derivation: forge's
-    template hardcodes ``#undef DIAGNOSTICS``/``#undef BIOLOGY_BEC2`` (no BEC2
-    or ROMS term-budget diagnostics support yet), so their absence from
-    ``cppdefs`` already correctly reads as "inactive" to the checker.
+    ``diagnostics`` and ``biology_bec2`` need no such derivation:
+    ``cppdefs.diagnostics`` is the literal key the template ``#define``s
+    ``DIAGNOSTICS`` from (absent reads as off, as in the template), and the
+    template hardcodes ``#undef BIOLOGY_BEC2`` (no BEC2 support yet), so its
+    absence already correctly reads as "inactive" to the checker.
 
     Both derived keys are always OVERWRITTEN (not just filled in when absent):
     ``cppdefs`` is an unvalidated dict, so a hand-edited/legacy blueprint could

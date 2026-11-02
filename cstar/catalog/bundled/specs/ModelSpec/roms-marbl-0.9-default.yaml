@@ -40,6 +40,7 @@ model_settings:
     nhy_forcing: true
     nox_forcing: true
     auto_tiling: false
+    diagnostics: false  # DIAGNOSTICS: momentum/tracer term-balance (_dia) output; the wizard's diagnostics switch
     # ucla-roms >= 0.8.0 tracer-advection switches (PR #361), both off = the 0.8.0
     # defaults (thickness-aware C4/U3 vertical scheme; full UPSTREAM_TS curvature).
     # Exposed in the wizard's "Physics & subgrid tuning" pane. Deliberately absent

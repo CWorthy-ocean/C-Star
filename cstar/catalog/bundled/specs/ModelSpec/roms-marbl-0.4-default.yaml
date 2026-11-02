@@ -32,6 +32,7 @@ model_settings:
     nhy_forcing: true
     nox_forcing: true
     auto_tiling: false
+    diagnostics: false  # DIAGNOSTICS: momentum/tracer term-balance (_dia) output; the wizard's diagnostics switch
   lateral_visc:
     visc2: 0.0
     rho0: 1000.0

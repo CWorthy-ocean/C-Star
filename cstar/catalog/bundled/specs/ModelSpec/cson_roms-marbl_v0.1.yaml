@@ -96,6 +96,7 @@ model_settings:
     nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
     nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"
     auto_tiling: false  # MPI_MASKING (ucla-roms 0.5.0); resolver always overwrites this from partitioning["auto_tiling"]
+    diagnostics: false  # DIAGNOSTICS: momentum/tracer term-balance (_dia) output; the wizard's diagnostics switch
 
   lateral_visc:
     visc2: 0.0  # m^2/sec

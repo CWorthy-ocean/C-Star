@@ -4026,6 +4026,30 @@ def test_resolver_non_extract_stream_check_gated_off_for_legacy_roms():
     assert cfg.model_settings["frc_output"]["wrt_frc"] is True
 
 
+@pytest.mark.parametrize("diagnostics", [True, False])
+def test_resolver_diagnostics_stream_check_follows_cppdefs_diagnostics(diagnostics):
+    """The `diagnostics` stream's divides-rst check is gated on the DIAGNOSTICS
+    CPP key, which the template defines from `cppdefs.diagnostics`: tracer
+    diagnostics at 7 * 5000 s (does not divide 86400 s) only fail when compiled in.
+    """
+    settings = _CATALOG.output_data("standard")
+    settings["diagnostics"] = {
+        **settings["diagnostics"],
+        "diag_trc": True,
+        "output_period": 5000.0,
+    }
+    kw = dict(
+        model_path=_MODEL_PATH_ROMS050,
+        output_settings=settings,
+        compile_time_overrides={"cppdefs": {"diagnostics": diagnostics}},
+    )
+    if diagnostics:
+        with pytest.raises(ValueError, match="evenly divide"):
+            _build(**kw)
+    else:
+        assert _build(**kw).model_settings["cppdefs"]["diagnostics"] is False
+
+
 def test_resolver_output_settings_override():
     from cstar.catalog.domain_catalog import default_catalog as cat
 

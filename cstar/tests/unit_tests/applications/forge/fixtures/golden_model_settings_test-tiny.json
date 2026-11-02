@@ -63,6 +63,7 @@
     "auto_tiling": false,
     "cdr_forcing": false,
     "co2_tvarying": true,
+    "diagnostics": false,
     "marbl": true,
     "nhy_forcing": true,
     "nox_forcing": true,
