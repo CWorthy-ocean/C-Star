@@ -202,9 +202,9 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         # _src conversion) rather than a single nested SourceSpec. Shared by
         # InitialConditions and BoundaryForcing, which have this identical shape.
         # Forwarding the typed fields (bgc_interpolation_method, allow_flex_time,
-        # groom/groom_settings -- the last two only when set: unset is excluded by
-        # the model and the None filter below, leaving roms-tools' defaults in
-        # charge) and the options passthrough here is what lets authored/UI choices
+        # groom/groom_settings -- the last two only off roms-tools' defaults: the
+        # model excludes groom=True and an empty groom_settings from the dump) and
+        # the options passthrough here is what lets authored/UI choices
         # actually reach input_generator — previously only source/bgc_source were
         # propagated, so any other field set in the wizard was silently dropped
         # on the ForgeBlueprint path.

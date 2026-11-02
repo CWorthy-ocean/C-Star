@@ -818,7 +818,8 @@ def _groom_seed(section, block):
 def test_groom_checkbox_round_trips_through_editor(section):
     """The "Groom ESPER tracers" box is checked by default and then writes nothing
     (roms-tools' default, on); unchecking writes ``groom: False``, which reloads
-    unchecked; an explicit ``groom: True`` is kept on re-save.
+    unchecked; an explicit ``groom: True`` loads checked and, being the default,
+    is not written back (it hashes like unset).
     """
     import ipywidgets as W
 
@@ -837,7 +838,7 @@ def test_groom_checkbox_round_trips_through_editor(section):
         W, _groom_seed(section, {"groom": True}), on_change=lambda: None
     )
     assert getattr(ed3, f"{section}_groom").value is True
-    assert _groom_section(ed3.gather(), section)["groom"] is True
+    assert "groom" not in _groom_section(ed3.gather(), section)
 
 
 def test_groom_checkbox_is_in_each_section_pane(editor):

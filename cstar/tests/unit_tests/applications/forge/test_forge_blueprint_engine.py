@@ -185,8 +185,8 @@ def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
     """``groom``/``groom_settings`` on the IC/boundary sections become the
     roms-tools ``InitialConditions``/``BoundaryForcing`` kwargs of the same name
     (``RomsInputGenerator`` passes each section dict through as constructor kwargs);
-    unset emits nothing, so roms-tools' own defaults apply. No source dict, ESPER
-    or otherwise, ever carries a ``groom`` key.
+    the defaults (``groom=True``, no settings) emit nothing, so roms-tools' own
+    defaults apply. No source dict, ESPER or otherwise, ever carries a ``groom`` key.
     """
     cfg = _build()
     f = cfg.forcing
@@ -232,5 +232,5 @@ def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
         assert "groom" not in sec and "groom_settings" not in sec
     assert set_["initial_conditions"]["groom"] is False
     assert set_["initial_conditions"]["groom_settings"] == settings
-    assert set_["forcing"]["boundary"]["groom"] is True
+    assert "groom" not in set_["forcing"]["boundary"]
     assert "groom_settings" not in set_["forcing"]["boundary"]

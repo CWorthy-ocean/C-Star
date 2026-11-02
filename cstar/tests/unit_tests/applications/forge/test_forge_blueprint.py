@@ -9758,14 +9758,15 @@ class TestEmittedProvenance:
 @pytest.mark.parametrize("section", ["initial_conditions", "boundary"])
 def test_section_groom_fields_unset_by_default_and_left_out_of_the_hash(section):
     """``groom``/``groom_settings`` live on the IC/boundary sections (not on an
-    ESPER ``SourceSpec``): unset is excluded from dumps and the content hash, so
-    existing blueprints keep their hash; set values are kept and hashed.
+    ESPER ``SourceSpec``): their defaults (on, no overrides) are excluded from dumps
+    and the content hash, so existing blueprints keep their hash and an explicit
+    ``groom: True`` hashes like unset; other values are kept and hashed.
     """
     from cstar.applications.forge.blueprint import SourceSpec
 
     cfg = _build()
     sec = getattr(cfg.forcing, section)
-    assert sec.groom is None and sec.groom_settings is None
+    assert sec.groom is True and sec.groom_settings == {}
     dumped = sec.model_dump()
     assert "groom" not in dumped and "groom_settings" not in dumped
     assert "groom" not in SourceSpec.model_fields
@@ -9780,7 +9781,9 @@ def test_section_groom_fields_unset_by_default_and_left_out_of_the_hash(section)
             }
         )
 
-    assert _with(groom=None, groom_settings=None).content_hash() == cfg.content_hash()
+    explicit = _with(groom=True, groom_settings={})
+    assert "groom" not in explicit.forcing.model_dump()[section]
+    assert explicit.content_hash() == cfg.content_hash()
     off = _with(groom=False)
     assert off.forcing.model_dump()[section]["groom"] is False
     assert off.content_hash() != cfg.content_hash()
@@ -9802,7 +9805,7 @@ def test_section_groom_fields_resolve_from_forcing_inputs():
     cfg = _build(forcing_inputs=fdata)
     assert cfg.forcing.initial_conditions.groom is False
     assert cfg.forcing.initial_conditions.groom_settings == {"passes": 2}
-    assert cfg.forcing.boundary.groom is None
+    assert cfg.forcing.boundary.groom is True
     assert cfg.forcing.boundary.groom_settings == {"relax_sweeps": 3}
 
 
@@ -9832,13 +9835,13 @@ def test_groom_settings_validated_by_roms_tools_when_available(monkeypatch):
         sys.modules, "roms_tools.setup.bgc_groom", types.ModuleType("x")
     )
     assert _check_groom_settings({"bogus": 1}) == {"bogus": 1}
-    assert _check_groom_settings(None) is None
+    assert _check_groom_settings({}) == {}
 
 
-def test_empty_groom_settings_normalizes_to_unset():
+def test_empty_groom_settings_is_left_out_like_unset():
     """A hand-written ``groom_settings: {}`` means roms-tools' defaults, same as unset:
-    it loads as ``None``, so it stays out of the dump and the content hash (and a
-    wizard load/re-save, which drops empty dicts, leaves the hash unchanged).
+    it stays out of the dump and the content hash (and a wizard load/re-save, which
+    drops empty dicts, leaves the hash unchanged).
     """
     from cstar.catalog.domain_catalog import default_catalog as cat
 
@@ -9847,8 +9850,8 @@ def test_empty_groom_settings_normalizes_to_unset():
     fdata["initial_conditions"]["groom_settings"] = {}
     fdata["forcing"]["boundary"]["groom_settings"] = {}
     cfg = _build(forcing_inputs=fdata)
-    assert cfg.forcing.initial_conditions.groom_settings is None
-    assert cfg.forcing.boundary.groom_settings is None
+    assert cfg.forcing.initial_conditions.groom_settings == {}
+    assert cfg.forcing.boundary.groom_settings == {}
     dumped = cfg.forcing.model_dump()
     assert "groom_settings" not in dumped["initial_conditions"]
     assert "groom_settings" not in dumped["boundary"]
