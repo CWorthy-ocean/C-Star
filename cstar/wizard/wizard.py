@@ -1821,6 +1821,9 @@ class _SettingsEditor:
         # and in the Output card, each holding only its own fields. A hosted field
         # (_HOSTED_FIELDS) is listed under its own section, in its host's group.
         self._group_fields: dict[str, dict[str, list[str | None]]] = {}
+        # (group, host section) -> {guest section: fields it hosts there}, recorded
+        # once by _build_group so a host's header counts its hosted fields.
+        self._hosted: dict[tuple[str, str], dict[str, list[str | None]]] = {}
         # (group, section) -> the section's header widget, retitled by the wizard.
         self._headers: dict[tuple[str, str], Any] = {}
         # True while sync() is pushing composed values into widgets -- distinct from
@@ -1926,6 +1929,8 @@ class _SettingsEditor:
                 continue
             group_fields = self._group_fields.setdefault(group, {})
             group_fields[section] = fields
+            if hosted:
+                self._hosted[(group, section)] = hosted
             for guest, guest_fields in hosted.items():
                 group_fields.setdefault(guest, []).extend(guest_fields)
             if not headers:
@@ -2182,7 +2187,7 @@ class _SettingsEditor:
 
         # A hosted field is skipped like a native one when its own section/field is
         # absent, gated out or not applicable; a host that built nothing hosts nothing.
-        hosted: dict[str, list[str]] = {}
+        hosted: dict[str, list[str | None]] = {}
         if built:
             for guest, key in _HOSTED_FIELDS.get(section, ()):
                 guest_value = model_settings.get(guest)
@@ -8216,17 +8221,18 @@ class ForgeBlueprintWizard:
             editor.accordion.set_title(i, title(name, editor._group_fields[name]))
         if more := editor._group_fields.get(_OUTPUT_MORE_TITLE):
             editor.more_streams.set_title(0, title(_OUTPUT_MORE_TITLE, more))
-        for section, fields in editor._group_fields.get(_OUTPUT_CARD, {}).items():
-            if (_OUTPUT_CARD, section) not in editor._headers:
-                continue  # a hosted field's own section: counted under its host
-            hosted: dict[str, list[str | None]] = {}
-            for guest, field in _HOSTED_FIELDS.get(section, ()):
-                if (guest, field) in editor._widgets:
-                    hosted.setdefault(guest, []).append(field)
-            _n_fields, n_mod = counts({section: fields, **hosted})
-            editor._headers[(_OUTPUT_CARD, section)].value = editor.header_html(
-                _OUTPUT_CARD, section, n_mod
+        # Per header, so a hosted field's own section (no header) is counted under
+        # its host only.
+        for (group, section), header in editor._headers.items():
+            if group != _OUTPUT_CARD:
+                continue
+            _n_fields, n_mod = counts(
+                {
+                    section: editor._group_fields[group][section],
+                    **editor._hosted.get((group, section), {}),
+                }
             )
+            header.value = editor.header_html(group, section, n_mod)
 
     def _update_status(
         self, cfg: ForgeBlueprint | None, error: str | None = None
