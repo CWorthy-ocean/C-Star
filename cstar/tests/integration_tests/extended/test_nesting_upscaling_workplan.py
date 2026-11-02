@@ -13,7 +13,6 @@ As in the e2e tier, ``cstar workplan submit`` only schedules: each step is a det
 this checkout. The module polls the step sentinels until all nine are terminal.
 """
 
-import os
 import re
 import shutil
 import time
@@ -126,8 +125,6 @@ REGISTRY_GLORYS_START = "2012-01-01T12:00:00"
 """The first record of the registry's GLORYS extract, where a run with initial conditions starts."""
 USCL_BOUNDARIES = ("north", "south", "east", "west")
 """The sides of the child that can carry an ``ALK_add_<side>`` export in ``_uscl``."""
-SMALL_LAYOUT = (2, 1)
-"""The MPI layout (``n_procs_x``, ``n_procs_y``) on a machine with fewer cores than the example's ranks."""
 MISSING_TOOLS = [
     tool
     for tool, found in {
@@ -246,31 +243,6 @@ def without_v_sponge_trc_before_0_13(
     return blueprint
 
 
-def within_cores(blueprint: dict[str, t.Any], cores: int) -> dict[str, t.Any]:
-    """Give ``blueprint`` the `SMALL_LAYOUT` when its MPI ranks outnumber ``cores``.
-
-    The example runs 2x2 ranks. MPICH busy-waits, so a rank that has to share a core
-    stalls every halo exchange: on a 3-core macOS runner the parent took ~2 s a step and
-    did not finish in an hour, where a 4-core ubuntu runner runs the whole workplan in
-    about six minutes. `SMALL_LAYOUT` still splits the grid, so halo exchanges and
-    ParallelIO's multi-rank writes are still tested, and it leaves a core for the step's
-    own process. Forge writes ``np_xi``/``np_eta`` from ``domain.partitioning``; both
-    change so the blueprint stays consistent.
-
-    Returns
-    -------
-    dict
-        ``blueprint``, changed in place.
-    """
-    partitioning = blueprint["domain"]["partitioning"]
-    if partitioning["n_procs_x"] * partitioning["n_procs_y"] <= cores:
-        return blueprint
-    n_procs_x, n_procs_y = SMALL_LAYOUT
-    partitioning.update(n_procs_x=n_procs_x, n_procs_y=n_procs_y)
-    blueprint["model_settings"]["param"].update(np_xi=n_procs_x, np_eta=n_procs_y)
-    return blueprint
-
-
 def write_workplan(path: Path, data: dict[str, Path]) -> Path:
     """Write a copy of the example workplan and its forge blueprints for the run under test.
 
@@ -282,26 +254,28 @@ def write_workplan(path: Path, data: dict[str, Path]) -> Path:
     adds ``code.roms.commit`` to its ``blueprint_overrides``: the published blueprints,
     and with them the ROMS the next steps build, are for that ref. The blueprint copies
     sit next to the workplan copy and read the pinned registry data
-    (`with_registry_sources`), with fewer ranks on a machine with too few cores for the
-    example's (`within_cores`).
+    (`with_registry_sources`).
 
     Returns
     -------
     Path
         ``path``.
     """
-    cores = os.cpu_count() or 1
     workplan = yaml.safe_load(WORKPLAN.read_text())
     for step in workplan["steps"]:
         if step["application"] != "forge":
             continue
         name = Path(step["blueprint"]).name
         blueprint = yaml.safe_load((EXAMPLE_DIR / name).read_text())
-        with_registry_sources(blueprint, data)
-        without_v_sponge_trc_before_0_13(blueprint, ROMS_REF)
-        within_cores(blueprint, cores)
         copy = path.parent / name
-        copy.write_text(yaml.safe_dump(blueprint, sort_keys=False))
+        copy.write_text(
+            yaml.safe_dump(
+                without_v_sponge_trc_before_0_13(
+                    with_registry_sources(blueprint, data), ROMS_REF
+                ),
+                sort_keys=False,
+            )
+        )
         step["blueprint"] = str(copy)
         step["blueprint_overrides"] = {
             **step.get("blueprint_overrides", {}),
