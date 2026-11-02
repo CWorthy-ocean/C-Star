@@ -41,3 +41,4 @@ Miscellaneous
 ~~~~~~~~~~~~~
 
 - Published the ``nest_ic`` 1.2.0 blueprint schema and described the new field on the ``nest_ic`` page. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
+- The macOS cells of the weekly extended integration workflow skip the nesting + upscaling workplan test, which cannot finish on the macOS runner; ubuntu cells still run it. (`#881 <https://github.com/CWorthy-ocean/C-Star/pull/881>`_)
