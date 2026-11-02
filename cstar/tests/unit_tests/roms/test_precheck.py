@@ -926,6 +926,16 @@ def test_file_name_lengths_reports_every_offender():
     assert "forcing_files.frcfiles[0]" not in message
     assert f"({len(long_name)} > {MAX_NAMELIST_FILE_NAME_LENGTH})" in message
     assert excinfo.value.rule == "file_name_lengths"
+    # one error for every group, as NamelistConsistencyError documents for this rule
+    assert excinfo.value.section == (
+        "grid_settings, forcing_files, extract_data_settings"
+    )
+    assert excinfo.value.keys == (
+        "grdname",
+        "frcfiles",
+        "extract_file",
+        "extract_root_name",
+    )
 
 
 def test_file_name_lengths_checks_a_live_namelist():

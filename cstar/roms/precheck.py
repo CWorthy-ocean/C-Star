@@ -123,7 +123,10 @@ class NamelistConsistencyError(ValueError):
     different vocabulary (e.g. Forge's settings dict) can point a user at the
     field it actually exposes, without this module knowing that vocabulary
     exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
-    ``"restart_period_divisible_by_dt"`` or ``"averages_end_on_marbl_step"``).
+    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"`` or
+    ``"file_name_lengths"``). ``"file_name_lengths"`` reports every offending
+    key in one error, so its ``section`` may join several group names with
+    ``", "`` and its ``keys`` may span those groups.
     """
 
     def __init__(
