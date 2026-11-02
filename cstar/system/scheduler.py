@@ -10,6 +10,8 @@ from cstar.base.utils import _run_cmd
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from cstar.system.toolchain import GpuNodes
+
 log = get_logger(__name__)
 
 UNLIMITED_WALLTIMES: Final = frozenset({"infinite", "unlimited", "n/a"})
@@ -470,6 +472,8 @@ class Scheduler(ABC, LoggingMixin):
         Whether the scheduler requires explicit specification of
         required nodes and cpus for a job, or will calculate it
         based on the number of CPUs alone. Defaults to True.
+    gpu : GpuNodes or None
+        The system's GPU nodes, or None when it has none registered.
     global_max_cpus_per_node : int
         The maximum number of CPUs available per node across all queues.
     global_max_mem_per_node_gb : float
@@ -489,6 +493,7 @@ class Scheduler(ABC, LoggingMixin):
         requires_task_distribution: bool | None = True,
         documentation: str | None = None,
         max_cpus_per_node: int | None = None,
+        gpu: "GpuNodes | None" = None,
     ):
         """Initialize a Scheduler instance.
 
@@ -509,6 +514,8 @@ class Scheduler(ABC, LoggingMixin):
         max_cpus_per_node : int, optional
             If specified, the maximum cpus used for distribution calculations
             will be fixed, instead of determined by inspecting the machine.
+        gpu : GpuNodes, optional
+            The system's GPU nodes, or None when it has none registered.
 
         Raises
         ------
@@ -524,6 +531,8 @@ class Scheduler(ABC, LoggingMixin):
         self.requires_task_distribution = requires_task_distribution
         self.documentation = documentation
         self._max_cpus_per_node = max_cpus_per_node
+        self.gpu = gpu
+        """The system's GPU nodes, or None when it has none registered."""
 
     def get_queue(self, name: str | None) -> Queue:
         """Retrieve a queue by name.

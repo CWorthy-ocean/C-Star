@@ -77,6 +77,7 @@ from cstar.orchestration.models import (
     Blueprint,
     BlueprintIdentity,
     CatalogSpecRef,
+    ComputeNeeds,
     GeneratedBy,
     Provenance,
     SpecSelection,
@@ -1590,14 +1591,21 @@ class ForgeBlueprint(Blueprint):
         )
 
     @property
-    def cpus_needed(self) -> int:
-        """Ballpark CPU count for *processing* this blueprint (the forge run
-        itself: roms-tools input generation), overriding the ``Blueprint`` base
-        default of 1. Deliberately NOT ``n_procs`` -- that is the ROMS
-        partitioning the downstream simulation uses, not what generating the
-        inputs needs. See :func:`estimate_forge_cpus`. Uncapped above its floor:
-        because the run is :attr:`single_node`, the launcher clamps this to the
-        target partition's CPUs per node.
+    def compute_needs(self) -> ComputeNeeds:
+        """What *processing* this blueprint needs (the forge run itself:
+        roms-tools input generation), overriding the ``Blueprint`` base default
+        of one task.
+
+        The task count is a ballpark, deliberately NOT ``n_procs`` -- that is
+        the ROMS partitioning the downstream simulation uses, not what generating
+        the inputs needs. See :func:`estimate_forge_cpus`. It is uncapped above
+        its floor: because the run is ``single_node``, the launcher clamps it to
+        the target partition's CPUs per node.
+
+        The forge run is one Python process (roms-tools on dask's threaded
+        scheduler), not an MPI job: it can never use more than one node. Marking
+        it ``single_node`` lets C-Star's launcher pin the forge step to
+        ``--nodes=1`` instead of requesting extra nodes the run would leave idle.
 
         When ``domain.grid_file`` is set, ``grid_kwargs`` carries no ``nx``/``ny``/
         ``N`` (a user-supplied grid has no generation-geometry keys -- see
@@ -1610,18 +1618,10 @@ class ForgeBlueprint(Blueprint):
         nx = gk.get("nx", param.get("llm", 0))
         ny = gk.get("ny", param.get("mmm", 0))
         nvert = gk.get("N", param.get("n", 0))
-        return estimate_forge_cpus(int(nx or 0), int(ny or 0), int(nvert or 0))
-
-    @property
-    def single_node(self) -> bool:
-        """The forge run is one Python process (roms-tools on dask's threaded
-        scheduler), not an MPI job: it can never use more than one node. Marking
-        it so lets C-Star's launcher pin the forge step to ``--nodes=1`` and clamp
-        :attr:`cpus_needed` to the target partition's CPUs per node, instead of
-        requesting extra nodes the run would leave idle. Overrides the
-        ``Blueprint`` base default of ``False``.
-        """
-        return True
+        return ComputeNeeds(
+            tasks=estimate_forge_cpus(int(nx or 0), int(ny or 0), int(nvert or 0)),
+            single_node=True,
+        )
 
     @property
     def n_tracers(self) -> int:

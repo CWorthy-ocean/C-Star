@@ -34,6 +34,8 @@ from cstar.cli.environment.register_kernel import RegisterKernelError
 from cstar.cli.environment.shell_init import Shell
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_QUEUE,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
@@ -46,6 +48,7 @@ from cstar.system.manager import (
     get_registered_sys_contexts,
 )
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
+from cstar.system.toolchain import GpuNodes
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
 REAL_QUERY_SLURM = init_module.query_slurm
@@ -101,6 +104,21 @@ class FakeSlurmContext:
     @classmethod
     def scratch_root(cls) -> None:
         return None
+
+
+class FakeGpuSlurmContext(FakeSlurmContext):
+    """A SLURM system that registers GPU nodes."""
+
+    name = "fakegpuslurm"
+
+    @classmethod
+    def create_scheduler(cls) -> SlurmScheduler:
+        return SlurmScheduler(
+            queues=[SlurmPartition(name="regular"), SlurmPartition(name="gpuq")],
+            primary_queue_name="regular",
+            max_cpus_per_node=128,
+            gpu=GpuNodes(4, "gpuq", {"--gpu-bind": "none"}, 128),
+        )
 
 
 class Recorder:
@@ -179,6 +197,12 @@ def run_init() -> Callable[..., Result]:
 def slurm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the system a SLURM cluster."""
     use_context(monkeypatch, FakeSlurmContext)
+
+
+@pytest.fixture
+def gpu_slurm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the system a SLURM cluster with GPU nodes."""
+    use_context(monkeypatch, FakeGpuSlurmContext)
 
 
 @pytest.fixture
@@ -432,6 +456,60 @@ def test_interactive_slurm_run_sets_only_what_is_answered(
     assert "SLURM account (required on this system)" in output
     assert "[48:00:00]" in output
     assert read_user_config(isolate_user_config) == {ENV_CSTAR_SLURM_ACCOUNT: "m1234"}
+
+
+def test_plain_slurm_system_offers_no_gpu_settings(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    slurm: None,
+) -> None:
+    """A system without GPU nodes prompts for nothing new and says nothing about GPUs."""
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "GPU" not in output
+    assert ENV_CSTAR_SLURM_GPU_ACCOUNT not in output
+
+
+def test_gpu_slurm_system_offers_optional_gpu_settings(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    gpu_slurm: None,
+) -> None:
+    """GPU nodes add a hint and two optional prompts after the CPU settings."""
+    result = run_init(input="m1234\n\n-\nm1234_g\n\nn\n\n\n\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "GPU jobs go to the `gpuq` queue on this system unless you set one." in output
+    )
+    assert (
+        "SLURM account for GPU jobs (optional; defaults to the SLURM account)" in output
+    )
+    assert "Queue for GPU jobs (optional; defaults to gpuq)" in output
+    assert read_user_config(isolate_user_config) == {
+        ENV_CSTAR_SLURM_ACCOUNT: "m1234",
+        ENV_CSTAR_SLURM_GPU_ACCOUNT: "m1234_g",
+    }
+
+
+def test_yes_on_gpu_slurm_system_never_warns_about_unset_gpu_settings(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    gpu_slurm: None,
+) -> None:
+    """The GPU account and queue are optional, so `--yes` does not call them out."""
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "GPU jobs go to the `gpuq` queue" in output
+    assert f"{ENV_CSTAR_SLURM_GPU_ACCOUNT} is not set" not in output
+    assert f"{ENV_CSTAR_SLURM_GPU_QUEUE} is not set" not in output
 
 
 def test_rerun_prefills_from_the_file_and_carries_other_settings(

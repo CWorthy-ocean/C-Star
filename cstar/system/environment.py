@@ -141,12 +141,17 @@ class CStarEnvironment:
     """The command prefix used for launching MPI jobs."""
     _compiler: Final[str]
     """The compiler to be used in the environment (e.g., "intel", "gnu")."""
+    _profile: Final[str]
+    """Infix of the module and env file names; empty selects the system's CPU files."""
     _package_root: Path | None = None
     """The root directory of the installation of the C-Star package."""
     _lmod_settings: Final[LmodEnvSettings]
     """Environment variables used by the LMOD system."""
     _system_settings_klass: Final[type[EnvSettingsBase] | None]
     """Environment variables used to configure jobs on the system."""
+    _prior_env: Final[dict[str, str | None]]
+    """What the variables the env file sets held before it was loaded (``None`` when
+    unset); empty when the env file is not loaded."""
 
     def __init__(
         self,
@@ -154,6 +159,7 @@ class CStarEnvironment:
         mpi_exec_prefix: str,
         compiler: str,
         system_settings_klass: type[EnvSettingsBase] | None = None,
+        profile: str = "",
     ):
         """Initialize the instance.
 
@@ -165,22 +171,54 @@ class CStarEnvironment:
             The MPI prefix
         compiler : str
             The compiler to use for builds
+        system_settings_klass : type[EnvSettingsBase], optional
+            The type that loads and validates the system's settings
+        profile : str, optional
+            Infix of the system's module and env file names. The default loads
+            ``<system>.lmod`` and ``<system>.env``; ``"gpu"`` loads
+            ``<system>.gpu.lmod`` and ``<system>.gpu.env``. Building the environment
+            loads that profile's modules into this process.
         """
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
-
-        # Load modules FIRST (if using lmod), then load env file
-        # This ensures module-set variables (e.g., CRAY_NETCDF_PREFIX) are available
-        # when env file variables are expanded
+        self._profile = profile
         self._lmod_settings = LmodEnvSettings()
+        self._system_settings_klass = system_settings_klass
+        self._prior_env = {}
+        self._env_vars: dict[str, str] = {}
+
+        self.load()
+
+    def load(self) -> None:
+        """Load this profile's modules and env file into the process.
+
+        Modules load FIRST (when the system uses Lmod), then the env file, so that
+        variables the modules set (e.g., ``CRAY_NETCDF_PREFIX``) are available when
+        the env file's variables are expanded. A profile that is already loaded is
+        `unload`-ed first, so loading twice never records its own values as the ones
+        to restore.
+        """
+        self.unload()
         if self.uses_lmod:
             self.load_lmod_modules()
-
-        self._system_settings_klass = system_settings_klass
-
-        # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()
+
+    def unload(self) -> None:
+        """Restore the variables the env file set to what they held before it loaded.
+
+        The module side is handled by the next profile's ``module reset``; this undoes
+        the env file, so the next profile does not inherit this one's paths (a
+        ``PATH`` or ``LIBRARY_PATH`` extended with this profile's netCDF directories,
+        or a variable only this profile sets). Calling it again, or on a profile
+        that is not loaded, does nothing.
+        """
+        for key, prior in self._prior_env.items():
+            if prior is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prior
+        self._prior_env.clear()
 
     @property
     def mpi_exec_prefix(self) -> str:
@@ -191,6 +229,18 @@ class CStarEnvironment:
     def compiler(self) -> str:
         """Get the compiler used when building in the environment."""
         return self._compiler
+
+    @property
+    def profile(self) -> str:
+        """Get the profile infix of the module and env files; empty for the CPU files."""
+        return self._profile
+
+    @property
+    def _file_stem(self) -> str:
+        """The system's module and env file name without its extension."""
+        if self._profile:
+            return f"{self._system_name}.{self._profile}"
+        return self._system_name
 
     def __str__(self) -> str:
         """Provides a structured, readable summary of the environment's configuration.
@@ -203,6 +253,8 @@ class CStarEnvironment:
         base_str = self.__class__.__name__ + "\n"
         base_str += "-" * (len(base_str) - 1)
         base_str += f"\nCompiler: {self.compiler}"
+        if self._profile:
+            base_str += f"\nProfile: {self._profile}"
         base_str += f"\nMPI Exec Prefix: {self.mpi_exec_prefix}"
         base_str += f"\nUses Lmod: {self.uses_lmod}"
         base_str += "\nEnvironment Variables:"
@@ -248,6 +300,7 @@ class CStarEnvironment:
             expanded_value = os.path.expandvars(value) if value else ""
             expanded_vars[key] = expanded_value
 
+        self._prior_env.update({key: os.environ.get(key) for key in expanded_vars})
         os.environ.update(expanded_vars)
 
         return expanded_vars
@@ -339,7 +392,7 @@ class CStarEnvironment:
         Path
             The path to the `.env` file.
         """
-        pkg_relative_path = f"additional_files/env_files/{self._system_name}.env"
+        pkg_relative_path = f"additional_files/env_files/{self._file_stem}.env"
         return self.package_root / pkg_relative_path
 
     @property
@@ -362,7 +415,7 @@ class CStarEnvironment:
         Path
             The complete path to the `.lmod` file.
         """
-        pkg_relative_path = f"additional_files/lmod_lists/{self._system_name}.lmod"
+        pkg_relative_path = f"additional_files/lmod_lists/{self._file_stem}.lmod"
         return self.package_root / pkg_relative_path
 
     def _call_lmod(self, *args: str) -> None:
@@ -420,7 +473,9 @@ class CStarEnvironment:
 
         - Resets the current module environment by executing `module reset`.
         - Loads each module listed in the `.lmod` file for the system, located at
-            `<root>/additional_files/lmod_lists/<system_name>.lmod`.
+            `<root>/additional_files/lmod_lists/<system_name>.lmod` (or
+            `<system_name>.<profile>.lmod` for a profile). Blank lines and ``#``
+            comments in the file are skipped.
 
         Raises
         ------
@@ -443,8 +498,9 @@ class CStarEnvironment:
         with open(self.lmod_path) as fp:
             lmod_list = fp.readlines()
 
-        for module in (x.strip() for x in lmod_list):
-            self._call_lmod(f"load {module}")
+        for module in (x.partition("#")[0].strip() for x in lmod_list):
+            if module:
+                self._call_lmod(f"load {module}")
 
     @staticmethod
     def set_env_var(key: str, value: str) -> None:
