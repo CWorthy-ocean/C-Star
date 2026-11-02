@@ -429,7 +429,8 @@ def create_scheduler_job(
     CstarError
         If the system requires a SLURM account or queue and it is empty. An empty
         queue is accepted for a GPU job on a system with GPU nodes registered,
-        which takes the system's GPU queue.
+        which takes the system's GPU queue. A GPU job with an empty account is
+        also refused on a system whose GPU nodes require one.
     """
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
@@ -459,6 +460,18 @@ def create_scheduler_job(
                 "export them in your shell."
             )
             raise CstarError(msg)
+
+    if (
+        gpus > 0
+        and scheduler.gpu is not None
+        and scheduler.gpu.account_required
+        and not account_key
+    ):
+        raise CstarError(
+            "GPU jobs on this system need an account: set CSTAR_SLURM_GPU_ACCOUNT "
+            "(or CSTAR_SLURM_ACCOUNT), run `cstar init`, or give `account_name` "
+            "in the workplan."
+        )
 
     return job_type(
         scheduler=scheduler,

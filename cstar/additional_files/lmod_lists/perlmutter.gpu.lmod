@@ -1,8 +1,8 @@
-# GPU toolchain (NVIDIA HPC SDK + CUDA-aware Cray MPICH + parallel-HDF5 netCDF).
-# Module versions unpinned; verify on Perlmutter and pin them.
-gpu  # NERSC's GPU meta-module; keep loaded for CUDA-aware cray-mpich
-PrgEnv-nvidia
-cudatoolkit
+# GPU toolchain: NVIDIA HPC SDK + CUDA-aware Cray MPICH + parallel-HDF5 netCDF.
+# Verified on Perlmutter 2026-11-02 (nvidia/26.5, cudatoolkit/13.2, cray-mpich/9.1.0).
+gpu/1.0  # NERSC's GPU meta-module; keep loaded for CUDA-aware cray-mpich
+PrgEnv-nvidia/8.7.0
+cudatoolkit/13.2
 craype-accel-nvidia80
-cray-hdf5-parallel
-cray-netcdf-hdf5parallel
+cray-hdf5-parallel/1.14.3.9
+cray-netcdf-hdf5parallel/4.9.0.13

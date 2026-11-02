@@ -23,7 +23,7 @@ from cstar.system.manager import (
 from cstar.system.toolchain import GpuNodes, Toolchain
 
 PACKAGE_ROOT = Path(CStarEnvironment._find_package_root())
-GPU_SYSTEMS = ("anvil", "perlmutter")
+GPU_SYSTEMS = ("perlmutter",)
 
 
 @pytest.mark.parametrize("ctx", CTX_REGISTRY.values(), ids=list(CTX_REGISTRY))
@@ -34,10 +34,9 @@ def test_cpu_toolchain_is_derived_from_class_vars(ctx: type[SystemContext]) -> N
     )
 
 
-@pytest.mark.parametrize("ctx", [PerlmutterSystemContext, AnvilSystemContext])
-def test_gpu_toolchain(ctx: type[SystemContext]) -> None:
-    """Verify the GPU toolchains of the systems that register one."""
-    assert ctx.toolchain("gpu") == Toolchain(
+def test_gpu_toolchain() -> None:
+    """Verify the GPU toolchain of Perlmutter, the system that registers one."""
+    assert PerlmutterSystemContext.toolchain("gpu") == Toolchain(
         compiler="nvfortran",
         mpi_prefix="srun --kill-on-bad-exit=1",
         profile="gpu",
@@ -45,7 +44,9 @@ def test_gpu_toolchain(ctx: type[SystemContext]) -> None:
     )
 
 
-@pytest.mark.parametrize("ctx", [BouchetSystemContext, LinuxSystemContext])
+@pytest.mark.parametrize(
+    "ctx", [AnvilSystemContext, BouchetSystemContext, LinuxSystemContext]
+)
 def test_gpu_toolchain_missing_names_system(ctx: type[SystemContext]) -> None:
     """Verify asking a system without GPU nodes for a GPU toolchain fails by name."""
     with pytest.raises(CstarError, match=ctx.name):
@@ -62,6 +63,7 @@ def test_perlmutter_gpu_nodes() -> None:
         queue="regular",
         directives={"-C": "gpu", "--gpu-bind": "none"},
         cores_per_node=64,
+        account_required=True,
     )
     assert scheduler.other_scheduler_directives == {"-C": "cpu"}
 
@@ -79,6 +81,13 @@ def test_anvil_gpu_nodes() -> None:
     )
     assert scheduler.primary_queue_name == "wholenode"
     assert scheduler.gpu.queue in scheduler.queue_names
+    assert not scheduler.gpu.account_required
+
+
+def test_anvil_registers_no_gpu_build_files() -> None:
+    """Verify Anvil ships no GPU module or env file, as it has no GPU toolchain."""
+    assert not (PACKAGE_ROOT / "additional_files/lmod_lists/anvil.gpu.lmod").exists()
+    assert not (PACKAGE_ROOT / "additional_files/env_files/anvil.gpu.env").exists()
 
 
 def test_no_gpu_nodes_by_default() -> None:

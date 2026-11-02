@@ -1,8 +1,0 @@
-# GPU toolchain (NVIDIA HPC SDK + CUDA-aware OpenMPI + netCDF-Fortran).
-# All names and versions unverified: confirm on Anvil (`module spider nvhpc`), that
-# openmpi is CUDA-aware and netcdf-fortran is built against it, and pin versions.
-modtree/gpu
-nvhpc
-cuda
-openmpi
-netcdf-fortran

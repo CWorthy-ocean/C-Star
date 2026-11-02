@@ -503,7 +503,7 @@ class AnvilSystemContext(SystemContext):
             max_walltime_method=query_max_walltime_via_sacctmgr,
         )
 
-        # Query names unverified; verify on Anvil.
+        # Query names verified on Anvil 2026-11-02.
         gpu_q = SlurmPartition(
             name="gpu",
             query_name="part-gpu",
@@ -522,9 +522,13 @@ class AnvilSystemContext(SystemContext):
             requires_task_distribution=False,
             documentation=cls.docs,
             max_cpus_per_node=128,
-            # ACCESS/RCAC docs: 16 GPU nodes of 4xA100 + 2xEPYC 7763 (128 cores);
-            # `gpu` is exclusive, `gpu-debug` is 30 min and at most 2 GPUs; GPUs
-            # are requested with `--gpus-per-node`.
+            # Verified on Anvil 2026-11-02: 16 GPU nodes of 4xA100 + 2xEPYC 7763
+            # (128 cores); `gpu` is exclusive, `gpu-debug` is 30 min and at most 2
+            # GPUs; GPUs are requested with `--gpus-per-node`. GPU allocations are
+            # `<allocation>-gpu` accounts with the `gpu` QOS (a CPU allocation is
+            # refused on the `gpu` partition). The site's GPU tree has no
+            # nvfortran-built netCDF-Fortran or CUDA-aware system OpenMPI, so no
+            # GPU build toolchain is registered yet.
             gpu=GpuNodes(
                 gpus_per_node=4,
                 queue="gpu",
@@ -532,18 +536,6 @@ class AnvilSystemContext(SystemContext):
                 cores_per_node=128,
             ),
         )
-
-    @override
-    @classmethod
-    def toolchain(cls, name: ToolchainName) -> Toolchain:
-        if name == "gpu":
-            return Toolchain(
-                compiler="nvfortran",
-                mpi_prefix=cls.mpi_prefix,
-                profile="gpu",
-                gpu_arch="cc80",
-            )
-        return super().toolchain(name)
 
     @override
     @classmethod
@@ -1001,14 +993,21 @@ class PerlmutterSystemContext(SystemContext):
             requires_task_distribution=False,
             documentation=cls.docs,
             max_cpus_per_node=128,
-            # NERSC docs: GPU nodes = 1xAMD EPYC 7763 (64 cores) + 4xA100; GPU jobs
-            # need `-C gpu` and an explicit GPU request; the GPU `regular`, `debug`
-            # and `shared` QOS share the CPU names.
+            # Verified on Perlmutter 2026-11-02: GPU nodes = 1xAMD EPYC 7763
+            # (64 cores) + 4xA100; GPU jobs need `-C gpu` and an explicit GPU
+            # request, and are submitted with `-q regular|debug|shared`. The GPU
+            # QOS limits are published under `gpu_regular`, `gpu_debug` and
+            # `gpu_shared` and match the CPU ones for walltime (2 days, 30 min,
+            # 2 days), so the walltime queries on the CPU QOS names stay valid.
             gpu=GpuNodes(
                 gpus_per_node=4,
                 queue="regular",
                 directives={"-C": "gpu", "--gpu-bind": "none"},
                 cores_per_node=64,
+                # NERSC's policy refuses a GPU job that names no account (checked
+                # with `sbatch --test-only` 2026-11-02); the CPU project or its
+                # `_g` twin both work.
+                account_required=True,
             ),
         )
 

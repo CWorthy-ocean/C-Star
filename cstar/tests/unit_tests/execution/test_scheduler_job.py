@@ -1311,6 +1311,71 @@ def test_create_scheduler_job_gpu_job_still_needs_account() -> None:
         )
 
 
+@pytest.fixture
+def account_required_gpu_system() -> Iterator[None]:
+    """Make the active system a SLURM system with a CPU queue and GPU nodes that
+    require an account, on settings that do not themselves require one.
+    """
+    scheduler = SlurmScheduler(
+        queues=[
+            SlurmQOS(name="test_queue", query_name="test_queue"),
+            SlurmQOS(name="gpu_queue", query_name="gpu_queue"),
+        ],
+        primary_queue_name="test_queue",
+        max_cpus_per_node=64,
+        gpu=GpuNodes(4, "gpu_queue", {"-C": "gpu"}, 64, account_required=True),
+    )
+    with (
+        patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            new_callable=PropertyMock,
+            return_value=scheduler,
+        ),
+        patch(
+            "cstar.system.scheduler.SlurmQOS.max_walltime",
+            new_callable=PropertyMock,
+            return_value="02:00:00",
+        ),
+        patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            None,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.usefixtures("account_required_gpu_system")
+def test_create_scheduler_job_gpu_account_required() -> None:
+    """Verify a GPU job without an account is refused where the GPU nodes need one,
+    builds once it has one, and a CPU job without an account is unaffected.
+    """
+    with pytest.raises(CstarError, match="CSTAR_SLURM_GPU_ACCOUNT"):
+        create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            gpus=4,
+            account_key="",
+            walltime="01:00:00",
+        )
+
+    gpu_job = create_scheduler_job(
+        commands="echo Hello, World",
+        cpus=4,
+        gpus=4,
+        account_key="acct",
+        walltime="01:00:00",
+    )
+    assert gpu_job.account_key == "acct"
+
+    cpu_job = create_scheduler_job(
+        commands="echo Hello, World",
+        cpus=4,
+        account_key="",
+        walltime="01:00:00",
+    )
+    assert cpu_job.account_key == ""
+
+
 @pytest.mark.usefixtures("slurm_system")
 def test_create_scheduler_job_gpu_job_without_gpu_nodes() -> None:
     """Verify a GPU job on a system with no GPU nodes is refused, even when it
