@@ -4041,6 +4041,7 @@ def test_resolver_diagnostics_stream_check_follows_cppdefs_diagnostics(diagnosti
     kw = dict(
         model_path=_MODEL_PATH_ROMS050,
         output_settings=settings,
+        use_pio=False,  # DIAGNOSTICS needs ParallelIO off (check_diagnostics_pio)
         compile_time_overrides={"cppdefs": {"diagnostics": diagnostics}},
     )
     if diagnostics:
@@ -4048,6 +4049,18 @@ def test_resolver_diagnostics_stream_check_follows_cppdefs_diagnostics(diagnosti
             _build(**kw)
     else:
         assert _build(**kw).model_settings["cppdefs"]["diagnostics"] is False
+
+
+def test_resolver_rejects_diagnostics_with_pio():
+    """ucla-roms aborts at the first _dia write under ParallelIO, so the resolver
+    (and with it the wizard) refuses the combination up front.
+    """
+    with pytest.raises(ValueError, match="needs ParallelIO off"):
+        _build(
+            model_path=_MODEL_PATH_ROMS050,
+            use_pio=True,
+            compile_time_overrides={"cppdefs": {"diagnostics": True}},
+        )
 
 
 def test_resolver_output_settings_override():

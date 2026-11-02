@@ -57,6 +57,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_constant_fe,
+    check_diagnostics_pio,
     check_marbl_only_outputs,
     check_restoring_flux_output,
     check_river_tracer_counts,
@@ -1965,6 +1966,38 @@ def test_check_cdr_lite_sections_reports_every_problem_together():
 )
 def test_bgc_mode_from_cppdefs(cppdefs, expected):
     assert bgc_mode_from_cppdefs(cppdefs) == expected
+
+
+# ---------------------------------------------------------------------------
+# check_diagnostics_pio
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "cppdefs",
+    [
+        {"diagnostics": True, "use_pio": False},
+        {"diagnostics": False, "use_pio": True},
+        {"use_pio": True},
+        {"diagnostics": True},
+    ],
+)
+def test_check_diagnostics_pio_accepts_either_alone(cppdefs):
+    check_diagnostics_pio(cppdefs)
+
+
+def test_check_diagnostics_pio_rejects_both():
+    with pytest.raises(ValueError, match="needs ParallelIO off"):
+        check_diagnostics_pio({"diagnostics": True, "use_pio": True})
+
+
+@pytest.mark.parametrize("use_pio", [True, False])
+def test_validate_run_time_sections_reports_diagnostics_with_pio(use_pio):
+    """A stored blueprint with DIAGNOSTICS and ParallelIO is reported up front
+    (engine/wizard), not first at configure_build.
+    """
+    errs = validate_run_time_sections(
+        {"cppdefs": {"diagnostics": True, "use_pio": use_pio}}
+    )
+    assert any("needs ParallelIO off" in e for e in errs) is use_pio
 
 
 # ---------------------------------------------------------------------------

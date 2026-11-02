@@ -1167,7 +1167,7 @@ fields:
   settings.cppdefs.diagnostics:
     label: Diagnostics (DIAGNOSTICS)
     symbol: diagnostics
-    hint: 'Compiles UCLA-ROMS with DIAGNOSTICS, which writes the _dia file of momentum (diag_uv) and tracer (diag_trc) term balances. Off: the diagnostics settings have no effect.'
+    hint: 'Compiles UCLA-ROMS with DIAGNOSTICS, which writes the _dia file of momentum (diag_uv) and tracer (diag_trc) term balances. Off: the diagnostics settings have no effect. Needs ParallelIO off: UCLA-ROMS cannot yet write the _dia file through ParallelIO.'
   settings.ocean_vars.wrt_avg_z:
     label: Sea surface height (zeta)
     symbol: wrt_avg_z

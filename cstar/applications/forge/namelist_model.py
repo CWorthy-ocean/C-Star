@@ -911,6 +911,27 @@ def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
         )
 
 
+def check_diagnostics_pio(cppdefs: Mapping[str, Any]) -> None:
+    """Reject ``cppdefs.diagnostics`` together with ``cppdefs.use_pio``. Under
+    PARALLEL_IO ucla-roms writes CDF-5 files, and its ``create_diagnostics_file``
+    defines the ``_dia`` file's variables without ``nf90_redef``, so the run aborts
+    at the first diagnostics output (every release through 0.13.0; a non-PIO build
+    writes netCDF-4, where that works). Gate this on the fixing release once one
+    exists.
+
+    The resolver, ``validate_run_time_sections`` and ``configure_build`` call this.
+
+    Raises ``ValueError`` when both are on.
+    """
+    if cppdefs.get("diagnostics") and cppdefs.get("use_pio"):
+        raise ValueError(
+            "cppdefs.diagnostics (DIAGNOSTICS) needs ParallelIO off: with use_pio, "
+            "ucla-roms aborts at the first diagnostics output (it defines the _dia "
+            "file's variables outside netCDF define mode). Turn off use_pio or "
+            "cppdefs.diagnostics."
+        )
+
+
 def check_upscaled_cdr_lite_tracer_counts(param: Mapping[str, Any]) -> None:
     """Reject an upscaled ``bgc_mode: cdr_lite`` build that declares no CDR-lite
     tracers.
@@ -2525,6 +2546,10 @@ def validate_run_time_sections(
             check_cdr_lite_mode_roms(roms_ref)
         except ValueError as exc:
             errors.append(str(exc))
+    try:
+        check_diagnostics_pio(settings.get("cppdefs") or {})
+    except ValueError as exc:
+        errors.append(str(exc))
     # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
     # blueprint fails before data staging/generation, not at configure_build.
     if "param" in settings and "cppdefs" in settings:

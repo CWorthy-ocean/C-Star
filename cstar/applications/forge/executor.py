@@ -51,6 +51,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_constant_fe,
+    check_diagnostics_pio,
     check_marbl_only_outputs,
     check_marbl_step_averages,
     check_output_streams_divide_rst,
@@ -2487,6 +2488,7 @@ class ForgeExecutor(BaseModel):
             check_cdr_lite_mode_roms(
                 str(effective_roms_ref) if effective_roms_ref is not None else None
             )
+        check_diagnostics_pio(cppdefs)
         if cdr_active and not cppdefs.get("cdr_forcing"):
             cppdefs["cdr_forcing"] = True
             log.info(
