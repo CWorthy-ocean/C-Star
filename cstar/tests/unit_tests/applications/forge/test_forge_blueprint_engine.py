@@ -214,10 +214,8 @@ def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
             update={
                 "forcing": f.model_copy(
                     update={
-                        "initial_conditions": _sec(
-                            f.initial_conditions, groom=False, groom_settings=settings
-                        ),
-                        "boundary": _sec(f.boundary, groom=True),
+                        "initial_conditions": _sec(f.initial_conditions, groom=False),
+                        "boundary": _sec(f.boundary, groom_settings=settings),
                     }
                 )
             }
@@ -231,6 +229,6 @@ def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
     for sec in (unset["initial_conditions"], unset["forcing"]["boundary"]):
         assert "groom" not in sec and "groom_settings" not in sec
     assert set_["initial_conditions"]["groom"] is False
-    assert set_["initial_conditions"]["groom_settings"] == settings
+    assert "groom_settings" not in set_["initial_conditions"]
     assert "groom" not in set_["forcing"]["boundary"]
-    assert "groom_settings" not in set_["forcing"]["boundary"]
+    assert set_["forcing"]["boundary"]["groom_settings"] == settings

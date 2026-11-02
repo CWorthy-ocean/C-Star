@@ -9800,11 +9800,10 @@ def test_section_groom_fields_resolve_from_forcing_inputs():
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["groom"] = False
-    fdata["initial_conditions"]["groom_settings"] = {"passes": 2}
     fdata["forcing"]["boundary"]["groom_settings"] = {"relax_sweeps": 3}
     cfg = _build(forcing_inputs=fdata)
     assert cfg.forcing.initial_conditions.groom is False
-    assert cfg.forcing.initial_conditions.groom_settings == {"passes": 2}
+    assert cfg.forcing.initial_conditions.groom_settings == {}
     assert cfg.forcing.boundary.groom is True
     assert cfg.forcing.boundary.groom_settings == {"relax_sweeps": 3}
 
@@ -9856,6 +9855,30 @@ def test_empty_groom_settings_is_left_out_like_unset():
     assert "groom_settings" not in dumped["initial_conditions"]
     assert "groom_settings" not in dumped["boundary"]
     assert cfg.content_hash() == base.content_hash()
+
+
+@pytest.mark.parametrize("section", ["initial_conditions", "boundary"])
+def test_groom_settings_with_groom_off_is_refused_at_load(section):
+    """roms-tools refuses ``groom_settings`` with grooming off, but only once it builds
+    the forcing, after the grid is written; the section refuses the pair when the
+    blueprint loads. An empty ``groom_settings`` is unset, so it stays allowed.
+    """
+    from pydantic import ValidationError
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    def _inputs(**block):
+        fdata = cat.forcing_data("glorys-era5-unified")
+        if section == "initial_conditions":
+            fdata["initial_conditions"].update(block)
+        else:
+            fdata["forcing"]["boundary"].update(block)
+        return fdata
+
+    with pytest.raises(ValidationError, match="groom_settings with groom: false"):
+        _build(forcing_inputs=_inputs(groom=False, groom_settings={"passes": 2}))
+    cfg = _build(forcing_inputs=_inputs(groom=False, groom_settings={}))
+    assert getattr(cfg.forcing, section).groom is False
 
 
 @pytest.mark.parametrize(

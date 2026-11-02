@@ -1068,6 +1068,22 @@ def _check_groom_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
+def _require_groom_for_groom_settings(
+    groom: bool, groom_settings: dict[str, Any], section_label: str
+) -> None:
+    """Shared by ``InitialConditions``/``BoundaryForcing``: roms-tools refuses
+    ``groom_settings`` with grooming off, but only when it builds the forcing --
+    after the grid (and, for boundary, the initial conditions and surface forcing)
+    is already written. Refuse the pair when the blueprint loads instead.
+    """
+    if groom_settings and not groom:
+        raise ValueError(
+            f"{section_label} sets groom_settings with groom: false -- roms-tools "
+            "applies groom_settings only while grooming is on; remove "
+            "groom_settings or groom: false"
+        )
+
+
 def _require_partitioned_bgc_use_vars(
     bgc_sources: list[BgcSourceItem], section_label: str
 ) -> None:
@@ -1159,6 +1175,13 @@ class InitialConditions(_Section):
         _require_partitioned_bgc_use_vars(self.bgc_sources, "initial_conditions")
         return self
 
+    @model_validator(mode="after")
+    def _groom_settings_need_groom(self) -> InitialConditions:
+        _require_groom_for_groom_settings(
+            self.groom, self.groom_settings, "initial_conditions"
+        )
+        return self
+
 
 class BoundaryForcing(_Section):
     """Structural mirror of ``InitialConditions`` -- see its docstring and
@@ -1219,6 +1242,13 @@ class BoundaryForcing(_Section):
     @model_validator(mode="after")
     def _bgc_sources_use_vars_partitioned(self) -> BoundaryForcing:
         _require_partitioned_bgc_use_vars(self.bgc_sources, "forcing.boundary")
+        return self
+
+    @model_validator(mode="after")
+    def _groom_settings_need_groom(self) -> BoundaryForcing:
+        _require_groom_for_groom_settings(
+            self.groom, self.groom_settings, "forcing.boundary"
+        )
         return self
 
 

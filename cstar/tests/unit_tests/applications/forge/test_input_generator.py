@@ -1517,12 +1517,15 @@ class TestRomsInputGeneratorGeneration:
         mock_ic_class.return_value = mock_ic
 
         sample_roms_input_generator._generate_initial_conditions(
-            source={"name": "GLORYS"},
-            groom=False,
-            groom_settings={"passes": 2},
+            source={"name": "GLORYS"}, groom=False
         )
         kwargs = mock_ic_class.call_args.kwargs
         assert kwargs["groom"] is False
+
+        sample_roms_input_generator._generate_initial_conditions(
+            source={"name": "GLORYS"}, groom_settings={"passes": 2}
+        )
+        kwargs = mock_ic_class.call_args.kwargs
         assert kwargs["groom_settings"] == {"passes": 2}
 
         sample_roms_input_generator._generate_initial_conditions(
@@ -1545,12 +1548,16 @@ class TestRomsInputGeneratorGeneration:
         sample_roms_input_generator._generate_boundary_forcing(
             key="forcing.boundary",
             source={"name": "GLORYS"},
-            groom=True,
+            groom=False,
+        )
+        assert mock_bf_class.call_args.kwargs["groom"] is False
+
+        sample_roms_input_generator._generate_boundary_forcing(
+            key="forcing.boundary",
+            source={"name": "GLORYS"},
             groom_settings={"passes": 2},
         )
-        kwargs = mock_bf_class.call_args.kwargs
-        assert kwargs["groom"] is True
-        assert kwargs["groom_settings"] == {"passes": 2}
+        assert mock_bf_class.call_args.kwargs["groom_settings"] == {"passes": 2}
 
     @patch("cstar.applications.forge.input_generator.rt.InitialConditions")
     def test_generate_initial_conditions_multiple_paths(

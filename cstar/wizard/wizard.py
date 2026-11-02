@@ -336,7 +336,8 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "ALK) and refills them from the surrounding water. On by default (roms-tools' "
     "default); uncheck to turn it off (groom=False). No effect without an ESPER "
     "source. Threshold overrides (groom_settings) are set only by hand in the "
-    "blueprint YAML.",
+    "blueprint YAML; unchecking leaves them out, since roms-tools applies them only "
+    "while grooming is on.",
     (
         "boundary",
         "boundary_groom",
@@ -345,7 +346,8 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "ALK) and refills them from the surrounding water. On by default (roms-tools' "
     "default); uncheck to turn it off (groom=False). No effect without an ESPER "
     "source. Threshold overrides (groom_settings) are set only by hand in the "
-    "blueprint YAML.",
+    "blueprint YAML; unchecking leaves them out, since roms-tools applies them only "
+    "while grooming is on.",
     (
         "boundary",
         "boundary_validate",
@@ -2832,7 +2834,9 @@ class _ForcingEditor:
             tooltip=_tip("ic", "ic_groom"),
         )
         # `groom_settings` has no widget (set only by hand in the blueprint YAML);
-        # carried through untouched so editing a loaded blueprint keeps it.
+        # carried through untouched so editing a loaded blueprint keeps it. It is
+        # written back only while the box is checked: the section refuses it with
+        # `groom: False`, and re-checking the box brings it back.
         self._ic_groom_settings = copy.deepcopy(ic.get("groom_settings") or {})
         _ic_prefill_val = str(ic.get("prefill") or "")
         if _ic_prefill_val not in _PREFILL_OPTS:
@@ -3976,7 +3980,7 @@ class _ForcingEditor:
             ic["bypass_validation"] = True
         if not self.ic_groom.value:  # checked ("groom") is the default
             ic["groom"] = False
-        if self._ic_groom_settings:
+        if self.ic_groom.value and self._ic_groom_settings:
             ic["groom_settings"] = copy.deepcopy(self._ic_groom_settings)
         if self.ic_prefill.value:  # Dropdown: "" = leave unset
             ic["prefill"] = self.ic_prefill.value
@@ -4021,7 +4025,7 @@ class _ForcingEditor:
                 boundary["bypass_validation"] = True
             if not self.boundary_groom.value:  # checked ("groom") is the default
                 boundary["groom"] = False
-            if self._boundary_groom_settings:
+            if self.boundary_groom.value and self._boundary_groom_settings:
                 boundary["groom_settings"] = copy.deepcopy(
                     self._boundary_groom_settings
                 )

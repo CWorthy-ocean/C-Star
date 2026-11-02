@@ -872,24 +872,52 @@ def test_groom_settings_survive_wizard_load_and_resave():
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["groom_settings"] = {"passes": 2}
-    fdata["initial_conditions"]["groom"] = False
-    fdata["forcing"]["boundary"]["groom_settings"] = {"relax_sweeps": 3}
+    fdata["forcing"]["boundary"]["groom"] = False
     cfg = _build_with_forcing(fdata)
 
     seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
     ed = _ForcingEditor(W, seed, on_change=lambda: None)
-    assert ed.ic_groom.value is False
-    assert ed.boundary_groom.value is True
+    assert ed.ic_groom.value is True
+    assert ed.boundary_groom.value is False
     gathered = ed.gather()
     assert gathered["initial_conditions"]["groom_settings"] == {"passes": 2}
-    assert gathered["initial_conditions"]["groom"] is False
-    assert gathered["forcing"]["boundary"]["groom_settings"] == {"relax_sweeps": 3}
-    assert "groom" not in gathered["forcing"]["boundary"]
+    assert "groom" not in gathered["initial_conditions"]
+    assert gathered["forcing"]["boundary"]["groom"] is False
+    assert "groom_settings" not in gathered["forcing"]["boundary"]
 
     cfg2 = _build_with_forcing(gathered)
     for sec in ("initial_conditions", "boundary"):
         a, b = getattr(cfg.forcing, sec), getattr(cfg2.forcing, sec)
         assert (a.groom, a.groom_settings) == (b.groom, b.groom_settings)
+
+
+@pytest.mark.parametrize("section", ["ic", "boundary"])
+def test_unchecking_groom_leaves_carried_groom_settings_out(section):
+    """roms-tools applies ``groom_settings`` only while grooming is on, and the section
+    refuses the pair: an unchecked box leaves carried settings out of the gather, so
+    it still resolves, and re-checking the box brings them back.
+    """
+    import ipywidgets as W
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    block = (
+        fdata["initial_conditions"] if section == "ic" else fdata["forcing"]["boundary"]
+    )
+    block["groom_settings"] = {"passes": 2}
+    seed = ForgeBlueprintWizard._sources_to_inputs(_build_with_forcing(fdata))
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    box = getattr(ed, f"{section}_groom")
+
+    box.value = False
+    gathered = ed.gather()
+    off = _groom_section(gathered, section)
+    assert off["groom"] is False and "groom_settings" not in off
+    _build_with_forcing(gathered)
+
+    box.value = True
+    assert _groom_section(ed.gather(), section)["groom_settings"] == {"passes": 2}
 
 
 @pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
