@@ -754,6 +754,26 @@ def test_workplan_content_hash_is_stable(hello_world_bp_path: Path) -> None:
     )
 
 
+def test_workplan_content_hash_keeps_an_infinite_override(
+    hello_world_bp_path: Path,
+) -> None:
+    """An infinite step override (``.inf``) is hashed as infinity, not as ``null``.
+
+    The workplan's JSON-mode dump, which the hash reads, follows the workplan's own
+    serialization config rather than the step's.
+    """
+    plan = _workplan(
+        _step(hello_world_bp_path.as_posix(), blueprint_overrides={"x": float("inf")})
+    )
+    nan = _workplan(
+        _step(hello_world_bp_path.as_posix(), blueprint_overrides={"x": float("nan")})
+    )
+
+    dumped = plan.model_dump(mode="json", by_alias=True)
+    assert dumped["steps"][0]["blueprint_overrides"]["x"] == float("inf")
+    assert workplan_content_hash(plan) != workplan_content_hash(nan)
+
+
 class TestDescribeSteps:
     def _hash(self, tmp_path: Path, **kwargs: t.Any) -> str:
         bp = _write_blueprint(tmp_path / "bp.yaml")
