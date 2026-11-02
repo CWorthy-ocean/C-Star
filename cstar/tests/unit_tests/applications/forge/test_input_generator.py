@@ -5215,6 +5215,22 @@ class TestLegacyBgcFileNames:
 
         assert planned == data.input_data_dir / f"test_grid_{category}-{legacy}.nc"
 
+    def test_keeping_a_legacy_name_is_logged_at_debug(
+        self, sample_roms_input_generator, caplog
+    ):
+        data = sample_roms_input_generator
+        short, legacy = self._details()
+        (data.input_data_dir / f"test_grid_boundary-{legacy}.nc").touch()
+
+        with caplog.at_level(
+            logging.DEBUG, logger="cstar.applications.forge.input_generator"
+        ):
+            self._planned_bgc(data, "boundary", self._VARS)
+
+        (record,) = [r for r in caplog.records if legacy in r.getMessage()]
+        assert record.levelno == logging.DEBUG
+        assert f"regenerates it as boundary-{short}" in record.getMessage()
+
     @pytest.mark.parametrize("category", ["boundary", "surface"])
     def test_no_legacy_file_plans_the_short_name(
         self, category, sample_roms_input_generator

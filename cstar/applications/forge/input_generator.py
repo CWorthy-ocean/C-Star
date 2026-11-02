@@ -1160,7 +1160,18 @@ class RomsInputGenerator(InputGenerator):
             basename = netcdf_basename(domain_name, f"{category}-{name}")
             return _output_on_disk(Path(input_data_dir) / basename)
 
-        return legacy if on_disk(legacy) and not on_disk(detail) else detail
+        if on_disk(legacy) and not on_disk(detail):
+            log.debug(
+                "%s: keeping the existing %s-%s file name; a run with clobber "
+                "regenerates it as %s-%s",
+                domain_name,
+                category,
+                legacy,
+                category,
+                detail,
+            )
+            return legacy
+        return detail
 
     @staticmethod
     def _item_source_name(kwargs: dict[str, Any] | None) -> str | None:
