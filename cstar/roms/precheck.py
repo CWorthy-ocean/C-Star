@@ -775,7 +775,9 @@ def check_file_name_lengths(settings: RomsNamelistBase | Mapping[str, Any]) -> N
             "the names below are too long for them (ucla-roms >= 0.13.0 stops at "
             "startup; earlier releases cut the name off silently):\n  "
             + "\n  ".join(detail for _, _, detail in too_long)
-            + "\nUse a shorter run directory or shorter input file names.",
+            + "\nShorten these file names. A file inside the run's root directory is "
+            "named relative to the run directory, and one outside it by its full "
+            "path, so moving an input inside the root also shortens its name.",
             rule="file_name_lengths",
             section=", ".join(dict.fromkeys(group for group, _, _ in too_long)),
             keys=tuple(dict.fromkeys(key for _, key, _ in too_long)),

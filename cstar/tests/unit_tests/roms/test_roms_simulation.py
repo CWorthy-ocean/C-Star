@@ -919,7 +919,7 @@ class TestROMSSimulationInitialization:
 
         too_long = forcing_path(MAX_NAMELIST_FILE_NAME_LENGTH + 1)
         mock_forcing_paths.return_value = [Path("forcing1.nc"), too_long]
-        with pytest.raises(ValueError, match="shorter run directory") as exc:
+        with pytest.raises(ValueError, match="Shorten these file names") as exc:
             _ = sim.roms_runtime_settings
         message = str(exc.value)
         assert "forcing_files.frcfiles[1]" in message
