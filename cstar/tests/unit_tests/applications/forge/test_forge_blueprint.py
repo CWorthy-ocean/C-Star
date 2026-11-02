@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 import xarray as xr
 import yaml
+from pydantic import ValidationError
 
 import cstar
 import cstar.catalog
@@ -33,6 +34,7 @@ from cstar.applications.forge.blueprint import (
     Composition,
     ForgeBlueprint,
     ForgeProvenance,
+    InitialConditions,
     SpecRef,
     UserProvidedFile,
     composition_refs,
@@ -3723,6 +3725,143 @@ def test_regrid_options_survive_wizard_load_back():
     assert seeded["initial_conditions"]["allow_flex_time"] is True
     assert seeded["forcing"]["surface"][0]["regrid_method"] == "xesmf"
     assert seeded["forcing"]["tidal"][0]["extrap_method"] == "nearest_s2d"
+
+
+def _bottom_fill_inputs(*, ic=None, boundary=None):
+    """The bundled forcing spec with ``bottom_fill_blend_m`` set on the sections
+    given (left unset on the others).
+    """
+    fdata = _CATALOG.forcing_data("glorys-era5-unified")
+    if ic is not None:
+        fdata["initial_conditions"]["bottom_fill_blend_m"] = ic
+    if boundary is not None:
+        fdata["forcing"]["boundary"]["bottom_fill_blend_m"] = boundary
+    return fdata
+
+
+def test_bottom_fill_blend_m_survives_resolve_and_override():
+    """``bottom_fill_blend_m`` authored on initial_conditions and boundary survives
+    the resolver and the reverse dump (``sources_to_forcing_override``), the two
+    propagation paths that carry every typed section field to roms-tools.
+    """
+    from cstar.applications.forge.engine import sources_to_forcing_override
+
+    cfg = _build(forcing_inputs=_bottom_fill_inputs(ic=10, boundary=0))
+    assert cfg.forcing.initial_conditions.bottom_fill_blend_m == 10
+    assert cfg.forcing.boundary.bottom_fill_blend_m == 0
+
+    ov = sources_to_forcing_override(cfg)
+    assert ov["initial_conditions"]["bottom_fill_blend_m"] == 10
+    assert ov["forcing"]["boundary"]["bottom_fill_blend_m"] == 0
+
+
+def test_bottom_fill_blend_m_unset_is_absent_from_the_override():
+    """Unset, the field is not passed on at all, so a roms-tools release without
+    the option still builds the section.
+    """
+    from cstar.applications.forge.engine import sources_to_forcing_override
+
+    cfg = _build()
+    assert cfg.forcing.initial_conditions.bottom_fill_blend_m is None
+    assert cfg.forcing.boundary.bottom_fill_blend_m is None
+
+    ov = sources_to_forcing_override(cfg)
+    assert "bottom_fill_blend_m" not in ov["initial_conditions"]
+    assert "bottom_fill_blend_m" not in ov["forcing"]["boundary"]
+
+
+def test_bottom_fill_blend_m_inf_survives_a_yaml_round_trip(tmp_path):
+    """``float("inf")`` ("copy each column's bottom value down") is written as
+    ``.inf``, loads back as ``inf`` with the same content hash, and reaches the
+    override as ``inf``. Pydantic's default would dump it as ``null`` -- a
+    different setting -- see ``Blueprint.model_config``.
+    """
+    from cstar.applications.forge.engine import sources_to_forcing_override
+
+    inf = float("inf")
+    cfg = _build(forcing_inputs=_bottom_fill_inputs(ic=inf, boundary=inf))
+    path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+
+    saved = yaml.safe_load(path.read_text())["forcing"]
+    assert saved["initial_conditions"]["bottom_fill_blend_m"] == inf
+    assert saved["boundary"]["bottom_fill_blend_m"] == inf
+    assert "bottom_fill_blend_m: .inf" in path.read_text()
+
+    back = ForgeBlueprint.from_yaml(path)
+    assert back.forcing.initial_conditions.bottom_fill_blend_m == inf
+    assert back.forcing.boundary.bottom_fill_blend_m == inf
+    assert back.content_hash() == cfg.content_hash()
+    assert back.integrity_problem() is None
+
+    ov = sources_to_forcing_override(back)
+    assert ov["initial_conditions"]["bottom_fill_blend_m"] == inf
+    assert ov["forcing"]["boundary"]["bottom_fill_blend_m"] == inf
+
+
+def test_bottom_fill_blend_m_is_written_only_when_set():
+    """Unset, the saved YAML has no ``bottom_fill_blend_m`` line, so a build that
+    predates the field (and forbids unknown keys) still reads the file; set on one
+    section, only that section carries it, and it reloads.
+    """
+    assert "bottom_fill_blend_m" not in _build().to_yaml_str()
+
+    text = _build(forcing_inputs=_bottom_fill_inputs(ic=0)).to_yaml_str()
+    saved = yaml.safe_load(text)["forcing"]
+    assert saved["initial_conditions"]["bottom_fill_blend_m"] == 0
+    assert "bottom_fill_blend_m" not in saved["boundary"]
+
+    back = ForgeBlueprint.from_yaml_data(yaml.safe_load(text))
+    assert back.forcing.initial_conditions.bottom_fill_blend_m == 0
+    assert back.forcing.boundary.bottom_fill_blend_m is None
+
+
+def test_bottom_fill_blend_m_hash_only_moves_when_set():
+    """Unset, the field leaves no trace in the hashed content (a hash recorded
+    before the field existed still verifies); set, it is results-affecting.
+    """
+    base = _build()
+    hashed = base._hashed_content()["forcing"]
+    assert "bottom_fill_blend_m" not in hashed["initial_conditions"]
+    assert "bottom_fill_blend_m" not in hashed["boundary"]
+
+    variants = [
+        _build(forcing_inputs=_bottom_fill_inputs(ic=25)),
+        _build(forcing_inputs=_bottom_fill_inputs(boundary=25)),
+        _build(forcing_inputs=_bottom_fill_inputs(ic=10)),
+        _build(forcing_inputs=_bottom_fill_inputs(ic=float("inf"))),
+    ]
+    hashes = [base.content_hash(), *(v.content_hash() for v in variants)]
+    assert len(set(hashes)) == len(hashes)
+
+
+# The field is declared identically on InitialConditions and BoundaryForcing, so the
+# accept/reject cases run on one.
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param(-1, id="negative"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(True, id="bool"),
+        pytest.param("25", id="string"),
+    ],
+)
+def test_bottom_fill_blend_m_rejects_invalid_values(bad):
+    with pytest.raises(ValidationError, match="bottom_fill_blend_m"):
+        InitialConditions(source={"name": "GLORYS"}, bottom_fill_blend_m=bad)
+
+
+@pytest.mark.parametrize(
+    "good",
+    [
+        pytest.param(0, id="zero"),
+        pytest.param(25, id="int"),
+        pytest.param(12.5, id="float"),
+        pytest.param(float("inf"), id="inf"),
+    ],
+)
+def test_bottom_fill_blend_m_accepts_valid_values(good):
+    sec = InitialConditions(source={"name": "GLORYS"}, bottom_fill_blend_m=good)
+    assert sec.bottom_fill_blend_m == good
 
 
 def test_forcing_override_coerces_enums_to_strings():

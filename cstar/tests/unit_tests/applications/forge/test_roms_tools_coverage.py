@@ -56,6 +56,10 @@ _FORGE_FIELDS = {
         "regrid_method",
         "extrap_method",
         "extrap_kwargs",
+        # blend depth below a column's bottom (a roms-tools option newer than the
+        # current release); passed only when a blueprint sets it, so older roms-tools
+        # still works.
+        "bottom_fill_blend_m",
         # model_reference_date is handled run-level; options dict is passthrough
         "model_reference_date",
         "options",
@@ -91,6 +95,8 @@ _FORGE_FIELDS = {
         "regrid_method",
         "extrap_method",
         "extrap_kwargs",
+        # Same as InitialConditions: passed only when a blueprint sets it.
+        "bottom_fill_blend_m",
         "model_reference_date",
         "options",
         # wizard "validate" checkbox (checked = bypass_validation=False, the

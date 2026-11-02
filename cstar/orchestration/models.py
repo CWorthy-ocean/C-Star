@@ -132,8 +132,12 @@ class ConfiguredBaseModel(BaseModel):
         from_attributes=True,
         str_strip_whitespace=True,
         use_attribute_docstrings=True,
+        ser_json_inf_nan="constants",
     )
-    """Configures the behavior of the pydantic model."""
+    """Configures the behavior of the pydantic model. An infinite float (``.inf`` in
+    YAML) stays one in a JSON-mode dump; under pydantic's default a wrap serializer
+    turns it into ``None``, so a save, hash or template fill would record a different
+    setting. The outermost model's setting governs, so it lives on this base."""
 
 
 class PathLocation(ConfiguredBaseModel):

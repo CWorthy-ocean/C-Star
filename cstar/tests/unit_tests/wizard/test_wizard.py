@@ -39,6 +39,7 @@ from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
+    _IC_NONE,
     _MODEL_CARD,
     _OUTPUT_CARD,
     _OUTPUT_MORE_TITLE,
@@ -460,6 +461,175 @@ def test_boundary_regrid_widgets_seed_gather_and_layout():
     assert ed.boundary_prefill in all_children
     assert ed.boundary_regrid_method in all_children
     assert ed.boundary_extrap_method in all_children
+
+
+# ``bottom_fill_blend_m`` (roms-tools' below-bottom blend depth) is a free-text box on
+# the IC and boundary sections: blank = unset, a number (or ``inf``) = that float,
+# anything else is gathered as typed so blueprint validation reports it.
+_BLEND_SECTIONS = ("ic", "boundary")
+
+
+def _blend_seed(section: str, **block) -> dict:
+    """A forcing-editor seed with a GLORYS IC or boundary block carrying ``block``."""
+    block = {"source": {"name": "GLORYS"}, **block}
+    return (
+        {"initial_conditions": block}
+        if section == "ic"
+        else {"forcing": {"boundary": block}}
+    )
+
+
+def _blend_block(gathered: dict, section: str) -> dict:
+    return (
+        gathered["initial_conditions"]
+        if section == "ic"
+        else gathered["forcing"]["boundary"]
+    )
+
+
+@pytest.mark.parametrize("section", _BLEND_SECTIONS)
+@pytest.mark.parametrize(
+    ("loaded", "shown"),
+    [
+        (None, ""),
+        (100.0, "100"),
+        (12.5, "12.5"),
+        (0.0, "0"),
+        (float("inf"), "inf"),
+        # shown exactly, so a re-save never changes the value
+        (12.3456789, "12.3456789"),
+        (1234567.0, "1234567"),
+    ],
+)
+def test_bottom_fill_blend_m_seeds_as_text(section, loaded, shown):
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        _blend_seed(section, bottom_fill_blend_m=loaded),
+        on_change=lambda: None,
+    )
+    assert getattr(ed, f"{section}_bottom_fill_blend_m").value == shown
+
+
+@pytest.mark.parametrize("section", _BLEND_SECTIONS)
+def test_bottom_fill_blend_m_absent_seeds_blank_and_gathers_no_key(section):
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, _blend_seed(section), on_change=lambda: None)
+    box = getattr(ed, f"{section}_bottom_fill_blend_m")
+    assert box.value == ""
+    assert "bottom_fill_blend_m" not in _blend_block(ed.gather(), section)
+
+    box.value = "   "  # whitespace alone is blank too
+    assert "bottom_fill_blend_m" not in _blend_block(ed.gather(), section)
+
+
+@pytest.mark.parametrize("section", _BLEND_SECTIONS)
+@pytest.mark.parametrize(
+    ("text", "gathered"),
+    [
+        ("12.5", 12.5),
+        (" 100 ", 100.0),
+        ("0", 0.0),  # zero is a real setting, not "unset"
+        ("inf", float("inf")),
+        # Unparseable text is kept as typed, so the blueprint's own validation
+        # reports it instead of the wizard silently dropping it.
+        ("deep", "deep"),
+        (" 25 m ", "25 m"),
+    ],
+)
+def test_bottom_fill_blend_m_gathers_typed_text(section, text, gathered):
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, _blend_seed(section), on_change=lambda: None)
+    getattr(ed, f"{section}_bottom_fill_blend_m").value = text
+    got = _blend_block(ed.gather(), section)["bottom_fill_blend_m"]
+    assert got == gathered
+    assert type(got) is type(gathered)
+
+
+@pytest.mark.parametrize(
+    ("section", "none_sentinel"),
+    [("ic", _IC_NONE), ("boundary", _BOUNDARY_NONE)],
+)
+def test_bottom_fill_blend_m_widget_is_laid_out_and_hidden_with_no_source(
+    section, none_sentinel
+):
+    """The text box is reachable from the rendered widget (one built but never laid
+    out renders invisibly), and goes with the rest of the section when its source is
+    "(none)".
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, _blend_seed(section), on_change=lambda: None)
+    box = getattr(ed, f"{section}_bottom_fill_blend_m")
+
+    all_children = []
+
+    def _walk(node):
+        all_children.append(node)
+        for c in getattr(node, "children", []):
+            _walk(c)
+
+    _walk(ed.widget)
+    assert box in all_children
+    assert _display(box) == ""
+
+    getattr(ed, f"{section}_name").value = none_sentinel
+    assert _display(box) == "none"
+    getattr(ed, f"{section}_name").value = "GLORYS"
+    assert _display(box) == ""
+
+
+def test_sources_to_inputs_round_trips_bottom_fill_blend_m():
+    """A loaded blueprint's ``bottom_fill_blend_m`` (including zero, which is not
+    "unset", and ``inf``) reaches the text boxes and gathers back unchanged.
+    """
+    forcing = Forcing.model_validate(
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bottom_fill_blend_m": 0.0,
+            },
+            "boundary": {
+                "source": {"name": "GLORYS"},
+                "bottom_fill_blend_m": float("inf"),
+            },
+        }
+    )
+    seed = ForgeBlueprintWizard._sources_to_inputs(SimpleNamespace(forcing=forcing))
+
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    assert ed.ic_bottom_fill_blend_m.value == "0"
+    assert ed.boundary_bottom_fill_blend_m.value == "inf"
+    gathered = ed.gather()
+    assert gathered["initial_conditions"]["bottom_fill_blend_m"] == 0.0
+    assert gathered["forcing"]["boundary"]["bottom_fill_blend_m"] == float("inf")
+
+
+@pytest.mark.parametrize("section", _BLEND_SECTIONS)
+@pytest.mark.parametrize("typed", ["deep", "-5", "nan"])
+def test_invalid_bottom_fill_blend_m_shows_an_invalid_blueprint_banner(section, typed):
+    """Typed-but-invalid text must reach blueprint validation and surface in the
+    status area (not raise out of the wizard, and not be dropped); clearing the box
+    makes the blueprint valid again.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+
+    box = getattr(wiz._forcing_editor, f"{section}_bottom_fill_blend_m")
+    box.value = typed
+    assert wiz.config is None
+    assert "Invalid blueprint" in wiz.derived.value
+
+    box.value = ""
+    assert wiz.config is not None, wiz.derived.value
 
 
 def test_ic_bypass_validation_round_trips_through_editor():
