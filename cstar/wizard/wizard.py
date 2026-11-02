@@ -329,6 +329,26 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "entirely (bypass_validation=True) -- a last-resort escape hatch, not a "
     "recommended default.",
     (
+        "ic",
+        "ic_groom",
+    ): "Groom the tracers this section's ESPER source(s) supply: roms-tools detects "
+    "implausible values (spikes, zeros beside ordinary water, DIC inconsistent with "
+    "ALK) and refills them from the surrounding water. On by default (roms-tools' "
+    "default); uncheck to turn it off (groom=False). No effect without an ESPER "
+    "source. Threshold overrides (groom_settings) are set only by hand in the "
+    "blueprint YAML; unchecking leaves them out, since roms-tools applies them only "
+    "while grooming is on.",
+    (
+        "boundary",
+        "boundary_groom",
+    ): "Groom the tracers this section's ESPER source(s) supply: roms-tools detects "
+    "implausible values (spikes, zeros beside ordinary water, DIC inconsistent with "
+    "ALK) and refills them from the surrounding water. On by default (roms-tools' "
+    "default); uncheck to turn it off (groom=False). No effect without an ESPER "
+    "source. Threshold overrides (groom_settings) are set only by hand in the "
+    "blueprint YAML; unchecking leaves them out, since roms-tools applies them only "
+    "while grooming is on.",
+    (
         "boundary",
         "boundary_validate",
     ): "Run roms-tools' post-construction validation (NaN-at-wet-point checks across "
@@ -2909,6 +2929,19 @@ class _ForcingEditor:
             indent=False,
             tooltip=_tip("ic", "ic_validate"),
         )
+        # `groom`: on is roms-tools' default, so only an explicit False loads
+        # unchecked (and only unchecked is written back, like `bypass_validation`).
+        self.ic_groom = W.Checkbox(
+            value=ic.get("groom") is not False,
+            description="groom ESPER tracers",
+            indent=False,
+            tooltip=_tip("ic", "ic_groom"),
+        )
+        # `groom_settings` has no widget (set only by hand in the blueprint YAML);
+        # carried through untouched so editing a loaded blueprint keeps it. It is
+        # written back only while the box is checked: the section refuses it with
+        # `groom: False`, and re-checking the box brings it back.
+        self._ic_groom_settings = copy.deepcopy(ic.get("groom_settings") or {})
         _ic_prefill_val = str(ic.get("prefill") or "")
         if _ic_prefill_val not in _PREFILL_OPTS:
             _ic_prefill_val = ""
@@ -2954,6 +2987,7 @@ class _ForcingEditor:
             self.ic_bgc_interp,
             self.ic_flex_time,
             self.ic_validate,
+            self.ic_groom,
             self.ic_prefill,
             self.ic_regrid_method,
             self.ic_extrap_method,
@@ -2974,6 +3008,7 @@ class _ForcingEditor:
                 self.ic_path,
                 self.ic_bgc_interp,
                 self.ic_flex_time,
+                self.ic_groom,
                 self.ic_prefill,
                 self.ic_regrid_method,
                 self.ic_extrap_method,
@@ -3093,12 +3128,23 @@ class _ForcingEditor:
             indent=False,
             tooltip=_tip("boundary", "boundary_validate"),
         )
+        # Mirrors self.ic_groom / self._ic_groom_settings above.
+        self.boundary_groom = W.Checkbox(
+            value=boundary_block.get("groom") is not False,
+            description="groom ESPER tracers",
+            indent=False,
+            tooltip=_tip("boundary", "boundary_groom"),
+        )
+        self._boundary_groom_settings = copy.deepcopy(
+            boundary_block.get("groom_settings") or {}
+        )
         for _w in (
             self.boundary_name,
             self.boundary_layout,
             self.boundary_path,
             self.boundary_bgc_interp,
             self.boundary_validate,
+            self.boundary_groom,
             self.boundary_prefill,
             self.boundary_regrid_method,
             self.boundary_extrap_method,
@@ -3116,6 +3162,7 @@ class _ForcingEditor:
                 self.boundary_path,
                 self.boundary_bgc_interp,
                 self.boundary_validate,
+                self.boundary_groom,
                 self.boundary_prefill,
                 self.boundary_regrid_method,
                 self.boundary_extrap_method,
@@ -4035,6 +4082,10 @@ class _ForcingEditor:
             ic["allow_flex_time"] = True
         if not self.ic_validate.value:  # checked ("validate") is the default
             ic["bypass_validation"] = True
+        if not self.ic_groom.value:  # checked ("groom") is the default
+            ic["groom"] = False
+        if self.ic_groom.value and self._ic_groom_settings:
+            ic["groom_settings"] = copy.deepcopy(self._ic_groom_settings)
         if self.ic_prefill.value:  # Dropdown: "" = leave unset
             ic["prefill"] = self.ic_prefill.value
         if self.ic_regrid_method.value:
@@ -4076,6 +4127,12 @@ class _ForcingEditor:
                 boundary["bgc_interpolation_method"] = self.boundary_bgc_interp.value
             if not self.boundary_validate.value:  # checked ("validate") is default
                 boundary["bypass_validation"] = True
+            if not self.boundary_groom.value:  # checked ("groom") is the default
+                boundary["groom"] = False
+            if self.boundary_groom.value and self._boundary_groom_settings:
+                boundary["groom_settings"] = copy.deepcopy(
+                    self._boundary_groom_settings
+                )
             if self.boundary_prefill.value:
                 boundary["prefill"] = self.boundary_prefill.value
             if self.boundary_regrid_method.value:
@@ -4111,6 +4168,7 @@ class _ForcingEditor:
                 components.field_row(W, "ic.ic_layout", self.ic_layout),
                 components.field_row(W, "ic.ic_path", self.ic_path),
                 components.field_row(W, "ic.ic_validate", self.ic_validate),
+                components.field_row(W, "ic.ic_groom", self.ic_groom),
             ],
         )
         ic_interp = components.subsection(
@@ -4156,6 +4214,7 @@ class _ForcingEditor:
                 components.field_row(
                     W, "boundary.boundary_validate", self.boundary_validate
                 ),
+                components.field_row(W, "boundary.boundary_groom", self.boundary_groom),
             ],
         )
         boundary_interp = components.subsection(

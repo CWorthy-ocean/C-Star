@@ -35,6 +35,7 @@ _IC_ATTRS = (
     "ic_bgc_interp",
     "ic_flex_time",
     "ic_validate",
+    "ic_groom",
     "ic_prefill",
     "ic_regrid_method",
     "ic_extrap_method",
@@ -51,6 +52,7 @@ _BOUNDARY_ATTRS = (
     "boundary_extrap_method",
     "boundary_bottom_fill_blend_m",
     "boundary_validate",
+    "boundary_groom",
     "boundary_options",
 )
 
