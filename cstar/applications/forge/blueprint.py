@@ -1832,20 +1832,21 @@ class ForgeBlueprint(Blueprint):
         # default is dropped by name: a saved file simply has no such line (and an
         # earlier build, which forbids unknown keys, still reads a file that does
         # not use the field). The same goes for ``bottom_fill_blend_m`` inside the
-        # initial-conditions and boundary sections, dropped below once dumped.
-        data = stamped.model_dump(
-            mode="json",
-            exclude_none=False,
-            exclude={
-                name
-                for name in ("working_dir", "carbonate_sensitivity")
-                if getattr(stamped, name) is None
-            },
-        )
-        for section in ("initial_conditions", "boundary"):
-            block = data["forcing"][section]
-            if block is not None and block["bottom_fill_blend_m"] is None:
-                del block["bottom_fill_blend_m"]
+        # initial-conditions and boundary sections.
+        exclude: dict[str, Any] = {
+            name: True
+            for name in ("working_dir", "carbonate_sensitivity")
+            if getattr(stamped, name) is None
+        }
+        unset_blend = {
+            section: {"bottom_fill_blend_m"}
+            for section in ("initial_conditions", "boundary")
+            if (block := getattr(stamped.forcing, section)) is not None
+            and block.bottom_fill_blend_m is None
+        }
+        if unset_blend:
+            exclude["forcing"] = unset_blend
+        data = stamped.model_dump(mode="json", exclude_none=False, exclude=exclude)
         # Pydantic keeps the narrowed ``provenance`` field at its ``Blueprint``
         # base position; saved files have it last. Forge files never populate
         # ``derived_from`` (``composition`` is their record): drop an empty one.
