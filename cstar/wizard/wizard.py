@@ -358,7 +358,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "bottom_fill_blend_m",
     ): "Metres over which tracers below a source column's bottom blend from that column's "
     "own bottom value to the value of the nearest source column at the same depth. Blank = "
-    "roms-tools' default (25 m), right for most domains. Use 100 or more for shelf-only "
+    "roms-tools' default, right for most domains. Use 100 or more for shelf-only "
     "domains, especially on a grid much finer than its source. '0' takes the neighbour's "
     "value at once; 'inf' copies each column's bottom value down, as roms-tools releases "
     "before this option did. Setting a value needs a roms-tools release with this option.",
@@ -469,7 +469,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "bottom_fill_blend_m",
     ): "Metres over which tracers below a source column's bottom blend from that column's "
     "own bottom value to the value of the nearest source column at the same depth. Blank = "
-    "roms-tools' default (25 m), right for most domains. Use 0 to 25 on deep, steep-slope "
+    "roms-tools' default, right for most domains. Use 0 to 25 on deep, steep-slope "
     "domains, and 100 or more for shelf-only domains, especially on a grid much finer than "
     "its source. '0' takes the neighbour's value at once; 'inf' copies each column's bottom "
     "value down, as roms-tools releases before this option did. Setting a value needs a "
