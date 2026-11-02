@@ -1087,12 +1087,13 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # fields -- only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/
 # ``nox_forcing``, and the ucla-roms >= 0.8.0 advection switches ``parabolic_splines``/
 # ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
-# a user override can never collide with a resolver-owned flag. The two advection
-# fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
-# ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
-# ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``, ``pio-dev``) -- the editor
-# type-infers a checkbox from the composed bool, so a spec that omits the key shows no
-# widget for it.
+# a user override can never collide with a resolver-owned flag (``diagnostics``, the
+# DIAGNOSTICS switch, shows in the Output card's diagnostics row instead). The two
+# advection fields only render for ModelSpecs that declare them
+# (``roms-marbl-0.8-default``, ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``,
+# ``roms-marbl-0.11-default``, ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``,
+# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
+# that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1175,8 +1176,8 @@ _WIZARD_SETTING_DEFAULTS: dict[tuple[str, str], Any] = {
 # names the card as a "place" for ``_split_fields``; the main streams are always
 # visible in this display order, the rest sit in the collapsed "More output streams"
 # accordion. Placement is display-only and independent of OutputSpec ownership
-# (``_is_output_key``): ``extract_data``, ``particles`` and ``calc_pflx`` sit here yet
-# are ModelSpec/Domain-owned.
+# (``_is_output_key``): ``extract_data``, ``particles``, ``calc_pflx`` and the
+# compile-time ``cppdefs.diagnostics`` sit here yet are ModelSpec/Domain-owned.
 _OUTPUT_CARD = "Output"
 _OUTPUT_MORE_TITLE = "More output streams"
 _OUTPUT_GROUPS = (_OUTPUT_CARD, _OUTPUT_MORE_TITLE)
@@ -1193,7 +1194,6 @@ _OUTPUT_MAIN_SECTIONS = (
 )
 _OUTPUT_MORE_SECTIONS = (
     "diagnostics",
-    "ts_output",
     "frc_output",
     "zslice",
     "random_output",
@@ -1221,6 +1221,15 @@ _SECTION_NOTES: dict[str, str] = {
     ),
 }
 
+
+# What a table or grid shows: a field of its own section by name, or a field hosted
+# from another section by its real ``(section, field)`` key (see _HOSTED_FIELDS).
+_FieldKey = str | tuple[str, str]
+# The diagnostics stream's compile-time switch (its other settings have no effect
+# while it is off) and its T/S flags (they matter only for tracer diagnostics), named
+# once for the table row below and for ``_apply_field_rules``.
+_DIAGNOSTICS_SWITCH = ("cppdefs", "diagnostics")
+_TS_DIAGNOSTICS_FLAGS = (("ts_output", "wrt_temp_dia"), ("ts_output", "wrt_salt_dia"))
 
 # Output-stream tables for the settings editor: each namelist section
 # that models one-or-more "write this stream / how often / how many records
@@ -1313,7 +1322,13 @@ _OUTPUT_TABLES: dict[str, list[dict[str, Any]]] = {
             "write": None,
             "period": "output_period",
             "records": "nrpf",
-            "extra": ["diag_avg", "diag_uv", "diag_trc"],
+            "extra": [
+                _DIAGNOSTICS_SWITCH,
+                "diag_avg",
+                "diag_uv",
+                "diag_trc",
+                *_TS_DIAGNOSTICS_FLAGS,
+            ],
         },
     ],
     "frc_output": [
@@ -1378,7 +1393,7 @@ _OUTPUT_TABLES: dict[str, list[dict[str, Any]]] = {
 # grid only consumes the fields that were actually built; any missing field is
 # simply omitted (a section can list more fields here than a given
 # settings_cls models).
-_VARIABLE_GRIDS: dict[str, list[tuple[str, list[str]]]] = {
+_VARIABLE_GRIDS: dict[str, list[tuple[str, list[_FieldKey]]]] = {
     "ocean_vars": [
         (
             "Variables in history files",
@@ -1388,6 +1403,8 @@ _VARIABLE_GRIDS: dict[str, list[tuple[str, list[str]]]] = {
                 "wrt_vb",
                 "wrt_u",
                 "wrt_v",
+                ("ts_output", "wrt_temp"),
+                ("ts_output", "wrt_salt"),
                 "wrt_r",
                 "wrt_o",
                 "wrt_w",
@@ -1420,13 +1437,34 @@ _VARIABLE_GRIDS: dict[str, list[tuple[str, list[str]]]] = {
     "surf_flux": [
         ("Fluxes written", ["wrt_smflx", "wrt_stflx", "wrt_rstflx", "wrt_swflx"]),
     ],
-    "ts_output": [
-        ("Fields written", ["wrt_temp", "wrt_salt", "wrt_temp_dia", "wrt_salt_dia"]),
-    ],
     "zslice": [
         ("Fields written", ["wrt_t_zsl", "wrt_u_zsl", "wrt_v_zsl"]),
     ],
 }
+
+
+def _hosted_keys(section: str) -> tuple[tuple[str, str], ...]:
+    """The ``(section, field)`` keys ``section``'s table rows and variable grids show
+    from other sections: the tuple entries of :data:`_OUTPUT_TABLES`' ``extra`` lists
+    and :data:`_VARIABLE_GRIDS`' key lists, the one place a hosted entry is told
+    from a field of ``section`` itself.
+    """
+    entries = [
+        *(k for row in _OUTPUT_TABLES.get(section, []) for k in row["extra"]),
+        *(k for _title, keys in _VARIABLE_GRIDS.get(section, []) for k in keys),
+    ]
+    return tuple(dict.fromkeys(k for k in entries if isinstance(k, tuple)))
+
+
+# Host section -> the fields of other sections it shows. Such a field is built with
+# its host (see _SettingsEditor._build_section) yet keyed by its real
+# ``(section, field)``, so overrides, sync and load-back never see where it is drawn.
+_HOSTED_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
+    section: hosted
+    for section in {*_OUTPUT_TABLES, *_VARIABLE_GRIDS}
+    if (hosted := _hosted_keys(section))
+}
+_HOSTED_KEYS = frozenset(key for keys in _HOSTED_FIELDS.values() for key in keys)
 
 
 def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = None):
@@ -1445,7 +1483,7 @@ def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = 
 
 
 def _build_output_table(
-    W, section: str, built: dict[str, Any], consumed: set[str]
+    W, section: str, built: dict[_FieldKey, Any], consumed: set[_FieldKey]
 ) -> Any | None:
     """A ``W.GridBox`` (class ``forge-out-table``) collecting ``section``'s
     eligible :data:`_OUTPUT_TABLES` rows into one Write / Period / Records
@@ -1544,7 +1582,7 @@ def _build_output_table(
 
 
 def _build_variable_grids(
-    W, section: str, built: dict[str, Any], consumed: set[str]
+    W, section: str, built: dict[_FieldKey, Any], consumed: set[_FieldKey]
 ) -> list[Any]:
     """A title + ``W.GridBox`` (class ``forge-var-grid``) pair per
     :data:`_VARIABLE_GRIDS` entry with at least one field present in
@@ -1585,8 +1623,9 @@ _VERSION_GATED_SECTIONS = version_gated_section_names()
 
 # cppdefs fields exposed per accordion pane -- everything else in cppdefs (obc_*/
 # marbl/use_pio/cdr_forcing/co2_tvarying/sal_restore/tides) is resolver-derived and
-# has no widget anywhere; leaving it out of both sets keeps it that way even if a
-# future pane adds "cppdefs" without remembering to scope it down.
+# has no widget anywhere, except ``diagnostics``, which the Output card's diagnostics
+# row hosts; leaving it out of both sets keeps it that way even if a future pane adds
+# "cppdefs" without remembering to scope it down.
 _CPPDEFS_PANE_FIELDS: dict[str, frozenset[str]] = {
     "Physics & subgrid tuning": frozenset(
         {"sponge_tune", "parabolic_splines", "upstream_ts_land_curv"}
@@ -1641,8 +1680,11 @@ def _in_output_card(section: str, field: str | None) -> bool:
     """Whether the ``(section, field)`` setting is placed in the Output card (main or
     "More output streams"), nesting role aside -- the one placement predicate behind
     the Output chip's count, so the Output and Advanced chips partition the overrides.
-    Distinct from ``_is_output_key``, which is OutputSpec ownership.
+    Distinct from ``_is_output_key``, which is OutputSpec ownership. A field hosted
+    by an Output-card section (see :data:`_HOSTED_FIELDS`) is placed there too.
     """
+    if (section, field) in _HOSTED_KEYS:
+        return True
     if section not in _OUTPUT_MAIN_SECTIONS and section not in _OUTPUT_MORE_SECTIONS:
         return False
     include, exclude = _split_fields(_OUTPUT_CARD, section)
@@ -1776,7 +1818,8 @@ class _SettingsEditor:
         # title), one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE) or
         # the Model card (_MODEL_CARD); a
         # section split along PARTIAL_OUTPUT_SECTIONS (bgc/marbl_bgc) sits in a pane
-        # and in the Output card, each holding only its own fields.
+        # and in the Output card, each holding only its own fields. A hosted field
+        # (_HOSTED_FIELDS) is listed under its own section, in its host's group.
         self._group_fields: dict[str, dict[str, list[str | None]]] = {}
         # (group, section) -> the section's header widget, retitled by the wizard.
         self._headers: dict[tuple[str, str], Any] = {}
@@ -1842,6 +1885,20 @@ class _SettingsEditor:
         title = _OUTPUT_SECTION_TITLES.get(section) if group in _OUTPUT_GROUPS else None
         return _section_header_html(section, n_modified, title)
 
+    def _gated_out(self, section: str) -> bool:
+        """Whether ``section`` is modeled by some registered settings tier (e.g.
+        pio_settings on RunTimeSettingsV0_6_0) but not by the active settings_cls --
+        e.g. a pre-0.6.0 roms_ref override with a ModelSpec whose model_settings
+        still carries the key. Rendering a type-inferred widget there would let the
+        user edit a value the active (extra="ignore") schema silently discards
+        downstream. cppdefs is NOT in _VERSION_GATED_SECTIONS (no tier ever models
+        it) and so is unaffected -- it keeps rendering via type-inference.
+        """
+        return (
+            section not in self._settings_cls.model_fields
+            and section in _VERSION_GATED_SECTIONS
+        )
+
     def _build_group(
         self,
         group: str,
@@ -1859,29 +1916,18 @@ class _SettingsEditor:
         place = _OUTPUT_CARD if group in _OUTPUT_GROUPS else group
         blocks: list[Any] = []
         for section in members:
-            if section not in model_settings:
-                continue
-            if (
-                section not in self._settings_cls.model_fields
-                and section in _VERSION_GATED_SECTIONS
-            ):
-                # section is modeled by some registered settings tier (e.g.
-                # pio_settings on RunTimeSettingsV0_6_0) but not by the
-                # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
-                # with a ModelSpec whose model_settings still carries the
-                # key. Rendering a type-inferred widget here would let the
-                # user edit a value the active (extra="ignore") schema
-                # silently discards downstream. cppdefs is NOT in
-                # _VERSION_GATED_SECTIONS (no tier ever models it) and so
-                # is unaffected -- it keeps rendering via type-inference.
+            if section not in model_settings or self._gated_out(section):
                 continue
             include, exclude = _split_fields(place, section)
-            box, fields = self._build_section(
-                section, model_settings[section], include, exclude
+            box, fields, hosted = self._build_section(
+                section, model_settings, include, exclude
             )
             if not fields:
                 continue
-            self._group_fields.setdefault(group, {})[section] = fields
+            group_fields = self._group_fields.setdefault(group, {})
+            group_fields[section] = fields
+            for guest, guest_fields in hosted.items():
+                group_fields.setdefault(guest, []).extend(guest_fields)
             if not headers:
                 blocks.append(box)
                 continue
@@ -1956,6 +2002,8 @@ class _SettingsEditor:
             ("ocean_vars", "wrt_file_rst"),
             ("ocean_vars", "monthly_restarts"),
             ("marbl_bgc", "use_constant_fe"),
+            _DIAGNOSTICS_SWITCH,
+            ("diagnostics", "diag_trc"),
         ]
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             keys.append((section, master_flag))
@@ -1999,6 +2047,12 @@ class _SettingsEditor:
         shared do_avg/monthly_averages/output_period/nrpf quartet and any
         stream-specific extras (``cdr_lite_output``'s ``wrt_*`` field-group
         toggles), which are all meaningless once that stream is off.
+
+        The diagnostics stream follows its compile-time switch the same way, when the
+        ModelSpec declares one (:data:`_DIAGNOSTICS_SWITCH`): off, every
+        ``diagnostics`` widget and the hosted T/S flags hide; on, the T/S flags
+        (:data:`_TS_DIAGNOSTICS_FLAGS`) show only with ``diag_trc``. Without the
+        switch nothing is hidden.
         """
 
         def _show(entry, on: bool) -> None:
@@ -2050,54 +2104,99 @@ class _SettingsEditor:
                     )
                     period[0].disabled = bool(is_avg and is_monthly)
 
+        if (switch := self._widgets.get(_DIAGNOSTICS_SWITCH)) is not None:
+            diag_on = bool(switch[0].value)
+            for (sec, _field), entry in self._widgets.items():
+                if sec == "diagnostics":
+                    _show(entry, diag_on)
+            trc = self._widgets.get(("diagnostics", "diag_trc"))
+            for key in _TS_DIAGNOSTICS_FLAGS:
+                _show(
+                    self._widgets.get(key),
+                    diag_on and trc is not None and bool(trc[0].value),
+                )
+
+    def _add_field(
+        self, section: str, key: str, val: Any, sub: type[BaseModel] | None
+    ) -> Any | None:
+        """The widget for the ``(section, key)`` field, registered in ``_widgets``, or
+        ``None`` when it gets no editor in the active ``settings_cls``/BGC mode.
+        """
+        if key in _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset()):
+            return None
+        if not _applies_in(section, key, self._bgc_mode):
+            return None
+        # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
+        # sub-models are extra="ignore", so anything not a typed field is dropped
+        # by the namelist transform and has no business in the editor.
+        if sub is not None and key not in sub.model_fields:
+            return None
+        ann = (
+            sub.model_fields[key].annotation
+            if (sub and key in sub.model_fields)
+            else None
+        )
+        base = _base_type(ann, val)
+        tip = _namelist_tooltip(self._settings_cls, section, key)
+        label, tip = _namelist_description_and_tooltip(section, key, tip)
+        bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
+        w = _make_field_widget(
+            self.W, label, base, val, tooltip=tip, bool_dropdown=bool_dropdown
+        )
+        self._widgets[(section, key)] = (w, base)
+        return w
+
     def _build_section(
         self,
         section: str,
-        value: Any,
+        model_settings: dict[str, Any],
         include: frozenset | None = None,
         exclude: frozenset = frozenset(),
     ):
+        """``(box, fields, hosted)`` for ``section``: its widgets laid out, the fields
+        built for it and, by section, the fields it hosts from others (see
+        :data:`_HOSTED_FIELDS`).
+        """
         W = self.W
+        value = model_settings[section]
         sub = _section_submodel(section, self._settings_cls)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
             if not _applies_in(section, None, self._bgc_mode):
-                return W.VBox([]), []
+                return W.VBox([]), [], {}
             base = _base_type(None, value)
             tip = _namelist_tooltip(self._settings_cls, section, section)
             label, tip = _namelist_description_and_tooltip(section, section, tip)
             w = _make_field_widget(W, label, base, value, tooltip=tip)
             self._widgets[(section, None)] = (w, base)
-            return W.VBox([w]), [None]
-        excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
-        built: dict[str, Any] = {}
+            return W.VBox([w]), [None], {}
+        built: dict[_FieldKey, Any] = {}
         fields: list[str] = []
         for key, val in value.items():
-            if key in excluded or key in exclude:
+            if key in exclude:
                 continue
             if include is not None and key not in include:
                 continue
-            if not _applies_in(section, key, self._bgc_mode):
-                continue
-            # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
-            # sub-models are extra="ignore", so anything not a typed field is dropped
-            # by the namelist transform and has no business in the editor.
-            if sub is not None and key not in sub.model_fields:
-                continue
-            ann = (
-                sub.model_fields[key].annotation
-                if (sub and key in sub.model_fields)
-                else None
-            )
-            base = _base_type(ann, val)
-            tip = _namelist_tooltip(self._settings_cls, section, key)
-            label, tip = _namelist_description_and_tooltip(section, key, tip)
-            bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
-            w = _make_field_widget(
-                W, label, base, val, tooltip=tip, bool_dropdown=bool_dropdown
-            )
-            self._widgets[(section, key)] = (w, base)
-            built[key] = w
-            fields.append(key)
+            if (w := self._add_field(section, key, val, sub)) is not None:
+                built[key] = w
+                fields.append(key)
+
+        # A hosted field is skipped like a native one when its own section/field is
+        # absent, gated out or not applicable; a host that built nothing hosts nothing.
+        hosted: dict[str, list[str]] = {}
+        if built:
+            for guest, key in _HOSTED_FIELDS.get(section, ()):
+                guest_value = model_settings.get(guest)
+                if (
+                    self._gated_out(guest)
+                    or not isinstance(guest_value, dict)
+                    or key not in guest_value
+                ):
+                    continue
+                guest_sub = _section_submodel(guest, self._settings_cls)
+                w = self._add_field(guest, key, guest_value[key], guest_sub)
+                if w is not None:
+                    built[guest, key] = w
+                    hosted.setdefault(guest, []).append(key)
 
         # Re-arrange (never re-build) the widgets just created: output-stream
         # tables and per-variable checkbox grids consume the widgets they
@@ -2105,7 +2204,7 @@ class _SettingsEditor:
         # identity or registry entry -- see _build_output_table/
         # _build_variable_grids), and whatever's left over renders as the
         # plain flat list, exactly as before this pane grouping existed.
-        consumed: set[str] = set()
+        consumed: set[_FieldKey] = set()
         table = _build_output_table(W, section, built, consumed)
         grids = _build_variable_grids(W, section, built, consumed)
         rest = [w for key, w in built.items() if key not in consumed]
@@ -2114,7 +2213,7 @@ class _SettingsEditor:
             body.append(table)
         body.extend(grids)
         body.extend(rest)
-        return W.VBox(body), fields
+        return W.VBox(body), fields, hosted
 
 
 # Dropdown option lists derived from the enums so the wizard and schema stay in sync.
@@ -8118,7 +8217,13 @@ class ForgeBlueprintWizard:
         if more := editor._group_fields.get(_OUTPUT_MORE_TITLE):
             editor.more_streams.set_title(0, title(_OUTPUT_MORE_TITLE, more))
         for section, fields in editor._group_fields.get(_OUTPUT_CARD, {}).items():
-            _n_fields, n_mod = counts({section: fields})
+            if (_OUTPUT_CARD, section) not in editor._headers:
+                continue  # a hosted field's own section: counted under its host
+            hosted: dict[str, list[str | None]] = {}
+            for guest, field in _HOSTED_FIELDS.get(section, ()):
+                if (guest, field) in editor._widgets:
+                    hosted.setdefault(guest, []).append(field)
+            _n_fields, n_mod = counts({section: fields, **hosted})
             editor._headers[(_OUTPUT_CARD, section)].value = editor.header_html(
                 _OUTPUT_CARD, section, n_mod
             )

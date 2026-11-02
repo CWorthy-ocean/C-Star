@@ -347,28 +347,38 @@ def test_namelist_label_falls_back_to_field_name_when_unknown():
 
 
 def test_output_table_and_variable_grid_fields_exist():
-    """Every field name referenced by ``_OUTPUT_TABLES``/``_VARIABLE_GRIDS`` (the
+    """Every field referenced by ``_OUTPUT_TABLES``/``_VARIABLE_GRIDS`` (the
     Advanced-settings output-stream table / per-variable checkbox-grid layout --
     see ``_SettingsEditor._build_section``) must be a real field of the
     ``RunTimeSettings`` section it claims, on at least one registered tier
-    (``RunTimeSettings``/``V0_5_0``/``V0_6_0``/``V0_7_0``). Mirrors
-    ``test_every_settings_field_key_names_a_real_namelist_field``'s glossary
+    (``RunTimeSettings``/``V0_5_0``/``V0_6_0``/``V0_7_0``): a plain name against
+    the table's own section, a hosted ``(section, field)`` key against its own.
+    Mirrors ``test_every_settings_field_key_names_a_real_namelist_field``'s glossary
     check, but for the table/grid definitions rather than the label glossary.
     """
     from cstar.wizard.wizard import _OUTPUT_TABLES, _VARIABLE_GRIDS
 
     section_fields = _all_settings_section_field_names()
 
+    def check(where: str, host: str, key) -> None:
+        section, field = key if isinstance(key, tuple) else (host, key)
+        if section in _UNMODELED_SETTINGS_SECTIONS:
+            return
+        assert section in section_fields, f"{where}: unknown section {section!r}"
+        assert field in section_fields[section], (
+            f"{where}: {field!r} is not a field of section {section!r}"
+        )
+
     for section, rows in _OUTPUT_TABLES.items():
         assert section in section_fields, f"_OUTPUT_TABLES: unknown section {section!r}"
         for row in rows:
             for key in (row["write"], row["period"], row["records"], *row["extra"]):
-                if key is None:
-                    continue
-                assert key in section_fields[section], (
-                    f"_OUTPUT_TABLES[{section!r}] row {row['label']!r}: {key!r} is "
-                    f"not a field of section {section!r}"
-                )
+                if key is not None:
+                    check(
+                        f"_OUTPUT_TABLES[{section!r}] row {row['label']!r}",
+                        section,
+                        key,
+                    )
 
     for section, grids in _VARIABLE_GRIDS.items():
         assert section in section_fields, (
@@ -376,7 +386,4 @@ def test_output_table_and_variable_grid_fields_exist():
         )
         for title, keys in grids:
             for key in keys:
-                assert key in section_fields[section], (
-                    f"_VARIABLE_GRIDS[{section!r}] {title!r}: {key!r} is not a "
-                    f"field of section {section!r}"
-                )
+                check(f"_VARIABLE_GRIDS[{section!r}] {title!r}", section, key)

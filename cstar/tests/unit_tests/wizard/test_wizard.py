@@ -6353,6 +6353,203 @@ def test_output_card_titles_carry_modified_counts():
     assert "all defaults" in editor.accordion.get_title(0)
 
 
+# ---------------------------------------------------------------------------
+# Hosted fields: the T/S write flags draw inside the ocean_vars history grid and
+# the diagnostics row, and the compile-time diagnostics switch heads that row --
+# all still keyed by their real (section, field).
+# ---------------------------------------------------------------------------
+_TS_DIA_KEYS = [("ts_output", "wrt_temp_dia"), ("ts_output", "wrt_salt_dia")]
+_DIAGNOSTICS_STACK_KEYS = [
+    ("cppdefs", "diagnostics"),
+    ("diagnostics", "diag_avg"),
+    ("diagnostics", "diag_uv"),
+    ("diagnostics", "diag_trc"),
+    *_TS_DIA_KEYS,
+]
+
+
+def _diagnostics_editor(*, switch=True, diag_trc=False, on=False, on_edit=None):
+    import ipywidgets as W
+
+    settings = {
+        "ocean_vars": {"wrt_file_his": True, "wrt_z": True, "wrt_u": True},
+        "diagnostics": {
+            "diag_avg": False,
+            "output_period": 3600.0,
+            "nrpf": 24,
+            "diag_uv": False,
+            "diag_trc": diag_trc,
+        },
+        "ts_output": {
+            "wrt_temp": True,
+            "wrt_salt": True,
+            "wrt_temp_dia": False,
+            "wrt_salt_dia": False,
+        },
+        "cppdefs": {"sponge_tune": False, **({"diagnostics": on} if switch else {})},
+    }
+    return _SettingsEditor(
+        W, settings, on_edit=on_edit, settings_cls=RunTimeSettingsV0_9_0
+    )
+
+
+def test_ts_flags_draw_in_the_history_variable_grid_not_under_their_own_header():
+    editor = _diagnostics_editor()
+    grid = next(
+        n
+        for n in _descendants(editor.output_box)
+        if "forge-var-grid" in getattr(n, "_dom_classes", ())
+    )
+    history_keys = [
+        ("ocean_vars", "wrt_z"),
+        ("ocean_vars", "wrt_u"),
+        ("ts_output", "wrt_temp"),
+        ("ts_output", "wrt_salt"),
+    ]
+    assert grid.children == tuple(editor._widgets[k][0] for k in history_keys)
+    assert editor._widgets[("ts_output", "wrt_temp")][0].description == "Temperature"
+    # no ts_output section header in either Output group
+    assert not [key for key in editor._headers if key[1] == "ts_output"]
+    assert not any(
+        "<span class='sym'>ts_output</span>" in w.value
+        for w in _descendants(editor.output_box)
+        if isinstance(getattr(w, "value", None), str)
+    )
+    # each hosted field is listed under its own section, in its host's group
+    assert editor._group_fields[_OUTPUT_CARD]["ts_output"] == ["wrt_temp", "wrt_salt"]
+    assert editor._group_fields[_OUTPUT_MORE_TITLE]["ts_output"] == [
+        "wrt_temp_dia",
+        "wrt_salt_dia",
+    ]
+    assert editor._group_fields[_OUTPUT_MORE_TITLE]["cppdefs"] == ["diagnostics"]
+
+
+def test_diagnostics_write_column_stacks_the_switch_first():
+    editor = _diagnostics_editor()
+    stack = next(
+        n
+        for n in _descendants(editor.output_box)
+        if "forge-out-write-stack" in getattr(n, "_dom_classes", ())
+    )
+    assert stack.children == tuple(
+        editor._widgets[k][0] for k in _DIAGNOSTICS_STACK_KEYS
+    )
+
+
+@pytest.mark.parametrize(
+    ("on", "diag_trc", "diagnostics_shown", "ts_shown"),
+    [
+        (False, False, False, False),
+        (False, True, False, False),
+        (True, False, True, False),
+        (True, True, True, True),
+    ],
+)
+def test_diagnostics_switch_and_tracer_flag_set_what_is_shown(
+    on, diag_trc, diagnostics_shown, ts_shown
+):
+    editor = _diagnostics_editor(on=on, diag_trc=diag_trc)
+    assert _display(editor._widgets[("cppdefs", "diagnostics")][0]) == ""
+    for field in ("diag_avg", "diag_uv", "diag_trc", "output_period", "nrpf"):
+        shown = _display(editor._widgets[("diagnostics", field)][0]) == ""
+        assert shown is diagnostics_shown, field
+    for key in _TS_DIA_KEYS:
+        assert (_display(editor._widgets[key][0]) == "") is ts_shown, key
+
+
+def test_diagnostics_switch_and_tracer_flag_update_visibility_live_without_editing():
+    editor = _diagnostics_editor()
+    switch = editor._widgets[("cppdefs", "diagnostics")][0]
+    trc = editor._widgets[("diagnostics", "diag_trc")][0]
+    ts = editor._widgets[("ts_output", "wrt_temp_dia")][0]
+    avg = editor._widgets[("diagnostics", "diag_avg")][0]
+    assert (_display(avg), _display(ts)) == ("none", "none")
+
+    switch.value = True
+    assert (_display(avg), _display(ts)) == ("", "none")
+    trc.value = True
+    assert (_display(avg), _display(ts)) == ("", "")
+    switch.value = False
+    assert (_display(avg), _display(ts)) == ("none", "none")
+    # hiding never mutates a value
+    assert trc.value is True
+    assert editor.read("diagnostics", "diag_trc") is True
+
+
+def test_diagnostics_stay_visible_when_the_model_spec_declares_no_switch():
+    editor = _diagnostics_editor(switch=False)
+    assert ("cppdefs", "diagnostics") not in editor._widgets
+    assert "cppdefs" not in editor._group_fields.get(_OUTPUT_MORE_TITLE, {})
+    for key in [*_DIAGNOSTICS_STACK_KEYS[1:], ("diagnostics", "output_period")]:
+        assert _display(editor._widgets[key][0]) == "", key
+
+
+def test_diagnostics_switch_follows_sync():
+    editor = _diagnostics_editor()
+    avg = editor._widgets[("diagnostics", "diag_avg")][0]
+    editor.sync({"cppdefs": {"diagnostics": True}})
+    assert editor._widgets[("cppdefs", "diagnostics")][0].value is True
+    assert _display(avg) == ""
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        (("ts_output", "wrt_temp"), True),
+        (("ts_output", "wrt_salt_dia"), True),
+        (("cppdefs", "diagnostics"), True),
+        (("cppdefs", "sponge_tune"), False),
+        (("ts_output", "wrt_unknown"), False),
+    ],
+)
+def test_hosted_fields_count_as_output_card_placement(key, expected):
+    assert _in_output_card(*key) is expected
+
+
+def test_hosted_field_edits_are_recorded_under_their_real_keys():
+    edits: list[tuple] = []
+    editor = _diagnostics_editor(on_edit=lambda s, f: edits.append((s, f)))
+    for key in (("ts_output", "wrt_temp"), ("cppdefs", "diagnostics")):
+        widget = editor._widgets[key][0]
+        widget.value = not widget.value
+    assert edits == [("ts_output", "wrt_temp"), ("cppdefs", "diagnostics")]
+
+
+@pytest.mark.parametrize(
+    ("key", "output_owned", "header"),
+    [
+        (("ts_output", "wrt_temp"), True, "ocean_vars"),
+        (("ts_output", "wrt_salt_dia"), True, None),
+        (("cppdefs", "diagnostics"), False, None),
+    ],
+)
+def test_hosted_field_overrides_keep_ownership_and_count_in_the_output_card(
+    key, output_owned, header
+):
+    """A hosted field counts under its host: the host's section header in the Output
+    card, else the "More output streams" accordion title; ownership is unchanged.
+    """
+    wiz = _new_wizard()
+    wiz._rebuild()
+    editor = wiz.editor
+    assert _is_output_key(*key) is output_owned
+    widget = editor._widgets[key][0]
+    assert _is_in_tree(wiz.output_editor_box, widget)
+    widget.value = not widget.value
+
+    assert wiz._overrides == {key: widget.value}
+    assert wiz.config.composition.output.modified is output_owned
+    assert wiz.config.composition.model.modified is (not output_owned)
+    assert "● 1 modified" in wiz.card_chips["output"].value
+    assert "All defaults" in wiz.card_chips["advanced"].value
+    if header:
+        assert "● 1 modified" in editor._headers[(_OUTPUT_CARD, header)].value
+        assert "all defaults" in editor.more_streams.get_title(0)
+    else:
+        assert "1 modified" in editor.more_streams.get_title(0)
+        assert "modified" not in editor._headers[(_OUTPUT_CARD, "ocean_vars")].value
+
+
 def test_nest_period_loads_from_the_effective_extract_period():
     """A blueprint whose extract_period was overridden (Advanced, before this
     field moved to the nesting options) differs from ``metadata_child.period``;
