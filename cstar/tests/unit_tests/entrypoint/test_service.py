@@ -430,32 +430,35 @@ async def test_event_hc_freq(max_duration: float, frequency: float) -> None:
     ],
 )
 async def test_delay(loop_delay: float, loop_count: int) -> None:
-    """Verify that the health check thread terminates when asked to do so."""
+    """Verify that the service sleeps for the configured delay between iterations.
+
+    The sleep is patched, so the test counts the delays instead of timing them
+    against the wall clock (a timing bound flaked on loaded CI runners).
+    """
     # the last delay is not executed before a shutdown.
     n_loops = loop_count - 1
-    expected_duration = loop_delay * n_loops
+    real_sleep = asyncio.sleep
+
+    async def _yield(_delay: float) -> None:
+        await real_sleep(0)
+
+    mock_sleep = mock.AsyncMock(side_effect=_yield)
 
     # Configure the test service to run for a fixed number of loops
-    with PrintingService(
-        as_service=True,
-        delay=loop_delay,
-        max_iterations=loop_count,
-    ) as service:
-        ts = time.time()
+    with (
+        mock.patch("cstar.entrypoint.service.asyncio.sleep", mock_sleep),
+        PrintingService(
+            as_service=True,
+            delay=loop_delay,
+            max_iterations=loop_count,
+        ) as service,
+    ):
         await service.execute()
-        te = time.time()
-        elapsed = te - ts
 
         # Collect any leftover call metrics from the HC thread.
         service.summarize(finalize=True)
-        assert service.n_on_delay >= n_loops
-
-        # Confirm the cumulative delay to the total runtime is over the minimum
-        # possible time, while allowing for compute overhead of processes/threads
-        upper_bound = 1.5 * expected_duration
-
-        assert expected_duration <= elapsed
-        assert elapsed <= upper_bound
+        assert service.n_on_delay == n_loops
+        assert mock_sleep.await_args_list == [mock.call(loop_delay)] * n_loops
 
 
 @pytest.mark.asyncio
