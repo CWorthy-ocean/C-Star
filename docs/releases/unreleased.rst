@@ -29,6 +29,15 @@ New features
   - With ParallelIO it needs ucla-roms 0.13.1 or later; Forge refuses diagnostics with ParallelIO on an older release pin, which aborts at the first diagnostics output.
 
 - Forge blueprints and ModelSpecs accept ``cppdefs.diagnostics`` to define ``DIAGNOSTICS`` in the generated ``cppdefs.opt``. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- Forge blueprints accept ``groom`` on ``initial_conditions`` and ``boundary``; ``groom: false`` turns off ROMS-Tools' grooming of ESPER-derived tracers, which is on by default. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
+
+  - On (the default, ROMS-Tools' own) is left out of saved blueprints and the content hash, so existing blueprints keep their hash and an explicit ``groom: true`` hashes the same as leaving it out.
+
+- Forge blueprints accept ``groom_settings`` on ``initial_conditions`` and ``boundary``, overriding ROMS-Tools' grooming thresholds; it is set by hand in the blueprint YAML only. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
+
+  - Unknown keys or invalid values fail when the blueprint loads, and so does ``groom_settings`` with ``groom: false``, since ROMS-Tools applies the settings only while grooming is on. An empty ``groom_settings`` counts as unset.
+
+- The wizard has a "Groom ESPER tracers" checkbox on the initial-conditions and boundary sections, checked by default. It keeps any hand-written ``groom_settings`` when a blueprint is loaded and saved again with the box checked, and leaves them out while the box is unchecked. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -59,3 +68,4 @@ Miscellaneous
 - Bundled ModelSpecs, the bundled and documentation Forge blueprints are re-pinned to the template commit that adds ``DIAGNOSTICS``; their rendered ``cppdefs.opt`` is unchanged. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
 - The integration tests and the weekly extended CI run against ucla-roms 0.13.1. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
 - The wizard docs describe the new placement and the diagnostics switch. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- The ESPER entry in the Forge source-datasets docs gives the oxygen floor as 5.0 mmol/m³ (MARBL's ``parm_o2_min``) and explains grooming, ``groom`` and ``groom_settings``. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
