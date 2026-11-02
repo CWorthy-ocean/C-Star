@@ -31,14 +31,17 @@ Bug Fixes
 - Forge names a boundary or surface BGC file whose ``use_vars`` tag would exceed 40 characters ``<source>-<n>vars_<digest>`` (e.g. ``boundary-bgc-unified-23vars_3581d4be.nc``) instead of joining every variable; a domain already generated under the old long name keeps and reuses its file. (`#879 <https://github.com/CWorthy-ocean/C-Star/pull/879>`_)
 - Forge records its surface-BGC files as products of the run (it was looking for them under names it never writes). (`#879 <https://github.com/CWorthy-ocean/C-Star/pull/879>`_)
 - An infinite value (``.inf``) in a blueprint or a workplan step's overrides was turned into ``null`` when saved, hashed or template-filled; it now stays infinite. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
+- On Perlmutter, C-Star again loads a module set that exists (``cray-hdf5/1.14.3.9``, ``cray-netcdf/4.9.2.3``, ``cray-parallel-netcdf/1.12.3.21`` under ``PrgEnv-gnu/8.7.0`` and ``cray-mpich/9.1.0``), so ``NETCDFHOME`` and ``PNETCDFHOME`` resolve and ROMS builds on CPU nodes. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
 
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- Module lists (``.lmod`` files) may contain blank lines and ``#`` comments; the Perlmutter list now names its login defaults explicitly so a change of site defaults does not change the build. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
 
 - Published the ``nest_ic`` 1.2.0 blueprint schema and described the new field on the ``nest_ic`` page. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
 - The macOS cells of the weekly extended integration workflow skip the nesting + upscaling workplan test, which cannot finish on the macOS runner; ubuntu cells still run it. (`#881 <https://github.com/CWorthy-ocean/C-Star/pull/881>`_)
+- The system-registration developer page's ``perlmutter.lmod`` example now shows the real Perlmutter list instead of Anvil's modules. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
