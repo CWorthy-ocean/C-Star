@@ -892,8 +892,8 @@ class DiagnosticsSettings(_NmlGroup):
     """Output momentum diagnostics"""
     diag_trc: bool
     """Output tracer diagnostics"""
-    output_period_diag: float
-    """Output frequency (s)"""
+    output_period_diag: int
+    """Output frequency (s); an integer in ucla-roms (``integer(kind=4)``)"""
     nrpf_diag: int
     """Number of records per output file"""
 

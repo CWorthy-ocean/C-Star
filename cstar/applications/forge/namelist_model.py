@@ -1509,7 +1509,7 @@ class DicAlkCorrectionCfg(_SettingsSection):
 
 class DiagnosticsCfg(_SettingsSection):
     diag_avg: bool
-    output_period: float = Field(serialization_alias="output_period_diag")
+    output_period: int = Field(serialization_alias="output_period_diag")
     nrpf: int = Field(serialization_alias="nrpf_diag")
     diag_uv: bool
     diag_trc: bool
