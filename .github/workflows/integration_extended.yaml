@@ -90,9 +90,13 @@ jobs:
           UCX_TLS: ${{ runner.os == 'Linux' && 'tcp,sm,self' || '' }}
           # on manual dispatch the input replaces the "main" cell
           CSTAR_IT_ROMS_REF: ${{ matrix.roms_ref == 'main' && (github.event.inputs.roms_ref || 'main') || matrix.roms_ref }}
+          # The nesting workplan (~6,900 ROMS steps) runs ~20x slower per step on the macOS
+          # runner VM than on ubuntu or a dev Mac, even at 2 ranks, and cannot finish within
+          # the job (runs 40322157611, 41466718571, 41501815143). Ubuntu cells still run it.
+          PYTEST_IGNORE: ${{ runner.os == 'macOS' && '--ignore=cstar/tests/integration_tests/extended/test_nesting_upscaling_workplan.py' || '' }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms cstar/tests/integration_tests/extended
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms cstar/tests/integration_tests/extended $PYTEST_IGNORE
 
       - name: Get coverage report
         shell: micromamba-shell {0}
