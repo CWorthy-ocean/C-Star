@@ -5173,16 +5173,14 @@ class TestLegacyBgcFileNames:
     rather than being missed (and, for boundaries, refused as a partial set).
     """
 
-    _VARS: ClassVar[list[str]] = [f"TRACER_{i}" for i in range(25)]
+    _VARS: ClassVar[list[str]] = _MARBL_USE_VARS
+    _LEGACY: ClassVar[str] = f"bgc-unified-{_MARBL_LEGACY_TAG}"
 
-    @staticmethod
-    def _details(source_name="UNIFIED", use_vars=None):
-        short = RomsInputGenerator._forcing_detail_suffix("bgc", source_name, use_vars)
-        legacy = RomsInputGenerator._forcing_detail_suffix(
-            "bgc", source_name, use_vars, shorten=False
-        )
-        assert short != legacy
-        return short, legacy
+    @classmethod
+    def _details(cls) -> tuple[str, str]:
+        short = RomsInputGenerator._forcing_detail_suffix("bgc", "UNIFIED", cls._VARS)
+        assert short != cls._LEGACY
+        return short, cls._LEGACY
 
     @staticmethod
     def _steps(category, use_vars):
@@ -5210,7 +5208,7 @@ class TestLegacyBgcFileNames:
         self, category, tail, sample_roms_input_generator
     ):
         data = sample_roms_input_generator
-        short, legacy = self._details(use_vars=self._VARS)
+        short, legacy = self._details()
         (data.input_data_dir / f"test_grid_{category}-{legacy}{tail}.nc").touch()
 
         planned = self._planned_bgc(data, category, self._VARS)
@@ -5222,7 +5220,7 @@ class TestLegacyBgcFileNames:
         self, category, sample_roms_input_generator
     ):
         data = sample_roms_input_generator
-        short, _ = self._details(use_vars=self._VARS)
+        short, _ = self._details()
 
         planned = self._planned_bgc(data, category, self._VARS)
 
@@ -5233,7 +5231,7 @@ class TestLegacyBgcFileNames:
         self, category, sample_roms_input_generator
     ):
         data = sample_roms_input_generator
-        short, legacy = self._details(use_vars=self._VARS)
+        short, legacy = self._details()
         for detail in (short, legacy):
             (data.input_data_dir / f"test_grid_{category}-{detail}.nc").touch()
 
@@ -5247,9 +5245,9 @@ class TestLegacyBgcFileNames:
             "cstar.applications.forge.input_generator._output_on_disk",
             side_effect=AssertionError("looked on disk"),
         ):
-            planned = self._planned_bgc(data, "boundary", ["ALK", "DIC"])
+            planned = self._planned_bgc(data, "boundary", ["diatC", "DOC"])
 
-        assert planned.name == "test_grid_boundary-bgc-unified-alk_dic.nc"
+        assert planned.name == "test_grid_boundary-bgc-unified-doc_diatc.nc"
 
     @pytest.mark.parametrize("tail", ["", "_202001"])
     @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
@@ -5260,7 +5258,7 @@ class TestLegacyBgcFileNames:
         rebuild, the legacy file recorded, and its legacy-named yaml sidecar kept.
         """
         data = sample_roms_input_generator
-        _, legacy = self._details(use_vars=self._VARS)
+        _, legacy = self._details()
         (data.input_data_dir / "test_grid_boundary-physics.nc").touch()
         bgc_path = data.input_data_dir / f"test_grid_boundary-{legacy}{tail}.nc"
         bgc_path.touch()
@@ -5304,7 +5302,7 @@ class TestLegacyBgcFileNames:
         self, mock_sf_class, sample_roms_input_generator
     ):
         data = sample_roms_input_generator
-        _, legacy = self._details(use_vars=self._VARS)
+        _, legacy = self._details()
         surface_path = data.input_data_dir / f"test_grid_surface-{legacy}.nc"
         surface_path.touch()
         data._yaml_filename(f"forcing.surface-{legacy}").touch()

@@ -173,20 +173,25 @@ _CDR_LITE_FORCING_INPUTS = {
 
 
 # Joined, these exceed the 40-character tag limit, yet a file name made from them
-# still fits a filesystem's name limit (unlike a 25-tracer list).
+# still fits a filesystem's name limit (unlike a 25-tracer list). Mixed case, as
+# MARBL names are, with the detail an older C-Star wrote for them pinned literally.
 _LONG_USE_VARS = [
     "ALK",
     "DIC",
     "DOC",
     "DON",
     "DOP",
-    "FE",
+    "Fe",
     "NO3",
     "PO4",
-    "SIO3",
+    "SiO3",
     "O2",
-    "ZOOC",
+    "diatC",
+    "zooC",
 ]
+_LONG_USE_VARS_LEGACY_DETAIL = (
+    "bgc-unified-alk_dic_doc_don_dop_fe_no3_o2_po4_sio3_diatc_zooc"
+)
 
 
 def _make_builder(args, **overrides):
@@ -539,9 +544,7 @@ class TestForgeExecutorProperties:
                 north=True, south=True, east=True, west=True
             )
         short = RomsInputGenerator._forcing_detail_suffix("bgc", "UNIFIED", use_vars)
-        legacy = RomsInputGenerator._forcing_detail_suffix(
-            "bgc", "UNIFIED", use_vars, shorten=False
-        )
+        legacy = _LONG_USE_VARS_LEGACY_DETAIL
         builder.input_data_dir.mkdir(parents=True, exist_ok=True)
         present = {"legacy": [legacy], "none": [], "both": [legacy, short]}[on_disk]
         for detail in present:
@@ -582,9 +585,7 @@ class TestForgeExecutorProperties:
         builder.open_boundaries = forge_models.OpenBoundaries(
             north=True, south=True, east=True, west=True
         )
-        legacy = RomsInputGenerator._forcing_detail_suffix(
-            "bgc", "UNIFIED", use_vars, shorten=False
-        )
+        legacy = _LONG_USE_VARS_LEGACY_DETAIL
         builder.input_data_dir.mkdir(parents=True, exist_ok=True)
         name = netcdf_basename(builder.name, f"boundary-{legacy}")
         (builder.input_data_dir / name).touch()
