@@ -9785,9 +9785,7 @@ def test_section_groom_fields_unset_by_default_and_left_out_of_the_hash(section)
     assert off.forcing.model_dump()[section]["groom"] is False
     assert off.content_hash() != cfg.content_hash()
     tuned = _with(groom_settings={"passes": 2})
-    assert tuned.forcing.model_dump()[section]["groom_settings"] == {
-        "passes": 2
-    }
+    assert tuned.forcing.model_dump()[section]["groom_settings"] == {"passes": 2}
     assert tuned.content_hash() != cfg.content_hash()
 
 
