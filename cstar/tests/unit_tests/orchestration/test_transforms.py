@@ -5065,6 +5065,31 @@ def test_template_fill_scalar_passthrough(live_step_with_templates: LiveStep) ->
     assert result.blueprint_overrides["ratio"] == 3.14
 
 
+def test_template_fill_keeps_an_infinite_override(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """An infinite override (``.inf``) survives filling a placeholder beside it.
+
+    Filling round-trips the step through JSON, where pydantic's default turns
+    infinity into ``null`` and the refill then fails validation.
+    """
+    variables = {"rst": "/data/rst.nc"}
+    transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={
+            "blueprint_overrides": {
+                "bottom_fill_blend_m": float("inf"),
+                "parent_rst": "{{rst}}",
+            }
+        },
+    )
+    (result,) = transform(step)
+
+    assert result.blueprint_overrides["parent_rst"] == "/data/rst.nc"
+    assert result.blueprint_overrides["bottom_fill_blend_m"] == float("inf")
+
+
 def test_template_fill_missing_variable_resolver_raises(
     live_step_with_templates: LiveStep,
 ) -> None:

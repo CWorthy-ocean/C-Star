@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import xarray as xr
+from pydantic import Field
 
 from cstar.applications.core import (
     ApplicationDefinition,
@@ -54,6 +55,13 @@ class NestIcBlueprint(Blueprint):
     ``_nc4``-suffixed name, then converted to CDF-5 at the intended filename via an
     ``nccopy -k cdf5`` subprocess instead of roms-tools' native (much slower at
     scale) CDF-5 writer. When False, roms-tools' default save is used unchanged."""
+    bottom_fill_blend_m: float | None = Field(default=None, ge=0, strict=True)
+    """Where the child grid is deeper than the parent, the depth (m) over which tracers
+    blend from the parent column's bottom value to the value of the nearest parent
+    column that has water at that depth. ``0`` takes that value at once; ``.inf``
+    copies the bottom value down. Leave it unset to use roms-tools' default."""
+    schema_version: str = "1.2.0"
+    """The current schema version for this blueprint."""
 
 
 class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
@@ -179,6 +187,10 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         ic_kwargs["model_reference_date"] = self._model_reference_date(
             self.blueprint.parent_rst
         )
+
+        # roms-tools releases before the option existed do not accept the keyword
+        if self.blueprint.bottom_fill_blend_m is not None:
+            ic_kwargs["bottom_fill_blend_m"] = self.blueprint.bottom_fill_blend_m
 
         fname = f"{INITIAL_CONDITIONS_STEM}.{rst.formatted_timestamp}.nc"
         output_dir = JobFileSystemManager(
