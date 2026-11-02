@@ -33,9 +33,12 @@ subclasses:
   Adds ``cdr_carbonate_sensitivity_time_interpolation`` to ``&CDR_LITE_SETTINGS``
   (ucla-roms PR #396) and lets the ``&EXTRACT_DATA_SETTINGS`` per-child keys
   take one entry per child, up to 8 (PR #395), on top of 0.11.0.
-- :class:`RomsNamelistV0_13_0` — the schema for ucla-roms **>= 0.13.0**. Adds
-  ``v_sponge_trc`` to ``&V_SPONGE_SETTINGS`` (the sponge's tracer diffusivity),
+- :class:`RomsNamelistV0_13_0` — the schema for ucla-roms **>= 0.13.0, < 0.14.0**.
+  Adds ``v_sponge_trc`` to ``&V_SPONGE_SETTINGS`` (the sponge's tracer diffusivity),
   on top of 0.12.0.
+- :class:`RomsNamelistV0_14_0` — the schema for ucla-roms **>= 0.14.0**. Adds
+  ``wrt_avg_temp``/``wrt_avg_salt`` to ``&TS_OUTPUT_SETTINGS`` (write ``temp`` and
+  ``salt`` to the averages file; ucla-roms PR #413), on top of 0.13.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -358,13 +361,28 @@ class BasicOutputSettingsV0_5_0(_BasicOutputSettingsCommon):
 
 class TsOutputSettings(_NmlGroup):
     wrt_temp: bool
-    """Include temperature in output fields"""
+    """Include `temp` in history files"""
     wrt_salt: bool
-    """Include salinity in output fields"""
+    """Include `salt` in history files"""
     wrt_temp_dia: bool
-    """Include temperature diagnostics in output fields"""
+    """Include temperature terms in the diagnostics file (needs diag_trc)"""
     wrt_salt_dia: bool
-    """Include salinity diagnostics in output fields"""
+    """Include salinity terms in the diagnostics file (needs diag_trc)"""
+
+
+class TsOutputSettingsV0_14_0(TsOutputSettings):
+    """``&TS_OUTPUT_SETTINGS`` for ucla-roms >= 0.14.0: adds the averages-file
+    switches for ``temp`` and ``salt`` (ucla-roms PR #413). Their defaults equal
+    the Fortran initializers (``.false.``), so a namelist without the keys runs
+    as before. They take effect only with ``wrt_file_avg``. With MARBL, tracers
+    named in ``marbl_tracers_to_write`` (every tracer when it is empty) are
+    still added to history and averages files on top of these settings.
+    """
+
+    wrt_avg_temp: bool = Field(default=False)
+    """Include `temp` in averages files"""
+    wrt_avg_salt: bool = Field(default=False)
+    """Include `salt` in averages files"""
 
 
 class FrcOutputSettings(_NmlGroup):
@@ -1012,9 +1030,11 @@ class RomsNamelistBase(BaseModel):
     ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, :class:`RomsNamelistV0_12_0` for
     ucla-roms >= 0.12.0, < 0.13.0, which adds the carbonate-sensitivity
     time-interpolation key and per-child extraction keys, or
-    :class:`RomsNamelistV0_13_0` for ucla-roms >= 0.13.0, which adds the sponge
-    tracer diffusivity ``v_sponge_trc``) or select one automatically with
-    :func:`namelist_schema_for_ref`.
+    :class:`RomsNamelistV0_13_0` for ucla-roms >= 0.13.0, < 0.14.0, which adds
+    the sponge tracer diffusivity ``v_sponge_trc``, or
+    :class:`RomsNamelistV0_14_0` for ucla-roms >= 0.14.0, which adds the
+    averages-file switches ``wrt_avg_temp`` and ``wrt_avg_salt``) or select one
+    automatically with :func:`namelist_schema_for_ref`.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -1300,7 +1320,7 @@ class RomsNamelistV0_12_0(RomsNamelistV0_11_0):
 
 
 class RomsNamelistV0_13_0(RomsNamelistV0_12_0):
-    """The ROMS namelist schema for ucla-roms >= 0.13.0.
+    """The ROMS namelist schema for ucla-roms >= 0.13.0, < 0.14.0.
 
     Adds `v_sponge_trc` to `&V_SPONGE_SETTINGS` (see
     :class:`VSpongeSettingsV0_13_0`) on top of the 0.12.0 schema. It is always
@@ -1309,6 +1329,18 @@ class RomsNamelistV0_13_0(RomsNamelistV0_12_0):
     """
 
     v_sponge_settings: VSpongeSettingsV0_13_0
+
+
+class RomsNamelistV0_14_0(RomsNamelistV0_13_0):
+    """The ROMS namelist schema for ucla-roms >= 0.14.0.
+
+    Adds `wrt_avg_temp` and `wrt_avg_salt` to `&TS_OUTPUT_SETTINGS` (see
+    :class:`TsOutputSettingsV0_14_0`) on top of the 0.13.0 schema. They are
+    always written, which is why earlier releases (which stop on unknown namelist
+    keys) keep the 0.13.0 schema.
+    """
+
+    ts_output_settings: TsOutputSettingsV0_14_0
 
 
 # ---- Schema version selection ----
@@ -1323,19 +1355,20 @@ UCLA_ROMS_0_9_0: Final[tuple[int, int, int]] = (0, 9, 0)
 UCLA_ROMS_0_11_0: Final[tuple[int, int, int]] = (0, 11, 0)
 UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
 UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
+UCLA_ROMS_0_14_0: Final[tuple[int, int, int]] = (0, 14, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.14.0):
+# Recipe for the next breaking namelist release (e.g. 0.15.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_14_0: Final[tuple[int, int, int]] = (0, 14, 0)
+#        UCLA_ROMS_0_15_0: Final[tuple[int, int, int]] = (0, 15, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_13_0, UCLA_ROMS_0_14_0, RomsNamelistV0_13_0),
+#        (UCLA_ROMS_0_14_0, UCLA_ROMS_0_15_0, RomsNamelistV0_14_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_14_0, None, RomsNamelistV0_14_0),
+#        (UCLA_ROMS_0_15_0, None, RomsNamelistV0_15_0),
 #   4. Bump NEWEST_KNOWN_UCLA_ROMS (below) to the new release.
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
@@ -1351,7 +1384,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_9_0, UCLA_ROMS_0_11_0, RomsNamelistV0_9_0),
     (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
     (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
-    (UCLA_ROMS_0_13_0, None, RomsNamelistV0_13_0),
+    (UCLA_ROMS_0_13_0, UCLA_ROMS_0_14_0, RomsNamelistV0_13_0),
+    (UCLA_ROMS_0_14_0, None, RomsNamelistV0_14_0),
 )
 
 # The newest ucla-roms release whose namelist C-Star has been checked against.
@@ -1360,7 +1394,7 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
 # with every new tier (recipe step 4 above) and also for a release that changes
 # no namelist key (a patch release such as 0.12.1), once checked. Never below the last entry's
 # lower bound.
-NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = (0, 13, 1)  # no namelist change
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_14_0
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:
@@ -1443,7 +1477,7 @@ def _warn_newer_than_known(
 
     Emitted as a `UserWarning` on every call (reported at the caller of
     :func:`namelist_schema_for_ref`) and logged once per release `version`
-    (``0.14.0``, ``v0.14.0`` and a hash on that tag log once between them).
+    (``0.15.0``, ``v0.15.0`` and a hash on that tag log once between them).
     `release_tag` is the tag a commit-hash `checkout_target` resolved to, or
     `None` when `checkout_target` is itself the tag.
     """
