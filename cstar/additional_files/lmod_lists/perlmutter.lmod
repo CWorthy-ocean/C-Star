@@ -1,4 +1,11 @@
-cpu/1.0
-cray-hdf5/1.12.2.9
-cray-netcdf/4.9.0.9
-cray-parallel-netcdf
+# CPU toolchain: PrgEnv-gnu + Cray MPICH + serial-HDF5 netCDF + parallel-netCDF (for PIO).
+# Verified on Perlmutter 2026-11-02: each module loads from `module reset`, and
+# CRAY_MPICH_PREFIX, CRAY_HDF5_PREFIX, CRAY_NETCDF_PREFIX and
+# CRAY_PARALLEL_NETCDF_PREFIX all resolve (gnu/12.3 builds).
+cpu/1.0  # swaps out the login default gpu/1.0
+PrgEnv-gnu/8.7.0  # login default, pinned so a change of site defaults does not change the build
+gcc-native/14  # login default
+cray-mpich/9.1.0  # login default
+cray-hdf5/1.14.3.9
+cray-netcdf/4.9.2.3  # provides netCDF-C and netCDF-Fortran (nf-config) in one prefix
+cray-parallel-netcdf/1.12.3.21

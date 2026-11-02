@@ -420,7 +420,8 @@ class CStarEnvironment:
 
         - Resets the current module environment by executing `module reset`.
         - Loads each module listed in the `.lmod` file for the system, located at
-            `<root>/additional_files/lmod_lists/<system_name>.lmod`.
+            `<root>/additional_files/lmod_lists/<system_name>.lmod`. Blank lines and
+            ``#`` comments in the file are skipped.
 
         Raises
         ------
@@ -443,8 +444,9 @@ class CStarEnvironment:
         with open(self.lmod_path) as fp:
             lmod_list = fp.readlines()
 
-        for module in (x.strip() for x in lmod_list):
-            self._call_lmod(f"load {module}")
+        for module in (x.partition("#")[0].strip() for x in lmod_list):
+            if module:
+                self._call_lmod(f"load {module}")
 
     @staticmethod
     def set_env_var(key: str, value: str) -> None:

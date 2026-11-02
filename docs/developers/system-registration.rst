@@ -89,11 +89,13 @@ Next, identify the modules C-Star should load.
 
 Example (``perlmutter.lmod``)::
 
-   gcc/11.2.0  # system default
-   openmpi/4.0.6  # system default
-   parallel-netcdf/1.11.2
-   cmake/3.20.0
-   ...
+   cpu/1.0  # swaps out the login default gpu/1.0
+   PrgEnv-gnu/8.7.0  # login default, pinned so a change of site defaults does not change the build
+   gcc-native/14  # login default
+   cray-mpich/9.1.0  # login default
+   cray-hdf5/1.14.3.9
+   cray-netcdf/4.9.2.3  # provides netCDF-C and netCDF-Fortran in one prefix
+   cray-parallel-netcdf/1.12.3.21
 
 Step 3: Identify system-specific environment variables
 ------------------------------------------------------
