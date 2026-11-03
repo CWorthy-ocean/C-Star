@@ -46,6 +46,7 @@ from cstar.roms.namelist import (
     UCLA_ROMS_0_11_0,
     UCLA_ROMS_0_12_0,
     UCLA_ROMS_0_13_0,
+    UCLA_ROMS_0_14_0,
     ForcingFiles,
     Gamma2Settings,
     LateralViscSettings,
@@ -60,6 +61,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
+    RomsNamelistV0_14_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -687,11 +689,60 @@ def check_marbl_step_averages(
     )
 
 
-class TsOutputCfg(_SettingsSection):
+class _TsOutputCfgCommon(_SettingsSection):
     wrt_temp: bool
     wrt_salt: bool
     wrt_temp_dia: bool
     wrt_salt_dia: bool
+
+
+class TsOutputCfg(_TsOutputCfgCommon):
+    """``ts_output`` settings for ucla-roms < 0.14.0, which cannot write
+    temperature or salinity to the averages file.
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # TsOutputCfgV0_14_0's averages switches: _reject_avg_ts is their gate.
+        return ("wrt_avg_temp", "wrt_avg_salt")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_avg_ts(cls, data: Any) -> Any:
+        """Fail loudly on a requested ``wrt_avg_temp``/``wrt_avg_salt`` rather
+        than letting ``extra="ignore"`` drop it: the averages file would lack the
+        field. A switched-off value passes (a shared spec may carry it) and is
+        dropped. Lists every requested key.
+        """
+        if isinstance(data, dict) and (
+            requested := [
+                key
+                for key in ("wrt_avg_temp", "wrt_avg_salt")
+                if _flag_requested(data.get(key))
+            ]
+        ):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_14_0)
+            raise ValueError(
+                f"ts_output.{'/'.join(requested)} requires ucla-roms >= {version}; "
+                "the pinned ucla-roms release cannot write temperature or salinity "
+                "to the averages file. Turn it off, or pin a newer release."
+            )
+        return data
+
+
+class TsOutputCfgV0_14_0(_TsOutputCfgCommon):
+    """``ts_output`` settings for ucla-roms >= 0.14.0: adds ``wrt_avg_temp`` and
+    ``wrt_avg_salt``, which write temperature and salinity to the averages file
+    (PR #413). Like every ``wrt_avg_*`` key they take effect only with
+    ``ocean_vars.wrt_file_avg``.
+
+    Deliberate defaults (like :class:`VSpongeCfgV0_13_0`): blueprints and
+    ModelSpecs written before the keys existed bypass the resolver and hit
+    ``model_validate`` directly; the values are the ucla-roms initializers.
+    """
+
+    wrt_avg_temp: bool = Field(default=False)
+    wrt_avg_salt: bool = Field(default=False)
 
 
 class FrcOutputCfg(_SettingsSection):
@@ -1745,13 +1796,14 @@ class VSpongeCfgV0_13_0(_VSpongeCfgCommon):
     v_sponge_trc: float = Field(default=-1.0)
 
 
-def _constant_fe_requested(value: Any) -> bool:
-    """Whether a ``marbl_bgc.use_constant_fe`` value asks for constant iron.
+def _flag_requested(value: Any) -> bool:
+    """Whether a boolean switch's value asks for the feature on.
 
-    The one parse rule for the version gate (:class:`MarblBgcCfg`) and the MARBL
-    guard (:func:`check_constant_fe`): a value pydantic reads as a bool is that
-    bool, ``None`` means unset, and anything else unparseable is not an "off"
-    value, so it counts as requested.
+    The one parse rule for the constant-iron gate (:class:`MarblBgcCfg`) and
+    guard (:func:`check_constant_fe`) and the temperature/salinity averages gate
+    (:class:`TsOutputCfg`): a value pydantic reads as a bool is that bool,
+    ``None`` means unset, and anything else unparseable is not an "off" value,
+    so it counts as requested.
     """
     if value is None:
         return False
@@ -1785,9 +1837,7 @@ class MarblBgcCfg(_MarblBgcCfgCommon):
         ``extra="ignore"`` drop it: the run would compute iron prognostically. A
         switched-off value passes (a shared spec may carry it) and is dropped.
         """
-        if isinstance(data, dict) and _constant_fe_requested(
-            data.get("use_constant_fe")
-        ):
+        if isinstance(data, dict) and _flag_requested(data.get("use_constant_fe")):
             version = ".".join(str(part) for part in UCLA_ROMS_0_11_0)
             raise ValueError(
                 f"marbl_bgc.use_constant_fe requires ucla-roms >= {version}; the "
@@ -1823,9 +1873,7 @@ def check_constant_fe(marbl_bgc: Mapping[str, Any], *, bgc_mode_is_marbl: bool) 
     Raises ``ValueError`` if ``use_constant_fe`` is requested while
     ``bgc_mode_is_marbl`` is False.
     """
-    if not bgc_mode_is_marbl and _constant_fe_requested(
-        marbl_bgc.get("use_constant_fe")
-    ):
+    if not bgc_mode_is_marbl and _flag_requested(marbl_bgc.get("use_constant_fe")):
         raise ValueError(
             "marbl_bgc.use_constant_fe is set but MARBL is off (cppdefs.marbl=False): "
             "ucla-roms never reads &MARBL_BIOGEOCHEMISTRY_SETTINGS without MARBL "
@@ -1845,8 +1893,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     ``marbl_bgc`` as the pre-0.11.0 :class:`MarblBgcCfg` (retyped by
     :class:`RunTimeSettingsV0_11_0`), ``v_sponge`` and ``surf_flux`` as the pre-0.13.0
     :class:`VSpongeCfg` and :class:`SurfFluxCfg` (retyped by
-    :class:`RunTimeSettingsV0_13_0`), and version-varying
-    sections that some schemas lack entirely (``pio_settings``, added by
+    :class:`RunTimeSettingsV0_13_0`), ``ts_output`` as the pre-0.14.0
+    :class:`TsOutputCfg` (retyped by :class:`RunTimeSettingsV0_14_0`), and
+    version-varying sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
     :class:`RunTimeSettingsV0_9_0` and retyped by :class:`RunTimeSettingsV0_12_0`)
@@ -1858,8 +1907,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
     (0.9.0 <= ucla-roms < 0.11.0), :class:`RunTimeSettingsV0_11_0`
     (0.11.0 <= ucla-roms < 0.12.0), :class:`RunTimeSettingsV0_12_0`
-    (0.12.0 <= ucla-roms < 0.13.0), or :class:`RunTimeSettingsV0_13_0`
-    (>= 0.13.0), or select one with :func:`run_time_settings_for_ref`.
+    (0.12.0 <= ucla-roms < 0.13.0), :class:`RunTimeSettingsV0_13_0`
+    (0.13.0 <= ucla-roms < 0.14.0), or :class:`RunTimeSettingsV0_14_0`
+    (>= 0.14.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -2034,7 +2084,8 @@ class RunTimeSettingsV0_12_0(RunTimeSettingsV0_11_0):
 
 
 class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.13.0, typed + validated.
+    """Forge's run-time settings dict for 0.13.0 <= ucla-roms < 0.14.0, typed +
+    validated.
 
     Mirrors C-Star's ``RomsNamelistV0_13_0(RomsNamelistV0_12_0)``. Types
     ``v_sponge`` as :class:`VSpongeCfgV0_13_0`, which adds ``v_sponge_trc``
@@ -2045,6 +2096,18 @@ class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):
 
     v_sponge: VSpongeCfgV0_13_0
     surf_flux: SurfFluxCfgV0_13_0
+
+
+class RunTimeSettingsV0_14_0(RunTimeSettingsV0_13_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.14.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_14_0(RomsNamelistV0_13_0)``. Types
+    ``ts_output`` as :class:`TsOutputCfgV0_14_0`, which adds ``wrt_avg_temp`` and
+    ``wrt_avg_salt`` (``&TS_OUTPUT_SETTINGS``) with their defaults, so a blueprint
+    saved before they existed still validates.
+    """
+
+    ts_output: TsOutputCfgV0_14_0
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -2061,6 +2124,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
     RomsNamelistV0_12_0: RunTimeSettingsV0_12_0,
     RomsNamelistV0_13_0: RunTimeSettingsV0_13_0,
+    RomsNamelistV0_14_0: RunTimeSettingsV0_14_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -2256,7 +2320,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
         :class:`RunTimeSettingsV0_11_0` for 0.11.0 <= ucla-roms < 0.12.0;
         :class:`RunTimeSettingsV0_12_0` for 0.12.0 <= ucla-roms < 0.13.0;
-        :class:`RunTimeSettingsV0_13_0` for ucla-roms >= 0.13.0.
+        :class:`RunTimeSettingsV0_13_0` for 0.13.0 <= ucla-roms < 0.14.0;
+        :class:`RunTimeSettingsV0_14_0` for ucla-roms >= 0.14.0.
 
     Warns
     -----

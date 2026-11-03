@@ -69,6 +69,8 @@ stdout_diag:
 ts_output:
   wrt_temp: false
   wrt_salt: false
+  wrt_avg_temp: false  # ucla-roms >= 0.14.0 (PR #413); dropped for older pins
+  wrt_avg_salt: false
   wrt_temp_dia: false
   wrt_salt_dia: false
 frc_output:

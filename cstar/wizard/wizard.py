@@ -1131,8 +1131,8 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # advection fields only render for ModelSpecs that declare them
 # (``roms-marbl-0.8-default``, ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``,
 # ``roms-marbl-0.11-default``, ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``,
-# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
-# that omits the key shows no widget for it.
+# ``roms-marbl-0.14-default``, ``pio-dev``) -- the editor type-infers a checkbox from
+# the composed bool, so a spec that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1462,6 +1462,8 @@ _VARIABLE_GRIDS: dict[str, list[tuple[str, list[_FieldKey]]]] = {
                 "wrt_avg_vb",
                 "wrt_avg_u",
                 "wrt_avg_v",
+                ("ts_output", "wrt_avg_temp"),
+                ("ts_output", "wrt_avg_salt"),
                 "wrt_avg_r",
                 "wrt_avg_o",
                 "wrt_avg_w",

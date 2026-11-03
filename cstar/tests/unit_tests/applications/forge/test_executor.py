@@ -86,6 +86,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
+    RomsNamelistV0_14_0,
 )
 
 requires_cstar_pio = pytest.mark.skipif(
@@ -136,6 +137,11 @@ _MODEL_PATH_ROMS0120 = (
 # used by the versioned-namelist golden test below.
 _MODEL_PATH_ROMS0130 = (
     _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.13-default.yaml"
+)
+# ucla-roms >= 0.14.0 ModelSpec (adds ts_output.wrt_avg_temp/wrt_avg_salt to
+# &TS_OUTPUT_SETTINGS) -- used by the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0140 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.14-default.yaml"
 )
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
@@ -4752,8 +4758,8 @@ class TestGoldenNamelist:
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
         roms050 and not roms060 and not roms070 and not roms090 and not
-        roms0110 and not roms0120 and not roms0130"``, which would otherwise also
-        catch this test.
+        roms0110 and not roms0120 and not roms0130 and not roms0140"``, which would
+        otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
             mock_grid,
@@ -4982,6 +4988,38 @@ class TestGoldenNamelist:
         v_sponge = normalized.split("&v_sponge_settings")[1].split("/", 1)[0]
         assert "v_sponge_trc = 0.0" in v_sponge
         assert f"v_sponge = {capture['cfg'].domain.v_sponge}" in v_sponge
+
+    def test_golden_namelist_test_tiny_roms0140(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.14-default`` ModelSpec (ucla-roms >= 0.14.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_14_0``/
+        ``RomsNamelistV0_14_0`` end to end.
+
+        The one schema-visible difference from the roms0130 golden is
+        ``wrt_avg_temp``/``wrt_avg_salt`` in ``&ts_output_settings``, always
+        written (here both false) -- the OutputSpec declares them.
+
+        Test name note: contains ``roms0140`` so the legacy golden's ``-k``
+        selector (``... and not roms0140``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_PATH_ROMS0140,
+            "golden_namelist_test-tiny-roms0140.nml",
+        )
+
+        ts_output = normalized.split("&ts_output_settings")[1].split("/", 1)[0]
+        assert "wrt_avg_temp = .false." in ts_output
+        assert "wrt_avg_salt = .false." in ts_output
+
+        # Read back through the 0.14 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms0140.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_14_0.read(namelist_path)
+        assert nml.ts_output_settings.wrt_avg_temp is False
+        assert nml.ts_output_settings.wrt_avg_salt is False
+        assert nml.v_sponge_settings.v_sponge_trc == -1.0
 
     @staticmethod
     def _cdrgas_sources(directory: Path) -> list[Path]:
