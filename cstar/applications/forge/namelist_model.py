@@ -696,6 +696,11 @@ class _TsOutputCfgCommon(_SettingsSection):
     wrt_salt_dia: bool
 
 
+# ``ts_output`` keys writing temperature and salinity to the averages file
+# (ucla-roms >= 0.14.0 only).
+_AVG_TS_KEYS = ("wrt_avg_temp", "wrt_avg_salt")
+
+
 class TsOutputCfg(_TsOutputCfgCommon):
     """``ts_output`` settings for ucla-roms < 0.14.0, which cannot write
     temperature or salinity to the averages file.
@@ -704,7 +709,7 @@ class TsOutputCfg(_TsOutputCfgCommon):
     @classmethod
     def _other_tier_keys(cls) -> Iterable[str]:
         # TsOutputCfgV0_14_0's averages switches: _reject_avg_ts is their gate.
-        return ("wrt_avg_temp", "wrt_avg_salt")
+        return _AVG_TS_KEYS
 
     @model_validator(mode="before")
     @classmethod
@@ -715,11 +720,7 @@ class TsOutputCfg(_TsOutputCfgCommon):
         dropped. Lists every requested key.
         """
         if isinstance(data, dict) and (
-            requested := [
-                key
-                for key in ("wrt_avg_temp", "wrt_avg_salt")
-                if _flag_requested(data.get(key))
-            ]
+            requested := [key for key in _AVG_TS_KEYS if _flag_requested(data.get(key))]
         ):
             version = ".".join(str(part) for part in UCLA_ROMS_0_14_0)
             raise ValueError(

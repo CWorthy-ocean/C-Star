@@ -148,7 +148,10 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.13-default`` (ucla-roms 0.13.1) is the wizard's default. Older
+``roms-marbl-0.13-default`` (ucla-roms 0.13.1) is the wizard's default.
+``roms-marbl-0.14-default`` pins ucla-roms 0.14.0, which can also write
+temperature and salinity to the averages file (``ts_output.wrt_avg_temp`` and
+``wrt_avg_salt``). Older
 ``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.12-default``
 stays for ucla-roms 0.12.0, which predates the sponge's tracer diffusivity
 ``v_sponge.v_sponge_trc`` and whose averaged MARBL output differs after a restart;
