@@ -4,6 +4,7 @@ The runs are built elsewhere than the data home, as a copy from another machine
 would be, with a completed step record and a product for the first step.
 """
 
+import fcntl
 import os
 import shutil
 import typing as t
@@ -305,6 +306,31 @@ def test_an_incomplete_transfer_is_refused_and_nothing_is_written(
     assert "incomplete" in result.output + result.stderr
     assert tracked(built.run_id) is None
     assert not history_files(built.run_id)
+
+
+def test_a_run_lock_kept_by_another_writer_refuses_the_attach(
+    elsewhere: t.Callable[..., BuiltRun], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a run lock that stays taken past its timeout ends the attach with
+    one line and exit 1, rather than a traceback, and writes nothing.
+    """
+    built = elsewhere()
+    monkeypatch.setattr("cstar.orchestration.tracking.RUN_LOCK_TIMEOUT", 0.1)
+    lock_path = TrackingRepository()._get_lock_path(built.run_id)
+
+    # another process holds the run lock, through a file of its own
+    with lock_path.open("a") as other_holder:
+        fcntl.flock(other_holder, fcntl.LOCK_EX)
+        try:
+            result = invoke("attach", str(built.root))
+        finally:
+            fcntl.flock(other_holder, fcntl.LOCK_UN)
+
+    assert result.exit_code == 1
+    assert "Not attached" in result.stderr
+    assert str(lock_path) in result.stderr
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert tracked(built.run_id) is None
 
 
 def test_a_run_attached_again_from_another_directory_is_re_attached(

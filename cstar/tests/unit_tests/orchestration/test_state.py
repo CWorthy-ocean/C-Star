@@ -1,5 +1,7 @@
 """Tests for the sentinel repository."""
 
+import fcntl
+import logging
 import os
 from pathlib import Path
 from unittest import mock
@@ -55,3 +57,58 @@ async def test_put_sentinel_never_exposes_a_partial_file(state_home: Path) -> No
     assert sorted(p.name for p in first.parent.iterdir()) == sorted(
         [first.name, first.with_suffix(".lock").name]
     )
+
+
+async def test_put_sentinel_writes_where_flock_is_unsupported(
+    state_home: Path, flock_unsupported: mock.Mock
+) -> None:
+    """Verify a sentinel is written where the file system refuses `flock`, as a
+    Perlmutter compute node's does.
+    """
+    repo = StateRepository()
+    handle = ProcessHandle(
+        pid="1", name="Step A", run_id="atomic-run", status=Status.Submitted
+    )
+
+    written = await repo.put_sentinel(handle)
+    reread = await repo.get_sentinel(handle, ProcessHandle)
+
+    assert flock_unsupported.called
+    assert written is not None
+    assert f"status: {Status.Submitted.value}" in written.read_text()
+    assert reread is not None
+    assert reread.status == Status.Submitted
+
+
+async def test_put_sentinel_writes_anyway_when_the_lock_is_kept(
+    state_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a sentinel writer that cannot get the lock within
+    `SENTINEL_LOCK_TIMEOUT` warns and writes the sentinel without it.
+    """
+    repo = StateRepository()
+    handle = ProcessHandle(
+        pid="1", name="Step A", run_id="atomic-run", status=Status.Submitted
+    )
+    sentinel = repo.sentinel_path(handle)
+    lock_path = sentinel.with_suffix(".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("cstar.orchestration.state.SENTINEL_LOCK_TIMEOUT", 0.2)
+    caplog.set_level(logging.WARNING, logger="cstar.orchestration.state")
+
+    # another process holds the lock, through a file of its own
+    with lock_path.open("a") as other_holder:
+        fcntl.flock(other_holder, fcntl.LOCK_EX)
+        try:
+            written = await repo.put_sentinel(handle)
+        finally:
+            fcntl.flock(other_holder, fcntl.LOCK_UN)
+
+    assert written == sentinel
+    assert f"status: {Status.Submitted.value}" in sentinel.read_text()
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "without it" in warnings[0]
+    assert str(sentinel) in warnings[0]

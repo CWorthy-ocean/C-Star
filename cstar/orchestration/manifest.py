@@ -47,7 +47,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
     local_copy,
-    locked,
+    locked_if_supported,
     write_text_atomic,
 )
 from cstar.orchestration.models import (
@@ -1117,7 +1117,9 @@ def manifest_lock(
     The lock file lives in the run's state directory. A standalone blueprint run
     has one writer and never takes it. A writer waits a bounded time, so one
     that is stalled while it holds the lock (a suspended `cstar run status`, a
-    hung file system) cannot hold up the scheduling of a run.
+    hung file system) cannot hold up the scheduling of a run. Where the file
+    system cannot lock (see `locked_if_supported`), only this process's writers
+    take turns.
 
     Parameters
     ----------
@@ -1135,11 +1137,9 @@ def manifest_lock(
     ------
     LockTimeoutError
         If another writer still holds the lock after `timeout` seconds.
-    LockUnsupportedError
-        If the file system holding the state directory does not support `flock`.
     """
     lock_path = StateDirectoryManager.run_state_dir(run_id=run_id) / MANIFEST_LOCK_NAME
-    with locked(lock_path, timeout=timeout):
+    with locked_if_supported(lock_path, timeout=timeout):
         yield
 
 
@@ -1670,8 +1670,6 @@ def record_submission(
     ------
     LockTimeoutError
         If the deadline passes before both locks are held.
-    LockUnsupportedError
-        If the file system holding the state directory does not support `flock`.
     CstarSchemaTooNewError
         If the manifest's schema is newer than this build reads (see `VersionedDocument`).
     CstarError

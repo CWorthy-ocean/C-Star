@@ -5,6 +5,8 @@ import os
 import pickle
 import shlex
 import stat
+import threading
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -14,6 +16,9 @@ import requests
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (
+    LOCK_FIRST_RETRY,
+    LOCK_LOG_DELAY,
+    LOCK_POLL_INTERVAL,
     UNKNOWN_SIZE,
     DirectoryManager,
     JobFileSystemManager,
@@ -25,6 +30,7 @@ from cstar.execution.file_system import (
     local_copy,
     local_copy_async,
     locked,
+    locked_if_supported,
     remove_files,
     rotate_file,
     step_disk_usage,
@@ -1383,6 +1389,7 @@ def test_locked_with_timeout_logs_the_wait_and_gives_up(
 
     with (
         mock.patch("cstar.execution.file_system.LOCK_POLL_INTERVAL", 0.05),
+        mock.patch("cstar.execution.file_system.LOCK_LOG_DELAY", 0.0),
         locked(lock_path),
         pytest.raises(LockTimeoutError, match="entry.lock"),
         locked(lock_path, timeout=0.2),
@@ -1392,7 +1399,114 @@ def test_locked_with_timeout_logs_the_wait_and_gives_up(
     assert f"Waiting for the lock at {lock_path}" in caplog.text
 
 
-@pytest.mark.parametrize("code", [errno.ENOLCK, errno.EOPNOTSUPP, errno.ENOSYS])
+def test_locked_with_timeout_takes_a_lock_soon_after_its_release(
+    tmp_path: Path,
+) -> None:
+    """Verify a waiter takes a lock well within `LOCK_POLL_INTERVAL` of its
+    release: a lock held briefly by another holder must not cost a full poll.
+    """
+    lock_path = tmp_path / "entry.lock"
+
+    with lock_path.open("a") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        release = threading.Timer(0.2, fcntl.flock, args=(holder, fcntl.LOCK_UN))
+        release.start()
+        start = time.monotonic()
+        with locked(lock_path, timeout=30.0):
+            waited = time.monotonic() - start
+        release.join()
+
+    assert waited < LOCK_POLL_INTERVAL / 2
+
+
+def test_locked_with_timeout_waits_quietly_for_a_lock_held_briefly(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a wait shorter than `LOCK_LOG_DELAY` logs nothing: the message
+    goes to stdout, where it would land in a command's JSON output.
+    """
+    lock_path = tmp_path / "entry.lock"
+    caplog.set_level(logging.DEBUG, logger="cstar.execution.file_system")
+
+    with lock_path.open("a") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        release = threading.Timer(0.2, fcntl.flock, args=(holder, fcntl.LOCK_UN))
+        release.start()
+        with locked(lock_path, timeout=LOCK_LOG_DELAY * 4):
+            pass
+        release.join()
+
+    assert "Waiting for the lock" not in caplog.text
+
+
+class _FakeClock:
+    """Stands in for `time`: `sleep` advances `monotonic` and records each pause."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+def test_locked_with_timeout_backs_off_with_jitter(tmp_path: Path) -> None:
+    """Verify the pause between attempts starts at `LOCK_FIRST_RETRY` and doubles,
+    jittered, up to `LOCK_POLL_INTERVAL`, so waiters that queued together drift
+    apart instead of retrying in step.
+    """
+    lock_path = tmp_path / "entry.lock"
+    clock = _FakeClock()
+
+    with (
+        locked(lock_path),
+        mock.patch("cstar.execution.file_system.time", clock),
+        pytest.raises(LockTimeoutError),
+        locked(lock_path, timeout=60.0),
+    ):
+        pytest.fail("the lock was taken twice")
+
+    # the last pause is cut short so the wait ends at the timeout
+    *pauses, last = clock.pauses
+    for n, pause in enumerate(pauses):
+        ceiling = min(LOCK_FIRST_RETRY * 2**n, LOCK_POLL_INTERVAL)
+        assert ceiling / 2 <= pause <= ceiling
+    assert last <= LOCK_POLL_INTERVAL
+    assert clock.now == pytest.approx(60.0)
+    assert len(set(pauses[-5:])) > 1
+
+
+def test_locked_with_zero_timeout_tries_once(tmp_path: Path) -> None:
+    """Verify a zero timeout gives up on the first refusal, without pausing."""
+    lock_path = tmp_path / "entry.lock"
+    clock = _FakeClock()
+
+    with (
+        locked(lock_path),
+        mock.patch("cstar.execution.file_system.time", clock),
+        pytest.raises(LockTimeoutError),
+        locked(lock_path, timeout=0.0),
+    ):
+        pytest.fail("the lock was taken twice")
+
+    assert clock.pauses == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        errno.ENOLCK,
+        errno.EOPNOTSUPP,
+        errno.ENOSYS,
+        # Linux's ENOTSUPP, which the DVS mounts of Perlmutter compute nodes
+        # answer with and which `errno` has no name for
+        524,
+    ],
+)
 def test_locked_names_an_unsupported_file_system(tmp_path: Path, code: int) -> None:
     """Verify `flock` errors meaning "cannot lock here" raise `LockUnsupportedError`."""
     lock_path = tmp_path / "entry.lock"
@@ -1424,3 +1538,168 @@ def test_locked_reraises_other_flock_errors(tmp_path: Path) -> None:
 
     assert not isinstance(raised.value, LockUnsupportedError)
     assert raised.value.errno == errno.EIO
+
+
+def test_locked_if_supported_holds_an_exclusive_lock_until_exit(
+    tmp_path: Path,
+) -> None:
+    """Verify the lock file is created and flocked, and released after the block."""
+    lock_path = tmp_path / "missing" / "parent" / "entry.lock"
+
+    with locked_if_supported(lock_path, timeout=1.0) as held:
+        assert held is True
+        assert lock_path.is_file()
+        assert _is_locked(lock_path)
+
+    assert lock_path.is_file()
+    assert not _is_locked(lock_path)
+
+
+def test_locked_if_supported_carries_on_where_flock_is_unsupported(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    flock_unsupported: mock.Mock,
+) -> None:
+    """Verify a file system that cannot lock still runs the block, saying so in
+    one warning for the directory however many lock files are used in it.
+    """
+    directory = tmp_path / "no-flock"
+    caplog.set_level(logging.DEBUG, logger="cstar.execution.file_system")
+    ran: list[bool] = []
+
+    with locked_if_supported(directory / "first.lock", timeout=1.0) as held:
+        ran.append(held)
+    with locked_if_supported(directory / "second.lock", timeout=1.0) as held:
+        ran.append(held)
+
+    assert ran == [False, False]
+    assert flock_unsupported.called
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert str(directory) in warnings[0].getMessage()
+    assert "not supported" in warnings[0].getMessage()
+    # the second use is still reported, below warning level
+    debugs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any(str(directory) in r.getMessage() for r in debugs)
+
+
+def test_locked_if_supported_still_serializes_threads_without_flock(
+    tmp_path: Path, flock_unsupported: mock.Mock
+) -> None:
+    """Verify threads of this process take turns where `flock` cannot be used."""
+    lock_path = tmp_path / "entry.lock"
+    guard = threading.Lock()
+    state = {"in_flight": 0, "peak": 0}
+    held_flags: list[bool] = []
+
+    def work() -> None:
+        with locked_if_supported(lock_path, timeout=10.0) as held:
+            with guard:
+                held_flags.append(held)
+                state["in_flight"] += 1
+                state["peak"] = max(state["peak"], state["in_flight"])
+            time.sleep(0.02)
+            with guard:
+                state["in_flight"] -= 1
+
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert held_flags == [False] * 4  # every thread went without flock
+    assert state["peak"] == 1
+
+
+def test_locked_if_supported_times_out_on_another_thread(tmp_path: Path) -> None:
+    """Verify a thread kept waiting for the lock gives up after its timeout, and
+    that the holder's lock survives.
+    """
+    lock_path = tmp_path / "entry.lock"
+
+    with (
+        locked_if_supported(lock_path, timeout=1.0),
+        pytest.raises(LockTimeoutError, match="Another thread"),
+        locked_if_supported(lock_path, timeout=0.2),
+    ):
+        pytest.fail("the lock was taken twice")
+
+    with locked_if_supported(lock_path, timeout=0.2) as held:
+        assert held is True
+
+
+def test_locked_if_supported_times_out_on_another_process(tmp_path: Path) -> None:
+    """Verify a lock another open file holds makes the call give up after its
+    timeout, well before the polling interval, and releases the thread lock.
+    """
+    lock_path = tmp_path / "entry.lock"
+
+    start = time.monotonic()
+    with lock_path.open("a") as other_holder:
+        fcntl.flock(other_holder, fcntl.LOCK_EX)
+        try:
+            with (
+                pytest.raises(LockTimeoutError, match="Another holder"),
+                locked_if_supported(lock_path, timeout=0.2),
+            ):
+                pytest.fail("the lock was taken while another holder had it")
+        finally:
+            fcntl.flock(other_holder, fcntl.LOCK_UN)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0
+    # the thread lock was let go on the way out, and the flock is free again
+    with locked_if_supported(lock_path, timeout=0.2) as held:
+        assert held is True
+
+
+def test_locked_if_supported_propagates_a_body_error_unchanged(
+    tmp_path: Path, flock_unsupported: mock.Mock
+) -> None:
+    """Verify an exception raised by the block is the one the caller sees, not
+    wrapped in or chained to the lock's refusal, and that the lock is let go.
+    """
+    lock_path = tmp_path / "entry.lock"
+    failure = RuntimeError("the block failed")
+
+    with (
+        pytest.raises(RuntimeError) as raised,
+        locked_if_supported(lock_path, timeout=1.0) as held,
+    ):
+        assert held is False
+        raise failure
+
+    assert raised.value is failure
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+
+    with locked_if_supported(lock_path, timeout=0.2) as held:
+        assert held is False
+
+
+def test_locked_if_supported_reraises_other_flock_errors(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify an I/O error from `flock` is not mistaken for missing lock support,
+    and that the thread lock is let go afterwards.
+    """
+    lock_path = tmp_path / "entry.lock"
+
+    with (
+        mock.patch(
+            "cstar.execution.file_system.fcntl.flock",
+            side_effect=OSError(errno.EIO, os.strerror(errno.EIO)),
+        ),
+        pytest.raises(OSError) as raised,
+        locked_if_supported(lock_path, timeout=1.0),
+    ):
+        pytest.fail("the lock was taken")
+
+    assert not isinstance(raised.value, LockUnsupportedError)
+    assert raised.value.errno == errno.EIO
+    assert "not supported" not in caplog.text
+
+    with locked_if_supported(lock_path, timeout=0.2) as held:
+        assert held is True

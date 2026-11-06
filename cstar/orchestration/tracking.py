@@ -1,7 +1,7 @@
 import asyncio
-import fcntl
 import os
 import typing as t
+import uuid
 from collections.abc import (
     AsyncGenerator,
     Callable,
@@ -11,6 +11,7 @@ from collections.abc import (
 )
 from contextlib import (
     AbstractAsyncContextManager,
+    ExitStack,
     asynccontextmanager,
     contextmanager,
 )
@@ -34,8 +35,10 @@ from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import MAX_CONCURRENCY, slugify, utc_now
 from cstar.execution.file_system import (
     UNKNOWN_SIZE,
+    LockTimeoutError,
     StateDirectoryManager,
     local_copy,
+    locked_if_supported,
     step_disk_usage,
     symlink_relative,
 )
@@ -70,6 +73,9 @@ log = get_logger(__name__)
 
 KEY_RUN_UUID: t.Final[str] = "uuid"
 """Key used to cache the run manifest's uuid in the run metadata; the manifest owns it."""
+
+RUN_LOCK_TIMEOUT: t.Final[float] = 60.0
+"""Seconds a writer of a run's record waits for other writers to release its lock."""
 
 _LEGACY_KEY_NAME: t.Final[str] = "name"
 """Metadata key under which records written by cstar 0.17.0 and earlier held the
@@ -737,18 +743,18 @@ def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
 def _replacing(path: Path) -> Generator[Path]:
     """Yield a sibling of `path` to build, then rename it onto `path` atomically.
 
-    The caller holds the run lock, so one fixed staging name per path suffices;
-    a leftover from a crashed writer is cleared first. The staged name is removed
-    if building or renaming it fails.
+    Each writer stages under a name of its own: where the file system cannot
+    lock, the run lock does not keep other processes out, and a shared staging
+    name would let one writer publish another's half-written file. The staged
+    name is removed if building or renaming it fails.
 
     Parameters
     ----------
     path : Path
         The file or link to replace.
     """
-    staged = path.with_name(f".{path.name}.tmp")
+    staged = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     staged.parent.mkdir(parents=True, exist_ok=True)
-    staged.unlink(missing_ok=True)
     try:
         yield staged
         os.replace(staged, path)
@@ -983,10 +989,7 @@ class TrackingRepository(LoggingMixin):
         run_paths: list[Path] = []
 
         latest = self.latest_path(run_id)
-        lock_path = self._get_lock_path(run_id)
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
+        with self._reading(run_id):
             if latest.exists():
                 run_paths.append(latest)
 
@@ -1041,11 +1044,7 @@ class TrackingRepository(LoggingMixin):
             msg = "A valid run-id was not provided; unable to retrieve run"
             raise ValueError(msg) from ex
 
-        lock_path = self._get_lock_path(run_id)
-
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
+        with self._reading(run_id):
             run_path = self._find_run_path(run_id, run_date)
             if not run_path.exists():
                 rd_out = run_date or "latest"
@@ -1124,7 +1123,8 @@ class TrackingRepository(LoggingMixin):
 
         The run lock is held across the whole read-modify-write, so concurrent
         updates to the same run (e.g. several steps finishing in one poll
-        tick) cannot overwrite each other.
+        tick) cannot overwrite each other. Where the file system cannot lock
+        (see `locked_if_supported`), only this process's updates take turns.
 
         Parameters
         ----------
@@ -1137,6 +1137,12 @@ class TrackingRepository(LoggingMixin):
         -------
         WorkplanRun | None
             The persisted record, or `None` when no record exists for the run-id.
+
+        Raises
+        ------
+        LockTimeoutError
+            If another writer still holds the run lock after `RUN_LOCK_TIMEOUT`
+            seconds.
         """
         try:
             run_id = slugify(run_id)
@@ -1146,9 +1152,7 @@ class TrackingRepository(LoggingMixin):
 
         lock_path = self._get_lock_path(run_id)
 
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
+        with locked_if_supported(lock_path, timeout=RUN_LOCK_TIMEOUT):
             run_path = self._find_run_path(run_id, None)
             if not run_path.exists():
                 self.log.warning(f"No run file for `{run_id}` found in {run_path}`")
@@ -1197,13 +1201,18 @@ class TrackingRepository(LoggingMixin):
         -------
         Path
             The path to the persisted history record
+
+        Raises
+        ------
+        LockTimeoutError
+            If another writer still holds the run lock after `RUN_LOCK_TIMEOUT`
+            seconds.
         """
         # use the latest path (e.g. /tmp/<run-id>.yaml) as a lock in case
         # multiple runs occur simultaneously.
         lock_path = self._get_lock_path(run.run_id)
 
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        with locked_if_supported(lock_path, timeout=RUN_LOCK_TIMEOUT):
             return self._write_run_locked(run)
 
     async def put_workplan_run(self, run: WorkplanRun) -> Path:
@@ -1227,6 +1236,40 @@ class TrackingRepository(LoggingMixin):
                 return await coro
 
         return await asyncio.to_thread(self.put_workplan_run_sync, run)
+
+    @contextmanager
+    def _reading(self, run_id: str) -> Generator[None]:
+        """Hold a run's lock while reading its records, or read without it.
+
+        Writers rename each record into place, which Linux makes atomic for
+        readers, but macOS can answer a lookup that races the rename with
+        `EINVAL` or a missing file, so a reader takes turns with the writers.
+        Once `RUN_LOCK_TIMEOUT` passes the reader goes ahead without the lock,
+        with a warning, rather than fail: a stalled writer must not stop a
+        step that only needs to read the run.
+
+        Parameters
+        ----------
+        run_id : str
+            The run whose records are read.
+
+        Yields
+        ------
+        None
+            While the records are read.
+        """
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(
+                    locked_if_supported(
+                        self._get_lock_path(run_id), timeout=RUN_LOCK_TIMEOUT
+                    )
+                )
+            except LockTimeoutError as ex:
+                self.log.warning(
+                    f"{ex}; reading the record of run {run_id!r} without it"
+                )
+            yield
 
     def _get_lock_path(self, run_id: str) -> Path:
         """Identify the path to the lock-file for a run id.

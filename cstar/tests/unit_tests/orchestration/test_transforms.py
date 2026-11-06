@@ -6858,6 +6858,28 @@ async def test_load_workplan_malformed_yaml_raises_runtime_error(
     assert exc_info.value.__cause__ is not None
 
 
+async def test_load_workplan_where_flock_is_unsupported(
+    deferred_run_context: LiveWorkplan, flock_unsupported: mock.Mock
+) -> None:
+    """The recorded workplan loads where the file system refuses `flock`, as a
+    Perlmutter compute node's does; looking up the run once raised the refusal
+    and failed every scheduled step before its model started.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan of the active run.
+    flock_unsupported : mock.Mock
+        The refused `flock`.
+    """
+    loaded = DirectiveConfig.load_workplan()
+
+    assert loaded.name == deferred_run_context.name
+    assert [step.name for step in loaded.steps] == [
+        step.name for step in deferred_run_context.steps
+    ]
+
+
 @pytest.fixture
 def inline_workplan(hello_world_bp_path: Path) -> Workplan:
     """Generate a workplan whose second step declares an inline blueprint.

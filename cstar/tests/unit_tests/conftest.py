@@ -39,6 +39,7 @@ from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import _WARNED_LOG_LEVELS, get_logger
 from cstar.base.utils import additional_files_dir
+from cstar.execution.file_system import _THREAD_LOCKS, _UNLOCKED_DIRS
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
@@ -185,6 +186,20 @@ def _clear_log_level_warnings() -> Generator[None]:
     _WARNED_LOG_LEVELS.clear()
     yield
     _WARNED_LOG_LEVELS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_lock_registries() -> Generator[None]:
+    """Forget the per-path thread locks and the directories reported unlockable.
+
+    `locked_if_supported` warns once per directory per process, so one test's
+    warning would otherwise hide the next one's.
+    """
+    _THREAD_LOCKS.clear()
+    _UNLOCKED_DIRS.clear()
+    yield
+    _THREAD_LOCKS.clear()
+    _UNLOCKED_DIRS.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -2380,6 +2395,22 @@ def mock_run_id() -> Generator[str]:
     run_id = str(uuid.uuid4())
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: run_id}):
         yield run_id
+
+
+@pytest.fixture
+def flock_unsupported() -> Generator[mock.Mock]:
+    """Make every `flock` refuse as the Perlmutter compute nodes' DVS mounts do.
+
+    The kernel answers with errno 524 (ENOTSUPP), which Python's `errno` module
+    does not name. The patch replaces `fcntl.flock` itself, so it reaches every
+    caller, including a test's own probe of a lock: do not hold a real lock under
+    it, and join any thread before the test ends.
+    """
+    with mock.patch(
+        "cstar.execution.file_system.fcntl.flock",
+        side_effect=OSError(524, "Unknown error 524"),
+    ) as flock:
+        yield flock
 
 
 @pytest.fixture

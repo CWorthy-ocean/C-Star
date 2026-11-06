@@ -11,6 +11,8 @@ import typing as t
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 import yaml
@@ -22,7 +24,6 @@ from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME, hash_netcdf_contents
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.execution.file_system import (
-    LOCK_POLL_INTERVAL,
     LockTimeoutError,
     StateDirectoryManager,
 )
@@ -716,6 +717,24 @@ def test_manifest_lock_creates_the_lock_file(
 
     with manifest_lock("my-run"):  # released, so it can be taken again
         pass
+
+
+def test_manifest_lock_carries_on_where_flock_is_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flock_unsupported: mock.Mock
+) -> None:
+    """Verify the lock runs the block, rather than raising `LockUnsupportedError`,
+    where the file system refuses `flock`, as a Perlmutter compute node's does.
+    """
+    monkeypatch.setenv("CSTAR_STATE_HOME", str(tmp_path / "state"))
+    ran: list[bool] = []
+
+    with manifest_lock("my-run"):
+        ran.append(True)
+    with manifest_lock("my-run"):  # only this process's writers take turns
+        ran.append(True)
+
+    assert ran == [True, True]
+    assert flock_unsupported.called
 
 
 @contextmanager
@@ -1767,6 +1786,23 @@ class TestRecordSubmission:
         assert one.submitted_at == NOW + timedelta(seconds=5)
         assert (two.launcher, two.job_id, two.submitted_at) == ("", "", None)
 
+    def test_writes_the_submission_where_flock_is_unsupported(
+        self, tmp_path: Path, flock_unsupported: mock.Mock
+    ) -> None:
+        write_run_manifest(tmp_path, _manifest("one", "two"))
+
+        assert self._submit(tmp_path, "two", job_id="456")
+
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        one, two = manifest.step("one"), manifest.step("two")
+        assert one is not None
+        assert two is not None
+        assert (two.launcher, two.job_id) == ("slurm", "456")
+        assert two.submitted_at == NOW + timedelta(seconds=5)
+        assert (one.launcher, one.job_id, one.submitted_at) == ("", "", None)
+        assert flock_unsupported.called
+
     def test_holds_the_lock_while_it_reads_and_writes(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1893,7 +1929,7 @@ class TestRecordSubmission:
         self, tmp_path: Path
     ) -> None:
         """Verify submissions recorded at once queue for each other instead of
-        polling the manifest lock, so all of them land without delay.
+        polling the manifest lock: no writer pauses to try the lock again.
         """
         steps = [f"step-{n}" for n in range(12)]
         write_run_manifest(tmp_path, _manifest(*steps))
@@ -1903,18 +1939,20 @@ class TestRecordSubmission:
             )
             for s in steps
         ]
+        clock = SimpleNamespace(
+            monotonic=time.monotonic, sleep=mock.Mock(wraps=time.sleep)
+        )
 
-        start = time.monotonic()
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=30)
-        elapsed = time.monotonic() - start
+        with mock.patch("cstar.execution.file_system.time", clock):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
 
         manifest = read_run_manifest(tmp_path)
         assert manifest is not None
         assert [entry.job_id for entry in manifest.steps] == steps
-        assert elapsed < LOCK_POLL_INTERVAL
+        clock.sleep.assert_not_called()
 
     def test_a_later_submission_replaces_the_earlier(self, tmp_path: Path) -> None:
         write_run_manifest(tmp_path, _manifest("one"))

@@ -31,7 +31,11 @@ from cstar.entrypoint.utils import (
     ARG_VERIFY,
     ARG_VERIFY_HELP,
 )
-from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
+from cstar.execution.file_system import (
+    DirectoryManager,
+    LockTimeoutError,
+    StateDirectoryManager,
+)
 from cstar.orchestration.index import (
     HandleKind,
     RunLocation,
@@ -408,6 +412,8 @@ def write_attached_record(plan: Plan, fresh: WorkplanRun, mode: Access) -> None:
     ------
     CstarError
         If the record of the run vanished before it was updated.
+    LockTimeoutError
+        If another writer kept the run's lock past `RUN_LOCK_TIMEOUT`.
     """
     repository = TrackingRepository()
     if plan is Plan.new:
@@ -507,13 +513,17 @@ def attach(
     elif plan is Plan.already:
         typer.echo(f"Run {run_id!r} is already attached here at {root}.")
     else:
-        write_attached_record(
-            plan,
-            build_attached_record(
-                manifest, resolved.location, run_id=run_id, mode=mode
-            ),
-            mode,
-        )
+        try:
+            write_attached_record(
+                plan,
+                build_attached_record(
+                    manifest, resolved.location, run_id=run_id, mode=mode
+                ),
+                mode,
+            )
+        except LockTimeoutError as ex:
+            typer.echo(f"Not attached: {ex}; try again once it is free.", err=True)
+            raise typer.Exit(1) from ex
         if plan is Plan.reattach and tracked is not None:
             typer.echo(
                 f"Re-attached run {run_id!r}: its directory is now {root} "
