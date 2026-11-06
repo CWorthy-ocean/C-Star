@@ -1,5 +1,4 @@
 import typing as t
-import warnings
 from datetime import datetime
 
 from pydantic import Field, NonNegativeInt, PositiveInt, model_validator
@@ -9,6 +8,8 @@ from cstar.applications.ucla_roms.models import (
     ForcingConfiguration,
     ParameterSet,
     RuntimeParameterSet,
+    processor_grid_conflicts,
+    unknown_override_names,
 )
 from cstar.orchestration.models import (
     Blueprint,
@@ -204,35 +205,19 @@ class UclaRomsGpuBlueprint(Blueprint):
         if not self.namelist_overrides:
             return
 
-        param_overrides = self.namelist_overrides.get("param_settings", {})
-        violations = [
-            f"namelist override {key!r} ({value!r}) conflicts with the "
-            f"blueprint tiling ({expected!r})"
-            for key, expected in (
-                ("np_xi", self.tiling.n_procs_x),
-                ("np_eta", self.tiling.n_procs_y),
-            )
-            if (value := param_overrides.get(key)) is not None and value != expected
-        ]
-
         ref = self.code.roms.checkout_target
-        if _parse_gpu_release(ref) is not None:
-            schema = gpu_namelist_schema_for_ref(ref)
-            violations += schema.unknown_override_keys(self.namelist_overrides)
-        else:
-            with warnings.catch_warnings():
-                # suppress the unpinned-ref fallback warning; unknown names are
-                # reported below only if any are found
-                warnings.simplefilter("ignore", UserWarning)
-                schema = gpu_namelist_schema_for_ref(ref)
-            if unknown := schema.unknown_override_keys(self.namelist_overrides):
-                warnings.warn(
-                    f"namelist_overrides contain names not in {schema.__name__} "
-                    f"(assumed for unpinned gpu-ucla-roms ref {ref!r}): "
-                    + "; ".join(unknown),
-                    UserWarning,
-                    stacklevel=2,
-                )
+        violations = [
+            *processor_grid_conflicts(
+                self.namelist_overrides, self.processor_grid, "tiling"
+            ),
+            *unknown_override_names(
+                self.namelist_overrides,
+                ref,
+                pinned=_parse_gpu_release(ref) is not None,
+                schema_for_ref=gpu_namelist_schema_for_ref,
+                codebase="gpu-ucla-roms",
+            ),
+        ]
 
         if violations:
             raise ValueError("invalid namelist_overrides: " + "; ".join(violations))

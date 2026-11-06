@@ -57,8 +57,9 @@ _RECORD_3D_KEYS: Final = (
     "wrt_akt",
     "wrt_r",
 )
-"""The 3-D history switches ``tools/gpu_layout.py`` counts in a record. A key the
-namelist does not have (``wrt_temp``, ``wrt_salt``) counts as off."""
+"""The 3-D history switches ``tools/gpu_layout.py`` counts in a record
+(``wrt_temp`` and ``wrt_salt`` are in ``&ts_output_settings``). A key the
+namelist does not have counts as off."""
 
 _MARBL_EXTRA_2D: Final = 8
 """2-D MARBL surface diagnostics (PH, pCO2, FG_CO2, zsat, ...) per history record
@@ -190,6 +191,30 @@ def history_record_gb(settings: RomsNamelistBase) -> float:
     return 4.0 * cells * (n3d * nz + n2d) / 1e9
 
 
+def writers_per_file(writers: int) -> int:
+    """Writer ranks that write one output file together.
+
+    The model splits its writers into groups, one file per group at a time:
+    ``min(4, max(1, writers // 2))`` per group, lowered until it divides the
+    writers (``writer_groups`` in gpu-ucla-roms ``src/host/io_server.F90``,
+    v0.1.2-beta, without the ``ROMS_GPU_IO_GROUP`` override).
+
+    Parameters
+    ----------
+    writers
+        Writer ranks in the whole job; ``0`` is taken as one, as the model does.
+
+    Returns
+    -------
+    int
+    """
+    writers = max(writers, 1)
+    size = min(GPU_MAX_WRITERS_PER_GROUP, max(1, writers // 2))
+    while writers % size:
+        size -= 1
+    return size
+
+
 def suggested_writers_per_node(settings: RomsNamelistBase, nodes: int) -> int:
     """Writer ranks per node for a GPU run of this namelist.
 
@@ -205,10 +230,10 @@ def suggested_writers_per_node(settings: RomsNamelistBase, nodes: int) -> int:
     The script scans the namelist text, so this finds each key in the first group
     of ``settings.model_dump()`` that holds it, with the script's default when it
     holds none: ``write_passive``, ``wrt_file_his`` and ``wrt_file_rst`` default
-    on, ``nrpf_his`` to 20. A key C-Star's namelist does not have (``wrt_temp``,
-    ``wrt_salt``, and ``write_passive``, which the GPU reads from its own
-    ``&passive_tracers`` group) is read as the script reads a key the namelist
-    lacks: off, or its default.
+    on, ``nrpf_his`` to 20. A key C-Star's namelist does not have
+    (``write_passive``, which the GPU reads from its own ``&passive_tracers``
+    group) is read as the script reads a key the namelist lacks: off, or its
+    default.
 
     Parameters
     ----------

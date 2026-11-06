@@ -49,7 +49,9 @@ from cstar.execution.file_system import is_remote_resource
 from cstar.io.source_data import SourceData
 from cstar.orchestration.serialization import load_blueprint
 from cstar.roms.build_verification import (
+    _get_dependency_root,
     assert_single_toolchain_stack,
+    rpath_link_flags,
     verify_roms_linkage,
 )
 from cstar.roms.discretization import ROMSDiscretization
@@ -61,9 +63,10 @@ from cstar.roms.gpu_layout import (
     GpuRankLayout,
     history_record_gb,
     suggested_writers_per_node,
+    writers_per_file,
 )
 from cstar.roms.namelist import gpu_namelist_schema_for_ref
-from cstar.roms.precheck import check_file_name_lengths, check_gpu_features
+from cstar.roms.precheck import check_gpu_features
 from cstar.roms.simulation import IOLayout, ROMSSimulation
 from cstar.system.manager import get_sysmgr
 
@@ -566,15 +569,22 @@ class ROMSGpuSimulation(ROMSSimulation):
         return self._layer_namelist_overrides(nml, schema, chosen_by)
 
     def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
-        """Check the composed namelist against what gpu-ucla-roms enforces.
+        """Check the composed namelist against what gpu-ucla-roms needs.
 
-        Rule E, the GPU model's start-up feature guard, and rule D, file names
-        too long to read. Not the ucla-roms rules A (output streams divide the
-        restart period) and C (averages end on a MARBL step), which the GPU model
-        does not enforce. When `rank_layout` has fewer writer ranks than
-        `suggested_writers_per_node` gives, says so: a warning when this run's
-        writers would take longer than the rule's target to write one history
-        record, otherwise for information only.
+        Rule E, the GPU model's start-up feature guard, then the base class's
+        rules. Of those, rule D (file names too long to read) mirrors the model;
+        rule A (every output stream's rollover divides the restart period) the
+        GPU model does not check, but it names and splits files as ucla-roms
+        does, so a rollover that does not divide the restart period leaves a
+        partial file at every restart that resume and `continue-from` start
+        from; and rule C applies to ucla-roms 0.13 namelists only, never to the
+        0.11.0 vocabulary the GPU reads. With no cppdefs, rule A checks only the
+        streams no ucla-roms cppdef gates.
+
+        When `rank_layout` has fewer writer ranks than
+        `suggested_writers_per_node` gives, says so: a warning when one history
+        record would take this run's writers longer than the rule's target to
+        write, otherwise for information only.
 
         Parameters
         ----------
@@ -585,19 +595,21 @@ class ROMSGpuSimulation(ROMSSimulation):
         ------
         NamelistConsistencyError
             If the namelist switches on a feature the GPU model does not have,
-            or names a file too long for the model to read.
+            has an output stream whose rollover does not divide the restart
+            period, or names a file too long for the model to read.
         """
         check_gpu_features(nml)
-        check_file_name_lengths(nml)
+        super()._check_runtime_settings(nml)
 
         layout = self.rank_layout
         suggested = suggested_writers_per_node(nml, layout.nodes)
         if layout.writers_per_node >= suggested:
             return
         # the rule also doubles the writers when history and restart are written
-        # at once; that only matters when the record itself is slow to write
+        # at once; that only matters when the record itself is slow to write,
+        # by the writers of one file's group
         record_gb = history_record_gb(nml)
-        seconds = record_gb / (GPU_WRITER_RATE_GBPS * max(layout.writers, 1))
+        seconds = record_gb / (GPU_WRITER_RATE_GBPS * writers_per_file(layout.writers))
         message = (
             f"tiling.writers_per_node is {layout.writers_per_node}; gpu-ucla-roms' "
             f"tools/gpu_layout.py suggests {suggested} per node on {layout.nodes} "
@@ -681,13 +693,8 @@ class ROMSGpuSimulation(ROMSSimulation):
         key = record.get(GPU_BUILD_RECORD_KEY) if isinstance(record, dict) else None
         return key if isinstance(key, dict) else None
 
-    def _mpi_home(self, environment: CStarEnvironment) -> Path:
-        """Find the MPI installation of the GPU toolchain.
-
-        Parameters
-        ----------
-        environment : CStarEnvironment
-            The GPU environment.
+    def _mpi_home(self) -> Path:
+        """Find the MPI installation of the active (GPU) toolchain.
 
         Returns
         -------
@@ -700,9 +707,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         CstarError
             If `MPIHOME` is set in neither.
         """
-        mpi_home = environment.environment_variables.get("MPIHOME") or os.environ.get(
-            "MPIHOME"
-        )
+        mpi_home = _get_dependency_root("MPIHOME")
         if not mpi_home:
             raise CstarError(
                 "MPIHOME is not set: the GPU toolchain profile of "
@@ -750,7 +755,7 @@ class ROMSGpuSimulation(ROMSSimulation):
                 + "\n Call ROMSGpuSimulation.setup() and try again"
             )
 
-        environment = self._gpu_environment()
+        self._gpu_environment()
         key = self._gpu_build_key()
 
         build_dir = codebase_copy.path / GPU_BUILD_DIR_NAME
@@ -782,9 +787,16 @@ class ROMSGpuSimulation(ROMSSimulation):
         assert_single_toolchain_stack(None)
         command = gpu_make_command(
             key,
-            mpi_home=self._mpi_home(environment),
+            mpi_home=self._mpi_home(),
             netcdf_flibs=_run_cmd("nf-config --flibs", raise_on_error=True),
-            link_flags=_expand_link_flags(get_sysmgr().toolchain(TOOLCHAIN).link_flags),
+            link_flags=" ".join(
+                flags
+                for flags in (
+                    _expand_link_flags(get_sysmgr().toolchain(TOOLCHAIN).link_flags),
+                    rpath_link_flags(),
+                )
+                if flags
+            ),
         )
         _run_cmd(
             command,
@@ -828,9 +840,11 @@ class ROMSGpuSimulation(ROMSSimulation):
     def _validate_build_flags(self, build_dir: Path) -> None:
         """Ensure the executable was built for this simulation's build key.
 
-        Called by `attach` before it adopts a previously compiled executable. An
-        executable with no recorded key (built by hand) is adopted with a warning,
-        as the model checks `rho0` itself at start-up.
+        Called by `attach` before it adopts a previously compiled executable.
+        Every build C-Star makes records its key, so an executable without one
+        was built by hand or left by a failed rebuild (`build` removes the
+        record before it compiles); it is refused, since the model checks only
+        `rho0` at start-up and would run with the wrong tracer precision.
 
         Parameters
         ----------
@@ -840,17 +854,16 @@ class ROMSGpuSimulation(ROMSSimulation):
         Raises
         ------
         ValueError
-            If the recorded key differs from the one this simulation needs; the
-            message names what differs.
+            If there is no recorded key, or it differs from the one this
+            simulation needs; the message names what differs.
         """
         recorded = self._recorded_build_key(build_dir)
         if recorded is None:
-            self.log.warning(
-                f"No GPU build record in {build_dir / BUILD_RECORD_NAME}: cannot "
-                "check that the executable was built for this namelist's rho0 and "
-                "tracer precision. The model stops at start-up if rho0 differs."
+            raise ValueError(
+                f"it has no GPU build record ({build_dir / BUILD_RECORD_NAME}), so "
+                "C-Star cannot tell which rho0 and tracer precision it was built "
+                f"for. Re-run the step with {ARG_CLOBBER} to rebuild it"
             )
-            return
 
         needed = dataclasses.asdict(self._gpu_build_key())
         differences = [

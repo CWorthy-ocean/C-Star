@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from cstar.roms.gpu_layout import GpuRankLayout, suggested_writers_per_node
+from cstar.roms.gpu_layout import (
+    GpuRankLayout,
+    suggested_writers_per_node,
+    writers_per_file,
+)
 from cstar.roms.namelist import RomsNamelistV0_11_0
 
 V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
@@ -166,3 +170,16 @@ def test_a_zero_history_period_counts_as_one_record():
         "basic_output_settings__output_period_his": 0.0,
     }
     assert suggested_writers_per_node(_namelist(**settings), 1) == 1
+
+
+@pytest.mark.parametrize(
+    ("writers", "per_file"),
+    [(0, 1), (1, 1), (2, 1), (3, 1), (4, 2), (5, 1), (6, 3), (8, 4), (10, 2), (16, 4)],
+)
+def test_writers_per_file_follows_the_model_s_writer_groups(
+    writers: int, per_file: int
+) -> None:
+    """``min(4, max(1, writers // 2))``, lowered until it divides the writers
+    (gpu-ucla-roms ``io_server.F90`` ``writer_groups``).
+    """
+    assert writers_per_file(writers) == per_file

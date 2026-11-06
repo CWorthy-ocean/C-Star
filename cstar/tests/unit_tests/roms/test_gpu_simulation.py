@@ -223,8 +223,9 @@ def gpu_toolchain() -> Toolchain:
 def gpu_system(
     gpu_toolchain: Toolchain, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[mock.Mock]:
-    """A system manager with a GPU toolchain, in place where `gpu_simulation`
-    looks it up. The modules of the toolchain "set" the link-flag variables.
+    """A system manager with a GPU toolchain, active, in place where
+    `gpu_simulation` and the build helpers it calls look it up. The modules of
+    the toolchain "set" the link-flag variables.
     """
     monkeypatch.setenv("PE_MPICH_GTL_DIR_nvidia80", "-L/opt/cray/gtl/lib")
     monkeypatch.setenv("PE_MPICH_GTL_LIBS_nvidia80", "-lmpi_gtl_cuda")
@@ -234,8 +235,12 @@ def gpu_system(
     sysmgr = mock.Mock()
     sysmgr.name = "perlmutter"
     sysmgr.environment_for.return_value = environment
+    sysmgr.environment = environment
     sysmgr.toolchain.return_value = gpu_toolchain
-    with mock.patch("cstar.roms.gpu_simulation.get_sysmgr", return_value=sysmgr):
+    with (
+        mock.patch("cstar.roms.gpu_simulation.get_sysmgr", return_value=sysmgr),
+        mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+    ):
         yield sysmgr
 
 
@@ -616,20 +621,29 @@ class TestRuntimeSettings:
         with pytest.raises(NamelistConsistencyError, match="Shorten these file names"):
             _ = sim.roms_runtime_settings
 
-    def test_the_ucla_roms_stream_rules_are_not_enforced(
+    def test_the_ucla_roms_stream_rollover_rule_is_enforced(
         self, make_simulation: SimulationFactory
     ) -> None:
         """A history file that rolls over every 7 records does not divide the daily
-        restart period: ucla-roms stops on that (rule A), and the GPU model does
-        not check it.
+        restart period. The GPU model does not check that (ucla-roms does, rule A),
+        but it names and splits files as ucla-roms does, so a restart would leave
+        a partial history file for resume and continue-from to start from.
         """
         overrides = {"basic_output_settings": {"wrt_file_his": True}}
         sim = make_simulation(namelist_overrides=overrides)
 
+        with pytest.raises(NamelistConsistencyError, match="evenly divide"):
+            _ = sim.roms_runtime_settings
+
+    def test_a_rollover_that_divides_the_restart_period_passes(
+        self, make_simulation: SimulationFactory
+    ) -> None:
+        overrides = {"basic_output_settings": {"wrt_file_his": True, "nrpf_his": 1}}
+        sim = make_simulation(namelist_overrides=overrides)
+
         nml = sim.roms_runtime_settings  # no error
 
-        with pytest.raises(NamelistConsistencyError, match="evenly divide"):
-            check_output_streams_divide_rst(nml)
+        check_output_streams_divide_rst(nml)
 
     def test_a_joined_layout_names_whole_files_and_writes_into_output(
         self, make_simulation: SimulationFactory, tmp_path: Path
@@ -697,6 +711,32 @@ class TestRuntimeSettings:
         assert "tiling.writers_per_node is 1" in message
         assert "suggests 3 per node on 2 node(s)" in message
         assert "Raise tiling.writers_per_node" in message
+
+    def test_sizes_the_write_time_by_one_files_writers(
+        self, make_simulation: SimulationFactory, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Eight writers form groups of four (io_server's `writer_groups`), one
+        file per group: a ~64 GB record takes four writers ~27 s, though all
+        eight together would take ~13 s, under the 15 s target.
+        """
+        sim = make_simulation(
+            n_procs=(2, 2),
+            nodes=1,
+            writers_per_node=8,
+            namelist_overrides={
+                "param_settings": {"llm": 2000, "mmm": 2000, "nz": 100, "nt_bgc": 32}
+            },
+        )
+        caplog.set_level(logging.WARNING, logger=sim.log.name)
+
+        with mock.patch(
+            "cstar.roms.gpu_simulation.suggested_writers_per_node", return_value=9
+        ):
+            _ = sim.roms_runtime_settings
+
+        [message] = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert "tiling.writers_per_node is 8" in message
+        assert "may stall the GPUs" in message
 
 
 class TestCdrLiteEnabled:
@@ -807,6 +847,22 @@ class TestBuild:
         ]
         gpu_system.environment_for.assert_called_with("gpu")
         build_tools.assert_single_toolchain_stack.assert_called_once_with(None)
+
+    def test_embeds_the_run_path_the_profile_declares(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+    ) -> None:
+        """Like the CPU build, the GPU build embeds the env file's `LD_RUN_PATH`."""
+        with mock.patch(
+            "cstar.roms.gpu_simulation.rpath_link_flags",
+            return_value="-Wl,-rpath,/opt/hdf5/lib",
+        ):
+            rho0_sim.build()
+
+        command = build_tools.commands[1][0]
+        assert "-lmpi_gtl_cuda -Wl,-rpath,/opt/hdf5/lib -Wl,-rpath," in command
 
     def test_records_the_executable_and_the_build(
         self,
@@ -1116,38 +1172,41 @@ class TestAttach:
         ):
             sim.attach()
 
-    def test_an_executable_without_a_gpu_record_is_adopted_with_a_warning(
-        self,
-        built: Path,
-        make_simulation: SimulationFactory,
-        gpu_system: mock.Mock,
-        caplog: pytest.LogCaptureFixture,
+    @staticmethod
+    def _refused(make_simulation: SimulationFactory) -> str:
+        sim = make_simulation(namelist_overrides={"rho0_settings": {"rho0": 1025.3}})
+        stage_codebase(sim)
+        with (
+            mock.patch.object(ROMSGpuExternalCodeBase, "attach"),
+            mock.patch("cstar.roms.simulation.verify_roms_linkage"),
+            pytest.raises(CstarExpectationFailed) as raised,
+        ):
+            sim.attach()
+        assert sim.exe_path is None
+        return str(raised.value)
+
+    def test_refuses_an_executable_without_a_build_record(
+        self, built: Path, make_simulation: SimulationFactory, gpu_system: mock.Mock
     ) -> None:
-        """A build by hand has no record; the model checks `rho0` itself."""
+        """A failed rebuild (the record is removed before compiling) or a build by
+        hand leaves no record, and the model checks only `rho0` at start-up.
+        """
         (built / BUILD_RECORD_NAME).unlink()
-        caplog.set_level(logging.WARNING)
 
-        sim = self.attach(make_simulation)
+        message = self._refused(make_simulation)
 
-        assert sim.exe_path == built / GPU_EXECUTABLE_NAME
-        assert any("No GPU build record" in r.message for r in caplog.records)
+        assert "has no GPU build record" in message
+        assert "--clobber" in message
 
-    def test_a_record_that_holds_no_gpu_build_is_treated_as_none(
-        self,
-        built: Path,
-        make_simulation: SimulationFactory,
-        gpu_system: mock.Mock,
-        caplog: pytest.LogCaptureFixture,
+    def test_refuses_a_record_that_holds_no_gpu_build(
+        self, built: Path, make_simulation: SimulationFactory, gpu_system: mock.Mock
     ) -> None:
         record = built / BUILD_RECORD_NAME
         contents = json.loads(record.read_text())
         del contents["gpu_build"]
         record.write_text(json.dumps(contents))
-        caplog.set_level(logging.WARNING)
 
-        self.attach(make_simulation)
-
-        assert any("No GPU build record" in r.message for r in caplog.records)
+        assert "has no GPU build record" in self._refused(make_simulation)
 
 
 # ---------------------------------------------------------------------------
