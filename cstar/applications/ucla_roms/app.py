@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import typing as t
+from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
@@ -34,6 +35,7 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.manifest import Product
 from cstar.orchestration.models import (
     Application,
+    Blueprint,
 )
 from cstar.orchestration.serialization import register_representer, strenum_representer
 from cstar.orchestration.transforms import (
@@ -59,6 +61,8 @@ if TYPE_CHECKING:
 
 _APP_NAME_LONG: t.Literal["UCLA-ROMS simulation runner"] = "UCLA-ROMS simulation runner"
 log = get_logger(__name__)
+
+TRomsBlueprint = t.TypeVar("TRomsBlueprint", bound=Blueprint)
 
 
 def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Product]:
@@ -108,24 +112,62 @@ def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Prod
     return products
 
 
-class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
-    """Worker class to run c-star simulations."""
+class RomsSimulationRunner(BlueprintRunner[TRomsBlueprint]):
+    """Worker class to run a `ROMSSimulation` from a blueprint.
+
+    The lifecycle is the same for every ROMS application: refuse a launch
+    outside a scheduler job, build the simulation (from a derived blueprint when
+    resuming), set it up, build and pre-run it, launch it, and post-run it. An
+    application's runner names its simulation class and how its blueprint is
+    resumed.
+    """
 
     simulation: Final["ROMSSimulation"]
     """The simulation instance created from the blueprint."""
     _handler: ExecutionHandler | None = None
     """The execution handler for the simulation."""
 
-    def __init__(
-        self,
-        request: RunnerRequest[UclaRomsBlueprint],
-        service_cfg: "ServiceConfiguration",
-    ) -> None:
-        """Initialize the UclaRomsRunner with the supplied configuration.
+    @classmethod
+    @abstractmethod
+    def _simulation_class(cls) -> "type[ROMSSimulation]":
+        """Return the simulation class this runner builds from its blueprint.
+
+        Resolved when the runner is constructed, not at import, because
+        `cstar.roms.simulation` imports this package.
+
+        Returns
+        -------
+        type[ROMSSimulation]
+        """
+
+    @classmethod
+    @abstractmethod
+    def _resume_blueprint(cls, blueprint_uri: str) -> str:
+        """Derive the blueprint a resumed attempt runs from.
 
         Parameters
         ----------
-        request: RunnerRequest[UclaRomsBlueprint]
+        blueprint_uri : str
+            The URI of the interrupted attempt's blueprint.
+
+        Returns
+        -------
+        str
+            The URI of the blueprint that continues from the interrupted
+            attempt's last usable restart, or `blueprint_uri` unchanged when
+            there is none.
+        """
+
+    def __init__(
+        self,
+        request: RunnerRequest[TRomsBlueprint],
+        service_cfg: "ServiceConfiguration",
+    ) -> None:
+        """Initialize the runner with the supplied configuration.
+
+        Parameters
+        ----------
+        request: RunnerRequest[TRomsBlueprint]
             A request containing information about the simulation to run
 
         service_cfg: ServiceConfiguration
@@ -140,20 +182,20 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         """
         super().__init__(request, service_cfg)
 
-        from cstar.roms.simulation import ROMSSimulation
+        simulation_class = self._simulation_class()
 
         # refuse before anything is derived or written: a refusal that reached
         # the service's shutdown would replace a prior attempt's step record
         if not self.request.pre_run:
-            ROMSSimulation.check_launch_location()
+            simulation_class.check_launch_location()
 
         # a resumed attempt runs from a derived blueprint that continues from
         # the interrupted attempt's last usable restart; the original is kept
         blueprint_uri = self.request.blueprint_uri
         if self.request.resume:
-            blueprint_uri = prepare_resume_blueprint(blueprint_uri)
+            blueprint_uri = self._resume_blueprint(blueprint_uri)
 
-        self.simulation = ROMSSimulation.from_blueprint(blueprint_uri)
+        self.simulation = simulation_class.from_blueprint(blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)
 
     @override
@@ -198,7 +240,7 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         self._handler = self.simulation.run(job_name=self.request.name)
 
     @override
-    async def run(self) -> RunnerResult[UclaRomsBlueprint]:
+    async def run(self) -> RunnerResult[TRomsBlueprint]:
         """Execute the c-star simulation."""
         if self._handler is None:
             msg = "Simulation did not start up successfully"
@@ -240,6 +282,22 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         elif ExecutionStatus.is_terminal(self.state.status):
             msg = "Skipping simulation post-run; simulation did not complete."
             self.log.debug(msg)
+
+
+class UclaRomsRunner(RomsSimulationRunner[UclaRomsBlueprint]):
+    """Worker class to run c-star simulations."""
+
+    @classmethod
+    @override
+    def _simulation_class(cls) -> "type[ROMSSimulation]":
+        from cstar.roms.simulation import ROMSSimulation
+
+        return ROMSSimulation
+
+    @classmethod
+    @override
+    def _resume_blueprint(cls, blueprint_uri: str) -> str:
+        return prepare_resume_blueprint(blueprint_uri)
 
 
 @register_application

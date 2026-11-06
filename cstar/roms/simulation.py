@@ -8,6 +8,7 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
@@ -209,6 +210,18 @@ def _extract_data_join_wildcard(
     logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
 
 
+class IOLayout(StrEnum):
+    """How a ROMS run's input and output files are laid out on disk."""
+
+    PARTITIONED = "partitioned"
+    """C-Star partitions the input files per rank before the run and joins the
+    per-rank outputs from `temp_output` into `output` after it."""
+
+    JOINED = "joined"
+    """The model reads whole input files and writes whole output files straight
+    into `output`: no partitioning and no join."""
+
+
 @dataclass(frozen=True)
 class LaunchPlan:
     """What is needed to launch ROMS once a simulation is prepared."""
@@ -253,6 +266,10 @@ class ROMSSimulation(Simulation):
         Whether ROMS uses the ParallelIO library for input/output.
     pio_codebase : PIOExternalCodeBase
         The repository containing the source code for the ParallelIO library (if use_pio is True).
+    io_layout : IOLayout
+        How input and output files are laid out: `PARTITIONED` (C-Star
+        partitions inputs and joins outputs) or `JOINED` (the model reads and
+        writes whole files; always so with `use_pio`).
     auto_tiling : bool
         Whether the tiling layout is determined automatically rather than from
         `discretization.n_procs_x`/`n_procs_y`. NOTE: this feature is in development.
@@ -436,12 +453,7 @@ class ROMSSimulation(Simulation):
                 "Cannot construct a ROMSSimulation instance without runtime "
                 + "code, but could not find 'runtime_code' entry"
             )
-        if compile_time_code is None:
-            raise NotImplementedError(
-                "This version of C-Star does not support ROMSSimulation instances "
-                + "without code to be included at compile time (.opt files, etc.), but "
-                + "could not find a 'compile_time_code' entry."
-            )
+        self._check_compile_time_code(compile_time_code)
 
         super().__init__(
             name=name,
@@ -519,6 +531,32 @@ class ROMSSimulation(Simulation):
         self._namelist_schema: type[RomsNamelistBase] | None = None
 
         self._execution_handler: ExecutionHandler | None = None
+
+    @classmethod
+    def _check_compile_time_code(
+        cls, compile_time_code: "AdditionalCode | None"
+    ) -> None:
+        """Refuse a simulation constructed without compile-time code.
+
+        An override point: a subclass whose build takes no compile-time code
+        overrides this to accept `None`.
+
+        Parameters
+        ----------
+        compile_time_code : AdditionalCode or None
+            The compile-time code the simulation was constructed with.
+
+        Raises
+        ------
+        NotImplementedError
+            If `compile_time_code` is `None`.
+        """
+        if compile_time_code is None:
+            raise NotImplementedError(
+                "This version of C-Star does not support ROMSSimulation instances "
+                + "without code to be included at compile time (.opt files, etc.), but "
+                + "could not find a 'compile_time_code' entry."
+            )
 
     def _find_namelist_file(self) -> None:
         """Identify the Fortran namelist (.nml) file from runtime code.
@@ -740,6 +778,20 @@ class ROMSSimulation(Simulation):
         return items
 
     @property
+    def io_layout(self) -> IOLayout:
+        """How this simulation's input and output files are laid out.
+
+        `JOINED` when `use_pio` is set (ParallelIO reads and writes whole
+        files), otherwise `PARTITIONED`. A subclass whose model always reads and
+        writes whole files overrides this.
+
+        Returns
+        -------
+        IOLayout
+        """
+        return IOLayout.JOINED if self.use_pio else IOLayout.PARTITIONED
+
+    @property
     def _forcing_datasets(self) -> list[ROMSInputDataset]:
         """Return every forcing input dataset ROMS reads through `frcfiles`.
 
@@ -764,7 +816,8 @@ class ROMSSimulation(Simulation):
         """Collect and return all local paths to ROMS forcing input datasets in ROMS format.
 
         Calls `ROMSInputDataset.path_for_roms` to strip any partitioning information from the
-        local path, in accordance with ROMS' expectations.
+        local path, in accordance with ROMS' expectations; with a joined `io_layout`
+        the datasets are not partitioned, so `path_for_roms_unpartitioned` is used.
 
         This property is used to populate the namelist's `forcing_files.frcfiles`
 
@@ -785,7 +838,7 @@ class ROMSSimulation(Simulation):
         for forcing in self._forcing_datasets:
             paths = (
                 forcing.path_for_roms_unpartitioned
-                if self.use_pio
+                if self.io_layout is IOLayout.JOINED
                 else forcing.path_for_roms
             )
             if not paths:
@@ -818,7 +871,7 @@ class ROMSSimulation(Simulation):
         only needs `reference_date_settings`, so it can run before input
         datasets are partitioned -- `roms_runtime_settings`'s derived
         grid/initial-condition paths require that to have already happened
-        for a non-`use_pio` simulation).
+        for a partitioned `io_layout`).
 
         Returns
         -------
@@ -989,14 +1042,14 @@ class ROMSSimulation(Simulation):
         if self.initial_conditions:
             nml.initial_conditions.inifile = self._namelist_path(
                 self.initial_conditions.path_for_roms_unpartitioned[0]
-                if self.use_pio
+                if self.io_layout is IOLayout.JOINED
                 else self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
             nml.grid_settings.grdname = self._namelist_path(
                 self.model_grid.path_for_roms_unpartitioned[0]
-                if self.use_pio
+                if self.io_layout is IOLayout.JOINED
                 else self.model_grid.path_for_roms[0]
             )
 
@@ -1023,11 +1076,12 @@ class ROMSSimulation(Simulation):
                 self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
-        # ParallelIO writes directly to output_dir without join/partition steps,
-        # otherwise the step should put intermediate work in the temporary directory
+        # a joined layout writes directly to output_dir without join/partition
+        # steps, otherwise the step should put intermediate work in the
+        # temporary directory
         target = (
             self.fs_manager.output_dir
-            if self.use_pio
+            if self.io_layout is IOLayout.JOINED
             else self.fs_manager.temp_output_dir
         )
 
@@ -1077,16 +1131,40 @@ class ROMSSimulation(Simulation):
             run_length_seconds = int((self.end_date - self.start_date).total_seconds())
             nml.time_stepping.ntimes = int(run_length_seconds // dt)
 
+        self._check_runtime_settings(nml)
+
+        return nml
+
+    def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
+        """Check the composed namelist against rules ucla-roms enforces at start-up.
+
+        Called by `roms_runtime_settings` once the namelist is fully composed
+        (derived settings, `namelist_overrides` and `ntimes` applied). An
+        override point: a subclass whose model has other start-up rules
+        replaces or extends these checks.
+
+        Parameters
+        ----------
+        nml : RomsNamelistBase
+            The composed namelist.
+
+        Raises
+        ------
+        NamelistConsistencyError
+            If the output streams do not divide the restart rollover, an averaged
+            stream does not end on a MARBL step, or a file name is too long for
+            ROMS to read (see `cstar.roms.precheck`).
+        """
         # Output-stream / restart-rollover consistency check (ucla-roms >=
         # 0.5.0's check_output_divides_rst, precheck.F90): a user overriding
         # output/restart periods via namelist_overrides (or a hand-edited
         # namelist file) can produce a config ucla-roms rejects at startup;
         # catch it here so the failure surfaces with the override still in
-        # hand, mirroring the `dt <= 0` check above. Version-gated via
-        # applies_to (the precheck landed in ucla-roms 0.5.0) -- gated on
-        # `nml`'s own concrete type rather than `schema` (which selected it),
-        # since `nml` may have been reassigned to a fresh, still-same-type
-        # instance by the override merge above. Beside it runs the MARBL-step
+        # hand, mirroring the `dt <= 0` check in `roms_runtime_settings`.
+        # Version-gated via applies_to (the precheck landed in ucla-roms
+        # 0.5.0) -- gated on `nml`'s own concrete type rather than the schema
+        # that selected it, since `nml` may be a fresh, still-same-type
+        # instance from the override merge. Beside it runs the MARBL-step
         # rule for the averaged `_cdr` and `_bgc_dia_avg` streams (ucla-roms >=
         # 0.13.0's check_avg_ends_on_marbl_step), gated the same way.
         cppdefs = self._active_cppdefs_for_precheck()
@@ -1098,8 +1176,6 @@ class ROMSSimulation(Simulation):
         # Names as written, after the override merge: ROMS cannot read one that
         # fills its buffer, and a pre-run never starts ROMS to find out.
         check_file_name_lengths(nml)
-
-        return nml
 
     @property
     def input_datasets(self) -> list[ROMSInputDataset]:
@@ -1782,7 +1858,7 @@ class ROMSSimulation(Simulation):
         # Mirrors pre_run's own check -- recorded once, rather than once per
         # dataset, so it appears in `problems` a single time.
         partition_dims: tuple[int, int] | None = None
-        if not self.use_pio:
+        if self.io_layout is IOLayout.PARTITIONED:
             n_procs_x, n_procs_y = (
                 self.discretization.n_procs_x,
                 self.discretization.n_procs_y,
@@ -1825,9 +1901,8 @@ class ROMSSimulation(Simulation):
             except self._ATTACH_COMPONENT_ERRORS as e:
                 problems.append(str(e))
 
-        if self.compile_time_code is not None and self.compile_time_code.working_copy:
-            build_dir = self.compile_time_code.working_copy.common_parent
-            exe_path = build_dir / ROMS_EXECUTABLE_NAME
+        if (build_dir := self._build_dir) is not None:
+            exe_path = build_dir / self._executable_name
             if not exe_path.exists():
                 problems.append(f"compiled ROMS executable {exe_path}")
             else:
@@ -1861,7 +1936,7 @@ class ROMSSimulation(Simulation):
                 f"components:\n{problem_list}\n"
                 "Re-run the step with --clobber to start over."
             )
-            if not self.use_pio:
+            if self.io_layout is IOLayout.PARTITIONED:
                 msg += (
                     f" Note that --clobber deletes {self.fs_manager.temp_output_dir}, "
                     "which holds the interrupted attempt's unjoined outputs, "
@@ -1873,6 +1948,32 @@ class ROMSSimulation(Simulation):
         if staged:
             msg += f"; newly staged: {', '.join(staged)}"
         self.log.info(msg)
+
+    @property
+    def _build_dir(self) -> Path | None:
+        """The directory holding the compiled executable and its build record.
+
+        An override point: a subclass that builds elsewhere returns its own
+        directory.
+
+        Returns
+        -------
+        Path or None
+            The common parent of the staged compile-time code, or `None` when
+            there is no compile-time code or it is not staged.
+        """
+        if self.compile_time_code is not None and self.compile_time_code.working_copy:
+            return self.compile_time_code.working_copy.common_parent
+        return None
+
+    @property
+    def _executable_name(self) -> str:
+        """The file name of the compiled executable in `_build_dir`.
+
+        An override point: a subclass whose build produces another executable
+        returns its name.
+        """
+        return ROMS_EXECUTABLE_NAME
 
     def build(self, rebuild: bool = False) -> None:
         """Compile the ROMS executable from source code.
@@ -2010,14 +2111,7 @@ class ROMSSimulation(Simulation):
         schema : type[RomsNamelistBase]
             The namelist schema selected for the build.
         """
-        codebase_copy = self.codebase.working_copy
-        record = {
-            "namelist_schema": schema.__name__,
-            "ucla_roms_ref": self.codebase.source.checkout_target,
-            "ucla_roms_commit": (
-                codebase_copy.checkout_hash if codebase_copy is not None else ""
-            ),
-        }
+        record = self._build_record(schema)
         path = build_dir / BUILD_RECORD_NAME
         try:
             path.write_text(json.dumps(record, indent=2) + "\n")
@@ -2025,6 +2119,31 @@ class ROMSSimulation(Simulation):
             self.log.warning(
                 f"Could not record the namelist schema of the ROMS build at {path}: {e}"
             )
+
+    def _build_record(self, schema: type[RomsNamelistBase]) -> dict[str, Any]:
+        """Describe the build for the record written beside the executable.
+
+        An override point: a subclass adds what else its build must remember.
+
+        Parameters
+        ----------
+        schema : type[RomsNamelistBase]
+            The namelist schema selected for the build.
+
+        Returns
+        -------
+        dict[str, Any]
+            The JSON-serializable record; it must hold `namelist_schema`, which
+            `attach()` reads back.
+        """
+        codebase_copy = self.codebase.working_copy
+        return {
+            "namelist_schema": schema.__name__,
+            "ucla_roms_ref": self.codebase.source.checkout_target,
+            "ucla_roms_commit": (
+                codebase_copy.checkout_hash if codebase_copy is not None else ""
+            ),
+        }
 
     def _attach_namelist_schema(self, build_dir: Path) -> None:
         """Adopt the namelist schema recorded by `build()` for the executable in `build_dir`.
@@ -2252,7 +2371,8 @@ class ROMSSimulation(Simulation):
         This method partitions any required input datasets according to
         the computational domain decomposition specified in the discretization
         settings. Each dataset is divided into smaller files so that they
-        can be processed in parallel by ROMS during execution.
+        can be processed in parallel by ROMS during execution. With a joined
+        `io_layout` the model reads whole files, so nothing is partitioned.
 
         Parameters
         ----------
@@ -2286,12 +2406,18 @@ class ROMSSimulation(Simulation):
         self._validate_reference_dates()
         self._validate_carbonate_sensitivity_inputs()
 
-        if self.use_pio:
-            self._validate_pio_inputs()
-            self.log.info(
-                "use_pio is True: skipping input-dataset partitioning "
-                "(ParallelIO reads joined files directly)"
-            )
+        if self.io_layout is IOLayout.JOINED:
+            if self.use_pio:
+                self._validate_pio_inputs()
+                self.log.info(
+                    "use_pio is True: skipping input-dataset partitioning "
+                    "(ParallelIO reads joined files directly)"
+                )
+            else:
+                self.log.info(
+                    "Joined file layout: skipping input-dataset partitioning "
+                    "(the model reads whole files)"
+                )
             return
 
         n_procs_x, n_procs_y = (
@@ -2347,7 +2473,7 @@ class ROMSSimulation(Simulation):
         # Read the namelist's reference date directly (schema parse +
         # namelist_overrides only), not via `roms_runtime_settings`: that
         # property also derives per-dataset grid/initial-condition paths,
-        # which for a non-`use_pio` simulation require partitioning -- the
+        # which for a partitioned `io_layout` require partitioning -- the
         # very step this check must run before.
         nml, schema, chosen_by = self._read_raw_namelist()
         nml = self._layer_namelist_overrides(nml, schema, chosen_by)
@@ -2404,6 +2530,19 @@ class ROMSSimulation(Simulation):
                 "read by ROMS with ParallelIO:\n- " + "\n- ".join(problems)
             )
 
+    def _cdr_lite_enabled(self) -> bool:
+        """Whether the build enables CDR-LiTE.
+
+        An override point: a subclass whose build records its features other
+        than in `cppdefs.opt` answers from there.
+
+        Returns
+        -------
+        bool
+            `True` when `CDR_LITE` is defined in the staged `cppdefs.opt`.
+        """
+        return self._active_cppdefs_for_precheck().get("cdr_lite", False)
+
     def _validate_carbonate_sensitivity_inputs(self) -> None:
         """Ensure a CDR-LiTE build that reads its carbonate sensitivities from
         forcing files can find the variables ROMS reads.
@@ -2417,8 +2556,8 @@ class ROMSSimulation(Simulation):
         `surface_forcing` or `forcing_corrections`): the union of variables
         over the first file of each of those datasets must cover
         `CARBONATE_SENSITIVITY_VARIABLES`. Otherwise ROMS aborts opaquely at
-        run time. Does nothing when `CDR_LITE` is not defined in the staged
-        `cppdefs.opt`, or when the sensitivities are computed online.
+        run time. Does nothing when the build does not enable CDR_LITE (see
+        `_cdr_lite_enabled`), or when the sensitivities are computed online.
 
         Raises
         ------
@@ -2427,7 +2566,7 @@ class ROMSSimulation(Simulation):
             `CARBONATE_SENSITIVITY_VARIABLES` (all missing variables and the
             files searched are listed).
         """
-        if not self._active_cppdefs_for_precheck().get("cdr_lite", False):
+        if not self._cdr_lite_enabled():
             return
 
         nml, schema, chosen_by = self._read_raw_namelist()
@@ -2518,7 +2657,7 @@ class ROMSSimulation(Simulation):
         self.fs_manager.run_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
-        if not self.use_pio:
+        if self.io_layout is IOLayout.PARTITIONED:
             self.fs_manager.temp_output_dir.mkdir(parents=True, exist_ok=True)
 
         # we run ROMS from the run directory
@@ -2545,21 +2684,39 @@ class ROMSSimulation(Simulation):
             roms_symlink_path, self.exe_path, within=self.fs_manager.root_dir
         )
 
-        n_procs = self.discretization.n_procs_tot
-        roms_exec_cmd = " ".join(
-            [
-                get_sysmgr().environment.mpi_exec_prefix,
-                "-n",
-                f"{n_procs}",
-                "./roms",
-                runtime_settings_fname,
-            ],
-        )
         return LaunchPlan(
-            command=roms_exec_cmd,
+            command=self._launch_command(runtime_settings_fname),
             run_path=run_path,
             output_file=output_file,
             runtime_settings_file=runtime_settings_file,
+        )
+
+    def _launch_command(self, namelist_name: str) -> str:
+        """Build the shell command that launches the model.
+
+        Called by `prepare_launch` after it has checked that the executable
+        and the rank count are known. An override point: a subclass launches
+        its own executable in its own way.
+
+        Parameters
+        ----------
+        namelist_name : str
+            The name of the generated namelist, in the run directory the
+            command runs from.
+
+        Returns
+        -------
+        str
+            The launch command.
+        """
+        return " ".join(
+            [
+                get_sysmgr().environment.mpi_exec_prefix,
+                "-n",
+                f"{self.discretization.n_procs_tot}",
+                f"./{self._executable_name}",
+                namelist_name,
+            ],
         )
 
     @staticmethod
@@ -2665,8 +2822,9 @@ class ROMSSimulation(Simulation):
     def post_run(self) -> None:
         """Perform post-processing steps after the ROMS simulation run.
 
-        With ParallelIO, ROMS already wrote whole files directly into
-        `output`; this method only checks for and logs them. Otherwise, it
+        With a joined `io_layout` (ParallelIO, say), the model already wrote
+        whole files directly into `output`; this method only checks for and
+        logs them. Otherwise, it
         joins the partitioned NetCDF files ROMS wrote into `temp_output`
         (one set per processor) into unified files in `output`, and removes
         every partition piece belonging to a successfully-joined group
@@ -2680,7 +2838,7 @@ class ROMSSimulation(Simulation):
 
         Notes
         -----
-        - For a non-ParallelIO run, this method searches `temp_output` for
+        - For a partitioned run, this method searches `temp_output` for
           NetCDF files with a timestamped pattern (`*.??????????????.*.nc`)
           and merges them into unified files written to `output`.
         - Uses the `ncjoin` command-line tool for file merging.
@@ -2709,8 +2867,8 @@ class ROMSSimulation(Simulation):
 
         output_dir = self.fs_manager.output_dir
 
-        if self.use_pio:
-            # ParallelIO writes whole files directly into `output`; there is
+        if self.io_layout is IOLayout.JOINED:
+            # the model writes whole files directly into `output`; there is
             # nothing to join or move.
             files = list(output_dir.glob("*.nc"))
             if not files:
@@ -2718,6 +2876,8 @@ class ROMSSimulation(Simulation):
                 return
             self.log.info(
                 f"use_pio is True: {len(files)} output files in `{output_dir}`"
+                if self.use_pio
+                else f"{len(files)} output files in `{output_dir}`"
             )
             return
 
