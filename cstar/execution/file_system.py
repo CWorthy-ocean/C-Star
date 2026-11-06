@@ -4,6 +4,7 @@ import errno
 import fcntl
 import functools
 import os
+import random
 import shlex
 import shutil
 import stat
@@ -997,8 +998,11 @@ def write_text_atomic(
     write_bytes_atomic(path, text.encode(encoding), sync=sync)
 
 
+LOCK_FIRST_RETRY: t.Final[float] = 0.05
+"""Seconds before trying again to take a lock that has a timeout; each later pause doubles."""
+
 LOCK_POLL_INTERVAL: t.Final[float] = 5.0
-"""Seconds between attempts to take a lock that has a timeout."""
+"""Longest pause between attempts to take a lock that has a timeout."""
 
 LOCK_LOG_INTERVAL: t.Final[float] = 60.0
 """Seconds between the messages logged while waiting for a lock that has a timeout."""
@@ -1092,6 +1096,7 @@ def _acquire(lock_file: t.IO[str], path: Path, timeout: float | None) -> None:
 
     start = time.monotonic()
     next_log = start
+    pause = min(LOCK_FIRST_RETRY, LOCK_POLL_INTERVAL)
     while True:
         try:
             _flock(lock_file, path, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1112,7 +1117,10 @@ def _acquire(lock_file: t.IO[str], path: Path, timeout: float | None) -> None:
                 timeout,
             )
             next_log = now + LOCK_LOG_INTERVAL
-        time.sleep(min(LOCK_POLL_INTERVAL, timeout - waited))
+        # most holders keep a lock for milliseconds, so try again soon; the
+        # jitter keeps waiters that queued together from retrying together
+        time.sleep(min(pause * random.uniform(0.5, 1.0), timeout - waited))
+        pause = min(2 * pause, LOCK_POLL_INTERVAL)
 
 
 @contextmanager
@@ -1124,8 +1132,9 @@ def locked(path: Path, *, timeout: float | None = None) -> Iterator[None]:
     as well as processes, and the kernel releases it if the holder dies.
 
     Without a `timeout` the call blocks until the lock is free. With one, it tries
-    every `LOCK_POLL_INTERVAL` seconds and logs that it is waiting when first
-    refused and every `LOCK_LOG_INTERVAL` seconds after that.
+    again after `LOCK_FIRST_RETRY` seconds, doubling the pause up to
+    `LOCK_POLL_INTERVAL`, and logs that it is waiting when first refused and
+    every `LOCK_LOG_INTERVAL` seconds after that.
 
     Parameters
     ----------

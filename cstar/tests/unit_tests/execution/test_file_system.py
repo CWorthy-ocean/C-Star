@@ -16,6 +16,8 @@ import requests
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (
+    LOCK_FIRST_RETRY,
+    LOCK_POLL_INTERVAL,
     UNKNOWN_SIZE,
     DirectoryManager,
     JobFileSystemManager,
@@ -1393,6 +1395,66 @@ def test_locked_with_timeout_logs_the_wait_and_gives_up(
         pytest.fail("the lock was taken twice")
 
     assert f"Waiting for the lock at {lock_path}" in caplog.text
+
+
+def test_locked_with_timeout_takes_a_lock_soon_after_its_release(
+    tmp_path: Path,
+) -> None:
+    """Verify a waiter takes a lock well within `LOCK_POLL_INTERVAL` of its
+    release: a lock held briefly by another holder must not cost a full poll.
+    """
+    lock_path = tmp_path / "entry.lock"
+
+    with lock_path.open("a") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        release = threading.Timer(0.2, fcntl.flock, args=(holder, fcntl.LOCK_UN))
+        release.start()
+        start = time.monotonic()
+        with locked(lock_path, timeout=30.0):
+            waited = time.monotonic() - start
+        release.join()
+
+    assert waited < LOCK_POLL_INTERVAL / 2
+
+
+class _FakeClock:
+    """Stands in for `time`: `sleep` advances `monotonic` and records each pause."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.pauses.append(seconds)
+        self.now += seconds
+
+
+def test_locked_with_timeout_backs_off_with_jitter(tmp_path: Path) -> None:
+    """Verify the pause between attempts starts at `LOCK_FIRST_RETRY` and doubles,
+    jittered, up to `LOCK_POLL_INTERVAL`, so waiters that queued together drift
+    apart instead of retrying in step.
+    """
+    lock_path = tmp_path / "entry.lock"
+    clock = _FakeClock()
+
+    with (
+        locked(lock_path),
+        mock.patch("cstar.execution.file_system.time", clock),
+        pytest.raises(LockTimeoutError),
+        locked(lock_path, timeout=60.0),
+    ):
+        pytest.fail("the lock was taken twice")
+
+    # the last pause may be cut short by the timeout
+    *pauses, last = clock.pauses
+    for n, pause in enumerate(pauses):
+        ceiling = min(LOCK_FIRST_RETRY * 2**n, LOCK_POLL_INTERVAL)
+        assert ceiling / 2 <= pause <= ceiling
+    assert last <= LOCK_POLL_INTERVAL
+    assert len(set(pauses[-5:])) > 1
 
 
 @pytest.mark.parametrize(
