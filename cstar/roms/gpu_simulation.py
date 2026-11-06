@@ -71,6 +71,7 @@ from cstar.roms.simulation import IOLayout, ROMSSimulation
 from cstar.system.manager import get_sysmgr
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import datetime
 
     from cstar.base.additional_code import AdditionalCode
@@ -219,12 +220,10 @@ def gpu_make_command(
     rpath for each library directory, so the executable runs without
     `LD_LIBRARY_PATH` set.
 
-    The NetCDF flags come from the installations, not from ``nf-config``; the
-    include flag is passed as `NETCDF_FFLAGS` and the libraries in `LIBS`, which
-    override the Makefile's own ``nf-config`` defaults:
-    Cray's NetCDF modules ship an ``nf-config`` that prints no flags (their
-    ``ftn`` wrapper adds them), and a conda environment early on ``PATH`` can
-    supply an ``nf-config`` built for another compiler.
+    The NetCDF flags come from the installations, not from ``nf-config``: Cray's
+    NetCDF modules ship an ``nf-config`` that prints no flags (their ``ftn``
+    wrapper adds them). The include flag is passed as `NETCDF_FFLAGS` and the
+    libraries in `LIBS`, which override the Makefile's ``nf-config`` defaults.
 
     Parameters
     ----------
@@ -739,8 +738,10 @@ class ROMSGpuSimulation(ROMSSimulation):
         """Find the NetCDF installations of the active (GPU) toolchain.
 
         `NETCDFFHOME` names the NetCDF-Fortran installation where it is apart
-        from NetCDF-C; otherwise both are under `NETCDFHOME`. Build verification
-        reads the two variables the same way.
+        from NetCDF-C; otherwise both are under `NETCDFHOME`, as build
+        verification reads them. Both come from one source: the GPU profile's
+        environment file when it names either, else the process environment,
+        so a variable exported in the shell never mixes with the profile's.
 
         Returns
         -------
@@ -752,8 +753,14 @@ class ROMSGpuSimulation(ROMSSimulation):
         CstarError
             If neither `NETCDFFHOME` nor `NETCDFHOME` is set.
         """
-        netcdf_home = _get_dependency_root("NETCDFHOME")
-        netcdff_home = _get_dependency_root("NETCDFFHOME") or netcdf_home
+        profile = get_sysmgr().environment.environment_variables
+        source: Mapping[str, str] = (
+            profile
+            if profile.get("NETCDFHOME") or profile.get("NETCDFFHOME")
+            else os.environ
+        )
+        netcdf_home = source.get("NETCDFHOME")
+        netcdff_home = source.get("NETCDFFHOME") or netcdf_home
         if not netcdff_home:
             raise CstarError(
                 "NETCDFHOME is not set: the GPU toolchain profile of "

@@ -255,6 +255,9 @@ def gpu_system(
     """
     monkeypatch.setenv("PE_MPICH_GTL_DIR_nvidia80", "-L/opt/cray/gtl/lib")
     monkeypatch.setenv("PE_MPICH_GTL_LIBS_nvidia80", "-lmpi_gtl_cuda")
+    # a login shell may export these (e.g. on Anvil); the profile must decide
+    monkeypatch.delenv("NETCDFHOME", raising=False)
+    monkeypatch.delenv("NETCDFFHOME", raising=False)
     environment = mock.Mock(
         mpi_exec_prefix=MPI_PREFIX,
         environment_variables={"MPIHOME": MPI_HOME, "NETCDFHOME": NETCDF_HOME},
@@ -1124,6 +1127,61 @@ class TestBuild:
         assert variables["LIBS"].startswith(
             "-L/opt/nff/lib -L/opt/nc/lib -lnetcdff -lnetcdf "
         )
+
+    def test_netcdffhome_alone_names_both(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+    ) -> None:
+        """With only `NETCDFFHOME`, NetCDF-C is taken to be installed with it."""
+        gpu_system.environment_for.return_value.environment_variables = {
+            "MPIHOME": MPI_HOME,
+            "NETCDFFHOME": "/opt/nff/",
+        }
+
+        rho0_sim.build()
+
+        [(command, _)] = build_tools.make_commands
+        variables = make_variables(command)
+        assert variables["NETCDF_FFLAGS"] == "-I/opt/nff/include"
+        assert variables["LIBS"].startswith("-L/opt/nff/lib -lnetcdff -lnetcdf ")
+        assert "-Wl,-rpath,/opt/nff/lib" in variables["LIBS"]
+
+    def test_a_shell_netcdffhome_does_not_mix_with_the_profile(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The profile names `NETCDFHOME` only; a `NETCDFFHOME` exported in the
+        shell (another toolchain's) must not supply `netcdf.mod`.
+        """
+        monkeypatch.setenv("NETCDFFHOME", "/ambient/nff")
+
+        rho0_sim.build()
+
+        [(command, _)] = build_tools.make_commands
+        assert "/ambient" not in command
+        assert make_variables(command)["NETCDF_FFLAGS"] == "-I/opt/netcdf/include"
+
+    def test_the_process_environment_is_used_when_the_profile_names_neither(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        gpu_system.environment_for.return_value.environment_variables = {
+            "MPIHOME": MPI_HOME
+        }
+        monkeypatch.setenv("NETCDFHOME", "/from/the/environment")
+
+        rho0_sim.build()
+
+        [(command, _)] = build_tools.make_commands
+        assert "NETCDF_FFLAGS=-I/from/the/environment/include" in command
 
     def test_never_asks_nf_config(
         self,
