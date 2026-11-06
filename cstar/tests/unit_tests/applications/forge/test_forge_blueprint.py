@@ -440,6 +440,7 @@ def test_forge_blueprint_is_single_node():
     """
     cfg = _build()
     assert cfg.single_node is True
+    assert cfg.compute_needs.single_node is True
 
 
 def test_cpus_needed_is_grid_sized_forge_estimate():
@@ -451,6 +452,7 @@ def test_cpus_needed_is_grid_sized_forge_estimate():
     cfg = _build()
     gk = cfg.domain.grid_kwargs
     assert cfg.cpus_needed == estimate_forge_cpus(gk["nx"], gk["ny"], gk["N"])
+    assert cfg.compute_needs.tasks == cfg.cpus_needed
 
 
 def test_forge_blueprint_import_stays_light():
@@ -9598,6 +9600,7 @@ def test_forge_application_emitted_blueprint(use_pio):
 
     assert emitted.filename == f"B_{cfg.name}.yaml"
     assert emitted.application == "ucla_roms"
+    assert emitted.compute_needs.tasks == cfg.n_procs
     assert emitted.cpus_needed == cfg.n_procs
     assert emitted.single_node is False
     assert emitted.start_date == cfg.run.start_date

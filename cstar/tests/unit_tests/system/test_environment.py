@@ -327,17 +327,19 @@ class TestSetupEnvironmentFromFiles:
         clear=True,
     )
     @pytest.mark.parametrize(
-        "system_name,expected_path",
+        "system_name,profile,expected_path",
         [
-            ["perlmutter", "additional_files/lmod_lists/perlmutter.lmod"],
-            ["derecho", "additional_files/lmod_lists/derecho.lmod"],
-            ["expanse", "additional_files/lmod_lists/expanse.lmod"],
+            ["perlmutter", "", "additional_files/lmod_lists/perlmutter.lmod"],
+            ["derecho", "", "additional_files/lmod_lists/derecho.lmod"],
+            ["expanse", "", "additional_files/lmod_lists/expanse.lmod"],
+            ["perlmutter", "gpu", "additional_files/lmod_lists/perlmutter.gpu.lmod"],
         ],
     )
     def test_lmod_path(
         self,
         tmp_path: Path,
         system_name: str,
+        profile: str,
         expected_path: str,
         custom_system_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
     ):
@@ -369,6 +371,7 @@ class TestSetupEnvironmentFromFiles:
                 system_name=system_name,
                 mpi_exec_prefix="mpi-prefix",
                 compiler="gnu",
+                profile=profile,
             )
 
             assert env.lmod_path == tmp_path / expected_path
@@ -384,11 +387,12 @@ class TestSetupEnvironmentFromFiles:
         clear=True,
     )
     @pytest.mark.parametrize(
-        ("package_root", "system_name"),
+        ("package_root", "system_name", "profile", "file_name"),
         [
-            ["foo/bar", "system-name-1"],
-            ["boo/far", "system-name-2"],
-            ["foz/baz", "system-name-3"],
+            ["foo/bar", "system-name-1", "", "system-name-1.env"],
+            ["boo/far", "system-name-2", "", "system-name-2.env"],
+            ["foz/baz", "system-name-3", "", "system-name-3.env"],
+            ["foz/baz", "system-name-3", "gpu", "system-name-3.gpu.env"],
         ],
     )
     def test_system_env_path(
@@ -396,6 +400,8 @@ class TestSetupEnvironmentFromFiles:
         tmp_path: Path,
         package_root: str,
         system_name: str,
+        profile: str,
+        file_name: str,
     ):
         """Verify that the system env property is based on package root and system name.
 
@@ -416,13 +422,14 @@ class TestSetupEnvironmentFromFiles:
             system_name=system_name,
             mpi_exec_prefix="mpi-prefix",
             compiler="gnu",
+            profile=profile,
         )
 
         with patch.object(CStarEnvironment, "package_root", new=tmp_pkg_root):
             # Instantiate the environment to trigger loading the environment variables
 
             system_actual = env.system_env_path
-            expected = tmp_pkg_root / f"additional_files/env_files/{system_name}.env"
+            expected = tmp_pkg_root / f"additional_files/env_files/{file_name}"
 
             assert system_actual == expected
 

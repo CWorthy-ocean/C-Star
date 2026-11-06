@@ -11,7 +11,11 @@ from unittest import mock
 import pytest
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
-from cstar.applications.ucla_roms.app import UclaRomsRunner, main
+from cstar.applications.ucla_roms.app import (
+    RomsSimulationRunner,
+    UclaRomsRunner,
+    main,
+)
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
@@ -947,6 +951,68 @@ def test_runner_init_resume_builds_simulation_from_resume_blueprint(
     mock_prepare.assert_called_once_with(str(blueprint_path))
     mock_sim_class.from_blueprint.assert_called_once_with(resumed_uri)
     assert request.blueprint_uri == str(blueprint_path)
+
+
+def _stub_roms_runner(
+    simulation_class: mock.Mock,
+) -> type[RomsSimulationRunner[UclaRomsBlueprint]]:
+    """Return a `RomsSimulationRunner` whose hooks are stubs: it builds
+    `simulation_class` and resumes any blueprint as `<uri>.derived`.
+    """
+
+    class _StubRunner(RomsSimulationRunner[UclaRomsBlueprint]):
+        @classmethod
+        def _simulation_class(cls) -> mock.Mock:  # type: ignore[override]
+            return simulation_class
+
+        @classmethod
+        def _resume_blueprint(cls, blueprint_uri: str) -> str:
+            return f"{blueprint_uri}.derived"
+
+    return _StubRunner
+
+
+def test_roms_runner_needs_its_hooks(blueprint_path: Path) -> None:
+    """The generic runner cannot be built without naming its simulation class
+    and how its blueprint is resumed.
+    """
+    request, service_config = _runner_request(blueprint_path)
+
+    with pytest.raises(TypeError, match="abstract"):
+        RomsSimulationRunner(request, service_config)  # type: ignore[abstract]
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_roms_runner_builds_the_simulation_its_hooks_name(
+    blueprint_path: Path, resume: bool
+) -> None:
+    """The runner checks the launch location through, and builds the
+    simulation from, the class its `_simulation_class` hook names, from the
+    blueprint its `_resume_blueprint` hook derives when it resumes.
+    """
+    request, service_config = _runner_request(blueprint_path, resume=resume)
+    simulation_class = mock.Mock()
+    simulation_class.from_blueprint.return_value.name = "My Simulation"
+
+    runner = _stub_roms_runner(simulation_class)(request, service_config)
+
+    simulation_class.check_launch_location.assert_called_once_with()
+    expected_uri = f"{blueprint_path}.derived" if resume else str(blueprint_path)
+    simulation_class.from_blueprint.assert_called_once_with(expected_uri)
+    assert runner.simulation is simulation_class.from_blueprint.return_value
+    assert runner.simulation.name == "my-simulation"
+
+
+def test_roms_runner_pre_run_skips_the_launch_check(blueprint_path: Path) -> None:
+    """A pre-run never launches the model, so the launch location is not checked."""
+    request, service_config = _runner_request(blueprint_path, pre_run=True)
+    simulation_class = mock.Mock()
+    simulation_class.from_blueprint.return_value.name = "sim"
+
+    _stub_roms_runner(simulation_class)(request, service_config)
+
+    simulation_class.check_launch_location.assert_not_called()
+    simulation_class.from_blueprint.assert_called_once_with(str(blueprint_path))
 
 
 @pytest.mark.asyncio

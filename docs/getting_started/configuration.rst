@@ -101,7 +101,8 @@ precedence, a later one replaces an earlier one:
    example).
 
 The SLURM settings (``CSTAR_SLURM_ACCOUNT``, ``CSTAR_SLURM_QUEUE``,
-``CSTAR_SLURM_MAX_WALLTIME``) have no command-line option but two more layers
+``CSTAR_SLURM_MAX_WALLTIME``, ``CSTAR_SLURM_GPU_ACCOUNT``,
+``CSTAR_SLURM_GPU_QUEUE``) have no command-line option but two more layers
 above the environment: the workplan's ``compute_environment.slurm`` block,
 then each step's ``compute_overrides.slurm``. The value that results for
 each step is recorded in the transformed workplan in the run directory. See

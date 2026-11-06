@@ -46,6 +46,27 @@ earlier releases cut a longer name off silently. C-Star applies the same limits 
 every release, with headroom for the rank suffix a non-PIO run appends, which
 ROMS's own check does not allow for. Ungated by schema version.
 
+Rule E -- :func:`check_gpu_features` mirrors the GPU model's start-up feature guard
+(gpu-ucla-roms ``src/host/feature_guard.F90``, v0.1.2-beta): the GPU model reads
+only the namelist groups it knows, so a CPU namelist that switches on a UCLA ROMS
+feature it does not have (``river_analytical``, ``pipe_source``, ``do_zslice``,
+monthly restarts, ...) would otherwise run without that feature and without a
+word, which is why the model stops instead. Five further switches act on the CPU
+only with a cpp key the GPU cannot see (or only add nesting fields to the
+restart); the model prints a warning for them, and so does the rule. It applies to
+the ``ucla_roms_gpu`` application only, and runs on the blueprint's namelist
+overrides at validation and on the composed namelist before launch, so the run
+fails at the desk rather than at start-up on the machine. Ungated by schema
+version: the GPU model has one guard whatever namelist vocabulary it reads, and a
+group C-Star's schema does not have (``tides_settings``) just never matches.
+
+Rule F -- :func:`check_gpu_array_sizes`: gpu-ucla-roms declares some namelist
+arrays smaller than UCLA ROMS does (v0.1.2-beta: ``akt_bak_in(2)`` in
+``src/host/case_io.F90``, temperature and salinity only, where ucla-roms
+allocates ``Akt_bak(NT)``, one value per tracer). A CPU namelist that gives more
+values stops the GPU model while it reads the group (``too many constants to
+initialize group item``). Same scope and call points as Rule E.
+
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
 A and C need an explicit, caller-supplied set of active cppdefs to know which
@@ -67,6 +88,7 @@ forge-shaped dict must first convert it (see
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -123,10 +145,13 @@ class NamelistConsistencyError(ValueError):
     different vocabulary (e.g. Forge's settings dict) can point a user at the
     field it actually exposes, without this module knowing that vocabulary
     exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
-    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"`` or
-    ``"file_name_lengths"``). ``"file_name_lengths"`` reports every offending
-    key in one error, so its ``section`` may join several group names with
-    ``", "`` and its ``keys`` may span those groups.
+    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"``,
+    ``"file_name_lengths"``, ``"gpu_features"`` or ``"gpu_array_sizes"``).
+    ``"file_name_lengths"`` reports every offending key in one error, so its
+    ``section`` may join several group names with ``", "`` and its ``keys`` may
+    span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"`` also report
+    every offender in one error, but their ``section`` and ``keys`` name the
+    first of them only.
     """
 
     def __init__(
@@ -781,4 +806,226 @@ def check_file_name_lengths(settings: RomsNamelistBase | Mapping[str, Any]) -> N
             rule="file_name_lengths",
             section=", ".join(dict.fromkeys(group for group, _, _ in too_long)),
             keys=tuple(dict.fromkeys(key for _, key, _ in too_long)),
+        )
+
+
+@dataclass(frozen=True)
+class _GpuSwitch:
+    """One ``need_off`` or ``warn_on`` call in the GPU model's ``feature_guard.F90``.
+
+    Parameters
+    ----------
+    group
+        ``RomsNamelistBase`` group field name (the ``&<group>`` header in
+        ``namelist.nml``) the switch lives in.
+    key
+        Real Fortran namelist key of the switch.
+    what
+        The feature the switch turns on, in the GPU model's own wording.
+    when
+        ``(group, key)`` of a gate switch that must itself be true for the GPU
+        model to look at this one (the ``if (is_true(...))`` around the call),
+        or ``None`` for an unconditional check.
+    """
+
+    group: str
+    key: str
+    what: str
+    when: tuple[str, str] | None = None
+
+    def is_on(self, settings: RomsNamelistBase | Mapping[str, Any]) -> bool:
+        """Whether the GPU model sees this switch on in ``settings``.
+
+        A switch is on only when its value is ``True``; a missing group or key
+        is off, as it is for the model, which scans the namelist text.
+        """
+        if self.when is not None and not _is_true(settings, *self.when):
+            return False
+        return _is_true(settings, self.group, self.key)
+
+
+def _is_true(
+    settings: RomsNamelistBase | Mapping[str, Any], group: str, key: str
+) -> bool:
+    """Whether ``group``.``key`` is set to ``True`` in ``settings``."""
+    return _section(_section(settings, group), key) is True
+
+
+_GPU_STOP_SWITCHES: tuple[_GpuSwitch, ...] = (
+    _GpuSwitch(
+        "river_frc_settings",
+        "river_analytical",
+        "analytical river forcing",
+        when=("river_frc_settings", "river_source"),
+    ),
+    _GpuSwitch("pipe_frc_settings", "pipe_source", "pipe (point source) forcing"),
+    _GpuSwitch(
+        "cdr_output_settings",
+        "cdr_monthly_averages",
+        "monthly CDR averages",
+        when=("cdr_output_settings", "do_cdr_output"),
+    ),
+    _GpuSwitch(
+        "cdr_tracer_output_settings", "do_cdr_tracer_output", "CDR tracer output"
+    ),
+    _GpuSwitch(
+        "cdr_gas_exch_output_settings",
+        "cdr_gas_monthly_averages",
+        "monthly CDR gas-exchange averages",
+        when=("cdr_gas_exch_output_settings", "do_cdr_gas_exch_output"),
+    ),
+    _GpuSwitch(
+        "cdr_lite_output_settings",
+        "cdr_lite_monthly_averages",
+        "monthly CDR_LITE averages",
+        when=("cdr_lite_output_settings", "do_cdr_lite_output"),
+    ),
+    _GpuSwitch("zslice_settings", "do_zslice", "z-slice output"),
+    _GpuSwitch("particles_settings", "floats", "particles (floats)"),
+    _GpuSwitch("frc_output_settings", "wrt_frc", "forcing output"),
+    _GpuSwitch("surf_flx_output_settings", "wrt_smflx", "surface momentum flux output"),
+    _GpuSwitch("surf_flx_output_settings", "wrt_stflx", "surface tracer flux output"),
+    _GpuSwitch("basic_output_settings", "monthly_restarts", "monthly restarts"),
+    _GpuSwitch("bgc_settings", "wrt_bgc_dia_avg", "BGC diagnostic averages output"),
+    _GpuSwitch("tidal_frc_settings", "ana_tides", "analytical tides"),
+    _GpuSwitch("tides_settings", "ana_tides", "analytical tides"),
+)
+"""The ``need_off`` calls of gpu-ucla-roms ``src/host/feature_guard.F90`` at
+v0.1.2-beta, in its order: switches that stop the GPU run when true. Every call
+is listed, including those on groups C-Star's namelist schemas do not have
+(``cdr_tracer_output_settings`` after ucla-roms 0.9.0, ``tides_settings``), which
+never match."""
+
+_GPU_WARN_SWITCHES: tuple[_GpuSwitch, ...] = (
+    _GpuSwitch(
+        "diagnostics_settings",
+        "diag_uv",
+        "momentum budget diagnostics (DIAGNOSTICS cpp key on the CPU) "
+        "are not on the GPU",
+    ),
+    _GpuSwitch(
+        "diagnostics_settings",
+        "diag_trc",
+        "tracer budget diagnostics (DIAGNOSTICS cpp key on the CPU) are not on the GPU",
+    ),
+    _GpuSwitch(
+        "sponge_tune_settings",
+        "ub_tune",
+        "sponge tuning (SPONGE_TUNE cpp key on the CPU) is not on the GPU",
+    ),
+    _GpuSwitch(
+        "sponge_tune_settings",
+        "wrt_sponge",
+        "sponge tuning output (SPONGE_TUNE cpp key on the CPU) is not on the GPU",
+    ),
+    _GpuSwitch(
+        "calc_pflx_settings",
+        "calc_pflx",
+        "pressure-flux fields for nesting are not computed; "
+        "restarts will not hold them",
+    ),
+)
+"""The ``warn_on`` calls of gpu-ucla-roms ``src/host/feature_guard.F90`` at
+v0.1.2-beta, in its order: switches the GPU model only warns about. ``what`` is
+the model's full warning sentence."""
+
+
+def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist switches on a feature the
+    GPU model does not have -- mirrors gpu-ucla-roms' start-up feature guard
+    (``src/host/feature_guard.F90``, v0.1.2-beta; see Rule E in the module
+    docstring), which stops the run otherwise.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`
+        (a live ``RomsNamelistBase``, or a mapping of group name to group
+        mapping, such as a blueprint's namelist overrides). A missing group or key
+        counts as off, and a switch is on only when its value is ``True``.
+
+    Raises
+    ------
+    NamelistConsistencyError
+        If any switch in ``_GPU_STOP_SWITCHES`` is on. One error lists them all, in
+        the model's wording; its ``section`` and ``keys`` name the first.
+
+    Warns
+    -----
+    UserWarning
+        If any switch in ``_GPU_WARN_SWITCHES`` is on: one warning lists them all.
+        Emitted before the error, when both apply, as the model prints its warnings
+        and errors together.
+    """
+    warned = [s for s in _GPU_WARN_SWITCHES if s.is_on(settings)]
+    if warned:
+        warnings.warn(
+            "The GPU model does not honour these namelist settings (it warns about them "
+            "at start-up):\n  "
+            + "\n  ".join(f"&{s.group} {s.key} = .true.: {s.what}" for s in warned),
+            UserWarning,
+            stacklevel=2,
+        )
+
+    unsupported = [s for s in _GPU_STOP_SWITCHES if s.is_on(settings)]
+    if unsupported:
+        raise NamelistConsistencyError(
+            "The GPU model stops at start-up on these namelist settings "
+            "(feature_guard):\n  "
+            + "\n  ".join(
+                f"&{s.group} {s.key} = .true.: {s.what} is not available on the "
+                "GPU model."
+                for s in unsupported
+            )
+            + "\nSet them to .false. to run on the GPU.",
+            rule="gpu_features",
+            section=unsupported[0].group,
+            keys=(unsupported[0].key,),
+        )
+
+
+_GPU_ARRAY_SIZES: tuple[tuple[str, str, int], ...] = (
+    ("vertical_mixing_settings", "akt_bak", 2),
+)
+"""``(group, key, size)`` of the namelist arrays gpu-ucla-roms (v0.1.2-beta)
+declares smaller than UCLA ROMS does: ``akt_bak_in(2)`` in ``src/host/case_io.F90``
+(temperature, salinity) against ucla-roms' ``Akt_bak(NT)``."""
+
+
+def check_gpu_array_sizes(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist gives a GPU-model array
+    more values than the model declares (Rule F in the module docstring), which
+    stops the model while it reads the group.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_gpu_features`. A missing
+        group or key, or a scalar value, passes.
+
+    Raises
+    ------
+    NamelistConsistencyError
+        If any array in ``_GPU_ARRAY_SIZES`` has more values than its size. One
+        error lists them all; its ``section`` and ``keys`` name the first.
+    """
+    oversized = [
+        (group, key, size, len(value))
+        for group, key, size in _GPU_ARRAY_SIZES
+        if isinstance(value := _section(_section(settings, group), key), list | tuple)
+        and len(value) > size
+    ]
+    if oversized:
+        raise NamelistConsistencyError(
+            "The GPU model reads fewer values than this namelist gives, and stops "
+            "at start-up on the rest:\n  "
+            + "\n  ".join(
+                f"&{group} {key}: {given} values; the GPU model reads {size}"
+                for group, key, size, given in oversized
+            )
+            + "\nGive only those values in the blueprint's namelist_overrides, e.g. "
+            f"{oversized[0][0]}: {{{oversized[0][1]}: [<{oversized[0][2]} values>]}}.",
+            rule="gpu_array_sizes",
+            section=oversized[0][0],
+            keys=(oversized[0][1],),
         )

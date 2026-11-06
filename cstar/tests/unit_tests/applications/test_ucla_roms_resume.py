@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from cstar.applications.ucla_roms.resume import (
     RESUME_SUFFIX,
     find_resume_restart,
     prepare_resume_blueprint,
+    resume_blueprint_from_restart,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.serialization import deserialize
@@ -293,3 +295,104 @@ class TestPrepareResumeBlueprint:
 
         new_bp = deserialize(result, UclaRomsBlueprint)
         assert str(new_bp.grid.data[0].location) == str(tmp_path / "relative_grid.nc")
+
+
+class TestResumeBlueprintFromRestart:
+    """Tests for `resume_blueprint_from_restart`, which another application
+    calls with its own blueprint class and its own restart search.
+    """
+
+    @staticmethod
+    def _joined(
+        bp: UclaRomsBlueprint, fs: RomsFileSystemManager
+    ) -> tuple[Path, int | None]:
+        """Search `output` for whole files, whatever the blueprint says."""
+        return fs.output_dir, None
+
+    @staticmethod
+    def _end_date(bp: UclaRomsBlueprint) -> datetime:
+        return bp.runtime_params.end_date
+
+    def test_resumes_from_where_locate_says(
+        self, bp_factory: Callable[..., Path]
+    ) -> None:
+        """A whole restart in the directory `locate` names is found and a
+        `.resume.yaml` continuing from it is written, even though the blueprint
+        itself is not a ParallelIO one.
+        """
+        bp_path = bp_factory(use_pio=False)
+        bp = deserialize(bp_path, UclaRomsBlueprint)
+        fs = RomsFileSystemManager(bp.effective_working_dir)
+        ts = "20200601000000"
+        whole_path = fs.output_dir / _whole_name(ts)
+        _write_netcdf(whole_path)
+        before = bp_path.read_bytes()
+
+        result = resume_blueprint_from_restart(
+            str(bp_path), UclaRomsBlueprint, self._joined, end_date=self._end_date
+        )
+
+        assert Path(result) == fs.run_dir / f"{bp_path.stem}.{RESUME_SUFFIX}.yaml"
+        new_bp = deserialize(result, UclaRomsBlueprint)
+        ic = new_bp.initial_conditions.data[0]
+        assert Path(str(ic.location)) == whole_path.resolve()
+        assert ic.partitioned is False
+        assert new_bp.runtime_params.start_date.strftime("%Y%m%d%H%M%S") == ts
+        assert bp_path.read_bytes() == before
+
+    def test_locate_is_given_the_blueprint_and_its_file_layout(
+        self, bp_factory: Callable[..., Path]
+    ) -> None:
+        """`locate` receives the loaded blueprint and the layout of its working
+        directory; with no restart there, the blueprint is returned unchanged.
+        """
+        bp_path = bp_factory(use_pio=False)
+        seen: list[tuple[UclaRomsBlueprint, RomsFileSystemManager]] = []
+
+        def locate(
+            bp: UclaRomsBlueprint, fs: RomsFileSystemManager
+        ) -> tuple[Path, int | None]:
+            seen.append((bp, fs))
+            return fs.output_dir, None
+
+        result = resume_blueprint_from_restart(
+            str(bp_path), UclaRomsBlueprint, locate, end_date=self._end_date
+        )
+
+        assert result == str(bp_path)
+        [(bp, fs)] = seen
+        assert isinstance(bp, UclaRomsBlueprint)
+        assert fs.root_dir == bp.effective_working_dir
+
+    def test_errors_from_locate_propagate(
+        self, bp_factory: Callable[..., Path]
+    ) -> None:
+        """A blueprint `locate` cannot place a search for is refused as it says."""
+
+        def locate(
+            bp: UclaRomsBlueprint, fs: RomsFileSystemManager
+        ) -> tuple[Path, int | None]:
+            raise CstarExpectationFailed("cannot tell where the restarts are")
+
+        with pytest.raises(CstarExpectationFailed, match="cannot tell where"):
+            resume_blueprint_from_restart(
+                str(bp_factory()), UclaRomsBlueprint, locate, end_date=self._end_date
+            )
+
+    def test_end_date_accessor_says_when_the_run_finished(
+        self, bp_factory: Callable[..., Path]
+    ) -> None:
+        """A restart at or after the end the accessor reads is refused."""
+        bp_path = bp_factory(use_pio=True)
+        bp = deserialize(bp_path, UclaRomsBlueprint)
+        fs = RomsFileSystemManager(bp.effective_working_dir)
+        _write_netcdf(fs.output_dir / _whole_name("20200601000000"))
+
+        with pytest.raises(CstarExpectationFailed, match="appears to have finished"):
+            resume_blueprint_from_restart(
+                str(bp_path),
+                UclaRomsBlueprint,
+                self._joined,
+                # the run is taken to end before the restart
+                end_date=lambda bp: bp.runtime_params.start_date,
+            )

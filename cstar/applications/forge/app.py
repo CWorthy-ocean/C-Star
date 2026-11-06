@@ -48,6 +48,7 @@ from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import Product
+from cstar.orchestration.models import ComputeNeeds
 
 if t.TYPE_CHECKING:
     from collections.abc import Sequence
@@ -216,8 +217,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
             filename=emitted_blueprint_filename(blueprint.name),
             application=UCLA_ROMS_APP,
             producer=producer_ref(blueprint),
-            cpus_needed=blueprint.n_procs,
-            single_node=False,
+            compute_needs=ComputeNeeds(tasks=blueprint.n_procs),
             start_date=blueprint.run.start_date,
             end_date=blueprint.run.end_date,
             use_pio=blueprint.use_pio,

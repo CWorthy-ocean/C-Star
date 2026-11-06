@@ -57,6 +57,7 @@ from cstar.orchestration.models import (
     Application,
     BlueprintIdentity,
     BlueprintState,
+    ComputeNeeds,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     RunRef,
@@ -87,6 +88,7 @@ from cstar.orchestration.transforms import (
     OverrideTransform,
     TemplateFillTransform,
     WorkplanTransformer,
+    _inject_compute,
     _inject_compute_defaults,
     anchor_blueprint_path,
     apply_automatic_overrides,
@@ -6150,9 +6152,9 @@ def test_preflight_overrides_records_single_node(
 
     with mock.patch.object(
         HelloWorldBlueprint,
-        "single_node",
+        "compute_needs",
         new_callable=mock.PropertyMock,
-        return_value=True,
+        return_value=ComputeNeeds(single_node=True),
     ):
         transformed = WorkplanTransformer(wp).apply()
 
@@ -6195,6 +6197,143 @@ def test_preflight_overrides_respects_declared_cpus(
     )
 
     assert compute_overrides["slurm"]["num_cpus"] == 7
+
+
+def test_preflight_overrides_records_gpu_needs(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a blueprint needing GPUs has `num_gpus` recorded in its step's
+    `compute_overrides` alongside `num_cpus`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    wp = Workplan(
+        name="gpu-needs-workplan",
+        description="A workplan whose blueprint needs GPUs.",
+        steps=[step],
+    )
+
+    with mock.patch.object(
+        HelloWorldBlueprint,
+        "compute_needs",
+        new_callable=mock.PropertyMock,
+        return_value=ComputeNeeds(tasks=10, gpu_tasks=8),
+    ):
+        transformed = WorkplanTransformer(wp).apply()
+
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+
+    assert compute_overrides["slurm"] == {"num_cpus": 10, "num_gpus": 8}
+
+
+def test_preflight_overrides_respects_declared_gpus(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step that already declares `num_gpus` keeps its declared value
+    while `num_cpus` is still injected from the blueprint's compute needs.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        compute_overrides={"slurm": {"num_gpus": 2}},
+    )
+    wp = Workplan(
+        name="gpus-declared-workplan",
+        description="A workplan whose step already declares num_gpus.",
+        steps=[step],
+    )
+
+    with mock.patch.object(
+        HelloWorldBlueprint,
+        "compute_needs",
+        new_callable=mock.PropertyMock,
+        return_value=ComputeNeeds(tasks=10, gpu_tasks=8),
+    ):
+        transformed = WorkplanTransformer(wp).apply()
+
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+
+    assert compute_overrides["slurm"]["num_gpus"] == 2
+    assert compute_overrides["slurm"]["num_cpus"] == 10
+
+
+def test_preflight_overrides_rejects_gpus_without_tasks(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step declaring more `num_gpus` than the `num_cpus` it ends up
+    with fails at schedule time, naming the step and `num_cpus`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file (one task).
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        compute_overrides={"slurm": {"num_gpus": 4}},
+    )
+    wp = Workplan(
+        name="gpus-without-tasks-workplan",
+        description="A workplan whose step declares GPUs but no tasks for them.",
+        steps=[step],
+    )
+
+    with pytest.raises(ValueError, match=r"'producer'.*num_cpus"):
+        WorkplanTransformer(wp).apply()
+
+
+def test_preflight_overrides_accepts_gpus_with_tasks(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step declaring a task per GPU passes schedule-time validation.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        compute_overrides={"slurm": {"num_cpus": 4, "num_gpus": 4}},
+    )
+    wp = Workplan(
+        name="gpus-with-tasks-workplan",
+        description="A workplan whose step declares a task per GPU.",
+        steps=[step],
+    )
+
+    transformed = WorkplanTransformer(wp).apply()
+
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+    assert compute_overrides["slurm"]["num_cpus"] == 4
+    assert compute_overrides["slurm"]["num_gpus"] == 4
 
 
 def test_preflight_overrides_deferred_step_skips_cpu_injection(
@@ -8946,6 +9085,138 @@ def test_inject_compute_defaults_skips_num_nodes_for_single_node_steps() -> None
         "single_node": True,
         "num_cpus": 4,
         "queue_name": "q",
+    }
+
+
+def test_inject_compute_defaults_withholds_cpu_defaults_from_gpu_steps() -> None:
+    """The workplan's CPU queue, account and node count do not reach a GPU step;
+    its walltime does, and a CPU step in the same workplan gets all of them.
+    """
+    env = ComputeEnvironment(
+        slurm=SlurmComputeSpec(
+            queue_name="wholenode",
+            account_name="acct",
+            max_walltime="01:00:00",
+            num_nodes=3,
+            cpus_per_node=128,
+        )
+    )
+    gpu_step = _live_step_for_defaults({"slurm": {"num_cpus": 4, "num_gpus": 4}})
+    cpu_step = _live_step_for_defaults({"slurm": {"num_cpus": 4}})
+
+    gpu = _inject_compute_defaults(gpu_step, env).compute_overrides["slurm"]
+    cpu = _inject_compute_defaults(cpu_step, env).compute_overrides["slurm"]
+
+    assert gpu == {"num_cpus": 4, "num_gpus": 4, "max_walltime": "01:00:00"}
+    assert cpu == {
+        "num_cpus": 4,
+        "queue_name": "wholenode",
+        "account_name": "acct",
+        "max_walltime": "01:00:00",
+        "num_nodes": 3,
+        "cpus_per_node": 128,
+    }
+
+
+@pytest.mark.parametrize(
+    ("needs", "expected"),
+    [
+        pytest.param(
+            ComputeNeeds(tasks=10, gpu_tasks=8, nodes=2),
+            {"num_cpus": 10, "num_gpus": 8, "num_nodes": 2},
+            id="gpu-with-writers",
+        ),
+        pytest.param(
+            ComputeNeeds(tasks=8, gpu_tasks=8, nodes=2),
+            {"num_cpus": 8, "num_gpus": 8, "num_nodes": 2},
+            id="gpu-without-writers",
+        ),
+        pytest.param(
+            ComputeNeeds(tasks=8, nodes=2),
+            {"num_cpus": 8, "num_nodes": 2},
+            id="cpu",
+        ),
+    ],
+)
+def test_blueprint_node_count_survives_workplan_defaults(
+    needs: ComputeNeeds, expected: dict[str, t.Any]
+) -> None:
+    """A node count that came from the blueprint's compute needs is not replaced by
+    the workplan-wide `num_nodes`, whether the step is a GPU step (which drops that
+    default) or a CPU step (where the step's own value wins).
+    """
+    step = _inject_compute(_live_step_for_defaults({}), needs)
+    env = ComputeEnvironment(
+        slurm=SlurmComputeSpec(num_nodes=5, max_walltime="01:00:00")
+    )
+
+    slurm = _inject_compute_defaults(step, env).compute_overrides["slurm"]
+
+    assert slurm == {**expected, "max_walltime": "01:00:00"}
+
+
+def test_declared_node_count_beats_the_blueprints() -> None:
+    """A step that declares `num_nodes` keeps it over the blueprint's own."""
+    step = _inject_compute(
+        _live_step_for_defaults({"slurm": {"num_nodes": 4}}),
+        ComputeNeeds(tasks=8, gpu_tasks=8, nodes=2),
+    )
+
+    slurm = step.compute_overrides["slurm"]
+
+    assert slurm == {"num_cpus": 8, "num_gpus": 8, "num_nodes": 4}
+
+
+def test_inject_compute_rejects_a_node_count_the_spec_refuses() -> None:
+    """A step pinned to one node cannot take a blueprint that spans two."""
+    step = _live_step_for_defaults({"slurm": {"single_node": True}})
+
+    with pytest.raises(ValueError, match=r"'only'.*single_node"):
+        _inject_compute(step, ComputeNeeds(tasks=8, nodes=2))
+
+
+def test_workplan_transformer_records_blueprint_node_count(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a blueprint's node count reaches the transformed step's
+    `compute_overrides` though the workplan sets its own `num_nodes`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    wp = Workplan(
+        name="gpu-nodes-workplan",
+        description="A workplan whose blueprint fixes its node count.",
+        compute_environment={"slurm": {"num_nodes": 5, "max_walltime": "01:00:00"}},
+        steps=[
+            Step(
+                name="producer",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+
+    with mock.patch.object(
+        HelloWorldBlueprint,
+        "compute_needs",
+        new_callable=mock.PropertyMock,
+        return_value=ComputeNeeds(tasks=10, gpu_tasks=8, nodes=2),
+    ):
+        transformed = WorkplanTransformer(wp).apply()
+
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+
+    assert compute_overrides["slurm"] == {
+        "num_cpus": 10,
+        "num_gpus": 8,
+        "num_nodes": 2,
+        "max_walltime": "01:00:00",
     }
 
 

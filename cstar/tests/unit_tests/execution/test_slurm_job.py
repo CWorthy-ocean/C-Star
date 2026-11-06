@@ -6,7 +6,8 @@ import pytest
 from cstar.base.env import ENV_CSTAR_SLURM_DISABLE_MT, FLAG_OFF, FLAG_ON
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.execution.scheduler_job import ExecutionStatus, SlurmJob
-from cstar.system.scheduler import SlurmPartition, SlurmQOS, SlurmScheduler
+from cstar.system.scheduler import Queue, SlurmPartition, SlurmQOS, SlurmScheduler
+from cstar.system.toolchain import GpuNodes
 
 
 class TestSlurmJob:
@@ -231,6 +232,133 @@ class TestSlurmJob:
         assert job.nodes == 2
         assert "#SBATCH --nodes=2" in job.script
         assert "#SBATCH --ntasks=16" in job.script
+
+    def _gpu_scheduler(
+        self,
+        queues: list[Queue],
+        gpu: GpuNodes | None = None,
+    ) -> SlurmScheduler:
+        """A scheduler with CPU nodes (`-C cpu`) and, by default, 4-GPU nodes
+        (`-C gpu`).
+        """
+        return SlurmScheduler(
+            queues=queues,
+            primary_queue_name=queues[0].name,
+            other_scheduler_directives={"-C": "cpu"},
+            requires_task_distribution=False,
+            max_cpus_per_node=64,
+            gpu=gpu or GpuNodes(4, "regular", {"-C": "gpu", "--gpu-bind": "none"}, 64),
+        )
+
+    def test_script_gpu_job_on_qos_scheduler(self):
+        """A GPU job replaces the task distribution with a uniform per-node layout
+        and takes the system's GPU directives in place of its CPU ones.
+        """
+        scheduler = self._gpu_scheduler(
+            [SlurmQOS(name="regular", query_name="regular")]
+        )
+        job = SlurmJob(
+            **self.common_job_params
+            | {"scheduler": scheduler, "queue_name": "", "cpus": 6, "gpus": 1}
+        )
+
+        assert job.script.split("\n") == [
+            "#!/bin/bash",
+            "#SBATCH --job-name=test_job",
+            "#SBATCH --output=/test/output.log",
+            "#SBATCH --qos=regular",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=6",
+            "#SBATCH --ntasks=6",
+            "#SBATCH --gpus-per-node=1",
+            "#SBATCH --account=test_account",
+            "#SBATCH --export=ALL",
+            "#SBATCH --mail-type=ALL",
+            "#SBATCH --time=01:00:00",
+            "#SBATCH -C gpu",
+            "#SBATCH --gpu-bind none",
+            "",
+            "set -e",
+            "ulimit -s unlimited",
+            "echo Hello, World",
+        ]
+        assert "-C cpu" not in job.script
+
+    def test_script_gpu_job_requests_only_its_gpus_per_node(self):
+        """Two GPUs on a 4-GPU node request two, not the node's four."""
+        scheduler = self._gpu_scheduler(
+            [SlurmQOS(name="regular", query_name="regular")]
+        )
+        job = SlurmJob(
+            **self.common_job_params
+            | {"scheduler": scheduler, "queue_name": "", "cpus": 2, "gpus": 2}
+        )
+
+        lines = job.script.split("\n")
+        assert "#SBATCH --gpus-per-node=2" in lines
+        assert "#SBATCH --ntasks-per-node=2" in lines
+
+    def test_script_gpu_job_spans_nodes_uniformly(self):
+        """Eight GPUs on 4-GPU nodes take two nodes, with the same tasks and GPUs
+        on each.
+        """
+        scheduler = self._gpu_scheduler(
+            [SlurmQOS(name="regular", query_name="regular")]
+        )
+        job = SlurmJob(
+            **self.common_job_params
+            | {"scheduler": scheduler, "queue_name": "", "cpus": 8, "gpus": 8}
+        )
+
+        lines = job.script.split("\n")
+        assert "#SBATCH --nodes=2" in lines
+        assert "#SBATCH --ntasks-per-node=4" in lines
+        assert "#SBATCH --ntasks=8" in lines
+        assert "#SBATCH --gpus-per-node=4" in lines
+
+    def test_script_gpu_job_rejects_uneven_tasks(self):
+        """Tasks that do not divide over the nodes are refused on SLURM too."""
+        scheduler = self._gpu_scheduler(
+            [SlurmQOS(name="regular", query_name="regular")]
+        )
+        with pytest.raises(ValueError, match="5 tasks cannot be spread evenly"):
+            SlurmJob(
+                **self.common_job_params
+                | {
+                    "scheduler": scheduler,
+                    "queue_name": "",
+                    "cpus": 5,
+                    "gpus": 4,
+                    "nodes": 2,
+                }
+            )
+
+    def test_script_gpu_job_uses_system_gpu_partition(self):
+        """On a partition scheduler an unset queue becomes the GPU queue the
+        system registers, and an explicit queue wins.
+        """
+        scheduler = self._gpu_scheduler(
+            [
+                self.mock_partition,
+                SlurmPartition(name="gpu"),
+                SlurmPartition(name="gpu-debug"),
+            ],
+            gpu=GpuNodes(4, "gpu", {"--gpu-bind": "none"}, 128),  # as Anvil has it
+        )
+
+        params = self.common_job_params | {
+            "scheduler": scheduler,
+            "queue_name": "",
+            "cpus": 4,
+            "gpus": 4,
+        }
+        default = SlurmJob(**params)
+        explicit = SlurmJob(**params | {"queue_name": "gpu-debug"})
+
+        assert "#SBATCH --partition=gpu" in default.script.split("\n")
+        assert "#SBATCH --partition=gpu-debug" in explicit.script.split("\n")
+        assert "#SBATCH --gpu-bind none" in default.script
+        assert "#SBATCH -C" not in default.script
 
     @pytest.mark.filterwarnings(
         r"ignore:.* Attempting to create scheduler job.*:UserWarning"

@@ -37,6 +37,8 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_QUEUE,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
@@ -72,13 +74,26 @@ class SlurmComputeSpec(BaseModel):
     """
     max_walltime: str = Field(default="", pattern=WALLTIME_RE)
     """The maximum walltime for the job, `HH:MM:SS` or SLURM's `D-HH:MM:SS`."""
+    num_gpus: int = Field(default=0, ge=0)
+    """GPU-bearing tasks: each needs one GPU; zero for a CPU job.
+
+    The node count follows from the system's GPUs per node.
+    """
+    gpus_per_node: int | None = Field(default=None, ge=1)
+    """GPUs per node to plan against; unset, the system's registered value."""
     queue_name: str = ""
     """The priority of the job."""
     account_name: str = ""
     """The SLURM account to run the job under."""
 
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
-    """Configure model to ignore empty strings."""
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid", str_strip_whitespace=True
+    )
+    """Configure model to ignore empty strings.
+
+    Unknown keys are rejected: they would otherwise be dropped silently, and a
+    typo'd `num_gpus` would run a CPU job.
+    """
 
     @model_validator(mode="after")
     def _single_node_needs_one_node(self) -> "SlurmComputeSpec":
@@ -90,6 +105,42 @@ class SlurmComputeSpec(BaseModel):
             msg = (
                 f"single_node is set but num_nodes={self.num_nodes}; a single-node "
                 "job must use num_nodes=1 (or leave num_nodes unset)"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _gpus_per_node_needs_gpus(self) -> "SlurmComputeSpec":
+        """Reject GPU planning values that contradict the rest of the spec, so
+        the contradiction surfaces when the workplan is checked rather than at
+        submission.
+        """
+        if self.gpus_per_node is None:
+            return self
+        if self.num_gpus == 0:
+            msg = (
+                f"gpus_per_node is set ({self.gpus_per_node}) but num_gpus=0; "
+                "set num_gpus, or drop gpus_per_node for a CPU job"
+            )
+            raise ValueError(msg)
+        if self.single_node and self.num_gpus > self.gpus_per_node:
+            msg = (
+                f"single_node is set but num_gpus={self.num_gpus} exceeds "
+                f"gpus_per_node={self.gpus_per_node}; a single-node job cannot "
+                "span more than one node's GPUs"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _gpus_need_tasks(self) -> "SlurmComputeSpec":
+        """Reject more GPUs than tasks, so the contradiction surfaces when the
+        workplan is checked rather than at submission.
+        """
+        if self.num_gpus > self.num_cpus:
+            msg = (
+                f"num_gpus={self.num_gpus} exceeds num_cpus={self.num_cpus}; "
+                "a GPU job needs at least one task per GPU, so set num_cpus"
             )
             raise ValueError(msg)
         return self
@@ -189,12 +240,44 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return get_env_item(ENV_CSTAR_SLURM_QUEUE).value
 
+    @staticmethod
+    def configured_gpu_queue() -> str:
+        """Get the queue to use for GPU SLURM jobs.
+
+        Read from the environment variable `CSTAR_SLURM_GPU_QUEUE`.
+
+        Returns
+        -------
+        str
+            The queue to use for GPU jobs; empty when unset, in which case the
+            system's registered GPU queue applies.
+        """
+        return get_env_item(ENV_CSTAR_SLURM_GPU_QUEUE).value
+
+    @staticmethod
+    def configured_gpu_account() -> str:
+        """Get the account to charge for GPU SLURM jobs.
+
+        Read from the environment variable `CSTAR_SLURM_GPU_ACCOUNT`.
+
+        Returns
+        -------
+        str
+            The account for GPU jobs; empty when unset, in which case GPU jobs
+            use `configured_account()`.
+        """
+        return get_env_item(ENV_CSTAR_SLURM_GPU_ACCOUNT).value
+
     _SPEC_ENV: t.ClassVar[dict[str, str]] = {
         "account_name": ENV_CSTAR_SLURM_ACCOUNT,
         "queue_name": ENV_CSTAR_SLURM_QUEUE,
         "max_walltime": ENV_CSTAR_SLURM_MAX_WALLTIME,
     }
-    """The `SlurmComputeSpec` field each `configured_*` environment variable backs."""
+    """The `SlurmComputeSpec` field each `configured_*` environment variable backs.
+
+    Only the CPU settings are listed: a GPU step takes its queue from the system
+    when none is configured, so a workplan's CPU steps still need these set.
+    """
 
     @classmethod
     def workplan_settings(cls, workplan: "Workplan") -> frozenset[str]:
@@ -259,7 +342,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
     @staticmethod
     def _get_default_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
-        """Create the default compute spec for SLURM.
+        """Create the default CPU compute spec for SLURM.
+
+        A GPU step does not use this default; see `_get_compute_spec`.
 
         `num_cpus` here is only a floor: the workplan transformer records
         each step's actual cpu requirement into
@@ -299,15 +384,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         -------
         SlurmComputeSpec
         """
-        default_compute = SlurmLauncher._get_default_compute_spec(step)
-        compute = default_compute
-
+        overrides: SlurmComputeSpec | None = None
         if step.compute_overrides:
             try:
                 overrides = SlurmComputeAdapter().adapt(step.compute_overrides)
-                compute = default_compute.model_copy(
-                    update=overrides.model_dump(exclude_defaults=True)
-                )
             except CstarExpectationFailed:
                 # overrides carry nothing for this launcher; keep the default
                 msg = f"No SLURM overrides for step {step.name!r}; using defaults"
@@ -317,7 +397,26 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 # in place of the declared resources must fail, not warn
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
                 raise CstarError(msg) from ex
-        return compute
+
+        if overrides is None:
+            return SlurmLauncher._get_default_compute_spec(step)
+
+        # A GPU step is charged to the GPU account (else the CPU account) and
+        # submitted to the GPU queue; with none configured the queue stays empty
+        # and the job takes the system's registered GPU queue.
+        default_compute = (
+            SlurmComputeSpec(
+                max_walltime=SlurmLauncher.configured_walltime(),
+                queue_name=SlurmLauncher.configured_gpu_queue(),
+                account_name=SlurmLauncher.configured_gpu_account()
+                or SlurmLauncher.configured_account(),
+            )
+            if overrides.num_gpus > 0
+            else SlurmLauncher._get_default_compute_spec(step)
+        )
+        return default_compute.model_copy(
+            update=overrides.model_dump(exclude_defaults=True)
+        )
 
     @staticmethod
     def adapt_step(
@@ -348,6 +447,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             nodes=compute.num_nodes,
             cpus_per_node=compute.cpus_per_node,
             single_node=compute.single_node,
+            gpus=compute.num_gpus,
+            gpus_per_node=compute.gpus_per_node,
             script_path=step.script_path,
             run_path=step.script_path.parent,
             job_name=step.safe_name,

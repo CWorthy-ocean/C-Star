@@ -80,6 +80,7 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
     from cstar.orchestration.index import RunRecord
+    from cstar.orchestration.models import ComputeNeeds
     from cstar.orchestration.orchestration import Launcher
 
 log = get_logger(__name__)
@@ -1318,11 +1319,7 @@ class WorkplanTransformer(LoggingMixin):
                     # baked in); record their cpu requirement directly
                     transformed_steps.extend(
                         _inject_compute_defaults(
-                            _inject_cpus(
-                                child,
-                                child.blueprint.cpus_needed,
-                                single_node=child.blueprint.single_node,
-                            ),
+                            _inject_compute(child, child.blueprint.compute_needs),
                             env,
                         )
                         for child in overridden_steps
@@ -1546,8 +1543,9 @@ def preflight_overrides(step: LiveStep) -> LiveStep:
     `compute_overrides` instead of the blueprint to determine CPU
     requirements. When the step's `compute_overrides` does not already
     declare `["slurm"]["num_cpus"]`, this injects it from the merged
-    blueprint's `cpus_needed`, so the transformed workplan records the
-    requirement regardless of whether the blueprint can be read later.
+    blueprint's `compute_needs` (`num_cpus`, and `num_gpus` for a GPU run), so
+    the transformed workplan records the requirement regardless of whether the
+    blueprint can be read later.
 
     Parameters
     ----------
@@ -1558,7 +1556,7 @@ def preflight_overrides(step: LiveStep) -> LiveStep:
     -------
     LiveStep
         The step unchanged (deferred, or CPU count already declared), or
-        with `compute_overrides` enriched with the CPU requirement.
+        with `compute_overrides` enriched with the blueprint's compute needs.
     """
     if step.is_deferred:
         return step
@@ -1567,38 +1565,37 @@ def preflight_overrides(step: LiveStep) -> LiveStep:
         step.blueprint, dict(step.blueprint_overrides)
     )
 
-    return _inject_cpus(step, merged.cpus_needed, single_node=merged.single_node)
+    return _inject_compute(step, merged.compute_needs)
 
 
-def _inject_cpus(step: LiveStep, cpus: int, single_node: bool = False) -> LiveStep:
-    """Record a step's cpu requirement in its `compute_overrides`.
+def _inject_compute(step: LiveStep, needs: "ComputeNeeds") -> LiveStep:
+    """Record a step's compute needs in its `compute_overrides`.
 
-    Declared values win; the requirement is injected only when
-    `["slurm"]["num_cpus"]` is absent. When the blueprint declares itself
-    `single_node`, that is recorded alongside as `["slurm"]["single_node"]`
-    so the launcher can clamp the cpu count to one node's capacity without
-    reading the blueprint.
+    Declared values win; the needs are merged beneath whatever the step
+    already declares under `["slurm"]`. `num_gpus` is recorded when the
+    blueprint needs GPUs, and `single_node` when it confines its work to one
+    node, so the launcher can size the job without reading the blueprint. The
+    shape of the recorded mapping comes from `ComputeNeeds.slurm_overrides`.
 
     Parameters
     ----------
     step : LiveStep
         The step to enrich.
-    cpus : int
-        The cpu requirement read from the step's blueprint.
-    single_node : bool, optional
-        Whether the blueprint confines its work to one node. Only recorded
-        when `True`; a `False` value leaves the overrides untouched so that
-        an explicitly declared `single_node` is never overwritten.
+    needs : ComputeNeeds
+        The compute needs read from the step's blueprint.
 
     Returns
     -------
     LiveStep
-        The step with `compute_overrides` recording the cpu requirement.
+        The step with `compute_overrides` recording the compute needs.
 
     Raises
     ------
     CstarExpectationFailed
         If the step declares a non-mapping `slurm` compute override.
+    ValueError
+        If the merged `slurm` overrides are not a valid `SlurmComputeSpec`, e.g.
+        a step declaring more `num_gpus` than `num_cpus`.
     """
     declared = step.compute_overrides.get("slurm", {})
     if not isinstance(declared, Mapping):
@@ -1608,21 +1605,24 @@ def _inject_cpus(step: LiveStep, cpus: int, single_node: bool = False) -> LiveSt
         )
         raise CstarExpectationFailed(msg)
 
-    injected: dict[str, t.Any] = {"num_cpus": cpus}
-    if single_node:
-        injected["single_node"] = True
-
     new_overrides = deep_merge(
-        {"slurm": injected},
+        {"slurm": needs.slurm_overrides()},
         dict(step.compute_overrides),
     )
+    try:
+        SlurmComputeSpec.model_validate(new_overrides["slurm"])
+    except ValidationError as ex:
+        msg = f"Step {step.name!r}: invalid compute overrides: {ex.errors()[0]['msg']}"
+        raise ValueError(msg) from ex
     return LiveStep.from_step(step, update={"compute_overrides": new_overrides})
 
 
 def _inject_compute_defaults(step: LiveStep, env: ComputeEnvironment) -> LiveStep:
     """Record the workplan-wide SLURM defaults in a step's `compute_overrides`.
 
-    Declared step values win; the workplan's defaults fill in the rest.
+    Declared step values win; the workplan's defaults fill in the rest. A step
+    that declares GPUs does not take the workplan's CPU `queue_name`,
+    `account_name`, `num_nodes` or `cpus_per_node`.
 
     Parameters
     ----------
@@ -1645,6 +1645,12 @@ def _inject_compute_defaults(step: LiveStep, env: ComputeEnvironment) -> LiveSte
     if isinstance(declared, Mapping) and declared.get("single_node"):
         # a single-node step cannot take a workplan-wide node count
         defaults.pop("num_nodes", None)
+    if isinstance(declared, Mapping) and declared.get("num_gpus", 0) > 0:
+        # the workplan's CPU queue, account, node count and tasks per node
+        # describe CPU nodes; a GPU step takes the system's GPU defaults
+        # (`CSTAR_SLURM_GPU_*`) and sizes its nodes from its GPUs
+        for key in ("queue_name", "account_name", "num_nodes", "cpus_per_node"):
+            defaults.pop(key, None)
 
     new_overrides = deep_merge({"slurm": defaults}, dict(step.compute_overrides))
     try:

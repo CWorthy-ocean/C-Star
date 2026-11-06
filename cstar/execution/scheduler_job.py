@@ -361,6 +361,8 @@ def create_scheduler_job(
     send_email: bool | None = True,
     walltime: str = "",
     depends_on: Iterable[str] = (),
+    gpus: int = 0,
+    gpus_per_node: int | None = None,
 ) -> "SchedulerJob":
     """Create a scheduler job for either SLURM or PBS based on the system's active
     scheduler.
@@ -407,6 +409,13 @@ def create_scheduler_job(
         the queue's maximum.
     depends_on: Iterable[str], optional
         An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
+    gpus : int, optional
+        The number of GPU-bearing tasks, each needing one GPU; zero for a CPU job.
+        The node count follows from the GPUs per node, and `cpus` is then the
+        total task count. Defaults to 0.
+    gpus_per_node : int, optional
+        The GPUs a node holds, which the node count is planned against. When unset,
+        the system's registered value. Only meaningful when `gpus` is positive.
 
     Returns
     -------
@@ -418,7 +427,10 @@ def create_scheduler_job(
     TypeError
         If the active scheduler is not SLURM or PBS.
     CstarError
-        If the system requires a SLURM account or queue and it is empty.
+        If the system requires a SLURM account or queue and it is empty. An empty
+        queue is accepted for a GPU job on a system with GPU nodes registered,
+        which takes the system's GPU queue. A GPU job with an empty account is
+        also refused on a system whose GPU nodes require one.
     """
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
@@ -434,18 +446,32 @@ def create_scheduler_job(
 
     klass = sysmgr.environment.settings_klass
     if klass is not None and issubclass(klass, SlurmSettingsBase):
+        # a GPU job on a system with GPU nodes takes that system's GPU queue
         supplied = {
-            ENV_CSTAR_SLURM_ACCOUNT: account_key,
-            ENV_CSTAR_SLURM_QUEUE: queue_name,
+            ENV_CSTAR_SLURM_ACCOUNT: bool(account_key),
+            ENV_CSTAR_SLURM_QUEUE: bool(queue_name)
+            or (gpus > 0 and scheduler.gpu is not None),
         }
         required = klass.required_settings()
-        if missing := [n for n, v in supplied.items() if n in required and not v]:
+        if missing := [n for n, ok in supplied.items() if n in required and not ok]:
             msg = (
                 f"Unable to submit a job: {' and '.join(missing)} must be set on "
                 "this system. Run `cstar init` to save your SLURM settings, or "
                 "export them in your shell."
             )
             raise CstarError(msg)
+
+    if (
+        gpus > 0
+        and scheduler.gpu is not None
+        and scheduler.gpu.account_required
+        and not account_key
+    ):
+        raise CstarError(
+            "GPU jobs on this system need an account: set CSTAR_SLURM_GPU_ACCOUNT "
+            "(or CSTAR_SLURM_ACCOUNT), run `cstar init`, or give `account_name` "
+            "in the workplan."
+        )
 
     return job_type(
         scheduler=scheduler,
@@ -463,6 +489,8 @@ def create_scheduler_job(
         send_email=send_email,
         walltime=walltime,
         depends_on=depends_on,
+        gpus=gpus,
+        gpus_per_node=gpus_per_node,
     )
 
 
@@ -539,6 +567,8 @@ class SchedulerJob(ExecutionHandler, ABC):
         send_email: bool | None = True,
         walltime: str = "",
         depends_on: Iterable[str] = (),
+        gpus: int = 0,
+        gpus_per_node: int | None = None,
     ):
         """Initialize a SchedulerJob instance.
 
@@ -585,13 +615,25 @@ class SchedulerJob(ExecutionHandler, ABC):
             queue's maximum walltime.
         depends_on: Iterable[str], optional
             An iterable of job ids to pass as dependencies to the scheduler. Defaults to ().
+        gpus : int, optional
+            The number of GPU-bearing tasks, each needing one GPU; zero for a CPU job.
+            For a GPU job `cpus` is the total task count and the node count follows
+            from the GPUs per node. Defaults to 0.
+        gpus_per_node : int, optional
+            The GPUs a node holds, which the node count is planned against. When
+            unset, the scheduler's registered GPU nodes decide. The GPUs requested
+            on each node are `gpus` over the node count. Only meaningful when
+            `gpus` is positive.
 
         Raises
         ------
+        CstarError
+            If `gpus` is positive and the scheduler has no GPU nodes registered.
         ValueError
             If no walltime is provided and the queue's maximum walltime is unavailable, or
             if the provided walltime exceeds the queue's maximum allowed walltime, or if
-            `single_node` is set alongside a `nodes` count other than 1.
+            `single_node` is set alongside a `nodes` count other than 1, or if the GPUs
+            do not fit the requested layout.
         EnvironmentError
             If neither `nodes` nor `cpus_per_node` are provided and the scheduler cannot
             determine the system's CPUs per node automatically.
@@ -599,6 +641,9 @@ class SchedulerJob(ExecutionHandler, ABC):
         self._scheduler = scheduler
         self._commands = commands
         self._cpus = cpus
+        self._gpus = gpus
+        self._gpus_per_node_planned = gpus_per_node
+        self._gpus_per_node_requested: int | None = None
 
         self._default_name = (
             f"cstar_job_{datetime.strftime(datetime.now(), '%Y%m%d_%H%M%S')}"
@@ -614,7 +659,16 @@ class SchedulerJob(ExecutionHandler, ABC):
         self._output_file = (
             Path(output_file) if output_file is not None else output_file
         )
-        self._queue_name = queue_name or scheduler.primary_queue_name
+        if gpus > 0:
+            if scheduler.gpu is None:
+                msg = (
+                    "This system has no GPU nodes registered with C-Star; "
+                    f"a job asking for {gpus} GPUs cannot be submitted"
+                )
+                raise CstarError(msg)
+            self._queue_name = queue_name or scheduler.gpu.queue
+        else:
+            self._queue_name = queue_name or scheduler.primary_queue_name
         self._walltime = walltime
 
         self.depends_on = depends_on
@@ -687,6 +741,27 @@ class SchedulerJob(ExecutionHandler, ABC):
     def cpus(self) -> int:
         """The total number of CPUs required for the job."""
         return self._cpus
+
+    @property
+    def gpus(self) -> int:
+        """The number of GPU-bearing tasks; zero for a CPU job."""
+        return self._gpus
+
+    @property
+    def gpus_per_node(self) -> int | None:
+        """The GPUs the job requests on each of its nodes (`gpus / nodes`);
+        `None` for a CPU job.
+        """
+        return self._gpus_per_node_requested
+
+    @property
+    def scheduler_directives(self) -> Mapping[str, str]:
+        """The extra scheduler directives for this job: the system's GPU
+        directives for a GPU job, else its CPU `other_scheduler_directives`.
+        """
+        if self._gpus > 0 and self._scheduler.gpu is not None:
+            return self._scheduler.gpu.directives
+        return self._scheduler.other_scheduler_directives
 
     @property
     def job_name(self) -> str:
@@ -824,8 +899,9 @@ class SchedulerJob(ExecutionHandler, ABC):
     ) -> tuple[int, int | None, int | None]:
         """Settle the job's (cpus, nodes, cpus_per_node) request.
 
-        Three regimes, in order of precedence:
+        Four regimes, in order of precedence:
 
+        0. A GPU job (`gpus > 0`): see `_gpu_distribution`.
         1. `single_node`: pin to one node and clamp `cpus` to the per-node capacity.
         2. An explicit `nodes` count is honored as-is; where the scheduler requires
            a task distribution and `cpus_per_node` is missing, it is derived.
@@ -837,6 +913,9 @@ class SchedulerJob(ExecutionHandler, ABC):
         tuple[int, int | None, int | None]
             The (possibly clamped) cpus, node count, and cpus per node to request.
         """
+        if self._gpus > 0:
+            return self._gpu_distribution(cpus, nodes, cpus_per_node, single_node)
+
         if single_node:
             return self._single_node_distribution(cpus, nodes, cpus_per_node)
 
@@ -863,6 +942,87 @@ class SchedulerJob(ExecutionHandler, ABC):
             )
             return cpus, None, cpus_per_node
         return cpus, ceil(cpus / capacity), cpus_per_node
+
+    def _gpu_distribution(
+        self,
+        cpus: int,
+        nodes: int | None,
+        cpus_per_node: int | None,
+        single_node: bool,
+    ) -> tuple[int, int, int | None]:
+        """Distribution for a GPU job.
+
+        A GPU job is uniform per node: PBS names one task count for every node
+        and SLURM's `--ntasks-per-node` is uniform, so a GPU job carries the same
+        tasks and the same GPUs on every node. Unless `nodes` is given, the node
+        count is the fewest nodes that hold the GPUs, `ceil(gpus / capacity)`,
+        where the capacity is the GPUs a node holds: the job's `gpus_per_node`,
+        else the scheduler's registered GPU nodes. `cpus` is the total task count
+        and is never clamped; the tasks per node are `cpus_per_node` if given,
+        else `cpus / nodes`. The GPUs requested on each node, `gpus / nodes`, are
+        stored back on the job.
+
+        Returns
+        -------
+        tuple[int, int, int | None]
+            The cpus (tasks), node count, and tasks per node to request.
+
+        Raises
+        ------
+        ValueError
+            If `single_node` is set and the GPUs exceed one node's, or the node
+            count is not 1, or the GPUs do not fit on the requested nodes, or the
+            GPUs or tasks cannot be spread evenly over the nodes, or the tasks
+            per node exceed the GPU node's cores.
+        """
+        gpu_nodes = self._scheduler.gpu
+        if gpu_nodes is None:  # guarded at construction; narrows the type
+            raise CstarError("This system has no GPU nodes registered with C-Star")
+        per_node = self._gpus_per_node_planned or gpu_nodes.gpus_per_node
+
+        if single_node:
+            if self._gpus > per_node:
+                raise ValueError(
+                    f"Cannot create scheduler job: 'single_node' is set but "
+                    f"{self._gpus} GPUs do not fit on one node of {per_node}."
+                )
+            if nodes is not None and nodes != 1:
+                raise ValueError(
+                    f"Cannot create scheduler job: 'single_node' is set but "
+                    f"nodes={nodes} was requested. A single-node job must use "
+                    "nodes=1 (or leave 'nodes' unset)."
+                )
+
+        nodes = nodes if nodes is not None else ceil(self._gpus / per_node)
+        if self._gpus > nodes * per_node:
+            raise ValueError(
+                f"Cannot create scheduler job: {self._gpus} GPUs do not fit on "
+                f"{nodes} node(s) of {per_node}."
+            )
+
+        if self._gpus % nodes:
+            raise ValueError(
+                f"Cannot create scheduler job: {self._gpus} GPUs cannot be spread "
+                f"evenly over {nodes} node(s); a GPU job carries the same number "
+                "of GPUs on every node"
+            )
+        if cpus % nodes:
+            raise ValueError(
+                f"Cannot create scheduler job: {cpus} tasks cannot be spread "
+                f"evenly over {nodes} node(s); a GPU job carries the same number "
+                "of tasks on every node; adjust num_cpus or num_nodes"
+            )
+        self._gpus_per_node_requested = self._gpus // nodes
+
+        if cpus_per_node is None:
+            cpus_per_node = cpus // nodes
+        cores = gpu_nodes.cores_per_node
+        if cores is not None and cpus_per_node > cores:
+            raise ValueError(
+                f"Cannot create scheduler job: {cpus_per_node} tasks per node "
+                f"exceed the {cores} cores of a GPU node"
+            )
+        return cpus, nodes, cpus_per_node
 
     def _single_node_distribution(
         self, cpus: int, nodes: int | None, cpus_per_node: int | None
@@ -1077,7 +1237,14 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --qos={self.queue_name}"
         elif isinstance(self.queue, SlurmPartition):
             scheduler_script += f"\n#SBATCH --partition={self.queue_name}"
-        if self.scheduler.requires_task_distribution:
+        if self.gpus > 0:
+            # PBS names one task count for every node and `--ntasks-per-node` is
+            # uniform, so a GPU job carries the same tasks and GPUs on every node
+            scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
+            scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
+            scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
+            scheduler_script += f"\n#SBATCH --gpus-per-node={self.gpus_per_node}"
+        elif self.scheduler.requires_task_distribution:
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         else:
@@ -1099,10 +1266,7 @@ class SlurmJob(SchedulerJob):
         scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
         scheduler_script += f"\n#SBATCH --time={self.walltime}"
-        for (
-            key,
-            value,
-        ) in self.scheduler.other_scheduler_directives.items():
+        for key, value in self.scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
 
         scheduler_script += "\n\nset -e"
@@ -1267,15 +1431,23 @@ class PBSJob(SchedulerJob):
             scheduler_script += f"\n#PBS -A {self.account_key}"
         # PBS has no day form; fold a `D-HH:MM:SS` request into hours
         walltime = "{:02d}:{:02d}:{:02d}".format(*parse_walltime(self.walltime or ""))
-        scheduler_script += f"\n#PBS -l select={self.nodes}:ncpus={self.cpus_per_node},walltime={walltime}"
+        if self.gpus > 0:
+            # `_gpu_distribution` sets a uniform `cpus_per_node` and `gpus_per_node`
+            ncpus = (
+                self.scheduler.gpu.cores_per_node if self.scheduler.gpu else None
+            ) or self.cpus_per_node
+            select = (
+                f"select={self.nodes}:ncpus={ncpus}:mpiprocs={self.cpus_per_node}"
+                f":ngpus={self.gpus_per_node}"
+            )
+        else:
+            select = f"select={self.nodes}:ncpus={self.cpus_per_node}"
+        scheduler_script += f"\n#PBS -l {select},walltime={walltime}"
         scheduler_script += f"\n#PBS -q {self.queue_name}"
         scheduler_script += "\n#PBS -j oe"
         scheduler_script += "\n#PBS -k eod"
         scheduler_script += "\n#PBS -V"
-        for (
-            key,
-            value,
-        ) in self.scheduler.other_scheduler_directives.items():
+        for key, value in self.scheduler_directives.items():
             scheduler_script += f"\n#PBS {key} {value}"
         scheduler_script += "\ncd ${PBS_O_WORKDIR}"
 
