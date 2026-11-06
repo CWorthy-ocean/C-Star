@@ -58,7 +58,7 @@ BUNDLED_BLUEPRINT = (
 GPU_REPO = "https://github.com/CWorthy-ocean/gpu-ucla-roms.git"
 MPI_PREFIX = "srun --kill-on-bad-exit=1"
 MPI_HOME = "/opt/mpi/"  # with the trailing slash perlmutter.gpu.env gives it
-NETCDF_FLIBS = "-L/opt/netcdf/lib -lnetcdff -lnetcdf"
+NETCDF_HOME = "/opt/netcdf/"  # with the trailing slash perlmutter.gpu.env gives it
 LINK_FLAGS_TEMPLATE = "${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}"
 LAUNCH_NAMELIST = "cstar_generated_roms.nml"
 
@@ -138,14 +138,15 @@ class TestGpuMakeCommand:
     KEY = GpuBuildKey("nvfortran", "cc80", 1025.3, passive_fp64=True)
 
     def test_exact_command(self) -> None:
-        """Each `VAR=value` is quoted for the shell; the libraries name the NetCDF
-        and MPI libraries, the link flags, and an rpath for every library
-        directory.
+        """Each `VAR=value` is quoted for the shell; the NetCDF include directory
+        is passed as `NETCDF_FFLAGS`, and the libraries name the NetCDF and MPI
+        libraries, the link flags, and an rpath for every library directory.
         """
         command = gpu_make_command(
             self.KEY,
             Path(MPI_HOME),
-            NETCDF_FLIBS,
+            Path(NETCDF_HOME),
+            Path(NETCDF_HOME),
             "-L/opt/gtl/lib -lmpi_gtl_cuda",
         )
 
@@ -154,47 +155,72 @@ class TestGpuMakeCommand:
             "FFLAGS_GPU='-O2 -g -cuda -gpu=cc80 -DUSE_CUDA -DPASSIVE_FP64 "
             "-DROMS_RHO0=1025.3d0 -Mpreprocess -Mfree -Mnofma -Isrc/shared' "
             "FFLAGS_MPI='-DUSE_MPI -I/opt/mpi/include' "
-            "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf -lnetcdf "
+            "NETCDF_FFLAGS=-I/opt/netcdf/include "
+            "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf "
             "-L/opt/mpi/lib -lmpifort -lmpi -L/opt/gtl/lib -lmpi_gtl_cuda "
             "-Wl,-rpath,/opt/netcdf/lib -Wl,-rpath,/opt/mpi/lib "
             "-Wl,-rpath,/opt/gtl/lib'"
+        )
+
+    def test_netcdf_fortran_apart_from_netcdf_c(self) -> None:
+        """`netcdf.mod` comes from the NetCDF-Fortran installation, and both
+        library directories are searched and embedded.
+        """
+        variables = make_variables(
+            gpu_make_command(
+                self.KEY, Path("/opt/mpi"), Path("/opt/nff"), Path("/opt/nc"), ""
+            )
+        )
+
+        assert variables["NETCDF_FFLAGS"] == "-I/opt/nff/include"
+        assert variables["LIBS"] == (
+            "-L/opt/nff/lib -L/opt/nc/lib -lnetcdff -lnetcdf "
+            "-L/opt/mpi/lib -lmpifort -lmpi "
+            "-Wl,-rpath,/opt/nff/lib -Wl,-rpath,/opt/nc/lib -Wl,-rpath,/opt/mpi/lib"
         )
 
     def test_rpaths_are_deduplicated_and_keep_their_order(self) -> None:
         command = gpu_make_command(
             self.KEY,
             Path("/opt/mpi"),
-            "-L/a/lib -lx -L/b/lib -ly -L/a/lib -L/opt/mpi/lib",
-            "",
+            Path("/a"),
+            Path("/a"),
+            "-L/b/lib -ly -L/a/lib -L/opt/mpi/lib",
         )
 
         libs = make_variables(command)["LIBS"]
         rpaths = [t for t in libs.split() if t.startswith("-Wl,-rpath,")]
         assert rpaths == [
             "-Wl,-rpath,/a/lib",
-            "-Wl,-rpath,/b/lib",
             "-Wl,-rpath,/opt/mpi/lib",
+            "-Wl,-rpath,/b/lib",
         ]
 
     def test_a_separated_library_directory_is_found(self) -> None:
         """`-L <dir>` names a directory as `-L<dir>` does."""
-        command = gpu_make_command(self.KEY, Path("/opt/mpi"), "-L /a/lib -lx", "")
+        command = gpu_make_command(
+            self.KEY, Path("/opt/mpi"), Path("/n"), Path("/n"), "-L /a/lib -lx"
+        )
 
         assert "-Wl,-rpath,/a/lib" in command
 
     def test_no_link_flags_leave_no_gap(self) -> None:
-        command = gpu_make_command(self.KEY, Path("/opt/mpi"), NETCDF_FLIBS, "  ")
+        command = gpu_make_command(
+            self.KEY, Path("/opt/mpi"), Path(NETCDF_HOME), Path(NETCDF_HOME), "  "
+        )
 
         assert "  " not in command
         assert (
-            "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf -lnetcdf -L/opt/mpi/lib "
+            "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf -L/opt/mpi/lib "
             "-lmpifort -lmpi -Wl,-rpath,/opt/netcdf/lib -Wl,-rpath,/opt/mpi/lib'"
         ) in command
 
     def test_values_with_spaces_are_quoted(self) -> None:
         key = GpuBuildKey("nv fortran", "cc80", 1000.0, passive_fp64=False)
 
-        command = gpu_make_command(key, Path("/opt/my mpi"), "", "")
+        command = gpu_make_command(
+            key, Path("/opt/my mpi"), Path("/opt/nc"), Path("/opt/nc"), ""
+        )
 
         assert "FC_GPU='nv fortran'" in command
         variables = make_variables(command)
@@ -230,7 +256,8 @@ def gpu_system(
     monkeypatch.setenv("PE_MPICH_GTL_DIR_nvidia80", "-L/opt/cray/gtl/lib")
     monkeypatch.setenv("PE_MPICH_GTL_LIBS_nvidia80", "-lmpi_gtl_cuda")
     environment = mock.Mock(
-        mpi_exec_prefix=MPI_PREFIX, environment_variables={"MPIHOME": MPI_HOME}
+        mpi_exec_prefix=MPI_PREFIX,
+        environment_variables={"MPIHOME": MPI_HOME, "NETCDFHOME": NETCDF_HOME},
     )
     sysmgr = mock.Mock()
     sysmgr.name = "perlmutter"
@@ -334,15 +361,13 @@ class FakeBuildTools:
 
 @pytest.fixture
 def build_tools() -> Generator[FakeBuildTools]:
-    """Replace what `build()` runs: `nf-config`, `make gpu` (which writes an
+    """Replace what `build()` runs: `make gpu` (which writes an
     executable), the toolchain assertion and the linkage check.
     """
     commands: list[tuple[str, Path | None]] = []
 
     def run_cmd(cmd: str, cwd: Path | None = None, **kwargs: Any) -> str:
         commands.append((cmd, cwd))
-        if cmd == "nf-config --flibs":
-            return NETCDF_FLIBS
         assert cmd.startswith("make gpu ") and cwd is not None, cmd
         build_dir = cwd / GPU_BUILD_DIR_NAME
         build_dir.mkdir(exist_ok=True)
@@ -818,7 +843,8 @@ class TestBuild:
         "FFLAGS_GPU='-O2 -g -cuda -gpu=cc80 -DUSE_CUDA -DPASSIVE_FP64 "
         "-DROMS_RHO0=1025.3d0 -Mpreprocess -Mfree -Mnofma -Isrc/shared' "
         "FFLAGS_MPI='-DUSE_MPI -I/opt/mpi/include' "
-        "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf -lnetcdf "
+        "NETCDF_FFLAGS=-I/opt/netcdf/include "
+        "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf "
         "-L/opt/mpi/lib -lmpifort -lmpi -L/opt/cray/gtl/lib -lmpi_gtl_cuda "
         "-Wl,-rpath,/opt/netcdf/lib -Wl,-rpath,/opt/mpi/lib "
         "-Wl,-rpath,/opt/cray/gtl/lib'"
@@ -841,10 +867,7 @@ class TestBuild:
 
         rho0_sim.build()
 
-        assert build_tools.commands == [
-            ("nf-config --flibs", None),
-            (self.EXPECTED_COMMAND, clone),
-        ]
+        assert build_tools.commands == [(self.EXPECTED_COMMAND, clone)]
         gpu_system.environment_for.assert_called_with("gpu")
         build_tools.assert_single_toolchain_stack.assert_called_once_with(None)
 
@@ -861,7 +884,7 @@ class TestBuild:
         ):
             rho0_sim.build()
 
-        command = build_tools.commands[1][0]
+        [(command, _)] = build_tools.make_commands
         assert "-lmpi_gtl_cuda -Wl,-rpath,/opt/hdf5/lib -Wl,-rpath," in command
 
     def test_records_the_executable_and_the_build(
@@ -993,7 +1016,7 @@ class TestBuild:
         def fail_to_compile(cmd: str, **kwargs: Any) -> str:
             if cmd.startswith("make gpu"):
                 raise RuntimeError("Error when compiling gpu-ucla-roms.")
-            return NETCDF_FLIBS
+            return ""
 
         with (
             mock.patch(
@@ -1044,7 +1067,9 @@ class TestBuild:
         build_tools: FakeBuildTools,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        gpu_system.environment_for.return_value.environment_variables = {}
+        gpu_system.environment_for.return_value.environment_variables = {
+            "NETCDFHOME": NETCDF_HOME
+        }
         monkeypatch.setenv("MPIHOME", "/from/the/environment")
 
         rho0_sim.build()
@@ -1052,6 +1077,66 @@ class TestBuild:
         [(command, _)] = build_tools.make_commands
         assert "-I/from/the/environment/include" in command
         assert "-Wl,-rpath,/from/the/environment/lib" in command
+
+    def test_needs_netcdfhome(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        gpu_system.environment_for.return_value.environment_variables = {
+            "MPIHOME": MPI_HOME
+        }
+        monkeypatch.delenv("NETCDFHOME", raising=False)
+        monkeypatch.delenv("NETCDFFHOME", raising=False)
+
+        with pytest.raises(
+            CstarError, match="GPU toolchain profile.*must set NETCDFHOME"
+        ):
+            rho0_sim.build()
+
+        assert build_tools.make_commands == []
+
+    def test_netcdffhome_names_netcdf_fortran(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """As build verification reads them: `NETCDFFHOME` is NetCDF-Fortran's
+        installation, `NETCDFHOME` NetCDF-C's.
+        """
+        gpu_system.environment_for.return_value.environment_variables = {
+            "MPIHOME": MPI_HOME,
+            "NETCDFHOME": "/opt/nc",
+            "NETCDFFHOME": "/opt/nff",
+        }
+        monkeypatch.delenv("NETCDFHOME", raising=False)
+        monkeypatch.delenv("NETCDFFHOME", raising=False)
+
+        rho0_sim.build()
+
+        [(command, _)] = build_tools.make_commands
+        variables = make_variables(command)
+        assert variables["NETCDF_FFLAGS"] == "-I/opt/nff/include"
+        assert variables["LIBS"].startswith(
+            "-L/opt/nff/lib -L/opt/nc/lib -lnetcdff -lnetcdf "
+        )
+
+    def test_never_asks_nf_config(
+        self,
+        rho0_sim: ROMSGpuSimulation,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+    ) -> None:
+        """Cray's `nf-config` prints no flags, and a conda one may come first on
+        PATH, so the build takes the NetCDF flags from the profile only.
+        """
+        rho0_sim.build()
+
+        assert [c for c, _ in build_tools.commands if "nf-config" in c] == []
 
     def test_a_link_flag_variable_the_modules_did_not_set_is_an_error(
         self,

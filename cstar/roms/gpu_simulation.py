@@ -164,7 +164,7 @@ class GpuBuildKey:
         """Compose the compile flags of `FFLAGS_GPU`.
 
         The flags of the README's build recipe. The Makefile itself appends
-        `FFLAGS_MPI` and the NetCDF flags.
+        `FFLAGS_MPI` and `NETCDF_FFLAGS`.
 
         Returns
         -------
@@ -189,7 +189,7 @@ def _library_dirs(link_flags: str) -> list[str]:
     Parameters
     ----------
     link_flags : str
-        A linker flag string, e.g. the output of ``nf-config --flibs``.
+        A linker flag string, e.g. a toolchain's extra link flags.
 
     Returns
     -------
@@ -206,14 +206,25 @@ def _library_dirs(link_flags: str) -> list[str]:
 
 
 def gpu_make_command(
-    key: GpuBuildKey, mpi_home: Path, netcdf_flibs: str, link_flags: str
+    key: GpuBuildKey,
+    mpi_home: Path,
+    netcdff_home: Path,
+    netcdf_home: Path,
+    link_flags: str,
 ) -> str:
     """Compose the ``make gpu`` command that builds the GPU executable.
 
-    The general form of the README's build recipe, with the MPI installation and
-    the NetCDF libraries as parameters. The libraries are named explicitly, with
-    an rpath for each library directory, so the executable runs without
+    The general form of the README's build recipe, with the MPI and NetCDF
+    installations as parameters. The libraries are named explicitly, with an
+    rpath for each library directory, so the executable runs without
     `LD_LIBRARY_PATH` set.
+
+    The NetCDF flags come from the installations, not from ``nf-config``; the
+    include flag is passed as `NETCDF_FFLAGS` and the libraries in `LIBS`, which
+    override the Makefile's own ``nf-config`` defaults:
+    Cray's NetCDF modules ship an ``nf-config`` that prints no flags (their
+    ``ftn`` wrapper adds them), and a conda environment early on ``PATH`` can
+    supply an ``nf-config`` built for another compiler.
 
     Parameters
     ----------
@@ -221,8 +232,12 @@ def gpu_make_command(
         The compiler, GPU architecture and build constants.
     mpi_home : Path
         The MPI installation: its `include` and `lib` directories are used.
-    netcdf_flibs : str
-        The NetCDF-Fortran link flags, as ``nf-config --flibs`` prints them.
+    netcdff_home : Path
+        The NetCDF-Fortran installation: `netcdf.mod` in its `include` directory,
+        `libnetcdff` in its `lib` directory.
+    netcdf_home : Path
+        The NetCDF-C installation, whose `lib` directory holds `libnetcdf`; the
+        same as `netcdff_home` where both are installed together.
     link_flags : str
         Extra link flags for the GPU build, after the MPI libraries (e.g. Cray
         MPICH's GPU transport layer), with their variables already expanded.
@@ -232,14 +247,16 @@ def gpu_make_command(
     str
         The shell command; run it in the root of the gpu-ucla-roms clone.
     """
-    mpi_lib = mpi_home / "lib"
-    rpath_dirs = dict.fromkeys(
-        [*_library_dirs(netcdf_flibs), str(mpi_lib), *_library_dirs(link_flags)]
+    netcdf_libs = list(
+        dict.fromkeys([str(netcdff_home / "lib"), str(netcdf_home / "lib")])
     )
+    mpi_lib = mpi_home / "lib"
+    rpath_dirs = dict.fromkeys([*netcdf_libs, str(mpi_lib), *_library_dirs(link_flags)])
     libs = " ".join(
         part
         for part in (
-            netcdf_flibs.strip(),
+            *(f"-L{d}" for d in netcdf_libs),
+            "-lnetcdff",
             "-lnetcdf",
             f"-L{mpi_lib}",
             "-lmpifort",
@@ -253,6 +270,7 @@ def gpu_make_command(
         "FC_GPU": key.compiler,
         "FFLAGS_GPU": key.fflags(),
         "FFLAGS_MPI": f"-DUSE_MPI -I{mpi_home / 'include'}",
+        "NETCDF_FFLAGS": f"-I{netcdff_home / 'include'}",
         "LIBS": libs,
     }
     return "make gpu " + " ".join(
@@ -717,6 +735,35 @@ class ROMSGpuSimulation(ROMSSimulation):
             )
         return Path(mpi_home)
 
+    def _netcdf_homes(self) -> tuple[Path, Path]:
+        """Find the NetCDF installations of the active (GPU) toolchain.
+
+        `NETCDFFHOME` names the NetCDF-Fortran installation where it is apart
+        from NetCDF-C; otherwise both are under `NETCDFHOME`. Build verification
+        reads the two variables the same way.
+
+        Returns
+        -------
+        tuple[Path, Path]
+            The NetCDF-Fortran installation and the NetCDF-C installation.
+
+        Raises
+        ------
+        CstarError
+            If neither `NETCDFFHOME` nor `NETCDFHOME` is set.
+        """
+        netcdf_home = _get_dependency_root("NETCDFHOME")
+        netcdff_home = _get_dependency_root("NETCDFFHOME") or netcdf_home
+        if not netcdff_home:
+            raise CstarError(
+                "NETCDFHOME is not set: the GPU toolchain profile of "
+                f"{get_sysmgr().name} (its .gpu.env file) must set NETCDFHOME to "
+                "the NetCDF installation (and NETCDFFHOME to NetCDF-Fortran's, if "
+                "it is installed apart), whose include and lib directories the GPU "
+                "build uses."
+            )
+        return Path(netcdff_home), Path(netcdf_home or netcdff_home)
+
     def build(self, rebuild: bool = False) -> None:
         """Compile the GPU executable from the gpu-ucla-roms source.
 
@@ -738,8 +785,9 @@ class ROMSGpuSimulation(ROMSSimulation):
         ValueError
             If the codebase is not staged, or the runtime namelist is not staged.
         CstarError
-            If the GPU toolchain does not name a GPU architecture, `MPIHOME` is
-            not set, or a variable of the toolchain's link flags is not set.
+            If the GPU toolchain does not name a GPU architecture, `MPIHOME` or
+            `NETCDFHOME` is not set, or a variable of the toolchain's link flags
+            is not set.
         RuntimeError
             If an error occurs during the compilation process.
 
@@ -785,10 +833,13 @@ class ROMSGpuSimulation(ROMSSimulation):
             self.log.warning(f"Could not remove the previous GPU build record: {e}")
 
         assert_single_toolchain_stack(None)
+        mpi_home = self._mpi_home()
+        netcdff_home, netcdf_home = self._netcdf_homes()
         command = gpu_make_command(
             key,
-            mpi_home=self._mpi_home(),
-            netcdf_flibs=_run_cmd("nf-config --flibs", raise_on_error=True),
+            mpi_home=mpi_home,
+            netcdff_home=netcdff_home,
+            netcdf_home=netcdf_home,
             link_flags=" ".join(
                 flags
                 for flags in (
