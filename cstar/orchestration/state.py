@@ -1,18 +1,28 @@
 import asyncio
-import fcntl
 import typing as t
 from pathlib import Path
 
+from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.execution.file_system import StateDirectoryManager, write_text_atomic
+from cstar.execution.file_system import (
+    LockTimeoutError,
+    StateDirectoryManager,
+    locked_if_supported,
+    write_text_atomic,
+)
 from cstar.orchestration.serialization import (
     SerializableModel,
     deserialize,
     model_to_yaml,
 )
 
+log = get_logger(__name__)
+
 EXT_SENTINEL: t.Final[str] = "sentinel"
 """File exension used for persisting sentinels."""
+
+SENTINEL_LOCK_TIMEOUT: t.Final[float] = 60.0
+"""Seconds a sentinel writer waits for another to finish before writing anyway."""
 
 
 class StateProxy(SerializableModel, t.Protocol):
@@ -49,6 +59,33 @@ async def load_sentinels(
     """
     repo = StateRepository()
     return await repo.list_sentinels(klass)
+
+
+def _write_sentinel(path: Path, content: str) -> None:
+    """Write a sentinel under its lock, or without it after `SENTINEL_LOCK_TIMEOUT`.
+
+    The write goes beside the sentinel and is renamed into place: the local
+    proxy script rewrites the sentinel's status line the moment it starts, and a
+    reader that caught an in-place write mid-way would copy a truncated sentinel
+    back over the complete one. The rename also makes writing without the lock
+    safe.
+
+    Parameters
+    ----------
+    path : Path
+        The sentinel file.
+    content : str
+        The serialized handle.
+    """
+    # no fsync: the sentinel is rewritten on every status change
+    try:
+        with locked_if_supported(
+            path.with_suffix(".lock"), timeout=SENTINEL_LOCK_TIMEOUT
+        ):
+            write_text_atomic(path, content, sync=False)
+    except LockTimeoutError as ex:
+        log.warning(f"{ex}; writing the sentinel {path} without it")
+        write_text_atomic(path, content, sync=False)
 
 
 class StateRepository:
@@ -138,21 +175,8 @@ class StateRepository:
             Whether the sentinel was successfully stored
         """
         persist_to = self.sentinel_path(proxy)
-
-        lock_path = persist_to.with_suffix(".lock")
-        if not lock_path.parent.exists():
-            lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-            # write beside the sentinel and rename it into place: the local proxy
-            # script rewrites the sentinel's status line the moment it starts,
-            # and a reader that caught an in-place write mid-way would copy a
-            # truncated sentinel back over the complete one
-            content = model_to_yaml(proxy)
-            # no fsync: the sentinel is rewritten on every status change
-            await asyncio.to_thread(write_text_atomic, persist_to, content, sync=False)
+        content = model_to_yaml(proxy)
+        await asyncio.to_thread(_write_sentinel, persist_to, content)
         return persist_to if content else None
 
     async def list_sentinels(

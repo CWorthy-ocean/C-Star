@@ -8,6 +8,7 @@ import shlex
 import shutil
 import stat
 import sys
+import threading
 import time
 import typing as t
 import uuid
@@ -1002,10 +1003,33 @@ LOCK_POLL_INTERVAL: t.Final[float] = 5.0
 LOCK_LOG_INTERVAL: t.Final[float] = 60.0
 """Seconds between the messages logged while waiting for a lock that has a timeout."""
 
+_ENOTSUPP: t.Final[int] = 524
+"""Linux's internal "operation not supported" code, which `errno` has no name for.
+
+`flock` on the DVS mounts of Perlmutter compute nodes (`$HOME`, `/global/cfs`)
+fails with it.
+"""
+
 _FLOCK_UNSUPPORTED_ERRNOS: t.Final[frozenset[int]] = frozenset(
-    {errno.ENOLCK, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS, errno.EINVAL}
+    {
+        errno.ENOLCK,
+        errno.EOPNOTSUPP,
+        errno.ENOTSUP,
+        errno.ENOSYS,
+        errno.EINVAL,
+        _ENOTSUPP,
+    }
 )
 """`flock` errors meaning the file system cannot lock, rather than that the call failed."""
+
+_THREAD_LOCKS: dict[Path, threading.Lock] = {}
+"""One lock per lock file, so this process's threads take turns where `flock` cannot."""
+
+_UNLOCKED_DIRS: set[Path] = set()
+"""Directories already reported as unable to lock, so each is warned about once."""
+
+_REGISTRY_GUARD = threading.Lock()
+"""Guards `_THREAD_LOCKS` and `_UNLOCKED_DIRS`."""
 
 
 class LockTimeoutError(TimeoutError):
@@ -1130,3 +1154,97 @@ def locked(path: Path, *, timeout: float | None = None) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def _thread_lock(path: Path) -> threading.Lock:
+    """Return this process's thread lock for the lock file at `path`.
+
+    Parameters
+    ----------
+    path : Path
+        The lock file.
+
+    Returns
+    -------
+    threading.Lock
+    """
+    with _REGISTRY_GUARD:
+        return _THREAD_LOCKS.setdefault(path.absolute(), threading.Lock())
+
+
+def _warn_unlocked(ex: LockUnsupportedError, path: Path) -> None:
+    """Report that a lock is not held, at warning level once per directory.
+
+    Parameters
+    ----------
+    ex : LockUnsupportedError
+        The refusal.
+    path : Path
+        The lock file.
+    """
+    directory = path.parent.absolute()
+    with _REGISTRY_GUARD:
+        first = directory not in _UNLOCKED_DIRS
+        _UNLOCKED_DIRS.add(directory)
+
+    msg = (
+        f"File locking is not supported in {directory} ({ex.strerror}); carrying "
+        "on without the lock, so other processes writing there are not kept out"
+    )
+    if first:
+        log.warning(msg)
+    else:
+        log.debug(msg)
+
+
+@contextmanager
+def locked_if_supported(path: Path, *, timeout: float) -> Iterator[bool]:
+    """Hold an exclusive lock on the file at `path` where the file system can.
+
+    This process's threads always take turns. Other processes are kept out by
+    `flock`, as in `locked`, where the file system supports it. Where it does
+    not (the DVS mounts of Perlmutter compute nodes) the caller carries on
+    without that lock, and a warning says so the first time for each directory.
+
+    Parameters
+    ----------
+    path : Path
+        The lock file.
+    timeout : float
+        Seconds to wait, in all, for other threads and processes to release the
+        lock.
+
+    Yields
+    ------
+    bool
+        Whether other processes are kept out.
+
+    Raises
+    ------
+    LockTimeoutError
+        If another holder still has the lock after `timeout` seconds.
+    """
+    timeout = max(0.0, timeout)
+    deadline = time.monotonic() + timeout
+    thread_lock = _thread_lock(path)
+    if not thread_lock.acquire(timeout=timeout):
+        msg = f"Another thread kept the lock at {path} for {timeout:.0f} s"
+        raise LockTimeoutError(msg)
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as lock_file:
+            try:
+                _acquire(lock_file, path, max(0.0, deadline - time.monotonic()))
+                held = True
+            except LockUnsupportedError as ex:
+                _warn_unlocked(ex, path)
+                held = False
+
+            try:
+                yield held
+            finally:
+                if held:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
+    finally:
+        thread_lock.release()

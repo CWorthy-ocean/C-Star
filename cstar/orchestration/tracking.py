@@ -1,5 +1,4 @@
 import asyncio
-import fcntl
 import os
 import typing as t
 from collections.abc import (
@@ -36,6 +35,7 @@ from cstar.execution.file_system import (
     UNKNOWN_SIZE,
     StateDirectoryManager,
     local_copy,
+    locked_if_supported,
     step_disk_usage,
     symlink_relative,
 )
@@ -70,6 +70,9 @@ log = get_logger(__name__)
 
 KEY_RUN_UUID: t.Final[str] = "uuid"
 """Key used to cache the run manifest's uuid in the run metadata; the manifest owns it."""
+
+RUN_LOCK_TIMEOUT: t.Final[float] = 60.0
+"""Seconds a writer of a run's record waits for other writers to release its lock."""
 
 _LEGACY_KEY_NAME: t.Final[str] = "name"
 """Metadata key under which records written by cstar 0.17.0 and earlier held the
@@ -983,30 +986,26 @@ class TrackingRepository(LoggingMixin):
         run_paths: list[Path] = []
 
         latest = self.latest_path(run_id)
-        lock_path = self._get_lock_path(run_id)
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if latest.exists():
+            run_paths.append(latest)
 
-            if latest.exists():
-                run_paths.append(latest)
+        search_dir = self.run_history_dir(run_id=run_id)
+        all_runs = [
+            path
+            for path in (search_dir.iterdir() if search_dir.exists() else ())
+            # a dotted name is a record a crashed writer left half-staged
+            if not path.name.startswith(".")
+        ]
 
-            search_dir = self.run_history_dir(run_id=run_id)
-            all_runs = [
-                path
-                for path in (search_dir.iterdir() if search_dir.exists() else ())
-                # a dotted name is a record a crashed writer left half-staged
-                if not path.name.startswith(".")
-            ]
-
-            if all_history:
-                run_paths.extend(all_runs)
-            else:
-                if ordered_runs := sorted(
-                    all_runs,
-                    key=lambda p: os.path.getctime(p),
-                    reverse=True,
-                ):
-                    run_paths.append(ordered_runs[0])
+        if all_history:
+            run_paths.extend(all_runs)
+        else:
+            if ordered_runs := sorted(
+                all_runs,
+                key=lambda p: os.path.getctime(p),
+                reverse=True,
+            ):
+                run_paths.append(ordered_runs[0])
 
         items = tuple(filter(lambda p: p.exists(), run_paths))
         return tuple(sorted(list({p.resolve() for p in items})))
@@ -1041,19 +1040,16 @@ class TrackingRepository(LoggingMixin):
             msg = "A valid run-id was not provided; unable to retrieve run"
             raise ValueError(msg) from ex
 
-        lock_path = self._get_lock_path(run_id)
+        # no lock: writers rename each record into place, so a reader sees the
+        # old record or the new one
+        run_path = self._find_run_path(run_id, run_date)
+        if not run_path.exists():
+            rd_out = run_date or "latest"
+            msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
+            self.log.debug(msg)
+            return None
 
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-            run_path = self._find_run_path(run_id, run_date)
-            if not run_path.exists():
-                rd_out = run_date or "latest"
-                msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-                self.log.debug(msg)
-                return None
-
-            return read_run_record(run_path, tolerant=tolerant).reanchored()
+        return read_run_record(run_path, tolerant=tolerant).reanchored()
 
     async def get_workplan_run(
         self,
@@ -1124,7 +1120,8 @@ class TrackingRepository(LoggingMixin):
 
         The run lock is held across the whole read-modify-write, so concurrent
         updates to the same run (e.g. several steps finishing in one poll
-        tick) cannot overwrite each other.
+        tick) cannot overwrite each other. Where the file system cannot lock
+        (see `locked_if_supported`), only this process's updates take turns.
 
         Parameters
         ----------
@@ -1137,6 +1134,12 @@ class TrackingRepository(LoggingMixin):
         -------
         WorkplanRun | None
             The persisted record, or `None` when no record exists for the run-id.
+
+        Raises
+        ------
+        LockTimeoutError
+            If another writer still holds the run lock after `RUN_LOCK_TIMEOUT`
+            seconds.
         """
         try:
             run_id = slugify(run_id)
@@ -1146,9 +1149,7 @@ class TrackingRepository(LoggingMixin):
 
         lock_path = self._get_lock_path(run_id)
 
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-
+        with locked_if_supported(lock_path, timeout=RUN_LOCK_TIMEOUT):
             run_path = self._find_run_path(run_id, None)
             if not run_path.exists():
                 self.log.warning(f"No run file for `{run_id}` found in {run_path}`")
@@ -1197,13 +1198,18 @@ class TrackingRepository(LoggingMixin):
         -------
         Path
             The path to the persisted history record
+
+        Raises
+        ------
+        LockTimeoutError
+            If another writer still holds the run lock after `RUN_LOCK_TIMEOUT`
+            seconds.
         """
         # use the latest path (e.g. /tmp/<run-id>.yaml) as a lock in case
         # multiple runs occur simultaneously.
         lock_path = self._get_lock_path(run.run_id)
 
-        with lock_path.open("w") as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        with locked_if_supported(lock_path, timeout=RUN_LOCK_TIMEOUT):
             return self._write_run_locked(run)
 
     async def put_workplan_run(self, run: WorkplanRun) -> Path:
