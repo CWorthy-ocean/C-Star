@@ -1,11 +1,13 @@
 import asyncio
 import errno
+import fcntl
 import logging
 import os
 import sys
 import threading
 import time
 import typing as t
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -17,7 +19,7 @@ import yaml
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
-from cstar.execution.file_system import StateDirectoryManager
+from cstar.execution.file_system import LockTimeoutError, StateDirectoryManager
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     Attempt,
@@ -918,6 +920,45 @@ async def test_tracking_bound_caps_concurrency(tmp_path: Path) -> None:
     assert state["peak"] <= limit
 
 
+async def _update_one_run_concurrently(tmp_path: Path, run_id: str) -> WorkplanRun:
+    """Persist a run, update it from eight concurrent tasks and read it back.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    run_id : str
+        The run-id of the record to update
+
+    Returns
+    -------
+    WorkplanRun
+        The record as persisted once every update is done.
+    """
+    state_dir = tmp_path / "state"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        run = _make_workplan_run(tmp_path, run_id)
+        await repo.put_workplan_run(run)
+
+        def _add(name: str, size: int) -> t.Callable[[WorkplanRun], None]:
+            def _mutate(latest: WorkplanRun) -> None:
+                latest.record_step_sizes({name: size})
+                latest.sentinels.add(tmp_path / f"{name}.sentinel")
+
+            return _mutate
+
+        await asyncio.gather(
+            *(repo.update_workplan_run(run_id, _add(f"step-{i}", i)) for i in range(8))
+        )
+
+        persisted = await repo.get_workplan_run(run_id)
+
+    assert persisted is not None
+    return persisted
+
+
 @pytest.mark.asyncio
 async def test_tracking_update_workplan_run_is_atomic_under_concurrency(
     tmp_path: Path,
@@ -930,32 +971,122 @@ async def test_tracking_update_workplan_run_is_atomic_under_concurrency(
     tmp_path : Path
         Temporary directory for test outputs
     """
-    state_dir = tmp_path / "state"
+    persisted = await _update_one_run_concurrently(tmp_path, "atomic-update")
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
-        repo = TrackingRepository()
-        run = _make_workplan_run(tmp_path, "atomic-update")
-        await repo.put_workplan_run(run)
-
-        def _add(name: str, size: int) -> t.Callable[[WorkplanRun], None]:
-            def _mutate(latest: WorkplanRun) -> None:
-                latest.record_step_sizes({name: size})
-                latest.sentinels.add(tmp_path / f"{name}.sentinel")
-
-            return _mutate
-
-        await asyncio.gather(
-            *(
-                repo.update_workplan_run("atomic-update", _add(f"step-{i}", i))
-                for i in range(8)
-            )
-        )
-
-        persisted = await repo.get_workplan_run("atomic-update")
-
-    assert persisted is not None
     assert persisted.step_sizes == {f"step-{i}": i for i in range(8)}
     assert len(persisted.sentinels) == 8
+
+
+@pytest.mark.asyncio
+async def test_tracking_update_workplan_run_is_atomic_without_flock(
+    tmp_path: Path, flock_unsupported: mock.Mock
+) -> None:
+    """Verify concurrent updates to one run each land where `flock` is refused,
+    the threads of this process taking turns on their own.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    flock_unsupported : mock.Mock
+        The refused `flock`
+    """
+    persisted = await _update_one_run_concurrently(tmp_path, "atomic-no-flock")
+
+    assert flock_unsupported.called
+    assert persisted.step_sizes == {f"step-{i}": i for i in range(8)}
+    assert len(persisted.sentinels) == 8
+
+
+def test_tracking_round_trips_a_record_where_flock_is_unsupported(
+    tmp_path: Path, flock_unsupported: mock.Mock
+) -> None:
+    """Verify a run record is written, read, updated and listed where the file
+    system refuses `flock`, as a Perlmutter compute node's does.
+    """
+    repo = TrackingRepository()
+    run = _make_workplan_run(tmp_path, "no-flock-run")
+
+    persisted = repo.put_workplan_run_sync(run)
+    found = repo.get_workplan_run_sync("no-flock-run")
+    updated = repo.update_workplan_run_sync(
+        "no-flock-run", lambda latest: latest.record_step_sizes({"step": 3})
+    )
+    reread = repo.get_workplan_run_sync("no-flock-run")
+    paths = repo.list_runtracking_paths("no-flock-run", all_history=True)
+
+    assert flock_unsupported.called
+    assert found is not None
+    assert found.run_id == "no-flock-run"
+    assert updated is not None
+    assert updated.step_sizes == {"step": 3}
+    assert reread is not None
+    assert reread.step_sizes == {"step": 3}
+    assert persisted.resolve() in paths
+
+
+def test_tracking_readers_take_no_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify reading a run record or listing a run's paths never calls `flock`,
+    since writers rename each record into place.
+    """
+    repo = TrackingRepository()
+    persisted = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "readable"))
+
+    flock = mock.Mock()
+    monkeypatch.setattr("cstar.execution.file_system.fcntl.flock", flock)
+    found = repo.get_workplan_run_sync("readable")
+    latest_paths = repo.list_runtracking_paths("readable")
+    history_paths = repo.list_runtracking_paths("readable", all_history=True)
+
+    assert found is not None
+    assert found.run_id == "readable"
+    assert persisted.resolve() in latest_paths
+    assert persisted.resolve() in history_paths
+    flock.assert_not_called()
+
+
+@contextmanager
+def _held_run_lock(repo: TrackingRepository, run_id: str) -> t.Iterator[None]:
+    """Hold a run's lock as another process would: through a file of its own."""
+    with repo._get_lock_path(run_id).open("a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def test_tracking_writers_give_up_on_a_run_lock_another_process_keeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a writer waits `RUN_LOCK_TIMEOUT` for the run lock and then raises
+    `LockTimeoutError`, leaving the record as it was, while readers are not held up.
+    """
+    repo = TrackingRepository()
+    run = _make_workplan_run(tmp_path, "locked-run")
+    repo.put_workplan_run_sync(run)
+    monkeypatch.setattr("cstar.orchestration.tracking.RUN_LOCK_TIMEOUT", 0.1)
+    history = repo.run_history_dir("locked-run")
+    records_before = sorted(path.name for path in history.iterdir())
+    mutate = mock.Mock()
+
+    with _held_run_lock(repo, "locked-run"):
+        with pytest.raises(LockTimeoutError):
+            repo.update_workplan_run_sync("locked-run", mutate)
+        with pytest.raises(LockTimeoutError):
+            repo.put_workplan_run_sync(run)
+        read_while_held = repo.get_workplan_run_sync("locked-run")
+
+    mutate.assert_not_called()
+    assert sorted(path.name for path in history.iterdir()) == records_before
+    assert read_while_held is not None
+    assert read_while_held.run_id == "locked-run"
+
+    # the refusals left nothing locked: the writers go through once it is free
+    assert repo.update_workplan_run_sync("locked-run", mutate) is not None
+    mutate.assert_called_once()
 
 
 def test_tracking_latest_record_stays_readable_while_rewritten(
@@ -966,8 +1097,8 @@ def test_tracking_latest_record_stays_readable_while_rewritten(
 
     Readers that take no lock (`stat` of the link, the listings) used to catch
     the gap between unlinking the old link and creating the new one, and the
-    in-place rewrite of the history record it points at; a lookup under the run
-    lock must never miss the record.
+    in-place rewrite of the history record it points at; a lookup, which takes
+    no lock either, must never miss the record.
 
     Parameters
     ----------
