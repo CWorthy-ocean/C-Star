@@ -1,3 +1,4 @@
+import contextlib
 import os
 from collections.abc import Generator
 from pathlib import Path
@@ -41,7 +42,14 @@ def test_gpu_toolchain() -> None:
         mpi_prefix="srun --kill-on-bad-exit=1",
         profile="gpu",
         gpu_arch="cc80",
+        link_flags="${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}",
     )
+
+
+def test_link_flags_default_to_none() -> None:
+    """Verify a toolchain adds no linker flags unless its system names some."""
+    assert Toolchain(compiler="gnu", mpi_prefix="mpirun").link_flags == ""
+    assert PerlmutterSystemContext.toolchain("cpu").link_flags == ""
 
 
 @pytest.mark.parametrize(
@@ -148,6 +156,46 @@ class TestEnvironmentFor:
             manager = CStarSystemManager()
             with pytest.raises(CstarError, match=LinuxSystemContext.name):
                 manager.environment_for("gpu")
+
+
+class TestManagerToolchain:
+    """Tests for `CStarSystemManager.toolchain`."""
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _manager(
+        context: type[SystemContext], system_name: str
+    ) -> Generator[CStarSystemManager, None, None]:
+        """A manager for `context` whose environments build without Lmod or env files."""
+        selection = SystemSelection(context, SystemSource.DETECTED)
+        env = {LmodEnvSettings.variable("SYSTEM_NAME"): system_name}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            mock.patch("cstar.system.manager.select_system", return_value=selection),
+            mock.patch.object(CStarEnvironment, "_load_env", return_value={}),
+            mock.patch.object(CStarEnvironment, "uses_lmod", False),
+        ):
+            yield CStarSystemManager()
+
+    def test_gpu_toolchain_on_perlmutter(self) -> None:
+        """Verify the manager reports the system's GPU toolchain, link flags included,
+        without switching the active profile.
+        """
+        with self._manager(PerlmutterSystemContext, "Perlmutter") as manager:
+            toolchain = manager.toolchain("gpu")
+
+            assert toolchain == PerlmutterSystemContext.toolchain("gpu")
+            assert toolchain.link_flags
+            assert manager.toolchain("cpu").link_flags == ""
+            # describing a toolchain does not load it
+            assert manager.environment.profile == ""
+
+    def test_missing_gpu_toolchain_names_system(self) -> None:
+        """Verify a system without a GPU toolchain refuses by name."""
+        with self._manager(LinuxSystemContext, "") as manager:
+            with pytest.raises(CstarError, match=LinuxSystemContext.name):
+                manager.toolchain("gpu")
+            assert manager.toolchain("cpu") == LinuxSystemContext.toolchain("cpu")
 
 
 def test_profile_in_str_only_when_set() -> None:

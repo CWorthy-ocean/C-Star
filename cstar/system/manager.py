@@ -1020,6 +1020,12 @@ class PerlmutterSystemContext(SystemContext):
                 mpi_prefix=cls.mpi_prefix,
                 profile="gpu",
                 gpu_arch="cc80",
+                # cray-mpich sets these for the `craype-accel-nvidia80` target:
+                # the `-L` directory and `-lmpi_gtl_cuda`. With
+                # `MPICH_GPU_SUPPORT_ENABLED=1` (set by perlmutter.gpu.env) the
+                # model aborts at start-up unless libmpi_gtl_cuda is linked.
+                # Not yet verified on the machine (2026-11-06).
+                link_flags="${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}",
             )
         return super().toolchain(name)
 
@@ -1150,6 +1156,29 @@ class CStarSystemManager:
             )
         self._active = name
         return self._environments[name]
+
+    def toolchain(self, name: ToolchainName) -> Toolchain:
+        """Get the compiler, MPI and module profile the system offers under `name`.
+
+        Unlike `environment_for`, this never switches the active profile.
+
+        Parameters
+        ----------
+        name : ToolchainName
+            The toolchain to describe.
+
+        Returns
+        -------
+        Toolchain
+            The toolchain's compiler, MPI prefix, profile and GPU build facts.
+
+        Raises
+        ------
+        CstarError
+            If the system does not register the toolchain, as for ``gpu`` on a
+            system without GPU nodes.
+        """
+        return self._context.toolchain(name)
 
     @property
     def scheduler(self) -> Scheduler | None:

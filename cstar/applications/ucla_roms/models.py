@@ -432,3 +432,11 @@ class UclaRomsBlueprint(Blueprint):
             raise ValueError(msg)
 
         return ComputeNeeds(tasks=dims[0] * dims[1])
+
+    @property
+    def processor_grid(self) -> tuple[int | None, int | None]:
+        """The domain decomposition (processes along x, y).
+
+        Partitioned input datasets were split for it.
+        """
+        return (self.partitioning.n_procs_x, self.partitioning.n_procs_y)

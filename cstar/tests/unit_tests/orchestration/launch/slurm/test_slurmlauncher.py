@@ -19,16 +19,18 @@ from cstar.base.utils import utc_now
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToRunRequestAdapter
+from cstar.orchestration.compute_environment import ComputeEnvironment
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import (
     SlurmComputeSpec,
     SlurmHandle,
     SlurmLauncher,
 )
-from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN
+from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, ComputeNeeds, Step
 from cstar.orchestration.orchestration import LiveStep, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
+from cstar.orchestration.transforms import _inject_compute, _inject_compute_defaults
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_GPU_ACCOUNT,
@@ -535,6 +537,22 @@ def test_compute_spec_unknown_override_key_fails_loudly(
         _ = SlurmLauncher._get_compute_spec(step)  # type: ignore
 
 
+def _gpu_system_manager(tmp_path: Path) -> mock.Mock:
+    """A system manager whose SLURM scheduler offers four-GPU nodes on `gpu-q`."""
+    mock_mgr = mock.Mock()
+    mock_mgr.environment.package_root = tmp_path
+    mock_mgr.environment.settings_klass = EnvSettingsBase
+    mock_mgr.scheduler = SlurmScheduler(
+        queues=[fake_get_queue("cpu-q"), fake_get_queue("gpu-q")],
+        primary_queue_name="cpu-q",
+        other_scheduler_directives={"-C": "cpu"},
+        requires_task_distribution=False,
+        max_cpus_per_node=64,
+        gpu=GpuNodes(4, "gpu-q", {"-C": "gpu"}, 64),
+    )
+    return mock_mgr
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_slurmlauncher_adapt_step_gpu_job(
     monkeypatch: pytest.MonkeyPatch,
@@ -552,17 +570,7 @@ def test_slurmlauncher_adapt_step_gpu_job(
         update={"compute_overrides": {"slurm": {"num_cpus": 6, "num_gpus": 6}}},
     )
 
-    mock_mgr = mock.Mock()
-    mock_mgr.environment.package_root = tmp_path
-    mock_mgr.environment.settings_klass = EnvSettingsBase
-    mock_mgr.scheduler = SlurmScheduler(
-        queues=[fake_get_queue("cpu-q"), fake_get_queue("gpu-q")],
-        primary_queue_name="cpu-q",
-        other_scheduler_directives={"-C": "cpu"},
-        requires_task_distribution=False,
-        max_cpus_per_node=64,
-        gpu=GpuNodes(4, "gpu-q", {"-C": "gpu"}, 64),
-    )
+    mock_mgr = _gpu_system_manager(tmp_path)
 
     with (
         mock.patch(
@@ -579,6 +587,86 @@ def test_slurmlauncher_adapt_step_gpu_job(
     assert "#SBATCH --gpus-per-node=3" in job.script
     assert "#SBATCH --ntasks-per-node=3" in job.script
     assert "#SBATCH -C gpu" in job.script
+
+
+@pytest.fixture
+def gpu_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings for a GPU job: an account, and no queue so the system's applies."""
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "cpu-account")
+    monkeypatch.delenv(ENV_CSTAR_SLURM_QUEUE, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_GPU_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_GPU_QUEUE, raising=False)
+
+
+def _scheduled_step(workplan_step: Step, needs: ComputeNeeds) -> LiveStep:
+    """The step as the workplan transformer leaves it: the blueprint's compute needs,
+    then the workplan-wide defaults, which set `num_nodes: 5`.
+    """
+    env = ComputeEnvironment(
+        slurm=SlurmComputeSpec(num_nodes=5, max_walltime="01:00:00")
+    )
+    return _inject_compute_defaults(
+        _inject_compute(LiveStep.from_step(workplan_step), needs), env
+    )
+
+
+@pytest.mark.usefixtures("read_yaml_intercept", "gpu_account")
+@pytest.mark.parametrize(
+    "needs",
+    [
+        pytest.param(ComputeNeeds(tasks=10, gpu_tasks=8, nodes=2), id="with-writers"),
+        pytest.param(ComputeNeeds(tasks=8, gpu_tasks=8, nodes=2), id="without-writers"),
+    ],
+)
+def test_slurmlauncher_adapt_step_passes_blueprint_node_count(
+    wp_templates_dir: Path, needs: ComputeNeeds
+) -> None:
+    """A node count a blueprint's compute needs fix reaches `create_scheduler_job`,
+    with its GPUs and tasks, through the workplan's own `num_nodes` default.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = _scheduled_step(workplan.steps[0], needs)
+
+    with mock.patch(
+        "cstar.orchestration.launch.slurm.create_scheduler_job"
+    ) as create_job:
+        SlurmLauncher.adapt_step(live_step, [])
+
+    kwargs = create_job.call_args.kwargs
+    assert (kwargs["nodes"], kwargs["gpus"], kwargs["cpus"]) == (
+        2,
+        needs.gpu_tasks,
+        needs.tasks,
+    )
+
+
+@pytest.mark.usefixtures("read_yaml_intercept", "gpu_account")
+def test_slurmlauncher_adapt_step_gpu_job_spans_the_blueprint_node_count(
+    tmp_path: Path, wp_templates_dir: Path
+) -> None:
+    """A GPU job takes its node count from the blueprint's needs, not the fewest
+    nodes that hold its GPUs, and spreads its ranks evenly over them.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = _scheduled_step(
+        workplan.steps[0], ComputeNeeds(tasks=12, gpu_tasks=8, nodes=4)
+    )
+    mock_mgr = _gpu_system_manager(tmp_path)
+
+    with (
+        mock.patch(
+            "cstar.execution.scheduler_job.get_sysmgr",
+            mock.Mock(return_value=mock_mgr),
+        ),
+        mock.patch.object(mock_mgr.scheduler, "get_queue", fake_get_queue),
+    ):
+        job = SlurmLauncher.adapt_step(live_step, [])
+
+    # eight GPUs would fit on two four-GPU nodes
+    assert (job.gpus, job.gpus_per_node, job.nodes) == (8, 2, 4)
+    assert "#SBATCH --nodes=4" in job.script
+    assert "#SBATCH --gpus-per-node=2" in job.script
+    assert "#SBATCH --ntasks-per-node=3" in job.script
 
 
 def test_compute_spec_single_node_rejects_multiple_nodes() -> None:

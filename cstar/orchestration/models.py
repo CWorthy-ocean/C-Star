@@ -25,6 +25,7 @@ from pydantic import (
     FilePath,
     HttpUrl,
     PlainSerializer,
+    PositiveInt,
     PrivateAttr,
     SerializationInfo,
     StringConstraints,
@@ -419,11 +420,30 @@ class ComputeNeeds(ConfiguredBaseModel):
     node instead of requesting additional nodes it could never use.
     """
 
+    nodes: PositiveInt | None = Field(default=None)
+    """The node count the run must span; `None` lets the launcher choose.
+
+    A GPU run whose ranks are laid out per node sets it, so that the task
+    count the run was sized for lands on that many nodes. Left unset, the
+    launcher picks the fewest nodes that hold the run's GPUs.
+    """
+
     @model_validator(mode="after")
     def _gpu_tasks_within_tasks(self) -> t.Self:
         """Reject a run that asks for more GPU tasks than it has tasks."""
         if self.gpu_tasks > self.tasks:
             msg = f"gpu_tasks ({self.gpu_tasks}) cannot exceed tasks ({self.tasks})"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _single_node_spans_one_node(self) -> t.Self:
+        """Reject a run confined to one node that also asks for more than one."""
+        if self.single_node and self.nodes not in (None, 1):
+            msg = (
+                f"single_node is set but nodes={self.nodes}; a single-node run "
+                "must use nodes=1 (or leave nodes unset)"
+            )
             raise ValueError(msg)
         return self
 
@@ -437,14 +457,16 @@ class ComputeNeeds(ConfiguredBaseModel):
         Returns
         -------
         dict[str, int | bool]
-            ``num_cpus``, plus ``single_node`` when set and ``num_gpus`` when
-            the run needs GPUs.
+            ``num_cpus``, plus ``single_node`` when set, ``num_gpus`` when the
+            run needs GPUs and ``num_nodes`` when the run fixes its node count.
         """
         overrides: dict[str, int | bool] = {"num_cpus": self.tasks}
         if self.single_node:
             overrides["single_node"] = True
         if self.gpu_tasks > 0:
             overrides["num_gpus"] = self.gpu_tasks
+        if self.nodes is not None:
+            overrides["num_nodes"] = self.nodes
         return overrides
 
 

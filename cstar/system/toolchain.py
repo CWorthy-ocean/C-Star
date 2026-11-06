@@ -28,6 +28,10 @@ class Toolchain:
     ``<system>.gpu.lmod`` and ``<system>.gpu.env``."""
     gpu_arch: str = ""
     """The NVIDIA compute capability flag value, e.g. ``cc80``; empty for CPU."""
+    link_flags: str = ""
+    """Extra linker flags a GPU build appends after the MPI libraries, e.g. Cray
+    MPICH's GPU transport layer. ``$VAR`` references are expanded when the build
+    runs, so they may name variables the profile's modules set."""
 
 
 @dataclass(frozen=True)
