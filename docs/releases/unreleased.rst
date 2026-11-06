@@ -49,6 +49,11 @@ Bug Fixes
 - An infinite value (``.inf``) in a blueprint or a workplan step's overrides was turned into ``null`` when saved, hashed or template-filled; it now stays infinite. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
 - On Perlmutter, C-Star again loads a module set that exists (``cray-hdf5/1.14.3.9``, ``cray-netcdf/4.9.2.3``, ``cray-parallel-netcdf/1.12.3.21`` under ``PrgEnv-gnu/8.7.0`` and ``cray-mpich/9.1.0``), so ``NETCDFHOME`` and ``PNETCDFHOME`` resolve and ROMS builds on CPU nodes. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
 - Forge wrote the diagnostics output period as a real number (``86400.0``), which ucla-roms cannot read into its integer setting, so any run with ``DIAGNOSTICS`` compiled in stopped at startup. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- Scheduled steps on Perlmutter no longer fail with ``OSError: [Errno 524]`` before the model starts when the state or cache directory is under ``$HOME`` or ``/global/cfs``. (`#884 <https://github.com/CWorthy-ocean/C-Star/pull/884>`_)
+
+  - Where a file system cannot lock files, C-Star carries on without the lock and logs one warning per directory saying other processes are not kept out there.
+  - A workplan run orchestrated inside an allocation on those mounts now writes its run record, sentinels and manifest instead of failing or silently skipping the manifest.
+
 
 Improvements
 ~~~~~~~~~~~~
@@ -57,6 +62,11 @@ Improvements
 - Module lists (``.lmod`` files) may contain blank lines and ``#`` comments; the Perlmutter list now names its login defaults explicitly so a change of site defaults does not change the build. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
 - The wizard no longer has a separate "Temperature and salinity output" section: the temperature and salinity checkboxes are under "Variables in history files", the only file they affect. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
 - The bundled ``roms-marbl-0.13-default`` ModelSpec (the wizard's default) now pins ucla-roms 0.13.1, which changes no namelist key. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- Locks on a run's records are bounded: a writer gives up after 60 s instead of waiting forever on a stalled process. (`#884 <https://github.com/CWorthy-ocean/C-Star/pull/884>`_)
+
+  - ``cstar workplan ls --size`` and ``cstar workplan status --size`` warn that a run's disk usage was not recorded instead of failing.
+  - ``cstar run attach`` refuses in one line, and a new run does not start, with a message naming the lock file.
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
