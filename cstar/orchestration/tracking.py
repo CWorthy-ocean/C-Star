@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+import uuid
 from collections.abc import (
     AsyncGenerator,
     Callable,
@@ -740,18 +741,18 @@ def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
 def _replacing(path: Path) -> Generator[Path]:
     """Yield a sibling of `path` to build, then rename it onto `path` atomically.
 
-    The caller holds the run lock, so one fixed staging name per path suffices;
-    a leftover from a crashed writer is cleared first. The staged name is removed
-    if building or renaming it fails.
+    Each writer stages under a name of its own: where the file system cannot
+    lock, the run lock does not keep other processes out, and a shared staging
+    name would let one writer publish another's half-written file. The staged
+    name is removed if building or renaming it fails.
 
     Parameters
     ----------
     path : Path
         The file or link to replace.
     """
-    staged = path.with_name(f".{path.name}.tmp")
+    staged = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     staged.parent.mkdir(parents=True, exist_ok=True)
-    staged.unlink(missing_ok=True)
     try:
         yield staged
         os.replace(staged, path)

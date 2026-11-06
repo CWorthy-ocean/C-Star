@@ -21,7 +21,11 @@ from cstar.cli.workplan.shared import (
     list_steps,
     refresh_disk_usage,
 )
-from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    LockTimeoutError,
+    StateDirectoryManager,
+)
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Step, StepRef, Workplan
 from cstar.orchestration.orchestration import Status
@@ -415,6 +419,55 @@ async def test_refresh_disk_usage_measures_and_persists(
     assert awaited_run is run
     assert awaited_step_dirs == step_dirs
     put_mock.assert_awaited_once_with(run.run_id, mock.ANY)
+
+
+@pytest.mark.asyncio
+async def test_refresh_disk_usage_warns_when_a_record_stays_locked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a run whose record stays locked past its timeout is reported in a
+    warning, and the other runs are still recorded, instead of the listing failing.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy step paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    caplog : pytest.LogCaptureFixture
+        Captures the warning.
+    """
+    runs = [make_workplan_run(rid, tmp_path) for rid in ("run-1", "run-2")]
+    plans: dict[Path, t.Any] = {}
+    for run in runs:
+        run.output_path.mkdir(parents=True)
+        (run.output_path / "plan_transformed.yaml").touch()
+        plans[run.trx_workplan_path] = make_plan({"step-a": tmp_path / "step-a"})
+
+    async def _update(run_id: str, mutate: t.Any) -> None:
+        if run_id == "run-1":
+            raise LockTimeoutError("Another holder kept the lock at x.lock for 60 s")
+
+    update_mock = mock.AsyncMock(side_effect=_update)
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.measure_step_sizes", mock.AsyncMock()
+    )
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run",
+        update_mock,
+    )
+    caplog.set_level(logging.WARNING, logger="cstar.cli.workplan.shared")
+
+    await refresh_disk_usage(runs, plans)
+
+    assert update_mock.await_count == 2
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "not recorded" in warnings[0]
+    assert "run-1" in warnings[0]
+    assert "run-2" not in warnings[0]
 
 
 @pytest.mark.asyncio

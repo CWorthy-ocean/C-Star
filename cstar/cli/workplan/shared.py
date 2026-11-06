@@ -927,11 +927,22 @@ async def refresh_disk_usage(
     # apply under each run's lock so a concurrently running orchestrator's
     # sentinel/size updates are not overwritten
     async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
-        await asyncio.gather(
+        outcomes = await asyncio.gather(
             *(
                 repo.update_workplan_run(
                     rid, functools.partial(WorkplanRun.record_step_sizes, sizes=sizes)
                 )
                 for rid, sizes in measured.items()
-            )
+            ),
+            return_exceptions=True,
+        )
+
+    # the sizes are record-keeping: a record that stayed locked is only reported
+    if failed := [
+        f"{rid} ({outcome})"
+        for rid, outcome in zip(measured, outcomes)
+        if isinstance(outcome, Exception)
+    ]:
+        log.warning(
+            f"Disk usage was measured but not recorded for run(s): {', '.join(failed)}"
         )

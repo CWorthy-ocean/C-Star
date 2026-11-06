@@ -51,6 +51,7 @@ from cstar.orchestration.tracking import (
     Access,
     TrackingRepository,
     WorkplanRun,
+    _replacing,
     measure_step_sizes,
     read_run_record,
     require_relaunchable,
@@ -544,6 +545,24 @@ async def test_tracking_get_run_paths(
     history = set(p for p in actual_paths if "history" in str(p))
 
     assert len(history) == exp_num_paths
+
+
+def test_replacing_stages_each_writer_under_a_name_of_its_own(tmp_path: Path) -> None:
+    """Verify two writers replacing one record at once never share a staging
+    file, as they could where the run lock does not keep other processes out.
+    """
+    target = tmp_path / "history" / "record.yaml"
+
+    with _replacing(target) as first, _replacing(target) as second:
+        assert first != second
+        assert first.name.startswith(".")
+        assert second.name.startswith(".")
+        first.write_text("first")
+        second.write_text("second")
+
+    # the inner writer renamed its own file into place, then the outer its own
+    assert target.read_text() == "first"
+    assert sorted(p.name for p in target.parent.iterdir()) == ["record.yaml"]
 
 
 @pytest.mark.parametrize("all_history", [True, False])
