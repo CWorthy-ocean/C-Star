@@ -14,7 +14,7 @@ yet supported for full workplan orchestration.
 |                                                                                  | build/run |                       |                |
 |                                                                                  | support   |                       |                |
 +==================================================================================+===========+=======================+================+
-| `Anvil (RCAC) <https://www.rcac.purdue.edu/anvil>`__                             | ✅        | ✅                    | ✅ (jobs only) |
+| `Anvil (RCAC) <https://www.rcac.purdue.edu/anvil>`__                             | ✅        | ✅                    | ❌ (planned)   |
 +----------------------------------------------------------------------------------+-----------+-----------------------+----------------+
 | `Bouchet (YCRC) <https://docs.ycrc.yale.edu/clusters/bouchet/>`__                | ✅        | ✅                    | ❌             |
 +----------------------------------------------------------------------------------+-----------+-----------------------+----------------+
@@ -32,9 +32,10 @@ yet supported for full workplan orchestration.
 | Linux (x86_64 and aarch 64)                                                      | ✅        | ✅                    | ❌             |
 +----------------------------------------------------------------------------------+-----------+-----------------------+----------------+
 
-Perlmutter's GPU modules were verified on the machine. On Anvil, GPU jobs can be
-submitted (a ``<allocation>-gpu`` account is needed), but C-Star has no GPU build
-toolchain registered there yet.
+Perlmutter's GPU modules were verified on the machine. GPU runs on Anvil are
+planned for a later release: its GPU partitions are registered, so a GPU job can
+be submitted with a ``<allocation>-gpu`` account, but this is untested and C-Star
+has no GPU build toolchain there yet.
 
 On Derecho, which uses PBS, ``cstar blueprint submit`` and ``cstar workplan
 submit`` are not available. Run ``cstar blueprint run`` from inside a PBS job
