@@ -342,7 +342,7 @@ class ROMSSimulation(Simulation):
         discretization: "ROMSDiscretization",
         runtime_code: "AdditionalCode",
         compile_time_code: "AdditionalCode | None" = None,
-        codebase: "ROMSExternalCodeBase | None" = None,
+        codebase: "ExternalCodeBase | None" = None,
         start_date: str | datetime | None = None,
         end_date: str | datetime | None = None,
         valid_start_date: str | datetime | None = None,
@@ -381,8 +381,9 @@ class ROMSSimulation(Simulation):
             ROMS runtime configuration files (e.g. a `.nml` Fortran namelist) required for execution.
         compile_time_code : AdditionalCode, optional
             Additional source code or modifications needed for compiling ROMS (e.g. `.opt` files).
-        codebase : ROMSExternalCodeBase, optional
-            The ROMS source code repository to be used. If not provided, a default ROMS
+        codebase : ExternalCodeBase, optional
+            The ROMS source code repository to be used (a `ROMSExternalCodeBase`, or
+            the GPU model's codebase for a subclass). If not provided, a default ROMS
             codebase will be used.
         start_date : str or datetime, optional
             The start date of the simulation. If not provided, it defaults to the valid start date.
@@ -744,7 +745,7 @@ class ROMSSimulation(Simulation):
         return cast("RomsFileSystemManager", self._fs_manager)
 
     @property
-    def default_codebase(self) -> ROMSExternalCodeBase:
+    def default_codebase(self) -> "ExternalCodeBase":
         """Returns the default ROMS external codebase.
 
         This property provides a default instance of `ROMSExternalCodeBase` to be used

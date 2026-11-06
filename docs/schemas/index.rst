@@ -57,6 +57,14 @@ executes a UCLA-ROMS simulation.
 
 - :download:`UCLA-ROMS Blueprint Schema v3.3.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms/ucla_roms_schema.3.3.0.json>`
 
+UCLA-ROMS GPU Blueprint
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The `ucla_roms_gpu` blueprint enables the orchestration of an application that
+executes a UCLA-ROMS simulation on GPUs (gpu-ucla-roms).
+
+- :download:`UCLA-ROMS GPU Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms_gpu/ucla_roms_gpu_schema.1.0.0.json>`
+
 ROMS-MARBL Blueprint (earlier name)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

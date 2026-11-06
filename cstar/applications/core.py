@@ -507,7 +507,8 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     attach to the prepared working directory."""
     toolchain: "ToolchainName" = "cpu"
     """The system toolchain profile (compiler, MPI, modules) the runner builds
-    and runs with; `cpu` for every application today."""
+    and runs with: `cpu`, or `gpu` for an application whose model runs on GPUs
+    (`ucla_roms_gpu`)."""
 
     @property
     def schema_version(self) -> str:

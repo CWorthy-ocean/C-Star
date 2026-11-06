@@ -112,6 +112,69 @@ def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Prod
     return products
 
 
+def roms_artifacts(
+    fs: RomsFileSystemManager,
+    *,
+    executable: Path,
+    extra_config: "Sequence[ArtifactSpec]" = (),
+) -> list[ArtifactSpec]:
+    """Declare the files every ROMS application's run leaves in its step root.
+
+    The files the model's file layout fixes: the joined output streams, the
+    namelist C-Star generates, the MARBL configuration and the run log. An
+    application adds the files its model alone has, and says where its
+    executable is.
+
+    Parameters
+    ----------
+    fs : RomsFileSystemManager
+        The file layout of the run's working directory; a manager on a
+        placeholder root is enough, since only its paths are read.
+    executable : Path
+        The compiled model, under `fs.root_dir`.
+    extra_config : Sequence[ArtifactSpec]
+        Further configuration files the model reads, declared after the
+        namelist.
+
+    Returns
+    -------
+    list[ArtifactSpec]
+        The joined output files by stream (the streams other steps consume under
+        their own kinds) and every other `output/*.nc` file, the namelist,
+        `extra_config`, `marbl_in`, the executable and the run log, in that
+        order.
+    """
+
+    def rel(path: Path) -> str:
+        return path.relative_to(fs.root_dir).as_posix()
+
+    streams = [
+        ArtifactSpec(
+            kind=kind,
+            pattern=rel(fs.output_dir / f"{stem}.*.nc"),
+            metadata=dict(metadata),
+        )
+        for stem, kind, metadata in OUTPUT_STREAMS
+    ]
+    return [
+        *streams,
+        ArtifactSpec(kind=ArtifactKind.output, pattern=rel(fs.output_dir / "*.nc")),
+        ArtifactSpec(
+            kind=ArtifactKind.config,
+            pattern=rel(fs.run_dir / GENERATED_NAMELIST_NAME),
+            metadata={"role": "namelist"},
+        ),
+        *extra_config,
+        ArtifactSpec(
+            kind=ArtifactKind.config,
+            pattern=rel(fs.runtime_code_dir / "marbl_in"),
+            metadata={"role": "marbl_in"},
+        ),
+        ArtifactSpec(kind=ArtifactKind.build, pattern=rel(executable)),
+        ArtifactSpec(kind=ArtifactKind.log, pattern=rel(fs.logs_dir / "*.out")),
+    ]
+
+
 class RomsSimulationRunner(BlueprintRunner[TRomsBlueprint]):
     """Worker class to run a `ROMSSimulation` from a blueprint.
 
@@ -338,42 +401,18 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
         """
         # a manager on a placeholder root only spells the layout; it touches no disk
         fs = RomsFileSystemManager(Path("/"))
-
-        def rel(directory: Path, name: str) -> str:
-            return (directory / name).relative_to(fs.root_dir).as_posix()
-
-        streams = [
-            ArtifactSpec(
-                kind=kind,
-                pattern=rel(fs.output_dir, f"{stem}.*.nc"),
-                metadata=dict(metadata),
-            )
-            for stem, kind, metadata in OUTPUT_STREAMS
-        ]
-        return [
-            *streams,
-            ArtifactSpec(kind=ArtifactKind.output, pattern=rel(fs.output_dir, "*.nc")),
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=rel(fs.run_dir, GENERATED_NAMELIST_NAME),
-                metadata={"role": "namelist"},
-            ),
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=rel(fs.compile_time_code_dir, "cppdefs.opt"),
-                metadata={"role": "cppdefs"},
-            ),
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=rel(fs.runtime_code_dir, "marbl_in"),
-                metadata={"role": "marbl_in"},
-            ),
-            ArtifactSpec(
-                kind=ArtifactKind.build,
-                pattern=rel(fs.compile_time_code_dir, ROMS_EXECUTABLE_NAME),
-            ),
-            ArtifactSpec(kind=ArtifactKind.log, pattern=rel(fs.logs_dir, "*.out")),
-        ]
+        cppdefs = fs.compile_time_code_dir / "cppdefs.opt"
+        return roms_artifacts(
+            fs,
+            executable=fs.compile_time_code_dir / ROMS_EXECUTABLE_NAME,
+            extra_config=[
+                ArtifactSpec(
+                    kind=ArtifactKind.config,
+                    pattern=cppdefs.relative_to(fs.root_dir).as_posix(),
+                    metadata={"role": "cppdefs"},
+                )
+            ],
+        )
 
 
 def main() -> int:

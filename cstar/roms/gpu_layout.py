@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from cstar.roms.namelist import RomsNamelistBase
 
 GPU_WRITER_RATE_GBPS: Final = 0.6
@@ -139,6 +141,55 @@ class GpuRankLayout:
         return self.tiles_per_node + self.writers_per_node
 
 
+def _namelist_lookup(settings: RomsNamelistBase) -> Callable[[str, Any], Any]:
+    """Look keys up in a namelist as ``tools/gpu_layout.py`` does.
+
+    The script scans the namelist text, so a key is found in the first group of
+    ``settings.model_dump()`` that holds it; the lookup returns `default` when no
+    group does.
+    """
+    groups = settings.model_dump().values()
+
+    def value(key: str, default: Any) -> Any:
+        return next(
+            (g[key] for g in groups if g.get(key) is not None),
+            default,
+        )
+
+    return value
+
+
+def history_record_gb(settings: RomsNamelistBase) -> float:
+    """Size, in GB, of one history record of a GPU run of this namelist.
+
+    The estimate of gpu-ucla-roms ``tools/gpu_layout.py`` (v0.1.2-beta): four
+    bytes per point of each 2-D and 3-D field the ``wrt_*`` switches write, plus
+    the MARBL tracers and diagnostics when ``nt_bgc > 0``. A key C-Star's namelist
+    does not have counts as the script counts a key the namelist lacks.
+
+    Parameters
+    ----------
+    settings
+        The namelist the GPU model will read.
+
+    Returns
+    -------
+    float
+    """
+    value = _namelist_lookup(settings)
+    nt_bgc = int(value("nt_bgc", 0))
+    nz = int(value("nz", 0))
+    cells = (int(value("llm", 0)) + 2) * (int(value("mmm", 0)) + 2)
+    n2d = sum(1 for k in _RECORD_2D_KEYS if value(k, False))
+    n3d = sum(1 for k in _RECORD_3D_KEYS if value(k, False))
+    if value("write_passive", True) and nt_bgc > 0:
+        n3d += nt_bgc
+    if nt_bgc > 0:
+        n2d += _MARBL_EXTRA_2D
+        n3d += _MARBL_EXTRA_3D
+    return 4.0 * cells * (n3d * nz + n2d) / 1e9
+
+
 def suggested_writers_per_node(settings: RomsNamelistBase, nodes: int) -> int:
     """Writer ranks per node for a GPU run of this namelist.
 
@@ -171,26 +222,8 @@ def suggested_writers_per_node(settings: RomsNamelistBase, nodes: int) -> int:
     int
         Writer ranks to put on each node (``ROMS_GPU_NWRITERS``), at least 1.
     """
-    groups = settings.model_dump().values()
-
-    def value(key: str, default: Any) -> Any:
-        # The first group holding the key, as the first match in the namelist text.
-        return next(
-            (g[key] for g in groups if g.get(key) is not None),
-            default,
-        )
-
-    nt_bgc = int(value("nt_bgc", 0))
-    nz = int(value("nz", 0))
-    cells = (int(value("llm", 0)) + 2) * (int(value("mmm", 0)) + 2)
-    n2d = sum(1 for k in _RECORD_2D_KEYS if value(k, False))
-    n3d = sum(1 for k in _RECORD_3D_KEYS if value(k, False))
-    if value("write_passive", True) and nt_bgc > 0:
-        n3d += nt_bgc
-    if nt_bgc > 0:
-        n2d += _MARBL_EXTRA_2D
-        n3d += _MARBL_EXTRA_3D
-    record_gb = 4.0 * cells * (n3d * nz + n2d) / 1e9
+    value = _namelist_lookup(settings)
+    record_gb = history_record_gb(settings)
 
     his = value("wrt_file_his", True)
     rst = value("wrt_file_rst", True)
