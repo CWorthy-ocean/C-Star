@@ -999,7 +999,10 @@ def write_text_atomic(
 
 
 LOCK_FIRST_RETRY: t.Final[float] = 0.05
-"""Seconds before trying again to take a lock that has a timeout; each later pause doubles."""
+"""Longest first pause before trying again to take a lock that has a timeout.
+
+Each later pause may be twice as long, and each is jittered down by up to half.
+"""
 
 LOCK_POLL_INTERVAL: t.Final[float] = 5.0
 """Longest pause between attempts to take a lock that has a timeout."""
@@ -1137,9 +1140,10 @@ def locked(path: Path, *, timeout: float | None = None) -> Iterator[None]:
     as well as processes, and the kernel releases it if the holder dies.
 
     Without a `timeout` the call blocks until the lock is free. With one, it tries
-    again after `LOCK_FIRST_RETRY` seconds, doubling the pause up to
-    `LOCK_POLL_INTERVAL`, and logs that it is waiting once the wait passes
-    `LOCK_LOG_DELAY` seconds and every `LOCK_LOG_INTERVAL` seconds after that.
+    again after a pause of up to `LOCK_FIRST_RETRY` seconds, doubling the pause
+    up to `LOCK_POLL_INTERVAL`, and logs that it is waiting at the first refusal
+    after `LOCK_LOG_DELAY` seconds and every `LOCK_LOG_INTERVAL` seconds after
+    that.
 
     Parameters
     ----------

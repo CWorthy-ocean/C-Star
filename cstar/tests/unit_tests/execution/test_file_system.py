@@ -1470,13 +1470,30 @@ def test_locked_with_timeout_backs_off_with_jitter(tmp_path: Path) -> None:
     ):
         pytest.fail("the lock was taken twice")
 
-    # the last pause may be cut short by the timeout
+    # the last pause is cut short so the wait ends at the timeout
     *pauses, last = clock.pauses
     for n, pause in enumerate(pauses):
         ceiling = min(LOCK_FIRST_RETRY * 2**n, LOCK_POLL_INTERVAL)
         assert ceiling / 2 <= pause <= ceiling
     assert last <= LOCK_POLL_INTERVAL
+    assert clock.now == pytest.approx(60.0)
     assert len(set(pauses[-5:])) > 1
+
+
+def test_locked_with_zero_timeout_tries_once(tmp_path: Path) -> None:
+    """Verify a zero timeout gives up on the first refusal, without pausing."""
+    lock_path = tmp_path / "entry.lock"
+    clock = _FakeClock()
+
+    with (
+        locked(lock_path),
+        mock.patch("cstar.execution.file_system.time", clock),
+        pytest.raises(LockTimeoutError),
+        locked(lock_path, timeout=0.0),
+    ):
+        pytest.fail("the lock was taken twice")
+
+    assert clock.pauses == []
 
 
 @pytest.mark.parametrize(

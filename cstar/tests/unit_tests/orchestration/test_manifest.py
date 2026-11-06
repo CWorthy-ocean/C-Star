@@ -11,6 +11,7 @@ import typing as t
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -23,7 +24,6 @@ from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME, hash_netcdf_contents
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.execution.file_system import (
-    LOCK_POLL_INTERVAL,
     LockTimeoutError,
     StateDirectoryManager,
 )
@@ -1929,7 +1929,7 @@ class TestRecordSubmission:
         self, tmp_path: Path
     ) -> None:
         """Verify submissions recorded at once queue for each other instead of
-        polling the manifest lock, so all of them land without delay.
+        polling the manifest lock: no writer pauses to try the lock again.
         """
         steps = [f"step-{n}" for n in range(12)]
         write_run_manifest(tmp_path, _manifest(*steps))
@@ -1939,18 +1939,20 @@ class TestRecordSubmission:
             )
             for s in steps
         ]
+        clock = SimpleNamespace(
+            monotonic=time.monotonic, sleep=mock.Mock(wraps=time.sleep)
+        )
 
-        start = time.monotonic()
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=30)
-        elapsed = time.monotonic() - start
+        with mock.patch("cstar.execution.file_system.time", clock):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
 
         manifest = read_run_manifest(tmp_path)
         assert manifest is not None
         assert [entry.job_id for entry in manifest.steps] == steps
-        assert elapsed < LOCK_POLL_INTERVAL
+        clock.sleep.assert_not_called()
 
     def test_a_later_submission_replaces_the_earlier(self, tmp_path: Path) -> None:
         write_run_manifest(tmp_path, _manifest("one"))
