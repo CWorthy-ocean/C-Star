@@ -1,4 +1,5 @@
-"""Tests for Rule E, `cstar.roms.precheck.check_gpu_features`.
+"""Tests for Rules E and F, `cstar.roms.precheck.check_gpu_features` and
+`check_gpu_array_sizes`.
 
 Mirrors the GPU model's start-up guard (gpu-ucla-roms ``src/host/feature_guard.F90``
 at v0.1.2-beta): fifteen switches stop the run, five more only warn. The tables
@@ -13,9 +14,11 @@ import pytest
 
 from cstar.roms.namelist import RomsNamelistV0_5_0, RomsNamelistV0_11_0
 from cstar.roms.precheck import (
+    _GPU_ARRAY_SIZES,
     _GPU_STOP_SWITCHES,
     _GPU_WARN_SWITCHES,
     NamelistConsistencyError,
+    check_gpu_array_sizes,
     check_gpu_features,
 )
 
@@ -242,3 +245,54 @@ def test_live_namelist_of_a_schema_without_the_group_is_fine():
     nml = RomsNamelistV0_5_0.read(V0_5_0_NAMELIST)
     nml.calc_pflx_settings.calc_pflx = False
     _no_warnings(nml)
+
+
+# Rule F: (group, key, size) of the arrays the GPU model declares smaller than
+# ucla-roms, restated from upstream (`akt_bak_in(2)`, src/host/case_io.F90:96 at
+# v0.1.2-beta).
+ARRAY_SIZES = [("vertical_mixing_settings", "akt_bak", 2)]
+
+
+def test_array_size_table_matches_upstream():
+    assert list(_GPU_ARRAY_SIZES) == ARRAY_SIZES
+
+
+@pytest.mark.parametrize("values", [[0.0], [1e-5, 1e-6]])
+def test_akt_bak_within_the_gpu_size_passes(values):
+    check_gpu_array_sizes({"vertical_mixing_settings": {"akt_bak": values}})
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"vertical_mixing_settings": {"akt_bak": 0.0}},
+        {"vertical_mixing_settings": {"akv_bak": 0.0}},
+        {},
+    ],
+)
+def test_a_scalar_or_missing_akt_bak_passes(settings):
+    check_gpu_array_sizes(settings)
+
+
+def test_more_akt_bak_values_than_the_gpu_reads_raise():
+    with pytest.raises(NamelistConsistencyError) as raised:
+        check_gpu_array_sizes({"vertical_mixing_settings": {"akt_bak": [0.0] * 3}})
+    assert raised.value.rule == "gpu_array_sizes"
+    assert raised.value.section == "vertical_mixing_settings"
+    assert raised.value.keys == ("akt_bak",)
+    assert "&vertical_mixing_settings akt_bak: 3 values; the GPU model reads 2" in str(
+        raised.value
+    )
+    assert "namelist_overrides" in str(raised.value)
+
+
+def test_a_live_cpu_namelist_is_refused(v0_11_0_namelist):
+    """A CPU 0.11.0 namelist gives one `akt_bak` per tracer."""
+    assert len(v0_11_0_namelist.vertical_mixing_settings.akt_bak) > 2
+    with pytest.raises(NamelistConsistencyError, match="akt_bak"):
+        check_gpu_array_sizes(v0_11_0_namelist)
+
+
+def test_a_live_namelist_with_two_values_passes(v0_11_0_namelist):
+    v0_11_0_namelist.vertical_mixing_settings.akt_bak = [0.0, 0.0]
+    check_gpu_array_sizes(v0_11_0_namelist)

@@ -56,6 +56,11 @@ class TestShippedBlueprints:
 
         assert bp.name == "wales-toy-gpu"
         assert bp.compute_needs.nodes == 1
+        # the shared CPU namelist gives one akt_bak per tracer; the GPU reads two
+        assert bp.namelist_overrides["vertical_mixing_settings"]["akt_bak"] == [
+            0.0,
+            0.0,
+        ]
 
     def test_schema_ref_names_a_published_schema(
         self, template_dict: dict[str, t.Any]
@@ -287,6 +292,25 @@ class TestNamelistOverrides:
     ) -> None:
         data = _with_overrides(
             template_dict, {"frc_output_settings": {"wrt_frc": False}}
+        )
+
+        UclaRomsGpuBlueprint.model_validate(data)
+
+    def test_more_akt_bak_values_than_the_gpu_reads_are_rejected(
+        self, template_dict: dict[str, t.Any]
+    ) -> None:
+        data = _with_overrides(
+            template_dict, {"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
+        )
+
+        with pytest.raises(ValidationError, match="akt_bak: 3 values"):
+            UclaRomsGpuBlueprint.model_validate(data)
+
+    def test_two_akt_bak_values_are_accepted(
+        self, template_dict: dict[str, t.Any]
+    ) -> None:
+        data = _with_overrides(
+            template_dict, {"vertical_mixing_settings": {"akt_bak": [1e-5, 1e-6]}}
         )
 
         UclaRomsGpuBlueprint.model_validate(data)

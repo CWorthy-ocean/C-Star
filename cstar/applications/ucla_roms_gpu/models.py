@@ -19,7 +19,7 @@ from cstar.orchestration.models import (
 )
 from cstar.roms.gpu_layout import GpuRankLayout
 from cstar.roms.namelist import _parse_gpu_release, gpu_namelist_schema_for_ref
-from cstar.roms.precheck import check_gpu_features
+from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
 
 if t.TYPE_CHECKING:
     from cstar.system.toolchain import ToolchainName
@@ -144,8 +144,10 @@ class UclaRomsGpuBlueprint(Blueprint):
     Group and key names are checked against the namelist vocabulary the pinned
     gpu-ucla-roms release reads: unknown names are an error when `code.roms`
     pins a release, and a warning otherwise. Switches for features the GPU
-    model does not have are refused. See :class:`TilingParameterSet` for the
-    processor grid.
+    model does not have are refused, and so are arrays with more values than
+    the GPU model reads: it takes `vertical_mixing_settings.akt_bak` for
+    temperature and salinity only, where a CPU namelist gives one value per
+    tracer. See :class:`TilingParameterSet` for the processor grid.
     """
 
     @model_validator(mode="after")
@@ -197,8 +199,9 @@ class UclaRomsGpuBlueprint(Blueprint):
 
         Unknown group/key names are an error when `code.roms` pins a
         gpu-ucla-roms release and a warning otherwise. `np_xi`/`np_eta`
-        conflicts with `tiling` and switches for features the GPU model does
-        not have (Rule E in :mod:`cstar.roms.precheck`) are always an error.
+        conflicts with `tiling`, switches for features the GPU model does
+        not have (Rule E in :mod:`cstar.roms.precheck`) and arrays with more
+        values than it reads (Rule F) are always an error.
         Values are re-validated when the overrides are merged onto the real
         namelist before launch.
         """
@@ -223,6 +226,7 @@ class UclaRomsGpuBlueprint(Blueprint):
             raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
 
         check_gpu_features(self.namelist_overrides)
+        check_gpu_array_sizes(self.namelist_overrides)
 
     @property
     def compute_needs(self) -> ComputeNeeds:

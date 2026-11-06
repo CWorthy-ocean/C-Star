@@ -60,6 +60,13 @@ fails at the desk rather than at start-up on the machine. Ungated by schema
 version: the GPU model has one guard whatever namelist vocabulary it reads, and a
 group C-Star's schema does not have (``tides_settings``) just never matches.
 
+Rule F -- :func:`check_gpu_array_sizes`: gpu-ucla-roms declares some namelist
+arrays smaller than UCLA ROMS does (v0.1.2-beta: ``akt_bak_in(2)`` in
+``src/host/case_io.F90``, temperature and salinity only, where ucla-roms
+allocates ``Akt_bak(NT)``, one value per tracer). A CPU namelist that gives more
+values stops the GPU model while it reads the group (``too many constants to
+initialize group item``). Same scope and call points as Rule E.
+
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
 A and C need an explicit, caller-supplied set of active cppdefs to know which
@@ -139,11 +146,12 @@ class NamelistConsistencyError(ValueError):
     field it actually exposes, without this module knowing that vocabulary
     exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
     ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"``,
-    ``"file_name_lengths"`` or ``"gpu_features"``). ``"file_name_lengths"``
-    reports every offending key in one error, so its ``section`` may join
-    several group names with ``", "`` and its ``keys`` may span those groups;
-    ``"gpu_features"`` also reports every offending switch in one error, but
-    its ``section`` and ``keys`` name the first of them only.
+    ``"file_name_lengths"``, ``"gpu_features"`` or ``"gpu_array_sizes"``).
+    ``"file_name_lengths"`` reports every offending key in one error, so its
+    ``section`` may join several group names with ``", "`` and its ``keys`` may
+    span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"`` also report
+    every offender in one error, but their ``section`` and ``keys`` name the
+    first of them only.
     """
 
     def __init__(
@@ -973,4 +981,51 @@ def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
             rule="gpu_features",
             section=unsupported[0].group,
             keys=(unsupported[0].key,),
+        )
+
+
+_GPU_ARRAY_SIZES: tuple[tuple[str, str, int], ...] = (
+    ("vertical_mixing_settings", "akt_bak", 2),
+)
+"""``(group, key, size)`` of the namelist arrays gpu-ucla-roms (v0.1.2-beta)
+declares smaller than UCLA ROMS does: ``akt_bak_in(2)`` in ``src/host/case_io.F90``
+(temperature, salinity) against ucla-roms' ``Akt_bak(NT)``."""
+
+
+def check_gpu_array_sizes(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist gives a GPU-model array
+    more values than the model declares (Rule F in the module docstring), which
+    stops the model while it reads the group.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_gpu_features`. A missing
+        group or key, or a scalar value, passes.
+
+    Raises
+    ------
+    NamelistConsistencyError
+        If any array in ``_GPU_ARRAY_SIZES`` has more values than its size. One
+        error lists them all; its ``section`` and ``keys`` name the first.
+    """
+    oversized = [
+        (group, key, size, len(value))
+        for group, key, size in _GPU_ARRAY_SIZES
+        if isinstance(value := _section(_section(settings, group), key), list | tuple)
+        and len(value) > size
+    ]
+    if oversized:
+        raise NamelistConsistencyError(
+            "The GPU model reads fewer values than this namelist gives, and stops "
+            "at start-up on the rest:\n  "
+            + "\n  ".join(
+                f"&{group} {key}: {given} values; the GPU model reads {size}"
+                for group, key, size, given in oversized
+            )
+            + "\nGive only those values in the blueprint's namelist_overrides, e.g. "
+            f"{oversized[0][0]}: {{{oversized[0][1]}: [<{oversized[0][2]} values>]}}.",
+            rule="gpu_array_sizes",
+            section=oversized[0][0],
+            keys=(oversized[0][1],),
         )

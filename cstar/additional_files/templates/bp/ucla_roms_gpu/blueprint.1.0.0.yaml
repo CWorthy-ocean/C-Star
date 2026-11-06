@@ -72,6 +72,10 @@ tiling:
 namelist_overrides:
   time_stepping:
     dt: 1
+  # gpu-ucla-roms reads akt_bak for temperature and salinity only; a CPU
+  # namelist gives one value per tracer, which the GPU model cannot read
+  vertical_mixing_settings:
+    akt_bak: [0.0, 0.0]
 runtime_params:
   documentation: http://mockdoc.com/runtime-params
   hash: null

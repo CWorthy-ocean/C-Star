@@ -291,11 +291,20 @@ def runtime_source(tmp_path: Path) -> Path:
 SimulationFactory = Callable[..., ROMSGpuSimulation]
 
 
+GPU_AKT_BAK: dict[str, dict[str, Any]] = {
+    "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]}
+}
+"""The override a GPU blueprint needs over a CPU namelist: the GPU model reads
+two `akt_bak` values (Rule F), the fixture namelist gives one per tracer."""
+
+
 @pytest.fixture
 def make_simulation(tmp_path: Path, runtime_source: Path) -> SimulationFactory:
     """Build a `ROMSGpuSimulation` with its runtime code staged.
 
-    By default 8 tiles (4 x 2) on 2 nodes with one writer per node.
+    By default 8 tiles (4 x 2) on 2 nodes with one writer per node, and the
+    two-value `akt_bak` override (`GPU_AKT_BAK`) under any `namelist_overrides`
+    given; pass `vertical_mixing_settings` to replace it.
     """
 
     def _make(
@@ -321,7 +330,7 @@ def make_simulation(tmp_path: Path, runtime_source: Path) -> SimulationFactory:
             end_date="2012-01-02",
             valid_start_date="2012-01-01",
             valid_end_date="2012-02-01",
-            namelist_overrides=namelist_overrides,
+            namelist_overrides=GPU_AKT_BAK | (namelist_overrides or {}),
             nodes=nodes,
             writers_per_node=writers_per_node,
             **kwargs,
@@ -637,6 +646,21 @@ class TestRuntimeSettings:
             _ = sim.roms_runtime_settings
 
         assert raised.value.rule == "gpu_features"
+
+    def test_more_akt_bak_values_than_the_gpu_reads_are_refused(
+        self, make_simulation: SimulationFactory
+    ) -> None:
+        """The fixture's CPU namelist gives one `akt_bak` per tracer (Rule F)."""
+        sim = make_simulation(
+            namelist_overrides={"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
+        )
+
+        with pytest.raises(
+            NamelistConsistencyError, match="akt_bak: 3 values"
+        ) as raised:
+            _ = sim.roms_runtime_settings
+
+        assert raised.value.rule == "gpu_array_sizes"
 
     def test_a_file_name_too_long_to_read_is_refused(
         self, make_simulation: SimulationFactory
@@ -975,7 +999,7 @@ class TestBuild:
         executable built for another one is not reused.
         """
         rho0_sim.build()
-        rho0_sim.namelist_overrides = {"rho0_settings": {"rho0": 1027.5}}
+        rho0_sim.namelist_overrides = GPU_AKT_BAK | {"rho0_settings": {"rho0": 1027.5}}
 
         rho0_sim.build()
 
@@ -1033,6 +1057,23 @@ class TestBuild:
         assert not record.exists()
         assert rho0_sim._namelist_schema is None
         assert rho0_sim.exe_path is None
+
+    def test_refuses_more_akt_bak_values_than_the_gpu_reads_before_compiling(
+        self,
+        make_simulation: SimulationFactory,
+        gpu_system: mock.Mock,
+        build_tools: FakeBuildTools,
+    ) -> None:
+        """Rule F fails the build, not the launch after it."""
+        sim = make_simulation(
+            namelist_overrides={"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
+        )
+        stage_codebase(sim)
+
+        with pytest.raises(NamelistConsistencyError, match="akt_bak: 3 values"):
+            sim.build()
+
+        assert build_tools.make_commands == []
 
     def test_needs_the_clone(
         self,
@@ -1486,7 +1527,10 @@ class TestFromBlueprint:
         assert sim.discretization.n_procs_x == 4
         assert sim.discretization.n_procs_y == 2
         assert sim.rank_layout == GpuRankLayout(tiles=8, nodes=2, writers_per_node=1)
-        assert sim.namelist_overrides == {"time_stepping": {"dt": 1}}
+        assert sim.namelist_overrides == {
+            "time_stepping": {"dt": 1},
+            "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]},
+        }
         self.assert_a_gpu_simulation(sim)
 
     def test_bundled_blueprint(self) -> None:
@@ -1497,7 +1541,10 @@ class TestFromBlueprint:
         assert sim.codebase.source.checkout_target == "v0.1.2-beta"
         assert sim.rank_layout == GpuRankLayout(tiles=4, nodes=1, writers_per_node=1)
         assert sim.discretization.n_procs_tot == 4
-        assert sim.namelist_overrides == {"time_stepping": {"dt": 360}}
+        assert sim.namelist_overrides == {
+            "time_stepping": {"dt": 360},
+            "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]},
+        }
         assert sim.cdr_forcing is not None
         assert sim.model_grid is not None
         assert sim.initial_conditions is not None

@@ -66,7 +66,7 @@ from cstar.roms.gpu_layout import (
     writers_per_file,
 )
 from cstar.roms.namelist import gpu_namelist_schema_for_ref
-from cstar.roms.precheck import check_gpu_features
+from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
 from cstar.roms.simulation import IOLayout, ROMSSimulation
 from cstar.system.manager import get_sysmgr
 
@@ -588,8 +588,9 @@ class ROMSGpuSimulation(ROMSSimulation):
     def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
         """Check the composed namelist against what gpu-ucla-roms needs.
 
-        Rule E, the GPU model's start-up feature guard, then the base class's
-        rules. Of those, rule D (file names too long to read) mirrors the model;
+        Rule E, the GPU model's start-up feature guard, and Rule F, the arrays
+        it declares smaller than ucla-roms (also checked before the build), then
+        the base class's rules. Of those, rule D (file names too long to read) mirrors the model;
         rule A (every output stream's rollover divides the restart period) the
         GPU model does not check, but it names and splits files as ucla-roms
         does, so a rollover that does not divide the restart period leaves a
@@ -612,10 +613,12 @@ class ROMSGpuSimulation(ROMSSimulation):
         ------
         NamelistConsistencyError
             If the namelist switches on a feature the GPU model does not have,
-            has an output stream whose rollover does not divide the restart
-            period, or names a file too long for the model to read.
+            gives a GPU-model array more values than the model reads, has an
+            output stream whose rollover does not divide the restart period, or
+            names a file too long for the model to read.
         """
         check_gpu_features(nml)
+        check_gpu_array_sizes(nml)
         super()._check_runtime_settings(nml)
 
         layout = self.rank_layout
@@ -795,6 +798,9 @@ class ROMSGpuSimulation(ROMSSimulation):
             If the GPU toolchain does not name a GPU architecture, `MPIHOME` or
             `NETCDFHOME` is not set, or a variable of the toolchain's link flags
             is not set.
+        NamelistConsistencyError
+            If the composed namelist gives a GPU-model array more values than
+            the model reads (Rule F), checked before the compile.
         RuntimeError
             If an error occurs during the compilation process.
 
@@ -811,6 +817,9 @@ class ROMSGpuSimulation(ROMSSimulation):
             )
 
         self._gpu_environment()
+        # Rule F before the compile: a CPU namelist gives one akt_bak per tracer,
+        # which a blueprint that never mentions akt_bak passes at validation
+        check_gpu_array_sizes(self._composed_namelist())
         key = self._gpu_build_key()
 
         build_dir = codebase_copy.path / GPU_BUILD_DIR_NAME

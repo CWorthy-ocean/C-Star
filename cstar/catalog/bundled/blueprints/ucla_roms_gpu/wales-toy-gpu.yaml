@@ -47,6 +47,10 @@ tiling:
 namelist_overrides:
   time_stepping:
     dt: 360
+  # gpu-ucla-roms reads akt_bak for temperature and salinity only; the
+  # shared CPU namelist gives one value per tracer, which stops the GPU model
+  vertical_mixing_settings:
+    akt_bak: [0.0, 0.0]
 runtime_params:
   start_date: 2012-01-01 00:00:00
   end_date: 2012-01-01 00:30:00

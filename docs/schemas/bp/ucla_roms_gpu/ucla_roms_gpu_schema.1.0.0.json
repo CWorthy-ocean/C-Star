@@ -733,7 +733,7 @@
                 "additionalProperties": true,
                 "type": "object"
             },
-            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale.\n\nGroup and key names are checked against the namelist vocabulary the pinned\ngpu-ucla-roms release reads: unknown names are an error when `code.roms`\npins a release, and a warning otherwise. Switches for features the GPU\nmodel does not have are refused. See :class:`TilingParameterSet` for the\nprocessor grid.",
+            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale.\n\nGroup and key names are checked against the namelist vocabulary the pinned\ngpu-ucla-roms release reads: unknown names are an error when `code.roms`\npins a release, and a warning otherwise. Switches for features the GPU\nmodel does not have are refused, and so are arrays with more values than\nthe GPU model reads: it takes `vertical_mixing_settings.akt_bak` for\ntemperature and salinity only, where a CPU namelist gives one value per\ntracer. See :class:`TilingParameterSet` for the processor grid.",
             "title": "Namelist Overrides",
             "type": "object"
         }
