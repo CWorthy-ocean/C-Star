@@ -1004,6 +1004,9 @@ LOCK_FIRST_RETRY: t.Final[float] = 0.05
 LOCK_POLL_INTERVAL: t.Final[float] = 5.0
 """Longest pause between attempts to take a lock that has a timeout."""
 
+LOCK_LOG_DELAY: t.Final[float] = 5.0
+"""Seconds a wait for a lock that has a timeout lasts before it is logged."""
+
 LOCK_LOG_INTERVAL: t.Final[float] = 60.0
 """Seconds between the messages logged while waiting for a lock that has a timeout."""
 
@@ -1095,7 +1098,9 @@ def _acquire(lock_file: t.IO[str], path: Path, timeout: float | None) -> None:
         return
 
     start = time.monotonic()
-    next_log = start
+    # a short wait passes quietly: the message goes to stdout, beside the output
+    # of commands like `cstar run show --format json`
+    next_log = start + LOCK_LOG_DELAY
     pause = min(LOCK_FIRST_RETRY, LOCK_POLL_INTERVAL)
     while True:
         try:
@@ -1133,8 +1138,8 @@ def locked(path: Path, *, timeout: float | None = None) -> Iterator[None]:
 
     Without a `timeout` the call blocks until the lock is free. With one, it tries
     again after `LOCK_FIRST_RETRY` seconds, doubling the pause up to
-    `LOCK_POLL_INTERVAL`, and logs that it is waiting when first refused and
-    every `LOCK_LOG_INTERVAL` seconds after that.
+    `LOCK_POLL_INTERVAL`, and logs that it is waiting once the wait passes
+    `LOCK_LOG_DELAY` seconds and every `LOCK_LOG_INTERVAL` seconds after that.
 
     Parameters
     ----------

@@ -52,13 +52,15 @@ def held_cache_lock(
 ) -> Generator[t.IO[str], None, None]:
     """Hold the repository cache lock for `remote_repo_uri`, as another step would.
 
-    Lock attempts are retried every 0.05 s while it is held.
+    Lock attempts are retried every 0.05 s at most while it is held, and the wait
+    is logged at once.
     """
     cache_path = t.cast("CRRS", SourceData(remote_repo_uri).stager)._get_cache_path()
     cache_home.mkdir(parents=True)
     with (
         (cache_home / f"{cache_path.name}.lock").open("a") as holder,
         mock.patch("cstar.execution.file_system.LOCK_POLL_INTERVAL", 0.05),
+        mock.patch("cstar.execution.file_system.LOCK_LOG_DELAY", 0.0),
     ):
         fcntl.flock(holder, fcntl.LOCK_EX)
         yield holder

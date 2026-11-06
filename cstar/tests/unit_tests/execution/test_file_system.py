@@ -17,6 +17,7 @@ from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (
     LOCK_FIRST_RETRY,
+    LOCK_LOG_DELAY,
     LOCK_POLL_INTERVAL,
     UNKNOWN_SIZE,
     DirectoryManager,
@@ -1388,6 +1389,7 @@ def test_locked_with_timeout_logs_the_wait_and_gives_up(
 
     with (
         mock.patch("cstar.execution.file_system.LOCK_POLL_INTERVAL", 0.05),
+        mock.patch("cstar.execution.file_system.LOCK_LOG_DELAY", 0.0),
         locked(lock_path),
         pytest.raises(LockTimeoutError, match="entry.lock"),
         locked(lock_path, timeout=0.2),
@@ -1415,6 +1417,26 @@ def test_locked_with_timeout_takes_a_lock_soon_after_its_release(
         release.join()
 
     assert waited < LOCK_POLL_INTERVAL / 2
+
+
+def test_locked_with_timeout_waits_quietly_for_a_lock_held_briefly(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a wait shorter than `LOCK_LOG_DELAY` logs nothing: the message
+    goes to stdout, where it would land in a command's JSON output.
+    """
+    lock_path = tmp_path / "entry.lock"
+    caplog.set_level(logging.DEBUG, logger="cstar.execution.file_system")
+
+    with lock_path.open("a") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        release = threading.Timer(0.2, fcntl.flock, args=(holder, fcntl.LOCK_UN))
+        release.start()
+        with locked(lock_path, timeout=LOCK_LOG_DELAY * 4):
+            pass
+        release.join()
+
+    assert "Waiting for the lock" not in caplog.text
 
 
 class _FakeClock:
