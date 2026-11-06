@@ -1044,28 +1044,6 @@ def test_tracking_round_trips_a_record_where_flock_is_unsupported(
     assert persisted.resolve() in paths
 
 
-def test_tracking_readers_take_no_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify reading a run record or listing a run's paths never calls `flock`,
-    since writers rename each record into place.
-    """
-    repo = TrackingRepository()
-    persisted = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "readable"))
-
-    flock = mock.Mock()
-    monkeypatch.setattr("cstar.execution.file_system.fcntl.flock", flock)
-    found = repo.get_workplan_run_sync("readable")
-    latest_paths = repo.list_runtracking_paths("readable")
-    history_paths = repo.list_runtracking_paths("readable", all_history=True)
-
-    assert found is not None
-    assert found.run_id == "readable"
-    assert persisted.resolve() in latest_paths
-    assert persisted.resolve() in history_paths
-    flock.assert_not_called()
-
-
 @contextmanager
 def _held_run_lock(repo: TrackingRepository, run_id: str) -> t.Iterator[None]:
     """Hold a run's lock as another process would: through a file of its own."""
@@ -1075,6 +1053,32 @@ def _held_run_lock(repo: TrackingRepository, run_id: str) -> t.Iterator[None]:
             yield
         finally:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def test_tracking_readers_go_ahead_without_a_run_lock_another_process_keeps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify reading a run record or listing a run's paths waits
+    `RUN_LOCK_TIMEOUT` for the run lock and then reads without it, with a
+    warning, rather than failing.
+    """
+    repo = TrackingRepository()
+    persisted = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "readable"))
+    monkeypatch.setattr("cstar.orchestration.tracking.RUN_LOCK_TIMEOUT", 0.1)
+    caplog.set_level(logging.WARNING, logger="cstar.orchestration.tracking")
+
+    with _held_run_lock(repo, "readable"):
+        found = repo.get_workplan_run_sync("readable")
+        history_paths = repo.list_runtracking_paths("readable", all_history=True)
+
+    assert found is not None
+    assert found.run_id == "readable"
+    assert persisted.resolve() in history_paths
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 2
+    assert all("reading the record of run 'readable' without it" in w for w in warnings)
 
 
 def test_tracking_writers_give_up_on_a_run_lock_another_process_keeps(
@@ -1116,8 +1120,8 @@ def test_tracking_latest_record_stays_readable_while_rewritten(
 
     Readers that take no lock (`stat` of the link, the listings) used to catch
     the gap between unlinking the old link and creating the new one, and the
-    in-place rewrite of the history record it points at; a lookup, which takes
-    no lock either, must never miss the record.
+    in-place rewrite of the history record it points at; a lookup under the run
+    lock must never miss the record.
 
     Parameters
     ----------
