@@ -155,6 +155,10 @@ _REQUIRED_VARIABLES: t.Final[dict[str, str]] = {
 """The variables roms-tools' `compute_cdr_metrics` reads from `_cdr` output, each
 with the ROMS setting that writes it."""
 
+CDR_METRICS_VARIABLES: t.Final[tuple[str, ...]] = tuple(_REQUIRED_VARIABLES)
+"""The variables CDR metrics are computed from; compression keeps them exact
+(`UclaRomsApplication.protected_variables`)."""
+
 log = get_logger(__name__)
 
 

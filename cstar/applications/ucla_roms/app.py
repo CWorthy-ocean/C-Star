@@ -317,6 +317,48 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
             ArtifactSpec(kind=ArtifactKind.log, pattern=rel(fs.logs_dir, "*.out")),
         ]
 
+    @override
+    def protected_variables(self) -> "Sequence[str]":
+        """Name the variables compression keeps exact in UCLA-ROMS output.
+
+        The CDR metrics inputs, and both members of each carbonate perturbation
+        pair (a tracer and its `_ALT_CO2` baseline): an analysis takes their
+        difference, which after months is far below float32 resolution.
+
+        Returns
+        -------
+        Sequence[str]
+            Variable names and glob patterns.
+        """
+        # deferred: application registration stays light
+        from cstar.applications.cdr_metrics import CDR_METRICS_VARIABLES
+
+        return tuple(dict.fromkeys((*CDR_METRICS_VARIABLES, *CARBONATE_PERTURBATION_VARIABLES)))
+
+
+CARBONATE_PERTURBATION_VARIABLES: Final[tuple[str, ...]] = (
+    "*_source",
+    "*_ALT_CO2",
+    "*_ALT_CO2_*",
+    "ALK*",
+    "DIC*",
+    "hALK*",
+    "hDIC*",
+    "int_z_ALK*",
+    "int_z_DIC*",
+    "FG_CO2",
+    "pCO2SURF",
+    "pH",
+    "PH",
+    "CO3",
+    "MARBL_PH_3D",
+    "MARBL_PH_SURF",
+)
+"""The perturbed carbonate variables of a MARBL CDR run and their `_ALT_CO2`
+baselines, in every form a file holds them (`ALK`, `hALK_avg`, the boundary
+`ALK_north`, ...), and every CDR source, including the CDR-lite tracer sources
+(`*_source`)."""
+
 
 def main() -> int:
     """Parse CLI arguments and run a c-star worker.
