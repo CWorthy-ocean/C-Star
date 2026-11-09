@@ -5300,17 +5300,27 @@ class TestSameNamedInputs:
         return str(path)
 
     def _chain(self, tmp_path: Path) -> tuple[str, str]:
-        """Locations of an earlier and a later file following on at `T`."""
+        """Locations of an earlier and a later averaged `_cdrgas` file following on
+        at `T`, with the time variables ucla-roms writes (output period 1).
+
+        The earlier step's last file holds its last average (stamped at the window
+        midpoint) and its end bracket at `T`; the later step's first file holds its
+        start bracket at `T`, then its averages. Brackets have zero-length windows.
+        """
         T = self.T
         earlier = self._write(
             tmp_path / "a" / self.NAME,
-            ddic_dco2_time=[T - 0.5, T],
             ocean_time=[T, T],
+            ddic_dco2_time=[T - 0.5, T],
+            avg_begin_time=[T - 1.0, T],
+            avg_end_time=[T, T],
         )
         later = self._write(
             tmp_path / "b" / self.NAME,
-            ddic_dco2_time=[T, T + 0.5, T + 1.0],
-            ocean_time=[T, T, T],
+            ocean_time=[T, T + 1.0, T + 2.0],
+            ddic_dco2_time=[T, T + 0.5, T + 1.5],
+            avg_begin_time=[T, T, T + 1.0],
+            avg_end_time=[T, T + 1.0, T + 2.0],
         )
         return earlier, later
 
@@ -5367,6 +5377,40 @@ class TestSameNamedInputs:
         assert (staged_dir / "output_cdrgas.20120219000000_2.nc").resolve() == Path(
             later
         ).resolve()
+
+    def test_partitioned_pieces_follow_the_staged_name(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Without ParallelIO, the renamed file's partition pieces carry its staged
+        name and ROMS is pointed at `<stem>_2.nc`.
+        """
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        earlier, later = self._chain(tmp_path)
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=earlier),
+            ROMSCarbonateSensitivity(location=later),
+        )
+        sim.use_pio = False
+        np_xi, np_eta = 2, 1
+
+        staged_dir = tmp_path / "staged"
+        for inp, name in sim._input_staging_names():
+            if inp in sim._forcing_datasets:
+                inp.get(staged_dir, name=name)
+                (staged,) = inp._working_copy_files()
+                for i in range(np_xi * np_eta):
+                    suffix = ROMSPartitioning.suffix(i, np_xi * np_eta)
+                    Path(f"{staged.with_suffix('')}{suffix}").write_text("x")
+                inp.attach_partitions(np_xi, np_eta)
+
+        assert sim._forcing_paths == [
+            staged_dir / self.NAME,
+            staged_dir / "output_cdrgas.20120219000000_2.nc",
+        ]
 
     def test_overlapping_times_are_refused(
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path
