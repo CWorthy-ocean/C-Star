@@ -911,12 +911,12 @@ class OscarEnvSettings(SlurmSettingsBase):
     set one); an unset queue submits to the primary `batch` partition.
     """
 
-    CLUSTER_IDENTIFIER: ClassVar[str] = "oscar"
-    """Expected value of SLURM_CLUSTER_NAME on Oscar (unverified: the public docs do not show it)."""
     FILESYSTEM_MARKER: ClassVar[Path] = Path("/oscar/home")
-    """Mount point every Oscar node has (shown by the site's `checkquota` output).
+    """Mount point on Oscar's login and compute nodes that identifies the system.
 
-    The fallback identification when no environment variable names the system.
+    No environment variable does: Oscar sets neither LMOD_SYSHOST nor
+    LMOD_SYSTEM_NAME, and its SLURM_CLUSTER_NAME is the generic ``slurmctld``
+    (both seen on the machine 2026-11-09).
     """
 
     SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
@@ -936,8 +936,9 @@ class OscarEnvSettings(SlurmSettingsBase):
 class OscarSystemContext(SystemContext):
     """The contextual dependencies for the Oscar system (Brown University CCV).
 
-    A first cut written from the public documentation, not yet exercised on the
-    machine: module names, environment variables and detection await confirmation.
+    A first cut written from the public documentation. The ``/oscar/home`` mount and
+    the module names were seen on the machine 2026-11-09; the environment file's
+    library prefixes await confirmation, and no build has run there yet.
     """
 
     name: ClassVar[str] = "oscar"
@@ -984,14 +985,10 @@ class OscarSystemContext(SystemContext):
     def is_match(cls) -> bool:
         """Return `True` if the current system is identified as *Oscar*.
 
-        The public documentation names no variable that identifies Oscar, so
-        either a matching ``SLURM_CLUSTER_NAME`` or the presence of the
-        ``/oscar/home`` mount counts. Detection runs on every machine, so a
-        failed filesystem check returns `False` rather than raising.
+        No environment variable identifies Oscar, so the presence of the
+        ``/oscar/home`` mount does. Detection runs on every machine, so a failed
+        filesystem check returns `False` rather than raising.
         """
-        if os.getenv("SLURM_CLUSTER_NAME", "") == OscarEnvSettings.CLUSTER_IDENTIFIER:
-            return True
-
         try:
             return OscarEnvSettings.FILESYSTEM_MARKER.is_dir()
         except OSError:

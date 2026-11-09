@@ -1,9 +1,14 @@
 # Oscar (Brown CCV): hierarchical, spack-built Lmod. The MPI module must be loaded
-# first; the *-mpi libraries built against it only appear afterwards. Names are from
-# https://docs.ccv.brown.edu/oscar/sys-changes/rhel-9.6-module-migration-guide and
-# are UNVERIFIED on the machine as of 2026-11-09 (nobody on our side has an account):
-# confirm each with `module spider <name>` and adjust.
-hpcx-mpi/2.25.1s  # site-recommended MPI (SLURM/PMIx integrated); the system gcc is the compiler
-netcdf-c-mpi/4.9.3  # netCDF-C built against the loaded MPI; hdf5/1.14.6 comes in as a dependency
-netcdf-fortran-mpi/4.6.1  # separate prefix from netcdf-c, hence NETCDFFHOME in oscar.env
+# first; the *-mpi libraries built against it only appear afterwards.
+# Seen on Oscar 2026-11-09 (by a CCV user, after `module purge`; C-Star runs
+# `module reset`): these three load in this order and pull in hdf5-mpi/1.14.6,
+# netcdf-c-mpi/4.9.3 and netcdf-fortran-mpi/4.6.1 as dependencies. Version-only
+# names resolve to the site's spack-hashed module names (hpcx-mpi/2.25.1s loads
+# hpcx-mpi/2.25.1s-le4f).
+hpcx-mpi/2.25.1s  # site-recommended MPI (SLURM/PMIx integrated); pulls in gcc-runtime/11.5.0
+# The netcdf-mpi bundle loads netCDF-C and netCDF-Fortran, each in its own prefix
+# (hence NETCDFFHOME in oscar.env). Oscar has two netcdf-c-mpi/4.9.3 builds, and
+# the default is not the one the bundle loads alongside netcdf-fortran-mpi, so
+# load the bundle rather than naming the two libraries.
+netcdf-mpi/4.9.3
 parallel-netcdf-mpi/1.14.0  # for ParallelIO

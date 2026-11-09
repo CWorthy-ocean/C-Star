@@ -34,10 +34,10 @@ yet supported for full workplan orchestration.
 | Linux (x86_64 and aarch 64)                                                          | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 
-Oscar support is a first cut written from the public documentation and not yet
-exercised on the machine: its module list, environment file and system detection
-are best guesses awaiting confirmation by a user with an account. Set
-``CSTAR_SYSTEM=oscar`` if C-Star does not recognise the machine.
+Oscar support is a first cut written from the public documentation. A user on the
+machine has confirmed that its modules load and that the ``/oscar/home`` mount
+C-Star recognises it by is present, but the library paths in its environment file
+still await confirmation and no ROMS build has run there yet. Set ``CSTAR_SYSTEM=oscar`` if C-Star does not recognise the machine.
 
 On Derecho, which uses PBS, ``cstar blueprint submit`` and ``cstar workplan
 submit`` are not available. Run ``cstar blueprint run`` from inside a PBS job
