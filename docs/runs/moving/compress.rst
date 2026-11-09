@@ -81,7 +81,9 @@ same blueprint can be applied to another run:
 
    cstar run compress <other-run> --blueprint <run>/compress/B_compress_....yaml
 
-Only file types the blueprint does not match are asked about.
+Only file types the blueprint does not match are asked about. In a blueprint
+edited by hand, ``significant_digits`` applies only with ``float32: true`` and
+is refused without it.
 
 Running as a job
 ----------------

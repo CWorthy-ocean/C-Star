@@ -217,18 +217,22 @@ def _protected(application: str) -> list[str]:
         return []
 
 
-def _worker_memory(
-    types: t.Sequence[FileType], chosen: t.Sequence[FileTypeSettings]
-) -> int:
+def _selected(
+    types: t.Sequence[FileType], settings: t.Sequence[FileTypeSettings]
+) -> list[FileType]:
+    """The types the run will compress: those whose most specific match says so,
+    the way `plan_jobs` resolves each file.
+    """
+    return [
+        t_
+        for t_ in types
+        if getattr(settings_for(t_.files[0], settings), "compress", False)
+    ]
+
+
+def _worker_memory(selected: t.Sequence[FileType]) -> int:
     """The memory one worker needs, from the largest record of the selected types."""
-    largest = max(
-        (
-            t_.sample.largest_record_bytes()
-            for t_ in types
-            if settings_for(t_.files[0], chosen)
-        ),
-        default=0,
-    )
+    largest = max((t_.sample.largest_record_bytes() for t_ in selected), default=0)
     return int(largest * _MEMORY_PER_RECORD)
 
 
@@ -369,12 +373,12 @@ def compress(
         proposed = default_settings(file_type, _protected(file_type.application))
         settings.append(_ask_type(file_type, proposed, yes))
 
-    chosen = [s for s in settings if s.compress]
-    total = sum(t_.total_bytes for t_ in types if settings_for(t_.files[0], chosen))
+    chosen = _selected(types, settings)
+    total = sum(t_.total_bytes for t_ in chosen)
     typer.echo(
-        f"\n{len(chosen)} of {len(settings)} file type(s) selected, {_human(total)} to compress."
+        f"\n{len(chosen)} of {len(types)} file type(s) selected, {_human(total)} to compress."
     )
-    per_worker = _worker_memory(types, chosen)
+    per_worker = _worker_memory(chosen)
 
     originals: t.Literal["delete", "keep"] = (
         saved.originals

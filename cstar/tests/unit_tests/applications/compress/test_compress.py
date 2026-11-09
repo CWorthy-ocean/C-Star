@@ -4,6 +4,7 @@ compress blueprint, and `cstar run compress`.
 
 import contextlib
 import typing as t
+from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -420,47 +421,50 @@ class TestCompressRun:
         with netCDF4.Dataset(run_root / STEP_DIR / job.relative_path) as ds:
             assert ds.data_model == "NETCDF3_64BIT_DATA"  # the original, untouched
 
-    def test_outcomes_are_recorded_when_the_pool_is_interrupted(
+    def test_outcomes_are_recorded_when_the_pool_breaks(
         self, run_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Regression: what was compressed before an interruption is recorded and reported."""
+        """Regression: what finished before the pool broke is recorded and reported."""
         real = run_mod._compress_one
-        calls = {"n": 0}
-
-        def flaky(job: FileJob) -> t.Any:
-            calls["n"] += 1
-            if calls["n"] == 2:
-                raise KeyboardInterrupt
-            return real(job)
 
         class SerialPool:
-            def __init__(self, max_workers: int) -> None: ...
+            """Runs each job on submit; the second job's worker 'dies'."""
+
+            def __init__(self, max_workers: int) -> None:
+                self.n = 0
 
             def __enter__(self) -> "SerialPool":
                 return self
 
             def __exit__(self, *exc: object) -> None: ...
 
-            def map(self, fn: t.Any, jobs: t.Any) -> t.Iterator[t.Any]:
-                return (fn(j) for j in jobs)
+            def submit(self, fn: t.Any, job: t.Any) -> Future[t.Any]:
+                self.n += 1
+                future: Future[t.Any] = Future()
+                if self.n == 2:
+                    future.set_exception(
+                        RuntimeError("A process in the pool was terminated")
+                    )
+                else:
+                    future.set_result(real(job))
+                return future
 
-        monkeypatch.setattr(run_mod, "_compress_one", flaky)
         monkeypatch.setattr(run_mod, "ProcessPoolExecutor", SerialPool)
+        monkeypatch.setattr(run_mod, "as_completed", iter)  # submission order
         bp = CompressBlueprint(
             name="c",
             description="c",
             run=run_root,
             file_types=[_settings("cdr", "output/output_cdr.*.nc", compress=True)],
         )
-        with pytest.raises(KeyboardInterrupt):
+        with pytest.raises(RuntimeError, match="terminated"):
             compress_run(bp)
 
         report = yaml.safe_load((run_root / REPORT_NAME).read_text())
         assert report["summary"]["compressed"] == 1
         record = read_step_record(run_root / STEP_DIR)
         assert record is not None
-        done = [p for p in record.products if "compression" in p.metadata]
-        assert len(done) == 1
+        assert len([p for p in record.products if "compression" in p.metadata]) == 1
 
 
 class TestCli:
@@ -565,3 +569,97 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert "'mystery_app' is not known to this build" in result.output
         assert "0 protected" in result.output
+
+
+class TestReviewFollowUps:
+    """Regressions from the adversarial review of the fixes."""
+
+    def test_a_failed_final_rename_puts_the_original_back(
+        self, run_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        real = os.replace
+        calls = {"n": 0}
+
+        def flaky(src: t.Any, dst: t.Any) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:  # the rename of the partial over the source
+                raise OSError(28, "No space left on device")
+            real(src, dst)
+
+        monkeypatch.setattr(run_mod.os, "replace", flaky)
+        rel = "output/output_cdr.20140301000000.nc"
+        job = FileJob(
+            step=STEP,
+            step_root=run_root / STEP_DIR,
+            relative_path=rel,
+            file_type="cdr",
+            encoding=Encoding(),
+            originals_dir=run_root / ORIGINALS_DIR_NAME,
+        )
+        outcome = _compress_one(job)
+
+        assert outcome.status == "failed"
+        assert "No space left" in outcome.problems[0]
+        assert (run_root / STEP_DIR / rel).is_file()  # back where it was
+        assert not (run_root / ORIGINALS_DIR_NAME / STEP / rel).exists()
+        assert not list((run_root / STEP_DIR).rglob("*.partial"))
+
+    def test_a_record_error_still_writes_the_report(
+        self, run_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*args: t.Any, **kwargs: t.Any) -> int:
+            raise TimeoutError("lock")
+
+        monkeypatch.setattr(run_mod, "update_products", boom)
+        bp = CompressBlueprint(
+            name="c",
+            description="c",
+            run=run_root,
+            file_types=[_settings("cdr", "output/output_cdr.*.nc", compress=True)],
+        )
+        outcomes = compress_run(bp)
+
+        assert all(o.status == "compressed" for o in outcomes)
+        assert (
+            yaml.safe_load((run_root / REPORT_NAME).read_text())["summary"][
+                "compressed"
+            ]
+            == 2
+        )
+
+    def test_files_differing_only_in_non_spatial_variables_are_one_type(
+        self, tmp_path: Path
+    ) -> None:
+        a = _write_roms_file(tmp_path / "output_his.20140101000000.nc")
+        b = _write_roms_file(tmp_path / "output_his.20140102000000.nc")
+        with netCDF4.Dataset(b, "a") as ds:
+            ds.createVariable("q", "f8", ("time",))[:] = [1.0, 2.0]
+        detector = FileTypeDetector()
+        data = detector.data_files(
+            Candidate("s", "ucla_roms", tmp_path, f.name, f.stat().st_size)
+            for f in (a, b)
+        )
+        assert [(t_.name, len(t_.files)) for t_ in detector.detect(data)] == [
+            ("output_his", 2)
+        ]
+
+    def test_the_estimate_follows_the_most_specific_match(self, tmp_path: Path) -> None:
+        from cstar.cli.run.compress import _selected
+
+        a = _write_roms_file(tmp_path / "output_his.20140101000000.nc")
+        b = _write_roms_file(tmp_path / "output_his.20140102000000.nc", extra=("salt",))
+        detector = FileTypeDetector()
+        data = detector.data_files(
+            Candidate("s", "ucla_roms", tmp_path, f.name, f.stat().st_size)
+            for f in (a, b)
+        )
+        types = detector.detect(data)  # -a holds salt (b), -b does not (a)
+        settings = [
+            FileTypeSettings(
+                name=t_.name, application="ucla_roms", match=t_.match, compress=i == 1
+            )
+            for i, t_ in enumerate(types)
+        ]
+        assert [t_.name for t_ in _selected(types, settings)] == ["output_his-b"]

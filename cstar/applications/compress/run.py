@@ -10,7 +10,7 @@ recorded and reported.
 import os
 import typing as t
 from collections.abc import Iterator, Sequence
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -192,12 +192,18 @@ def default_settings(file_type: FileType, protected: Sequence[str]) -> FileTypeS
 def _compress_one(job: FileJob) -> FileOutcome:
     """Compress, verify and replace one file (runs in a worker process).
 
-    Whatever goes wrong, from reading the source to moving the original aside,
-    becomes a `failed` outcome: one bad file must not stop the others, and the
-    caller must learn of every file it touched.
+    Whatever goes wrong, from reading the source to the final rename, becomes a
+    `failed` outcome: one bad file must not stop the others, and the caller
+    must learn of every file it touched. An original already moved aside when
+    the rename fails is moved back, so a failed file is always where it was.
     """
     src = job.step_root / job.relative_path
     partial = src.with_name(src.name + PARTIAL_SUFFIX)
+    kept = (
+        None
+        if job.originals_dir is None
+        else job.originals_dir / job.step / job.relative_path
+    )
     outcome = FileOutcome(job.step, job.relative_path, job.file_type, "failed", 0)
     try:
         outcome.size_before = src.stat().st_size
@@ -207,18 +213,26 @@ def _compress_one(job: FileJob) -> FileOutcome:
             partial.unlink(missing_ok=True)
             outcome.problems = problems
             return outcome
-        if job.originals_dir is not None:
-            kept = job.originals_dir / job.step / job.relative_path
+        if kept is not None:
             kept.parent.mkdir(parents=True, exist_ok=True)
             os.replace(src, kept)
-        os.replace(partial, src)
+        try:
+            os.replace(partial, src)
+        except OSError:
+            if kept is not None and not src.exists():
+                os.replace(kept, src)
+            raise
+        outcome.status = "compressed"
+        outcome.size_after = src.stat().st_size
+        outcome.reduced = list(result.reduced)
     except Exception as ex:
         partial.unlink(missing_ok=True)
-        outcome.problems = [f"{type(ex).__name__}: {ex}"]
-        return outcome
-    outcome.status = "compressed"
-    outcome.size_after = src.stat().st_size
-    outcome.reduced = list(result.reduced)
+        outcome.problems.append(f"{type(ex).__name__}: {ex}")
+        if not src.exists():
+            where = (
+                f"moved to {kept}" if kept is not None and kept.exists() else "missing"
+            )
+            outcome.problems.append(f"original {where}")
     return outcome
 
 
@@ -261,7 +275,8 @@ def _record(root: Path, run_id: str, outcomes: Sequence[FileOutcome]) -> int:
     """Record the compressed files' sizes, digests and compression in the step records.
 
     A product whose values changed (float32) gets a fresh digest; a lossless
-    rewrite keeps its digest, which does not depend on the encoding.
+    rewrite keeps its digest, which does not depend on the encoding. Digests
+    (a bounded read per file) are computed before the manifest lock is taken.
 
     Returns
     -------
@@ -271,14 +286,23 @@ def _record(root: Path, run_id: str, outcomes: Sequence[FileOutcome]) -> int:
     done = {(o.step, o.relative_path): o for o in outcomes if o.status == "compressed"}
     if not done:
         return 0
+    manifest = read_run_manifest(root)
+    if manifest is None:
+        return 0
+    step_dirs = {e.name: e.working_dir for e in manifest.steps}
+    digests = {
+        key: product_digest(root / step_dirs[key[0]] / key[1])
+        for key, o in done.items()
+        if o.reduced and key[0] in step_dirs
+    }
 
     def update(step: str, product: Product) -> bool:
         outcome = done.get((step, product.path))
         if outcome is None:
             return False
         product.size_bytes = outcome.size_after
-        if outcome.reduced and product.digest:
-            product.digest = product_digest(root / step_dirs[step] / product.path)
+        if product.digest and (step, product.path) in digests:
+            product.digest = digests[step, product.path]
         product.metadata[COMPRESSION_KEY] = (
             f"netcdf4;float32 x{len(outcome.reduced)}"
             if outcome.reduced
@@ -287,10 +311,6 @@ def _record(root: Path, run_id: str, outcomes: Sequence[FileOutcome]) -> int:
         return True
 
     with manifest_lock(run_id):
-        manifest = read_run_manifest(root)
-        if manifest is None:
-            return 0
-        step_dirs = {e.name: e.working_dir for e in manifest.steps}
         return update_products(root, update)
 
 
@@ -364,7 +384,10 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
     outcomes: list[FileOutcome] = []
     try:
         with ProcessPoolExecutor(max_workers=blueprint.workers) as pool:
-            for outcome in pool.map(_compress_one, jobs):
+            # results are taken as they finish, so a broken pool loses none
+            futures = [pool.submit(_compress_one, job) for job in jobs]
+            for future in as_completed(futures):
+                outcome = future.result()
                 outcomes.append(outcome)
                 if outcome.status == "compressed":
                     log.info(
@@ -376,8 +399,14 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
                         f"{outcome.step}/{outcome.relative_path} kept: {outcome.problems}"
                     )
     finally:
-        if outcomes:
-            _record(root, manifest.run_id, outcomes)
+        # record-keeping never stops the run, nor the report of what happened
+        try:
+            if outcomes:
+                _record(root, manifest.run_id, outcomes)
+        except Exception as ex:
+            log.warning(
+                f"The step records of {manifest.run_id!r} were not updated: {ex}"
+            )
         report = _write_report(root, outcomes, unmatched)
         log.info(f"Wrote {report}")
     return outcomes

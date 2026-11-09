@@ -302,10 +302,12 @@ class FileTypeDetector:
     def detect(self, files: Sequence[DataFile]) -> list[FileType]:
         """Group files by application, filename template and variable contents.
 
-        A template whose files hold different variables is split into types
-        labelled `<name>-a`, `<name>-b`, ..., the one with the most spatial
-        variables first; each match requires the variables that tell the type
-        from its siblings, so `settings_for` can pick the most specific match.
+        A template whose files hold different spatial variables is split into
+        types labelled `<name>-a`, `<name>-b`, ..., the one with the most
+        spatial variables first; each match requires the variables that tell
+        the type from its siblings, so `settings_for` can pick the most specific
+        match. Files that differ only in non-spatial variables (which a match
+        cannot tell apart, and compression leaves exact) are one type.
         Dimension sizes are ignored.
         """
         groups: dict[
@@ -313,7 +315,9 @@ class FileTypeDetector:
         ]
         groups = defaultdict(list)
         for f in files:
-            signature = frozenset((n, v.dims) for n, v in f.header.variables.items())
+            signature = frozenset(
+                (n, v.dims) for n, v in f.header.spatial_variables().items()
+            )
             groups[f.application, filename_template(f.relative_path), signature].append(
                 f
             )
