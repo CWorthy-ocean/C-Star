@@ -109,7 +109,6 @@ from cstar.roms.precheck import (
     check_file_name_lengths,
     check_forcing_file_count,
     check_output_streams_divide_rst,
-    max_forcing_files,
 )
 from cstar.simulation import Simulation
 from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr, warn_once
@@ -1104,7 +1103,7 @@ class ROMSSimulation(Simulation):
         # fills its buffer, and a pre-run never starts ROMS to find out. Likewise
         # a forcing-file list longer than the pinned release reads.
         check_file_name_lengths(nml)
-        check_forcing_file_count(nml, max_forcing_files(type(nml)))
+        check_forcing_file_count(nml, type(nml))
 
         return nml
 
@@ -1612,9 +1611,9 @@ class ROMSSimulation(Simulation):
         order given shares a time variable with the earlier file's last time at
         or before the later file's first time in each shared one.
         """
-        forcing = self._forcing_datasets
+        forcing = {id(f) for f in self._forcing_datasets}
         if not (
-            all(any(g is f for f in forcing) for g in group)
+            all(id(g) in forcing for g in group)
             and len({type(g) for g in group}) == 1
             and all(
                 not g.source_partitioning
@@ -1921,8 +1920,14 @@ class ROMSSimulation(Simulation):
         try:
             staging_names = self._input_staging_names()
         except ValueError as e:
+            # Still check every other input under its own name, so the report is
+            # complete; the recorded problem stops the resume either way.
             problems.append(str(e))
-            staging_names = []
+            staging_names = [
+                (inp, "")
+                for inp in self.input_datasets
+                if self._overlaps_simulation_dates(inp)
+            ]
 
         for inp, name in staging_names:
             try:

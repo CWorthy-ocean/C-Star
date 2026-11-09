@@ -5564,3 +5564,50 @@ class TestSameNamedInputs:
         assert (
             second.working_copy.path == input_dir / "output_cdrgas.20120219000000_2.nc"
         )
+
+    @mock.patch.object(ROMSSimulation, "_validate_build_flags")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_reports_a_clash_and_still_checks_every_input(
+        self,
+        mock_partition: mock.Mock,
+        mock_marbl_attach: mock.Mock,
+        mock_roms_attach: mock.Mock,
+        mock_verify_linkage: mock.Mock,
+        mock_validate_flags: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+    ):
+        """On resume, a name clash is reported and every input is still checked."""
+        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[0.0, 2.0])
+        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[1.0, 3.0])
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=a),
+            ROMSCarbonateSensitivity(location=b),
+        )
+        expected = [
+            inp for inp in sim.input_datasets if sim._overlaps_simulation_dates(inp)
+        ]
+
+        with (
+            mock.patch.object(
+                ROMSInputDataset,
+                "attach",
+                autospec=True,
+                side_effect=FileNotFoundError("not staged"),
+            ) as mock_attach,
+            mock.patch.object(
+                ROMSInputDataset,
+                "get",
+                autospec=True,
+                side_effect=FileNotFoundError("not staged"),
+            ),
+            pytest.raises(CstarExpectationFailed) as exc_info,
+        ):
+            sim.attach()
+
+        assert "share a name" in str(exc_info.value)
+        assert [c.args[0] for c in mock_attach.call_args_list] == expected

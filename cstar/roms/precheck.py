@@ -810,20 +810,22 @@ def check_file_name_lengths(settings: RomsNamelistBase | Mapping[str, Any]) -> N
 
 
 def check_forcing_file_count(
-    settings: RomsNamelistBase | Mapping[str, Any], max_files: int
+    settings: RomsNamelistBase | Mapping[str, Any],
+    schema: type[RomsNamelistBase],
 ) -> None:
-    """Raise ``NamelistConsistencyError`` if the namelist lists more than
-    ``max_files`` forcing files, which ROMS cannot read (see Rule E in the module
-    docstring and :func:`max_forcing_files`).
+    """Raise ``NamelistConsistencyError`` if the namelist lists more forcing files
+    than the ucla-roms release that reads ``schema`` accepts (see Rule E in the
+    module docstring and :func:`max_forcing_files`).
 
     Parameters
     ----------
     settings
         A canonical namelist dump, as for :func:`check_output_streams_divide_rst`.
         Reads ``forcing_files.frcfiles``; a missing group or key is skipped.
-    max_files
-        The most forcing files the pinned ucla-roms release reads.
+    schema
+        The namelist schema of the pinned ucla-roms release.
     """
+    max_files = max_forcing_files(schema)
     files = _section(_section(settings, "forcing_files"), "frcfiles") or []
     if len(files) <= max_files:
         return
@@ -833,7 +835,7 @@ def check_forcing_file_count(
         '"Cannot match namelist object name". Use fewer, larger forcing files '
         "(for nest-from boundary files, a larger nrpf_extract in the parent run)"
     )
-    if max_files == MAX_FORCING_FILES_BEFORE_0_13_0:
+    if max_files < MAX_FORCING_FILES:
         message += ", or pin ucla-roms 0.13.0 or later"
     raise NamelistConsistencyError(
         message + ".",

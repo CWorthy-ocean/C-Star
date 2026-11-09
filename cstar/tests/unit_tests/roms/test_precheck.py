@@ -950,19 +950,28 @@ def test_file_name_lengths_checks_a_live_namelist():
         check_file_name_lengths(nml)
 
 
-@pytest.mark.parametrize("limit", [MAX_FORCING_FILES_BEFORE_0_13_0, MAX_FORCING_FILES])
-def test_forcing_file_count_accepts_exactly_the_limit(limit):
-    check_forcing_file_count({"forcing_files": {"frcfiles": ["f.nc"] * limit}}, limit)
+@pytest.mark.parametrize(
+    ("schema", "limit"),
+    [
+        (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0),
+        (RomsNamelistV0_13_0, MAX_FORCING_FILES),
+    ],
+)
+def test_forcing_file_count_accepts_exactly_the_limit(schema, limit):
+    check_forcing_file_count({"forcing_files": {"frcfiles": ["f.nc"] * limit}}, schema)
 
 
 @pytest.mark.parametrize(
-    ("limit", "mentions_pin"),
-    [(MAX_FORCING_FILES_BEFORE_0_13_0, True), (MAX_FORCING_FILES, False)],
+    ("schema", "limit", "mentions_pin"),
+    [
+        (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0, True),
+        (RomsNamelistV0_13_0, MAX_FORCING_FILES, False),
+    ],
 )
-def test_forcing_file_count_refuses_one_over_the_limit(limit, mentions_pin):
+def test_forcing_file_count_refuses_one_over_the_limit(schema, limit, mentions_pin):
     settings = {"forcing_files": {"frcfiles": ["f.nc"] * (limit + 1)}}
     with pytest.raises(NamelistConsistencyError) as excinfo:
-        check_forcing_file_count(settings, limit)
+        check_forcing_file_count(settings, schema)
 
     assert excinfo.value.rule == "forcing_file_count"
     assert excinfo.value.section == "forcing_files"
@@ -979,14 +988,14 @@ def test_forcing_file_count_refuses_one_over_the_limit(limit, mentions_pin):
     "settings", [{}, {"forcing_files": {}}, {"forcing_files": None}]
 )
 def test_forcing_file_count_skips_a_missing_group_or_key(settings):
-    check_forcing_file_count(settings, 1)
+    check_forcing_file_count(settings, RomsNamelistV0_12_0)
 
 
 def test_forcing_file_count_checks_a_live_namelist():
     nml = RomsNamelistV0_13_0.read(V0_13_0_NAMELIST)
     nml.forcing_files.frcfiles = ["f.nc"] * (MAX_FORCING_FILES + 1)
     with pytest.raises(NamelistConsistencyError, match="forcing files"):
-        check_forcing_file_count(nml, MAX_FORCING_FILES)
+        check_forcing_file_count(nml, type(nml))
 
 
 @pytest.mark.parametrize(
