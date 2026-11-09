@@ -936,9 +936,9 @@ class OscarEnvSettings(SlurmSettingsBase):
 class OscarSystemContext(SystemContext):
     """The contextual dependencies for the Oscar system (Brown University CCV).
 
-    A first cut written from the public documentation. The ``/oscar/home`` mount and
-    the module names were seen on the machine 2026-11-09; the environment file's
-    library prefixes await confirmation, and no build has run there yet.
+    Written from the public documentation, then corrected from a user's output on the
+    machine 2026-11-09 (the ``/oscar/home`` mount, modules, compilers, library
+    prefix variables and SLURM layout). No ROMS build has run there yet.
     """
 
     name: ClassVar[str] = "oscar"
@@ -965,7 +965,7 @@ class OscarSystemContext(SystemContext):
         )
         """Short wait, short run time partition for debugging."""
 
-        # No max_cpus_per_node: batch nodes range from 24 to 192 cores.
+        # No max_cpus_per_node: batch nodes range from 32 to 192 cores.
         return SlurmScheduler(
             queues=[batch_queue, debug_queue],
             primary_queue_name="batch",

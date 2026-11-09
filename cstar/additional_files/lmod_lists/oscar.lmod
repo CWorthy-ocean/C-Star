@@ -5,9 +5,9 @@
 # netcdf-c-mpi/4.9.3 and netcdf-fortran-mpi/4.6.1 as dependencies. Version-only
 # names resolve to the site's spack-hashed module names (hpcx-mpi/2.25.1s loads
 # hpcx-mpi/2.25.1s-le4f).
-hpcx-mpi/2.25.1s  # site-recommended MPI (SLURM/PMIx integrated); pulls in gcc-runtime/11.5.0
-# The netcdf-mpi bundle loads netCDF-C and netCDF-Fortran, each in its own prefix
-# (hence NETCDFFHOME in oscar.env). Oscar has two netcdf-c-mpi/4.9.3 builds, and
+hpcx-mpi/2.25.1s  # site-recommended MPI (SLURM/PMIx integrated); its mpifort wraps the system gfortran 11.5
+# The netcdf-mpi bundle loads netCDF-C and netCDF-Fortran and sets NETCDF, which
+# oscar.env uses for both prefixes. Oscar has two netcdf-c-mpi/4.9.3 builds, and
 # the default is not the one the bundle loads alongside netcdf-fortran-mpi, so
 # load the bundle rather than naming the two libraries.
 netcdf-mpi/4.9.3
