@@ -10,8 +10,11 @@ netCDF-4, in place, and can also store variables in single precision.
 
 .. code-block:: console
 
-   cstar run compress <run-directory> --dry-run
-   cstar run compress <run-directory>
+   cstar run compress <run> --dry-run
+   cstar run compress <run>
+
+``<run>`` is a run-id or the path of a run directory. A run attached read-only
+is refused: ``cstar run attach <run> --own`` takes ownership first.
 
 How files are grouped
 ---------------------
@@ -43,7 +46,9 @@ many variables are protected, then asks:
 
 Then, once for the run: whether to delete each original once its compressed
 copy is verified (otherwise it is moved to ``<run>/uncompressed_originals/``),
-and whether to run here or submit a SLURM job.
+and whether to run here or submit a SLURM job. Each worker holds one record of
+one variable at a time (about 3.5 times the largest record in memory); the
+command shows that estimate when it asks how many files to compress at once.
 
 Protected variables
 -------------------
@@ -67,14 +72,14 @@ The list is written into the blueprint for each file type and can be edited.
 The compress blueprint
 ----------------------
 
-The answers are written to ``<run>/compress/B_compress_<run-id>_<time>.yaml``, a
-blueprint of the ``compress`` application. Each file type is described by a
+The settings are written to ``<run>/compress/B_compress_<run-id>_<time>.yaml``,
+a blueprint of the ``compress`` application. Each file type is described by a
 filename glob and a few variables it must hold, not by dimension sizes, so the
 same blueprint can be applied to another run:
 
 .. code-block:: console
 
-   cstar run compress <other-run> --answers <run>/compress/B_compress_....yaml
+   cstar run compress <other-run> --blueprint <run>/compress/B_compress_....yaml
 
 Only file types the blueprint does not match are asked about.
 
@@ -87,9 +92,11 @@ a one-step workplan ``W_compress_<run-id>_<time>.yaml`` carrying them in the
 step's ``compute_overrides``, and submits it with ``cstar workplan submit``.
 ``--now`` compresses in the current process instead.
 
-Each file is written to ``<name>.partial``, compared with its original (exact
-variables bit for bit, reduced ones within their tolerance), and only then
-renamed over the original. A file that fails the check is left as it was. The
-run's step records get each file's new size, and a ``compression`` note, and
-``<run>/compress-report.yaml`` lists every file. Running the command again skips
-files that are already compressed.
+Each file is written to ``<name>.partial`` and compared with its original on
+the first and last record of each variable (exact variables bit for bit,
+reduced ones within their tolerance; a lossless rewrite either succeeds or
+fails outright, so the check samples rather than re-reads every record), and
+only then renamed over the original. A file that fails the check is left as it
+was. The run's step records get each file's new size, and a ``compression``
+note, and ``<run>/compress-report.yaml`` lists every file. Running the command
+again skips files that are already compressed.

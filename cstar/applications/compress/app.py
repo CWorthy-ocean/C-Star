@@ -1,19 +1,20 @@
-"""The ``compress`` application: compress the data files of a finished run in place.
+"""Register the ``compress`` application.
 
 A compress blueprint is written by ``cstar run compress`` from its questions (or
 by hand), and runs like any blueprint: ``cstar blueprint run`` here, or as a
 step of a workplan (``cstar workplan submit``) with SLURM resources in the
-step's ``compute_overrides``. See `cstar.archive.compress`.
+step's ``compute_overrides``. See `cstar.applications.compress.run`.
 """
 
 import typing as t
 
+from cstar.applications.compress.blueprint import APP_NAME, CompressBlueprint
+from cstar.applications.compress.run import compress_run
 from cstar.applications.core import (
     ApplicationDefinition,
     RunnerResult,
     register_application,
 )
-from cstar.archive.compress import APP_NAME, CompressBlueprint, compress_run
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 

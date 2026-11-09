@@ -333,7 +333,9 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
         # deferred: application registration stays light
         from cstar.applications.cdr_metrics import CDR_METRICS_VARIABLES
 
-        return tuple(dict.fromkeys((*CDR_METRICS_VARIABLES, *CARBONATE_PERTURBATION_VARIABLES)))
+        return tuple(
+            dict.fromkeys((*CDR_METRICS_VARIABLES, *CARBONATE_PERTURBATION_VARIABLES))
+        )
 
 
 CARBONATE_PERTURBATION_VARIABLES: Final[tuple[str, ...]] = (
