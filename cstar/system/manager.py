@@ -958,10 +958,12 @@ class OscarSystemContext(SystemContext):
             max_walltime_method=query_max_walltime_via_sinfo,
         )
         """General purpose computing, the default partition."""
+        # The debug association defaults to the debug QOS, whose MaxWall (01:00:00
+        # on 2026-11-09) is the binding limit; the partition and the QOS share a name.
         debug_queue = SlurmPartition(
             name="debug",
             query_name="debug",
-            max_walltime_method=query_max_walltime_via_sinfo,
+            max_walltime_method=query_max_walltime_via_sacctmgr,
         )
         """Short wait, short run time partition for debugging."""
 
