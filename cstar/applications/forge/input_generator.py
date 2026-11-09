@@ -2447,6 +2447,23 @@ class RomsInputGenerator(InputGenerator):
                 "holds only T and S."
             )
 
+    def _reused_river_count(self, path: Path | str) -> int:
+        """Return the river count of an existing river forcing file ROMS will read.
+
+        Raises ``ValueError`` if ``river_volume`` or ``river_tracer`` is missing
+        or the file holds fewer tracers than ucla-roms reads.
+        """
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning, module="xarray")
+            with xr.open_dataset(Path(path), decode_timedelta=False) as ds:
+                if "river_volume" not in ds.variables:
+                    raise ValueError("river_volume is not in the dataset")
+                if "river_tracer" not in ds.variables:
+                    raise ValueError("river_tracer is not in the dataset")
+                if "ntracers" in ds.sizes:
+                    self._check_river_tracer_floor(int(ds.sizes["ntracers"]), path)
+                return int(ds.sizes["nriver"])
+
     def _generate_river_forcing_from_custom_file(
         self,
         subkey: str,
@@ -2520,16 +2537,7 @@ class RomsInputGenerator(InputGenerator):
             # generated path's reuse branch) so the namelist can't desync from
             # the data actually read (e.g. a swapped custom file without clobber).
             print(f"   ↪ Reusing existing file: {output_path}")
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", category=FutureWarning, module="xarray"
-                )
-                with xr.open_dataset(output_path, decode_timedelta=False) as reused:
-                    nriv_reused = int(reused.sizes["nriver"])
-                    if "ntracers" in reused.sizes:
-                        self._check_river_tracer_floor(
-                            int(reused.sizes["ntracers"]), output_path
-                        )
+            nriv_reused = self._reused_river_count(output_path)
             if nriv_reused != nriv:
                 warnings.warn(
                     f"reusing existing river forcing at {output_path} "
@@ -2590,20 +2598,7 @@ class RomsInputGenerator(InputGenerator):
         if existing_paths and yaml_path.exists():
             print(f"   ↪ Reusing existing file(s): {', '.join(existing_paths)}")
             paths = list(existing_paths)
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", category=FutureWarning, module="xarray"
-                )
-                with xr.open_dataset(Path(paths[0]), decode_timedelta=False) as ds:
-                    if "river_volume" not in ds.variables:
-                        raise ValueError("river_volume is not in the dataset")
-                    if "river_tracer" not in ds.variables:
-                        raise ValueError("river_tracer is not in the dataset")
-                    nriv = int(ds.sizes["nriver"])
-                    if "ntracers" in ds.sizes:
-                        self._check_river_tracer_floor(
-                            int(ds.sizes["ntracers"]), paths[0]
-                        )
+            nriv = self._reused_river_count(paths[0])
             if "river_frc" not in self._settings_run_time:
                 self._settings_run_time["river_frc"] = {}
             self._settings_run_time["river_frc"]["river_source"] = True
@@ -2670,6 +2665,7 @@ class RomsInputGenerator(InputGenerator):
                 stacklevel=2,
             )
 
+        nriv = int(river.ds.sizes["nriver"])
         if existing_paths:
             print(f"   ↪ Reusing existing file(s): {', '.join(existing_paths)}")
             paths = list(existing_paths)
@@ -2679,6 +2675,17 @@ class RomsInputGenerator(InputGenerator):
                 UserWarning,
                 stacklevel=2,
             )
+            nriv_reused = self._reused_river_count(paths[0])
+            if nriv_reused != nriv:
+                warnings.warn(
+                    f"reusing existing river forcing at {paths[0]} "
+                    f"(nriver={nriv_reused}), which differs from the river forcing "
+                    f"these settings build now (nriver={nriv}); the namelist will "
+                    "describe the reused file -- pass clobber to regenerate it.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            nriv = nriv_reused
         else:
             with mem_log("RiverForcing.save", enabled=self.verbose):
                 paths = self._pio_finalize(river.save(self._pio_mangle(output_path)))
@@ -2701,7 +2708,7 @@ class RomsInputGenerator(InputGenerator):
 
         self._settings_run_time["river_frc"]["river_source"] = True
         self._settings_run_time["river_frc"]["analytical"] = False
-        self._settings_run_time["river_frc"]["nriv"] = river.ds.sizes["nriver"]
+        self._settings_run_time["river_frc"]["nriv"] = nriv
 
         # check to make sure river_volume and river_tracer are in the dataset
         if "river_volume" not in river.ds.variables:

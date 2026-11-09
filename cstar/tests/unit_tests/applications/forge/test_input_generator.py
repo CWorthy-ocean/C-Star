@@ -17,6 +17,7 @@ import logging
 import re
 import shutil
 import sys
+import warnings
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -1979,6 +1980,45 @@ class TestRomsInputGeneratorGeneration:
             sample_roms_input_generator._settings_run_time["river_frc"]["nriv"]
             == nriver
         )
+
+    @pytest.mark.parametrize(
+        ("rebuilt", "mismatch"), [(3, True), (2, False)], ids=["differs", "equal"]
+    )
+    @patch("cstar.applications.forge.input_generator.rt.RiverForcing")
+    def test_generate_river_forcing_sidecar_missing_uses_reused_file_count(
+        self, mock_rf_class, rebuilt, mismatch, sample_roms_input_generator, tmp_path
+    ):
+        """With the NetCDF on disk but no YAML sidecar, nriv comes from the reused
+        file, not the in-memory rebuild; a differing count warns.
+        """
+        data = sample_roms_input_generator
+        data.input_data_dir = tmp_path / f"{data.domain_name}"
+        data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        nc_path = data._forcing_filename(input_name="river")
+        _write_river_netcdf(nc_path, nriver=2, ntracers=2)
+        assert not data._yaml_filename("forcing.river").exists()
+
+        mock_rf = MagicMock()
+        mock_rf.ds = xr.Dataset(
+            {
+                "river_volume": (["river_time", "nriver"], np.ones((2, rebuilt))),
+                "river_tracer": (
+                    ["river_time", "ntracers", "nriver"],
+                    np.ones((2, 2, rebuilt)),
+                ),
+            }
+        )
+        mock_rf_class.return_value = mock_rf
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            data._generate_river_forcing(key="forcing.river", source={"name": "DAI"})
+
+        messages = [str(w.message) for w in caught if w.category is UserWarning]
+        assert any("YAML sidecar is missing" in m for m in messages)
+        assert any("differs from the river forcing" in m for m in messages) is mismatch
+        mock_rf.save.assert_not_called()
+        assert data._settings_run_time["river_frc"]["nriv"] == 2
 
     @patch("cstar.applications.forge.input_generator.rt.CDRForcing")
     def test_generate_cdr_forcing(
