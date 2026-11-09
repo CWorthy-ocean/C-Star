@@ -155,6 +155,10 @@ def test_partial_platform_fallback(
             "cstar.system.manager.AnvilSystemContext.is_match",
             mock.MagicMock(return_value=False),
         ),
+        patch(
+            "cstar.system.manager.OscarSystemContext.is_match",
+            mock.MagicMock(return_value=False),
+        ),
     ):
         namer = HostNameEvaluator()
 
@@ -174,6 +178,7 @@ def test_partial_platform_fallback(
     [
         ({"RCAC_CLUSTER": "anvil"}, "anvil"),
         ({"HOSTNAME": "elja-irhpc"}, "elja"),
+        ({"SLURM_CLUSTER_NAME": "oscar"}, "oscar"),
     ],
 )
 @pytest.mark.usefixtures("env_clear_lmod")

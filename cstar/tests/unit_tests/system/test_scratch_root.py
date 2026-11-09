@@ -10,6 +10,7 @@ import pytest
 from cstar.system.manager import (
     CTX_REGISTRY,
     BouchetSystemContext,
+    OscarSystemContext,
     SystemContext,
 )
 
@@ -20,12 +21,18 @@ def test_protocol_default_is_none() -> None:
 
 @pytest.mark.parametrize(
     "context",
-    [ctx for name, ctx in sorted(CTX_REGISTRY.items()) if name != "bouchet"],
+    [
+        ctx
+        for name, ctx in sorted(CTX_REGISTRY.items())
+        if name not in {"bouchet", "oscar"}
+    ],
     ids=lambda ctx: ctx.name,
 )
-def test_only_bouchet_declares_a_convention(context: type[SystemContext]) -> None:
-    """Anvil, Perlmutter and the rest export SCRATCH (or have no scratch at all), so
-    they rely on CSTAR_SCRATCH_DIRS and contribute nothing here.
+def test_contexts_without_a_convention_return_none(
+    context: type[SystemContext],
+) -> None:
+    """Apart from Bouchet and Oscar, systems export SCRATCH (or have no scratch at
+    all), so they rely on CSTAR_SCRATCH_DIRS and contribute nothing here.
     """
     assert context.scratch_root() is None
 
@@ -76,3 +83,38 @@ class TestBouchetContext:
         with caplog.at_level(logging.WARNING, logger="cstar.system.manager"):
             assert BouchetSystemContext.scratch_root() is None
         assert "scratch_pi_*" in caplog.text
+
+
+class TestOscarContext:
+    """Oscar's convention: the ``$HOME/scratch`` directory."""
+
+    @pytest.fixture
+    def home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        return home
+
+    def test_scratch_directory_is_the_root(self, home: Path) -> None:
+        (home / "scratch").mkdir()
+        assert OscarSystemContext.scratch_root() == home / "scratch"
+
+    def test_none_without_scratch(self, home: Path) -> None:
+        assert OscarSystemContext.scratch_root() is None
+
+    def test_none_when_scratch_is_a_file(self, home: Path) -> None:
+        (home / "scratch").write_text("not a directory")
+        assert OscarSystemContext.scratch_root() is None
+
+    def test_returns_none_on_oserror(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """A failed check (a stale mount, say) degrades to None instead of raising."""
+
+        def _boom(self):
+            raise OSError("stale NFS handle")
+
+        monkeypatch.setattr(Path, "is_dir", _boom)
+        with caplog.at_level(logging.WARNING, logger="cstar.system.manager"):
+            assert OscarSystemContext.scratch_root() is None
+        assert "SCRATCH" in caplog.text
