@@ -77,6 +77,7 @@ _INPUT_LIKE_KINDS: t.Final[frozenset[ArtifactKind]] = frozenset(
     {
         ArtifactKind.restart,
         ArtifactKind.boundary_forcing,
+        ArtifactKind.gas_exchange,
         ArtifactKind.grid,
         ArtifactKind.initial_conditions,
         ArtifactKind.surface_forcing,
@@ -85,12 +86,11 @@ _INPUT_LIKE_KINDS: t.Final[frozenset[ArtifactKind]] = frozenset(
         ArtifactKind.cdr_forcing,
     }
 )
-"""Product kinds other runs read as input: restarts, nesting boundaries and
-every generated input."""
-_INPUT_LIKE_ROMS_KINDS: t.Final[frozenset[str]] = frozenset(
-    {"restart", "boundary_forcing"}
-)
-"""The ROMS output kinds read as input, for files recorded without a kind."""
+"""Product kinds a ROMS run reads as input, where the file format matters:
+restarts (`continue-from`), nesting boundaries (`nest-from`), carbonate
+sensitivities (`carbonate-sensitivity-from`) and every generated input. Output
+read only by Python steps (`_cdr` by CDR metrics, `_uscl` by the upscaler) is
+not here: those read netCDF-4, and the variables they need are protected."""
 
 HELP_SHORT: t.Final[str] = "Compress the data files of a finished run in place."
 HELP_LONG: t.Final[str] = f"""{HELP_SHORT}
@@ -124,7 +124,8 @@ def _human(nbytes: float) -> str:
 
 
 def _input_like(file_type: FileType) -> bool:
-    """Whether other runs read files of this type as input (restarts, nesting, forge).
+    """Whether a ROMS run reads files of this type as input (restarts, nesting
+    boundaries, carbonate sensitivities, forge inputs).
 
     The product kinds the step record gives the files decide; files recorded
     without a kind (a step without products) fall back to the ROMS output
@@ -138,7 +139,7 @@ def _input_like(file_type: FileType) -> bool:
     return any(
         name.startswith(f"{stem}.")
         for stem, kind, _ in OUTPUT_STREAMS
-        if kind.value in _INPUT_LIKE_ROMS_KINDS
+        if kind in _INPUT_LIKE_KINDS
     )
 
 

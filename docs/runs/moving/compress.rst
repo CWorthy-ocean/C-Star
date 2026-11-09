@@ -34,8 +34,9 @@ many variables are protected, then asks:
 
 1. **Compress it?** Yes rewrites the files as netCDF-4 with deflate and
    chunking, which is lossless on its own. Restart, nesting boundary
-   (``child_bry``) and forge files default to no: other runs read them as
-   input, and a CPU ROMS build with ParallelIO cannot read netCDF-4 input.
+   (``child_bry``), carbonate sensitivity (``_cdrgas``) and forge files default
+   to no: other runs read them as input, and a CPU ROMS build with ParallelIO
+   cannot read netCDF-4 input.
 2. **Float32-compress non-protected variables?** Double-precision variables
    that are not protected are stored as single precision.
 3. **Additionally bit-reduce (quantize) them?** Asked only after a yes to the
@@ -57,13 +58,16 @@ An application names the variables compression must keep exact; they are only
 chunked and deflated, never cast or quantized. Coordinates and time variables
 are always kept exact.
 
-- ``ucla_roms``: the inputs of the :ref:`CDR metrics <blueprints-cdr-metrics>`
-  (``FG_CO2``, ``FG_ALT_CO2``, ``hDIC``, ``hDIC_ALT_CO2``, ``ALK_source``,
-  ``DIC_source`` and the averaging window times), and both members of every
-  carbonate perturbation pair (``ALK*``, ``DIC*``, ``hALK*``, ``int_z_*``,
-  ``pH``, ``pCO2SURF``, ``CO3`` and their ``*_ALT_CO2`` baselines, including
-  the boundary forms such as ``ALK_north``). An analysis takes the difference of
-  a pair, which after months is far below single-precision resolution.
+- ``ucla_roms``: both members of every carbonate perturbation pair (``ALK*``,
+  ``DIC*``, ``hALK*``, ``int_z_*``, ``pH``, ``pCO2SURF``, ``CO3`` and their
+  ``*_ALT_CO2`` baselines, including the boundary forms such as ``ALK_north``),
+  since an analysis takes the difference of a pair, which after months is far
+  below single-precision resolution. And every variable another step reads:
+  the inputs of the :ref:`CDR metrics <blueprints-cdr-metrics>` (``FG_CO2``,
+  ``FG_ALT_CO2``, ``hDIC``, ``hDIC_ALT_CO2``, ``ALK_source``, ``DIC_source`` and
+  the averaging window times), the carbonate sensitivities a CDR-LiTE run reads
+  (``ddic_dco2``, ``ddic_dalk``), and the boundary fluxes and layer thicknesses
+  the upscaler builds CDR forcing from (``*_add_<side>``, ``h_<side>``).
 - ``forge``: every variable. Grids and forcing feed a model, so they are only
   compressed losslessly.
 

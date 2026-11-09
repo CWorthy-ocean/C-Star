@@ -34,12 +34,13 @@ from cstar.applications.compress.run import (
     compress_run,
     settings_for,
 )
-from cstar.applications.core import ArtifactKind
+from cstar.applications.core import ArtifactKind, get_application
 from cstar.base.netcdf_compress import (
     ChunkSpec,
     Encoding,
     compress_netcdf,
     default_chunks,
+    matches_any,
     verify_compressed,
 )
 from cstar.cli.run.compress import app
@@ -663,3 +664,69 @@ class TestReviewFollowUps:
             for i, t_ in enumerate(types)
         ]
         assert [t_.name for t_ in _selected(types, settings)] == ["output_his-b"]
+
+
+class TestConsumedOutput:
+    """Output another step reads: `_cdrgas` (ROMS forcing) and `_uscl` (the upscaler)."""
+
+    CDRGAS: t.Final[str] = "output/output_cdrgas.20140302000000.nc"
+
+    def _blueprint_settings(self, root: Path) -> dict[str, dict[str, t.Any]]:
+        result = invoke(str(root), "--yes", "--now", "--dry-run")
+        assert result.exit_code == 0, result.output
+        (bp_path,) = (root / "compress").glob("B_*.yaml")
+        return {f["name"]: f for f in yaml.safe_load(bp_path.read_text())["file_types"]}
+
+    def test_carbonate_sensitivities_recorded_by_kind_default_to_not_compressed(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: a CDR-LiTE run reads `_cdrgas` as ROMS forcing."""
+        root = _build_run(
+            tmp_path / "run",
+            {**RUN_FILES, self.CDRGAS: _write_roms_file},
+            kinds={self.CDRGAS: ArtifactKind.gas_exchange.value},
+        )
+        by_name = self._blueprint_settings(root)
+
+        assert by_name["output_cdrgas"]["compress"] is False
+        assert by_name["output_cdr"]["compress"] is True
+
+    def test_carbonate_sensitivities_found_by_name_default_to_not_compressed(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: the walked-run fallback knows `_cdrgas` from its stem, and
+        does not mistake `_cdr` for it.
+        """
+        root = _build_run(
+            tmp_path / "old",
+            {**RUN_FILES, self.CDRGAS: _write_roms_file},
+            record_products=False,
+        )
+        by_name = self._blueprint_settings(root)
+
+        assert by_name["output_cdrgas"]["compress"] is False
+        assert by_name["output_cdr"]["compress"] is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ddic_dco2",
+            "ddic_dalk",
+            "h_north",
+            "lat_east",
+            "ALK_add_west",
+            "DIC_add_south",
+            "CDR_OAE_ALK1_add_north",
+            "CDR_DOR_DIC2_add_east",
+            "avg_begin_time",
+        ],
+    )
+    def test_what_other_steps_read_is_protected(self, name: str) -> None:
+        """Regression: the carbonate sensitivities and the upscaler's inputs stay exact."""
+        protected = get_application("ucla_roms").protected_variables()
+        assert matches_any(name, protected)
+
+    @pytest.mark.parametrize("name", ["temp", "salt", "u", "h", "zeta"])
+    def test_ordinary_fields_stay_reducible(self, name: str) -> None:
+        protected = get_application("ucla_roms").protected_variables()
+        assert not matches_any(name, protected)
