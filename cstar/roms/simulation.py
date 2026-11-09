@@ -92,6 +92,7 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
     missing_carbonate_sensitivity_variables,
+    netcdf_dimension_size,
 )
 from cstar.roms.namelist import (
     RomsNamelistBase,
@@ -104,7 +105,9 @@ from cstar.roms.precheck import (
     averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
     check_file_name_lengths,
+    check_forcing_file_count,
     check_output_streams_divide_rst,
+    max_forcing_files,
 )
 from cstar.simulation import Simulation
 from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr, warn_once
@@ -1096,8 +1099,10 @@ class ROMSSimulation(Simulation):
             check_averages_end_on_marbl_step(nml, cppdefs)
 
         # Names as written, after the override merge: ROMS cannot read one that
-        # fills its buffer, and a pre-run never starts ROMS to find out.
+        # fills its buffer, and a pre-run never starts ROMS to find out. Likewise
+        # a forcing-file list longer than the pinned release reads.
         check_file_name_lengths(nml)
+        check_forcing_file_count(nml, max_forcing_files(type(nml)))
 
         return nml
 
@@ -1605,6 +1610,7 @@ class ROMSSimulation(Simulation):
 
         # Everything the check reads is staged now: fail before `build()` compiles.
         self._validate_carbonate_sensitivity_inputs()
+        self._validate_river_count()
 
     @property
     def is_setup(self) -> bool:
@@ -2270,6 +2276,9 @@ class ROMSSimulation(Simulation):
             If the build reads carbonate sensitivities from forcing files but
             they are missing or incomplete (see
             `_validate_carbonate_sensitivity_inputs`).
+        ValueError
+            If the namelist's river count does not match the river forcing file
+            (see `_validate_river_count`).
 
         Notes
         -----
@@ -2285,6 +2294,7 @@ class ROMSSimulation(Simulation):
         """
         self._validate_reference_dates()
         self._validate_carbonate_sensitivity_inputs()
+        self._validate_river_count()
 
         if self.use_pio:
             self._validate_pio_inputs()
@@ -2465,6 +2475,58 @@ class ROMSSimulation(Simulation):
                 "carbonate-sensitivity-from workplan directive."
             )
         raise ValueError(f"{message} {CARBONATE_SENSITIVITY_REMEDY}")
+
+    def _validate_river_count(self) -> None:
+        """Ensure `river_frc_settings.nriv` (effective value, after
+        `namelist_overrides`) matches the `nriver` dimension of the staged river
+        forcing file.
+
+        ROMS reads `nriv` rivers from the file: more than the file holds stops
+        the run with "NetCDF: Start+count exceeds dimension bound", fewer
+        silently leaves rivers out. Does nothing when there is no staged river
+        forcing, or when rivers are off or analytical.
+
+        Raises
+        ------
+        ValueError
+            If the file's `nriver` dimension is missing or differs from `nriv`.
+        """
+        if self.river_forcing is None or not self.river_forcing.exists_locally:
+            return
+        files = self.river_forcing._working_copy_files()
+        if not files:
+            return
+
+        nml, schema, chosen_by = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, chosen_by)
+        settings = getattr(nml, "river_frc_settings", None)
+        if settings is None or not settings.river_source or settings.river_analytical:
+            return
+
+        # Header read of the first file only: all files of one dataset come
+        # from one writer.
+        in_file = netcdf_dimension_size(files[0], "nriver")
+        if in_file == settings.nriv:
+            return
+        if in_file is None:
+            found = (
+                f"{files[0].name} has no nriver dimension, so ROMS cannot read "
+                "rivers from it"
+            )
+        else:
+            found = (
+                f"{files[0].name} holds {in_file} rivers but "
+                f"river_frc_settings.nriv is {settings.nriv}"
+            )
+        raise ValueError(
+            f"The river forcing file does not match the namelist: {found}. "
+            "If the namelist asks for more rivers than the file holds, ROMS stops "
+            'with "NetCDF: Start+count exceeds dimension bound"; if it asks for '
+            "fewer, ROMS silently leaves the rest out. Set "
+            "river_frc_settings.nriv to the file's river count (for example "
+            "through the blueprint's namelist_overrides), or regenerate the "
+            "namelist and the river file together with Forge."
+        )
 
     def prepare_launch(self, job_name: str | None = None) -> LaunchPlan:
         """Prepare everything needed to launch ROMS, without launching it.

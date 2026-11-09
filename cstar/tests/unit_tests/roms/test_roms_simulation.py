@@ -44,6 +44,7 @@ from cstar.roms.input_dataset import (
     ROMSModelGrid,
     ROMSNestingInfo,
     ROMSPartitioning,
+    ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
     missing_carbonate_sensitivity_variables,
@@ -58,6 +59,7 @@ from cstar.roms.namelist import (
     namelist_schema_for_ref,
 )
 from cstar.roms.precheck import (
+    MAX_FORCING_FILES_BEFORE_0_13_0,
     MAX_NAMELIST_FILE_NAME_LENGTH,
     MAX_OUTPUT_ROOT_NAME_LENGTH,
 )
@@ -880,6 +882,41 @@ class TestROMSSimulationInitialization:
             expected_output_root
         )
         assert result.extract_data_settings.extract_root_name == (expected_extract_root)
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_forcing_file_count(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """More forcing files than a pre-0.13.0 ROMS reads are refused when the
+        namelist is built; exactly the limit is accepted.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        limit = MAX_FORCING_FILES_BEFORE_0_13_0
+        mock_forcing_paths.return_value = [Path("f.nc")] * limit
+        assert len(sim.roms_runtime_settings.forcing_files.frcfiles) == limit
+
+        mock_forcing_paths.return_value = [Path("f.nc")] * (limit + 1)
+        with pytest.raises(ValueError, match="at most 360") as exc:
+            _ = sim.roms_runtime_settings
+        assert f"{limit + 1} forcing files" in str(exc.value)
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
@@ -4161,6 +4198,125 @@ class TestValidateCarbonateSensitivityInputs:
         mock_validate.assert_called_once_with()
         mock_validate_pio.assert_not_called()
         mock_partition.assert_not_called()
+
+
+class TestValidateRiverCount:
+    """Tests for `ROMSSimulation._validate_river_count`.
+
+    The raw namelist read is patched; the namelist is a real
+    `RomsNamelistV0_9_0` so `namelist_overrides` layer on it for real, and the
+    river file is a tiny real netCDF file.
+    """
+
+    @staticmethod
+    def _nml(
+        nriv: int, river_source: bool = True, river_analytical: bool = False
+    ) -> RomsNamelistV0_9_0:
+        nml = RomsNamelistV0_9_0.read(EXAMPLE_NAMELIST_V0_9_0)
+        nml.river_frc_settings.nriv = nriv
+        nml.river_frc_settings.river_source = river_source
+        nml.river_frc_settings.river_analytical = river_analytical
+        return nml
+
+    @staticmethod
+    def _staged_river(tmp_path: Path, dims: dict[str, int]) -> ROMSRiverForcing:
+        """Stage a tiny netCDF file with dimensions `dims` as the river forcing."""
+        source = tmp_path / "source" / "rivers.nc"
+        source.parent.mkdir(exist_ok=True)
+        xr.Dataset(
+            {f"v_{name}": (name, np.zeros(size)) for name, size in dims.items()}
+        ).to_netcdf(source)
+        dataset = ROMSRiverForcing(location=str(source))
+        dataset.get(tmp_path / "staged")
+        return dataset
+
+    def _validate(self, sim: ROMSSimulation, nml: Any) -> None:
+        with mock.patch.object(
+            ROMSSimulation,
+            "_read_raw_namelist",
+            return_value=(nml, type(nml), "0.9.0"),
+        ):
+            sim._validate_river_count()
+
+    def test_matching_count_passes(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        self._validate(sim, self._nml(3))
+
+    @pytest.mark.parametrize(("nriv", "in_file"), [(5, 3), (2, 3)])
+    def test_mismatch_names_both_counts(
+        self, stub_romssimulation, tmp_path, nriv, in_file
+    ):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": in_file})
+        with pytest.raises(ValueError, match="does not match") as exc_info:
+            self._validate(sim, self._nml(nriv))
+
+        message = str(exc_info.value)
+        assert f"rivers.nc holds {in_file} rivers" in message
+        assert f"river_frc_settings.nriv is {nriv}" in message
+        assert "Start+count exceeds dimension bound" in message
+        assert "silently leaves the rest out" in message
+        assert "namelist_overrides" in message
+
+    def test_override_of_nriv_is_honored(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        sim.namelist_overrides = {"river_frc_settings": {"nriv": 3}}
+        self._validate(sim, self._nml(5))
+
+    def test_rivers_off_checks_nothing(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        self._validate(sim, self._nml(7, river_source=False))
+
+    def test_analytical_rivers_check_nothing(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        self._validate(sim, self._nml(7, river_analytical=True))
+
+    def test_no_river_forcing_checks_nothing(self, stub_romssimulation):
+        sim = stub_romssimulation
+        sim.river_forcing = None
+        with mock.patch.object(ROMSSimulation, "_read_raw_namelist") as mock_read:
+            sim._validate_river_count()
+
+        mock_read.assert_not_called()
+
+    def test_unstaged_river_forcing_checks_nothing(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        source = tmp_path / "r.nc"
+        xr.Dataset({"v": ("nriver", np.zeros(2))}).to_netcdf(source)
+        sim.river_forcing = ROMSRiverForcing(location=str(source))
+        with mock.patch.object(ROMSSimulation, "_read_raw_namelist") as mock_read:
+            sim._validate_river_count()
+
+        mock_read.assert_not_called()
+
+    def test_file_without_nriver_dimension_is_refused(
+        self, stub_romssimulation, tmp_path
+    ):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"river": 3})
+        with pytest.raises(ValueError, match="has no nriver dimension"):
+            self._validate(sim, self._nml(3))
+
+    def test_pre_run_runs_the_check(self, stub_romssimulation):
+        """`pre_run` runs the check (the other pre-run checks are patched out)."""
+        sim = stub_romssimulation
+        with (
+            mock.patch.object(ROMSSimulation, "_validate_reference_dates"),
+            mock.patch.object(ROMSSimulation, "_validate_carbonate_sensitivity_inputs"),
+            mock.patch.object(
+                ROMSSimulation,
+                "_validate_river_count",
+                side_effect=ValueError("river count"),
+            ) as mock_validate,
+            pytest.raises(ValueError, match="river count"),
+        ):
+            sim.pre_run()
+
+        mock_validate.assert_called_once_with()
 
 
 class TestAttach:

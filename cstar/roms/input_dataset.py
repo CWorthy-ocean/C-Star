@@ -802,6 +802,19 @@ def missing_carbonate_sensitivity_variables(path: Path) -> list[str]:
         ]
 
 
+def netcdf_dimension_size(path: Path, dimension: str) -> int | None:
+    """Return the size of dimension `dimension` of the netCDF file at `path`, or
+    None if the file has no such dimension (a header read; no data is loaded).
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(
+        path, decode_cf=False, decode_times=False, create_default_indexes=False
+    ) as ds:
+        return ds.sizes.get(dimension)
+
+
 class ROMSCarbonateSensitivity(ROMSInputDataset):
     """Carbonate sensitivity forcing for a CDR-LiTE (ucla-roms >= 0.9.0) build.
 
