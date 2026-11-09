@@ -2900,6 +2900,29 @@ def test_nesting_directive_duplicate_paths_deduplicated(
     assert len(bp_after.forcing.boundary.data) == 1
 
 
+def test_nesting_directive_same_file_through_symlinked_directory_deduplicated(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a source reached directly and through a symlinked directory yields
+    one boundary entry.
+    """
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(bry_dir)
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: f"{bry_dir}; {link_dir}"})
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
+    assert len(bp_after.forcing.boundary.data) == 1
+
+
 def test_nesting_directive_empty_sources_raises() -> None:
     """Verify a `path` value that is empty after splitting is rejected."""
     with pytest.raises(NotImplementedError, match="no boundary source"):

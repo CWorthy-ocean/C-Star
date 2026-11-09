@@ -136,6 +136,18 @@ class TestROMSInputDatasetGet:
 
         mock_path_resolve.assert_called()
 
+    def test_partitioned_source_refuses_a_name(
+        self, romsinputdataset_remote_partitioned_source, tmp_path
+    ):
+        """A partitioned source's pieces are staged by their own names, so a name
+        for `get` or `attach` is refused.
+        """
+        dataset = romsinputdataset_remote_partitioned_source
+        with pytest.raises(ValueError, match="its pieces are staged"):
+            dataset.get(local_dir=tmp_path, name="other.nc")
+        with pytest.raises(ValueError, match="its pieces are staged"):
+            dataset.attach(tmp_path, name="other.nc")
+
     @mock.patch(
         "cstar.roms.input_dataset.ROMSInputDataset._get_from_partitioned_source",
         autospec=True,
@@ -1225,3 +1237,24 @@ class TestROMSCarbonateSensitivity:
             "ddic_dco2_time",
             "ddic_dalk_time",
         ]
+
+
+def test_netcdf_time_ranges_reads_only_1d_numeric_time_variables(tmp_path: Path):
+    """Only non-empty 1-D numeric variables named `*time` are reported."""
+    from cstar.roms.input_dataset import netcdf_time_ranges
+
+    path = tmp_path / "f.nc"
+    xr.Dataset(
+        {
+            "ocean_time": ("t", np.array([3.0, 1.0, 2.0])),
+            "DDIC_dco2_Time": ("u", np.array([5, 6])),
+            "empty_time": ("e", np.array([], dtype=float)),
+            "grid_time": (("t", "x"), np.zeros((3, 2))),
+            "data": (("t", "x"), np.zeros((3, 2))),
+        }
+    ).to_netcdf(path)
+
+    assert netcdf_time_ranges(path) == {
+        "ocean_time": (1.0, 3.0),
+        "DDIC_dco2_Time": (5.0, 6.0),
+    }

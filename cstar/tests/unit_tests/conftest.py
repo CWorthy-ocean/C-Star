@@ -462,9 +462,9 @@ class MockStager(Stager):
             self._retriever = mock.Mock(spec=Retriever)
         return self._retriever
 
-    def stage(self, target_dir: Path):
+    def stage(self, target_dir: Path, name: str = ""):
         return MockStagedData(
-            source=self.source, path=target_dir / self.source.basename
+            source=self.source, path=target_dir / (name or self.source.basename)
         )
 
 
