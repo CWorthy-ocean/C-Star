@@ -1,5 +1,5 @@
 """Tests for `cstar.roms.gpu_simulation`: the GPU build key and `make gpu` command,
-and `ROMSGpuSimulation`, which runs gpu-ucla-roms.
+and `ROMSGpuSimulation`, which runs roms-marbl-gpu.
 
 No network and no compiler: the system manager, the shell commands and the
 linkage checks are replaced where `gpu_simulation` looks them up. The runtime
@@ -55,7 +55,7 @@ BUNDLED_BLUEPRINT = (
     PACKAGE_ROOT / "catalog/bundled/blueprints/ucla_roms_gpu/wales-toy-gpu.yaml"
 )
 
-GPU_REPO = "https://github.com/CWorthy-ocean/gpu-ucla-roms.git"
+GPU_REPO = "https://github.com/CWorthy-ocean/roms-marbl-gpu.git"
 MPI_PREFIX = "srun --kill-on-bad-exit=1"
 MPI_HOME = "/opt/mpi/"  # with the trailing slash perlmutter.gpu.env gives it
 NETCDF_HOME = "/opt/netcdf/"  # with the trailing slash perlmutter.gpu.env gives it
@@ -291,20 +291,12 @@ def runtime_source(tmp_path: Path) -> Path:
 SimulationFactory = Callable[..., ROMSGpuSimulation]
 
 
-GPU_AKT_BAK: dict[str, dict[str, Any]] = {
-    "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]}
-}
-"""The override a GPU blueprint needs over a CPU namelist: the GPU model reads
-two `akt_bak` values (Rule G), the fixture namelist gives one per tracer."""
-
-
 @pytest.fixture
 def make_simulation(tmp_path: Path, runtime_source: Path) -> SimulationFactory:
     """Build a `ROMSGpuSimulation` with its runtime code staged.
 
-    By default 8 tiles (4 x 2) on 2 nodes with one writer per node, and the
-    two-value `akt_bak` override (`GPU_AKT_BAK`) under any `namelist_overrides`
-    given; pass `vertical_mixing_settings` to replace it.
+    By default 8 tiles (4 x 2) on 2 nodes with one writer per node; the
+    fixture's CPU namelist (one `akt_bak` per tracer) is one the GPU reads.
     """
 
     def _make(
@@ -330,7 +322,7 @@ def make_simulation(tmp_path: Path, runtime_source: Path) -> SimulationFactory:
             end_date="2012-01-02",
             valid_start_date="2012-01-01",
             valid_end_date="2012-02-01",
-            namelist_overrides=GPU_AKT_BAK | (namelist_overrides or {}),
+            namelist_overrides=namelist_overrides or {},
             nodes=nodes,
             writers_per_node=writers_per_node,
             **kwargs,
@@ -349,7 +341,7 @@ def sim(make_simulation: SimulationFactory) -> ROMSGpuSimulation:
 
 
 def stage_codebase(simulation: ROMSGpuSimulation) -> Path:
-    """Give the simulation a staged gpu-ucla-roms clone (an empty directory)."""
+    """Give the simulation a staged roms-marbl-gpu clone (an empty directory)."""
     clone = simulation.fs_manager.codebase_subdir(simulation.codebase.key)
     clone.mkdir(parents=True, exist_ok=True)
     simulation.codebase._working_copy = mock.Mock(  # type: ignore[assignment]
@@ -535,7 +527,7 @@ class TestSelectNamelistSchema:
         ) as mock_select:
             sim._select_namelist_schema()
 
-        mock_select.assert_called_once_with("v0.1.2-beta", repo_path=None)
+        mock_select.assert_called_once_with("v0.1.3-beta", repo_path=None)
 
 
 # ---------------------------------------------------------------------------
@@ -647,20 +639,44 @@ class TestRuntimeSettings:
 
         assert raised.value.rule == "gpu_features"
 
-    def test_more_akt_bak_values_than_the_gpu_reads_are_refused(
+    def test_more_forcing_files_than_the_gpu_reads_are_refused(
         self, make_simulation: SimulationFactory
     ) -> None:
-        """The fixture's CPU namelist gives one `akt_bak` per tracer (Rule G)."""
+        """The GPU reads at most 64 forcing files, fewer than ucla-roms' 360
+        (Rule G runs before the base class's Rule E).
+        """
         sim = make_simulation(
-            namelist_overrides={"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
+            namelist_overrides={
+                "forcing_files": {"frcfiles": [f"f{i}.nc" for i in range(65)]}
+            }
         )
 
         with pytest.raises(
-            NamelistConsistencyError, match="akt_bak: 3 values"
+            NamelistConsistencyError, match="frcfiles: 65 values"
         ) as raised:
             _ = sim.roms_runtime_settings
 
         assert raised.value.rule == "gpu_array_sizes"
+
+    def test_more_staged_forcing_files_than_the_gpu_reads_are_refused(
+        self, make_simulation: SimulationFactory
+    ) -> None:
+        """The forcing list C-Star derives from the staged inputs, not only an
+        override, goes through Rule G before launch.
+        """
+        sim = make_simulation()
+        staged = [Path(f"/inputs/roms_frc.{i}.nc") for i in range(65)]
+
+        with (
+            mock.patch.object(
+                type(sim),
+                "_forcing_paths",
+                new_callable=mock.PropertyMock,
+                return_value=staged,
+            ),
+            pytest.raises(NamelistConsistencyError, match="frcfiles: 65 values"),
+        ):
+            _ = sim.roms_runtime_settings
 
     def test_a_file_name_too_long_to_read_is_refused(
         self, make_simulation: SimulationFactory
@@ -932,7 +948,7 @@ class TestBuild:
         record = json.loads((clone / "build_gpu" / BUILD_RECORD_NAME).read_text())
         assert record == {
             "namelist_schema": "RomsNamelistV0_11_0",
-            "ucla_roms_ref": "v0.1.2-beta",
+            "ucla_roms_ref": "v0.1.3-beta",
             "ucla_roms_commit": "abc123",
             "gpu_build": {
                 "compiler": "nvfortran",
@@ -999,7 +1015,7 @@ class TestBuild:
         executable built for another one is not reused.
         """
         rho0_sim.build()
-        rho0_sim.namelist_overrides = GPU_AKT_BAK | {"rho0_settings": {"rho0": 1027.5}}
+        rho0_sim.namelist_overrides = {"rho0_settings": {"rho0": 1027.5}}
 
         rho0_sim.build()
 
@@ -1042,7 +1058,7 @@ class TestBuild:
 
         def fail_to_compile(cmd: str, **kwargs: Any) -> str:
             if cmd.startswith("make gpu"):
-                raise RuntimeError("Error when compiling gpu-ucla-roms.")
+                raise RuntimeError("Error when compiling roms-marbl-gpu.")
             return ""
 
         with (
@@ -1058,7 +1074,7 @@ class TestBuild:
         assert rho0_sim._namelist_schema is None
         assert rho0_sim.exe_path is None
 
-    def test_refuses_more_akt_bak_values_than_the_gpu_reads_before_compiling(
+    def test_refuses_more_forcing_files_than_the_gpu_reads_before_compiling(
         self,
         make_simulation: SimulationFactory,
         gpu_system: mock.Mock,
@@ -1066,11 +1082,13 @@ class TestBuild:
     ) -> None:
         """Rule G fails the build, not the launch after it."""
         sim = make_simulation(
-            namelist_overrides={"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
+            namelist_overrides={
+                "forcing_files": {"frcfiles": [f"f{i}.nc" for i in range(65)]}
+            }
         )
         stage_codebase(sim)
 
-        with pytest.raises(NamelistConsistencyError, match="akt_bak: 3 values"):
+        with pytest.raises(NamelistConsistencyError, match="frcfiles: 65 values"):
             sim.build()
 
         assert build_tools.make_commands == []
@@ -1522,15 +1540,12 @@ class TestFromBlueprint:
         assert isinstance(sim, ROMSGpuSimulation)
         assert sim.name == "Test GPU Blueprint"
         assert sim.codebase.source.location == GPU_REPO
-        assert sim.codebase.source.checkout_target == "v0.1.2-beta"
+        assert sim.codebase.source.checkout_target == "v0.1.3-beta"
         # 8 tiles on 2 nodes, one writer per node
         assert sim.discretization.n_procs_x == 4
         assert sim.discretization.n_procs_y == 2
         assert sim.rank_layout == GpuRankLayout(tiles=8, nodes=2, writers_per_node=1)
-        assert sim.namelist_overrides == {
-            "time_stepping": {"dt": 1},
-            "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]},
-        }
+        assert sim.namelist_overrides == {"time_stepping": {"dt": 1}}
         self.assert_a_gpu_simulation(sim)
 
     def test_bundled_blueprint(self) -> None:
@@ -1538,13 +1553,10 @@ class TestFromBlueprint:
 
         assert sim.name == "wales-toy-gpu"
         assert sim.codebase.source.location == GPU_REPO
-        assert sim.codebase.source.checkout_target == "v0.1.2-beta"
+        assert sim.codebase.source.checkout_target == "v0.1.3-beta"
         assert sim.rank_layout == GpuRankLayout(tiles=4, nodes=1, writers_per_node=1)
         assert sim.discretization.n_procs_tot == 4
-        assert sim.namelist_overrides == {
-            "time_stepping": {"dt": 360},
-            "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]},
-        }
+        assert sim.namelist_overrides == {"time_stepping": {"dt": 360}}
         assert sim.cdr_forcing is not None
         assert sim.model_grid is not None
         assert sim.initial_conditions is not None

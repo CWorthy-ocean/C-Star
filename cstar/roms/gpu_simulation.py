@@ -1,4 +1,4 @@
-"""A ROMS simulation that runs on gpu-ucla-roms, the CUDA-Fortran port of ucla-roms.
+"""A ROMS simulation that runs on roms-marbl-gpu, the CUDA-Fortran port of ucla-roms.
 
 The GPU model is built from its own source (MARBL included, as a git submodule)
 by `make gpu`, takes no cppdefs or compile-time code, reads the ucla-roms 0.11.0
@@ -11,8 +11,8 @@ Two of the executable's inputs are fixed at build time: the reference density
 precision of the passive tracers. :class:`GpuBuildKey` holds the build's inputs
 beyond its source, so a build is reused only for a namelist it suits.
 
-See https://github.com/CWorthy-ocean/gpu-ucla-roms (README: "Build" and "Run"),
-pinned at ``v0.1.2-beta``.
+See https://github.com/CWorthy-ocean/roms-marbl-gpu (README: "Build" and "Run"),
+pinned at ``v0.1.3-beta``.
 """
 
 from __future__ import annotations
@@ -91,17 +91,17 @@ if TYPE_CHECKING:
     from cstar.system.environment import CStarEnvironment
 
 GPU_EXECUTABLE_NAME: Final = "roms_gpu_cuda"
-"""The executable `make gpu` writes (the Makefile's `gpu` target, gpu-ucla-roms
-v0.1.2-beta)."""
+"""The executable `make gpu` writes (the Makefile's `gpu` target, roms-marbl-gpu
+v0.1.3-beta)."""
 
 GPU_BUILD_DIR_NAME: Final = "build_gpu"
 """The directory, in the repository's clone, that `make gpu` writes the executable
-to (`GPUDIR` in the Makefile, gpu-ucla-roms v0.1.2-beta)."""
+to (`GPUDIR` in the Makefile, roms-marbl-gpu v0.1.3-beta)."""
 
 GPU_WRITERS_ENV_VAR: Final = "ROMS_GPU_NWRITERS"
 """The environment variable that gives the model the writer ranks on each node: the
 last that many ranks of every node write output (`src/shared/comm.F90`,
-gpu-ucla-roms v0.1.2-beta)."""
+roms-marbl-gpu v0.1.3-beta)."""
 
 GPU_BUILD_RECORD_KEY: Final = "gpu_build"
 """The entry of the build record that holds the `GpuBuildKey` the executable was
@@ -114,7 +114,7 @@ def fortran_double_literal(value: float) -> str:
     The GPU model takes its reference density from a preprocessor macro,
     ``rho0 = real(ROMS_RHO0, rp)``, and stops at start-up when the namelist's
     `rho0` differs from it by more than 1e-6 (`src/host/case_io.F90`,
-    gpu-ucla-roms v0.1.2-beta). A plain ``1025.3`` is a default-real (single
+    roms-marbl-gpu v0.1.3-beta). A plain ``1025.3`` is a default-real (single
     precision) literal, about 1025.30005, so it must be written ``1025.3d0``.
 
     Parameters
@@ -244,7 +244,7 @@ def gpu_make_command(
     Returns
     -------
     str
-        The shell command; run it in the root of the gpu-ucla-roms clone.
+        The shell command; run it in the root of the roms-marbl-gpu clone.
     """
     netcdf_libs = list(
         dict.fromkeys([str(netcdff_home / "lib"), str(netcdf_home / "lib")])
@@ -310,7 +310,7 @@ def _expand_link_flags(link_flags: str) -> str:
 
 
 class ROMSGpuSimulation(ROMSSimulation):
-    """A `ROMSSimulation` that builds and runs gpu-ucla-roms.
+    """A `ROMSSimulation` that builds and runs roms-marbl-gpu.
 
     The GPU model differs from ucla-roms where this class overrides the base:
     it is built from its own source (`ROMSGpuExternalCodeBase`, MARBL included)
@@ -377,7 +377,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         runtime_code : AdditionalCode
             The namelist and the MARBL settings the model reads at run time.
         codebase : ROMSGpuExternalCodeBase, optional
-            The gpu-ucla-roms repository to build. If not provided, the default
+            The roms-marbl-gpu repository to build. If not provided, the default
             codebase is used.
         nodes : int, optional
             The nodes the job spans; the tiles are spread evenly over them.
@@ -454,7 +454,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         """
         if compile_time_code is not None:
             raise ValueError(
-                "gpu-ucla-roms builds from its own source and takes no compile-time "
+                "roms-marbl-gpu builds from its own source and takes no compile-time "
                 "code (cppdefs.opt or source files); remove the compile-time code."
             )
 
@@ -472,7 +472,7 @@ class ROMSGpuSimulation(ROMSSimulation):
 
     @property
     def default_codebase(self) -> ROMSGpuExternalCodeBase:
-        """Returns the default gpu-ucla-roms external codebase.
+        """Returns the default roms-marbl-gpu external codebase.
 
         Returns
         -------
@@ -482,9 +482,9 @@ class ROMSGpuSimulation(ROMSSimulation):
         return ROMSGpuExternalCodeBase()
 
     def _select_namelist_schema(self) -> type[RomsNamelistBase]:
-        """Select the namelist schema for this simulation's gpu-ucla-roms pin.
+        """Select the namelist schema for this simulation's roms-marbl-gpu pin.
 
-        Every gpu-ucla-roms release reads the ucla-roms 0.11.0 vocabulary (see
+        Every roms-marbl-gpu release reads the ucla-roms 0.11.0 vocabulary (see
         `gpu_namelist_schema_for_ref`).
         """
         codebase_copy = self.codebase.working_copy
@@ -557,7 +557,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         Returns
         -------
         Path or None
-            `build_gpu` in the gpu-ucla-roms clone, or `None` when the clone is
+            `build_gpu` in the roms-marbl-gpu clone, or `None` when the clone is
             not staged.
         """
         codebase_copy = self.codebase.working_copy
@@ -586,11 +586,14 @@ class ROMSGpuSimulation(ROMSSimulation):
         return self._layer_namelist_overrides(nml, schema, chosen_by)
 
     def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
-        """Check the composed namelist against what gpu-ucla-roms needs.
+        """Check the composed namelist against what roms-marbl-gpu needs.
 
         Rule F, the GPU model's start-up feature guard, and Rule G, the arrays
         it declares smaller than ucla-roms (also checked before the build), then
-        the base class's rules. Of those, rule D (file names too long to read) mirrors the model;
+        the base class's rules. Of those, rule D (file names too long to read)
+        mirrors the model, with ucla-roms' shorter name buffers; rule E (forcing
+        files) allows ucla-roms 0.11.0's 360, more than the GPU's 64, which
+        Rule G checks first;
         rule A (every output stream's rollover divides the restart period) the
         GPU model does not check, but it names and splits files as ucla-roms
         does, so a rollover that does not divide the restart period leaves a
@@ -631,7 +634,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         record_gb = history_record_gb(nml)
         seconds = record_gb / (GPU_WRITER_RATE_GBPS * writers_per_file(layout.writers))
         message = (
-            f"tiling.writers_per_node is {layout.writers_per_node}; gpu-ucla-roms' "
+            f"tiling.writers_per_node is {layout.writers_per_node}; roms-marbl-gpu' "
             f"tools/gpu_layout.py suggests {suggested} per node on {layout.nodes} "
             f"node(s) for this namelist's history output (~{record_gb:.2f} GB per "
             f"record, ~{seconds:.0f} s to write with this run's writers)"
@@ -775,7 +778,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         return Path(netcdff_home), Path(netcdf_home or netcdff_home)
 
     def build(self, rebuild: bool = False) -> None:
-        """Compile the GPU executable from the gpu-ucla-roms source.
+        """Compile the GPU executable from the roms-marbl-gpu source.
 
         Runs ``make gpu`` in the clone, with the system's GPU compiler,
         architecture and link flags and the `rho0` and tracer precision this
@@ -799,8 +802,10 @@ class ROMSGpuSimulation(ROMSSimulation):
             `NETCDFHOME` is not set, or a variable of the toolchain's link flags
             is not set.
         NamelistConsistencyError
-            If the composed namelist gives a GPU-model array more values than
-            the model reads (Rule G), checked before the compile.
+            If the namelist file or the overrides give a GPU-model array more
+            values than the model reads (Rule G), checked before the compile.
+            The forcing files C-Star lists from the staged inputs are checked
+            later, with the runtime settings, before launch.
         RuntimeError
             If an error occurs during the compilation process.
 
@@ -817,8 +822,8 @@ class ROMSGpuSimulation(ROMSSimulation):
             )
 
         self._gpu_environment()
-        # Rule G before the compile: a CPU namelist gives one akt_bak per tracer,
-        # which a blueprint that never mentions akt_bak passes at validation
+        # Rule G before the compile, on the namelist file and the overrides; the
+        # forcing list derived from the staged inputs is checked before launch
         check_gpu_array_sizes(self._composed_namelist())
         key = self._gpu_build_key()
 
@@ -868,9 +873,9 @@ class ROMSGpuSimulation(ROMSSimulation):
         _run_cmd(
             command,
             cwd=codebase_copy.path,
-            msg_pre="Compiling gpu-ucla-roms...",
-            msg_post=f"gpu-ucla-roms compiled at {build_dir}",
-            msg_err="Error when compiling gpu-ucla-roms.",
+            msg_pre="Compiling roms-marbl-gpu...",
+            msg_post=f"roms-marbl-gpu compiled at {build_dir}",
+            msg_err="Error when compiling roms-marbl-gpu.",
             raise_on_error=True,
         )
 

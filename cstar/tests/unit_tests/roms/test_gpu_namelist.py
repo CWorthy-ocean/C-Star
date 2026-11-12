@@ -1,6 +1,6 @@
-"""Tests for the gpu-ucla-roms namelist tier selection in `cstar.roms.namelist`.
+"""Tests for the roms-marbl-gpu namelist tier selection in `cstar.roms.namelist`.
 
-Every gpu-ucla-roms release up to v0.1.2-beta reads the ucla-roms 0.11.0 namelist
+Every roms-marbl-gpu release up to v0.1.3-beta reads the ucla-roms 0.11.0 namelist
 vocabulary (``NAMELIST_COMPAT``), so C-Star writes `RomsNamelistV0_11_0` for it
 and never the 0.12/0.13 tiers, whose extra keys the GPU model rejects.
 """
@@ -21,7 +21,7 @@ from cstar.roms.namelist import (
 )
 
 NOT_A_RELEASE = "is not a release tag"
-NEWER_THAN_KNOWN = "newer than the newest gpu-ucla-roms release this C-Star knows"
+NEWER_THAN_KNOWN = "newer than the newest roms-marbl-gpu release this C-Star knows"
 HASH = "a" * 40
 
 
@@ -61,7 +61,7 @@ def test_parse_gpu_release_rejects_non_release_refs(ref):
 
 def test_registry_is_one_open_entry_mapping_to_the_0_11_0_tier():
     assert GPU_NAMELIST_SCHEMA_REGISTRY == ((None, None, RomsNamelistV0_11_0),)
-    assert NEWEST_KNOWN_UCLA_ROMS_GPU == (0, 1, 2)
+    assert NEWEST_KNOWN_UCLA_ROMS_GPU == (0, 1, 3)
 
 
 def test_the_gpu_tier_is_findable_by_name_for_a_build_record():
@@ -74,9 +74,10 @@ def test_the_gpu_tier_is_findable_by_name_for_a_build_record():
         "v0.1.0-beta",
         "v0.1.1-beta",
         "v0.1.2-beta",
-        "0.1.2-beta",
-        "0.1.2",
-        "v0.1.2",
+        "v0.1.3-beta",
+        "0.1.3-beta",
+        "0.1.3",
+        "v0.1.3",
         "0.1.0",
     ],
 )
@@ -91,9 +92,9 @@ def test_a_ref_that_is_not_a_release_warns_and_uses_the_last_entry(ref):
         schema = gpu_namelist_schema_for_ref(ref)
     assert schema is RomsNamelistV0_11_0
     message = str(record[0].message)
-    assert "gpu-ucla-roms" in message
+    assert "roms-marbl-gpu" in message
     assert "RomsNamelistV0_11_0" in message
-    assert "v0.1.2-beta" in message  # what to pin instead
+    assert "v0.1.3-beta" in message  # what to pin instead
     assert record[0].filename == __file__
 
 
@@ -106,15 +107,15 @@ def test_a_hash_without_a_clone_warns_and_never_asks_git():
     describe.assert_not_called()
 
 
-@pytest.mark.parametrize("ref", ["v0.1.3-beta", "0.2.0", "v1.0.0", "v0.13.0", "0.12.0"])
+@pytest.mark.parametrize("ref", ["v0.1.4-beta", "0.2.0", "v1.0.0", "v0.13.0", "0.12.0"])
 def test_a_release_newer_than_known_warns_and_uses_the_last_entry(ref):
-    """A ucla-roms-looking tag (``v0.13.0``) is just a newer gpu-ucla-roms one."""
+    """A ucla-roms-looking tag (``v0.13.0``) is just a newer roms-marbl-gpu one."""
     with pytest.warns(UserWarning, match=NEWER_THAN_KNOWN) as record:
         schema = gpu_namelist_schema_for_ref(ref)
     assert schema is RomsNamelistV0_11_0
     message = str(record[0].message)
     assert "RomsNamelistV0_11_0" in message
-    assert "0.1.2" in message  # what to pin at or below
+    assert "0.1.3" in message  # what to pin at or below
     assert record[0].filename == __file__
 
 
@@ -132,11 +133,11 @@ def test_a_commit_ahead_of_its_release_warns():
     with (
         mock.patch(
             "cstar.roms.namelist._describe_nearest_tag",
-            return_value=("v0.1.2-beta", 3),
+            return_value=("v0.1.3-beta", 3),
         ),
         pytest.warns(
             UserWarning,
-            match=r"gpu-ucla-roms commit .* is 3 commit\(s\) after release v0.1.2-beta",
+            match=r"roms-marbl-gpu commit .* is 3 commit\(s\) after release v0.1.3-beta",
         ) as record,
     ):
         schema = gpu_namelist_schema_for_ref(HASH, repo_path="/some/repo")

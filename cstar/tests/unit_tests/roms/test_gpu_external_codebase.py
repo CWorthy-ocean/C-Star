@@ -10,13 +10,13 @@ from cstar.roms.gpu_external_codebase import (
     ROMSGpuExternalCodeBase,
 )
 
-GPU_REPO = "https://github.com/CWorthy-ocean/gpu-ucla-roms.git"
+GPU_REPO = "https://github.com/CWorthy-ocean/roms-marbl-gpu.git"
 
 
 @pytest.fixture
 def clone(tmp_path: Path) -> Path:
-    """A directory standing in for a clone of gpu-ucla-roms."""
-    path = tmp_path / "gpu-ucla-roms"
+    """A directory standing in for a clone of roms-marbl-gpu."""
+    path = tmp_path / "roms-marbl-gpu"
     path.mkdir()
     return path
 
@@ -31,14 +31,14 @@ def staged_codebase(clone: Path) -> ROMSGpuExternalCodeBase:
 
 class TestROMSGpuExternalCodeBaseProperties:
     def test_defaults(self) -> None:
-        """The defaults pin the gpu-ucla-roms repository at its tested release."""
+        """The defaults pin the roms-marbl-gpu repository at its tested release."""
         codebase = ROMSGpuExternalCodeBase()
 
         assert codebase._default_source_repo == GPU_REPO
-        assert codebase._default_checkout_target == "v0.1.2-beta"
+        assert codebase._default_checkout_target == "v0.1.3-beta"
         assert codebase.root_env_var == "ROMS_GPU_ROOT"
         assert codebase.source.location == GPU_REPO
-        assert codebase.source.checkout_target == "v0.1.2-beta"
+        assert codebase.source.checkout_target == "v0.1.3-beta"
 
     def test_init_with_args(self) -> None:
         """A source repository and checkout target replace the defaults."""
@@ -105,7 +105,7 @@ class TestROMSGpuExternalCodeBaseConfigure:
         with pytest.raises(
             RuntimeError,
             match=(
-                "Error when fetching the MARBL submodule of gpu-ucla-roms. "
+                "Error when fetching the MARBL submodule of roms-marbl-gpu. "
                 "Return Code: `128`. STDERR:\nfatal: could not read Username"
             ),
         ):

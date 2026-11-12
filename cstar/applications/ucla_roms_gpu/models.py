@@ -36,14 +36,14 @@ class GpuCodeRepositories(ConfiguredBaseModel):
     """The repositories a GPU run builds and configures the model from."""
 
     roms: CodeRepository
-    """The gpu-ucla-roms repository. It is cloned with its MARBL submodule, which
+    """The roms-marbl-gpu repository. It is cloned with its MARBL submodule, which
     the GPU build compiles into the model."""
 
     run_time: CodeRepository
     """The namelist and MARBL settings (`marbl_in`) the model reads at run time.
 
     The GPU model reads the namelist vocabulary of one ucla-roms release (0.11.0
-    for every gpu-ucla-roms release so far), so the namelist file may only use
+    for every roms-marbl-gpu release so far), so the namelist file may only use
     that release's groups and keys."""
 
 
@@ -96,7 +96,7 @@ class TilingParameterSet(ParameterSet):
 
 
 class UclaRomsGpuBlueprint(Blueprint):
-    """Blueprint schema for running a UCLA-ROMS simulation on GPUs with gpu-ucla-roms."""
+    """Blueprint schema for running a UCLA-ROMS simulation on GPUs with roms-marbl-gpu."""
 
     schema_version: str = Field(default="1.0.0")
     """The blueprint schema version."""
@@ -142,12 +142,12 @@ class UclaRomsGpuBlueprint(Blueprint):
     otherwise compute; list values replace the existing list wholesale.
 
     Group and key names are checked against the namelist vocabulary the pinned
-    gpu-ucla-roms release reads: unknown names are an error when `code.roms`
+    roms-marbl-gpu release reads: unknown names are an error when `code.roms`
     pins a release, and a warning otherwise. Switches for features the GPU
     model does not have are refused, and so are arrays with more values than
-    the GPU model reads: it takes `vertical_mixing_settings.akt_bak` for
-    temperature and salinity only, where a CPU namelist gives one value per
-    tracer. See :class:`TilingParameterSet` for the processor grid.
+    the GPU model reads: it takes at most 64 `forcing_files.frcfiles`, where
+    ucla-roms 0.11.0 takes 360. See :class:`TilingParameterSet` for the
+    processor grid.
     """
 
     @model_validator(mode="after")
@@ -198,7 +198,7 @@ class UclaRomsGpuBlueprint(Blueprint):
         """Check `namelist_overrides` names, tiling consistency and GPU features early.
 
         Unknown group/key names are an error when `code.roms` pins a
-        gpu-ucla-roms release and a warning otherwise. `np_xi`/`np_eta`
+        roms-marbl-gpu release and a warning otherwise. `np_xi`/`np_eta`
         conflicts with `tiling`, switches for features the GPU model does
         not have (Rule F in :mod:`cstar.roms.precheck`) and arrays with more
         values than it reads (Rule G) are always an error.
@@ -218,7 +218,7 @@ class UclaRomsGpuBlueprint(Blueprint):
                 ref,
                 pinned=_parse_gpu_release(ref) is not None,
                 schema_for_ref=gpu_namelist_schema_for_ref,
-                codebase="gpu-ucla-roms",
+                codebase="roms-marbl-gpu",
             ),
         ]
 

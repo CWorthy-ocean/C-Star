@@ -1,4 +1,4 @@
-"""Rank layout of a GPU ROMS job: how many MPI ranks gpu-ucla-roms needs, and how
+"""Rank layout of a GPU ROMS job: how many MPI ranks roms-marbl-gpu needs, and how
 many of them write output.
 
 The GPU model runs one compute rank per tile (``np_xi * np_eta`` tiles, one GPU
@@ -8,12 +8,12 @@ node are writers and the rest compute. Every node carries the same number of
 ranks (what a SLURM ``--ntasks-per-node`` can express), which makes the tiles
 divide evenly over the nodes. The model itself checks only that the compute ranks
 number ``np_xi * np_eta`` and that every node keeps a compute rank, and stops at
-start-up printing the layout it expected otherwise (gpu-ucla-roms
-``src/shared/comm.F90``, v0.1.2-beta).
+start-up printing the layout it expected otherwise (roms-marbl-gpu
+``src/shared/comm.F90``, v0.1.3-beta).
 
 :class:`GpuRankLayout` holds that arithmetic. :func:`suggested_writers_per_node`
-sizes the writers from the history record, as gpu-ucla-roms'
-``tools/gpu_layout.py --per-node`` (v0.1.2-beta) does.
+sizes the writers from the history record, as roms-marbl-gpu'
+``tools/gpu_layout.py --per-node`` (v0.1.3-beta) does.
 """
 
 from __future__ import annotations
@@ -29,20 +29,20 @@ if TYPE_CHECKING:
 
 GPU_WRITER_RATE_GBPS: Final = 0.6
 """GB/s one writer streams (measured on Derecho Lustre). Mirrors ``--rate-gbps`` in
-gpu-ucla-roms ``tools/gpu_layout.py`` at v0.1.2-beta."""
+roms-marbl-gpu ``tools/gpu_layout.py`` at v0.1.3-beta."""
 
 GPU_WRITER_TARGET_SECONDS: Final = 15.0
 """Seconds one history record should take to write. Mirrors ``--target-seconds`` in
-gpu-ucla-roms ``tools/gpu_layout.py`` at v0.1.2-beta."""
+roms-marbl-gpu ``tools/gpu_layout.py`` at v0.1.3-beta."""
 
 GPU_MAX_WRITERS_PER_GROUP: Final = 4
 """Most writers on one file: one file's bandwidth is limited, and more writers on
-it were slower. Mirrors the ``min(4, ...)`` in gpu-ucla-roms ``tools/gpu_layout.py``
-at v0.1.2-beta."""
+it were slower. Mirrors the ``min(4, ...)`` in roms-marbl-gpu ``tools/gpu_layout.py``
+at v0.1.3-beta."""
 
 GPU_MAX_WRITERS: Final = 16
-"""Most writer ranks in total. Mirrors ``--max-writers`` in gpu-ucla-roms
-``tools/gpu_layout.py`` at v0.1.2-beta."""
+"""Most writer ranks in total. Mirrors ``--max-writers`` in roms-marbl-gpu
+``tools/gpu_layout.py`` at v0.1.3-beta."""
 
 _RECORD_2D_KEYS: Final = ("wrt_z", "wrt_ub", "wrt_vb", "wrt_hbls", "wrt_hbbl")
 """The 2-D history switches ``tools/gpu_layout.py`` counts in a record. A key the
@@ -75,7 +75,7 @@ class GpuRankLayout:
     """The MPI ranks of a GPU job: compute ranks, writer ranks, and their nodes.
 
     The one place the rank arithmetic lives (see the module docstring and
-    gpu-ucla-roms ``src/shared/comm.F90``, v0.1.2-beta). Every node carries
+    roms-marbl-gpu ``src/shared/comm.F90``, v0.1.3-beta). Every node carries
     ``tiles // nodes`` compute ranks and ``writers_per_node`` writer ranks, as a
     uniform ranks-per-node launch gives, so the tiles must divide evenly over the
     nodes. The model itself checks only the compute-rank count and that every node
@@ -163,7 +163,7 @@ def _namelist_lookup(settings: RomsNamelistBase) -> Callable[[str, Any], Any]:
 def history_record_gb(settings: RomsNamelistBase) -> float:
     """Size, in GB, of one history record of a GPU run of this namelist.
 
-    The estimate of gpu-ucla-roms ``tools/gpu_layout.py`` (v0.1.2-beta): four
+    The estimate of roms-marbl-gpu ``tools/gpu_layout.py`` (v0.1.3-beta): four
     bytes per point of each 2-D and 3-D field the ``wrt_*`` switches write, plus
     the MARBL tracers and diagnostics when ``nt_bgc > 0``. A key C-Star's namelist
     does not have counts as the script counts a key the namelist lacks.
@@ -196,8 +196,8 @@ def writers_per_file(writers: int) -> int:
 
     The model splits its writers into groups, one file per group at a time:
     ``min(4, max(1, writers // 2))`` per group, lowered until it divides the
-    writers (``writer_groups`` in gpu-ucla-roms ``src/host/io_server.F90``,
-    v0.1.2-beta, without the ``ROMS_GPU_IO_GROUP`` override).
+    writers (``writer_groups`` in roms-marbl-gpu ``src/host/io_server.F90``,
+    v0.1.3-beta, without the ``ROMS_GPU_IO_GROUP`` override).
 
     Parameters
     ----------
@@ -218,7 +218,7 @@ def writers_per_file(writers: int) -> int:
 def suggested_writers_per_node(settings: RomsNamelistBase, nodes: int) -> int:
     """Writer ranks per node for a GPU run of this namelist.
 
-    A port of gpu-ucla-roms ``tools/gpu_layout.py --per-node`` (v0.1.2-beta). It
+    A port of roms-marbl-gpu ``tools/gpu_layout.py --per-node`` (v0.1.3-beta). It
     sizes the history record from the grid and the ``wrt_*`` switches that write
     a field, takes the writers one file needs to write a record in
     :data:`GPU_WRITER_TARGET_SECONDS` at :data:`GPU_WRITER_RATE_GBPS` each (at

@@ -2,17 +2,16 @@
 name: wales-toy-gpu
 description: >-
   toy domain near wales on one 4-GPU node, for a quick check of a GPU system
-  (bundled example). gpu-ucla-roms is a private repository, so cloning it needs
-  GitHub credentials. The namelist directory is the one named for ucla-roms
-  0.13; its file uses only 0.11.0 keys, the vocabulary gpu-ucla-roms reads.
+  (bundled example). The namelist directory is the one named for ucla-roms
+  0.13; its file uses only 0.11.0 keys, the vocabulary roms-marbl-gpu reads.
 state: draft
 valid_start_date: 2012-01-01 00:00:00
 valid_end_date: 2012-01-31 12:00:00
 code:
   roms:
-    documentation: gpu-ucla-roms, the CUDA-Fortran port of ucla-roms
-    location: https://github.com/CWorthy-ocean/gpu-ucla-roms.git
-    commit: v0.1.2-beta
+    documentation: roms-marbl-gpu, the CUDA-Fortran port of ucla-roms
+    location: https://github.com/CWorthy-ocean/roms-marbl-gpu.git
+    commit: v0.1.3-beta
   run_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
     branch: main
@@ -47,10 +46,6 @@ tiling:
 namelist_overrides:
   time_stepping:
     dt: 360
-  # gpu-ucla-roms reads akt_bak for temperature and salinity only; the
-  # shared CPU namelist gives one value per tracer, which stops the GPU model
-  vertical_mixing_settings:
-    akt_bak: [0.0, 0.0]
 runtime_params:
   start_date: 2012-01-01 00:00:00
   end_date: 2012-01-01 00:30:00

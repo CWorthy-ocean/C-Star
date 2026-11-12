@@ -312,11 +312,11 @@
             "properties": {
                 "roms": {
                     "$ref": "#/$defs/CodeRepository",
-                    "description": "The gpu-ucla-roms repository. It is cloned with its MARBL submodule, which\nthe GPU build compiles into the model."
+                    "description": "The roms-marbl-gpu repository. It is cloned with its MARBL submodule, which\nthe GPU build compiles into the model."
                 },
                 "run_time": {
                     "$ref": "#/$defs/CodeRepository",
-                    "description": "The namelist and MARBL settings (`marbl_in`) the model reads at run time.\n\nThe GPU model reads the namelist vocabulary of one ucla-roms release (0.11.0\nfor every gpu-ucla-roms release so far), so the namelist file may only use\nthat release's groups and keys."
+                    "description": "The namelist and MARBL settings (`marbl_in`) the model reads at run time.\n\nThe GPU model reads the namelist vocabulary of one ucla-roms release (0.11.0\nfor every roms-marbl-gpu release so far), so the namelist file may only use\nthat release's groups and keys."
                 }
             },
             "required": [
@@ -615,7 +615,7 @@
         }
     },
     "additionalProperties": false,
-    "description": "Blueprint schema for running a UCLA-ROMS simulation on GPUs with gpu-ucla-roms.",
+    "description": "Blueprint schema for running a UCLA-ROMS simulation on GPUs with roms-marbl-gpu.",
     "properties": {
         "name": {
             "description": "A unique, user-friendly name for this blueprint.",
@@ -733,7 +733,7 @@
                 "additionalProperties": true,
                 "type": "object"
             },
-            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale.\n\nGroup and key names are checked against the namelist vocabulary the pinned\ngpu-ucla-roms release reads: unknown names are an error when `code.roms`\npins a release, and a warning otherwise. Switches for features the GPU\nmodel does not have are refused, and so are arrays with more values than\nthe GPU model reads: it takes `vertical_mixing_settings.akt_bak` for\ntemperature and salinity only, where a CPU namelist gives one value per\ntracer. See :class:`TilingParameterSet` for the processor grid.",
+            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale.\n\nGroup and key names are checked against the namelist vocabulary the pinned\nroms-marbl-gpu release reads: unknown names are an error when `code.roms`\npins a release, and a warning otherwise. Switches for features the GPU\nmodel does not have are refused, and so are arrays with more values than\nthe GPU model reads: it takes at most 64 `forcing_files.frcfiles`, where\nucla-roms 0.11.0 takes 360. See :class:`TilingParameterSet` for the\nprocessor grid.",
             "title": "Namelist Overrides",
             "type": "object"
         }

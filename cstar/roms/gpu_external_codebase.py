@@ -16,7 +16,7 @@ application can declare the executable's path without building a codebase."""
 
 
 class ROMSGpuExternalCodeBase(ExternalCodeBase):
-    """An implementation of the ExternalCodeBase class for gpu-ucla-roms, the
+    """An implementation of the ExternalCodeBase class for roms-marbl-gpu, the
     CUDA-Fortran port of UCLA ROMS.
 
     The repository holds MARBL as a git submodule, which the model's build
@@ -27,18 +27,18 @@ class ROMSGpuExternalCodeBase(ExternalCodeBase):
     Methods:
     --------
     get()
-        inherited from ExternalCodeBase.get() to clone the gpu-ucla-roms repository
+        inherited from ExternalCodeBase.get() to clone the roms-marbl-gpu repository
     configure()
         overrides ExternalCodeBase.configure() to set the environment and fetch the MARBL submodule
     """
 
     @property
     def _default_source_repo(self) -> str:
-        return "https://github.com/CWorthy-ocean/gpu-ucla-roms.git"
+        return "https://github.com/CWorthy-ocean/roms-marbl-gpu.git"
 
     @property
     def _default_checkout_target(self) -> str:
-        return "v0.1.2-beta"
+        return "v0.1.3-beta"
 
     @property
     def root_env_var(self) -> str:
@@ -60,9 +60,9 @@ class ROMSGpuExternalCodeBase(ExternalCodeBase):
         _run_cmd(
             "git submodule update --init --recursive",
             cwd=self.working_copy.path,
-            msg_pre="Fetching the MARBL submodule of gpu-ucla-roms...",
+            msg_pre="Fetching the MARBL submodule of roms-marbl-gpu...",
             msg_post="Fetched the MARBL submodule",
-            msg_err="Error when fetching the MARBL submodule of gpu-ucla-roms.",
+            msg_err="Error when fetching the MARBL submodule of roms-marbl-gpu.",
             raise_on_error=True,
         )
 

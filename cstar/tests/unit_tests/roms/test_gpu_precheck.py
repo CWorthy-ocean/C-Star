@@ -1,8 +1,8 @@
-"""Tests for Rules E and F, `cstar.roms.precheck.check_gpu_features` and
+"""Tests for Rules F and G, `cstar.roms.precheck.check_gpu_features` and
 `check_gpu_array_sizes`.
 
-Mirrors the GPU model's start-up guard (gpu-ucla-roms ``src/host/feature_guard.F90``
-at v0.1.2-beta): fifteen switches stop the run, five more only warn. The tables
+Mirrors the GPU model's start-up guard (roms-marbl-gpu ``src/host/feature_guard.F90``
+at v0.1.3-beta): sixteen switches stop the run, five more only warn. The tables
 below restate upstream's calls as literals, so that a drift in the module's data
 shows up as a failing test.
 """
@@ -45,6 +45,7 @@ STOP = [
     ("frc_output_settings", "wrt_frc", "forcing output", None),
     ("surf_flx_output_settings", "wrt_smflx", "surface momentum flux output", None),
     ("surf_flx_output_settings", "wrt_stflx", "surface tracer flux output", None),
+    ("surf_flx_output_settings", "wrt_rstflx", "surface restoring flux output", None),
     ("basic_output_settings", "monthly_restarts", "monthly restarts", None),
     ("bgc_settings", "wrt_bgc_dia_avg", "BGC diagnostic averages output", None),
     ("tidal_frc_settings", "ana_tides", "analytical tides", None),
@@ -247,52 +248,76 @@ def test_live_namelist_of_a_schema_without_the_group_is_fine():
     _no_warnings(nml)
 
 
-# Rule G: (group, key, size) of the arrays the GPU model declares smaller than
-# ucla-roms, restated from upstream (`akt_bak_in(2)`, src/host/case_io.F90:96 at
-# v0.1.2-beta).
-ARRAY_SIZES = [("vertical_mixing_settings", "akt_bak", 2)]
+# Rule G: (group, key, size, remedy) of the arrays the GPU model declares smaller
+# than ucla-roms, restated from upstream (`frcfiles(max_frc)`, `max_frc = 64`,
+# src/host/frc_io.F90:29 at v0.1.3-beta).
+ARRAY_SIZES = [
+    (
+        "forcing_files",
+        "frcfiles",
+        64,
+        "Use fewer, larger forcing files (for nest-from boundary files, a larger "
+        "nrpf_extract in the parent run).",
+    )
+]
+
+
+def _frcfiles(n: int) -> dict[str, dict[str, list[str]]]:
+    return {"forcing_files": {"frcfiles": [f"roms_frc.{i}.nc" for i in range(n)]}}
 
 
 def test_array_size_table_matches_upstream():
     assert list(_GPU_ARRAY_SIZES) == ARRAY_SIZES
 
 
-@pytest.mark.parametrize("values", [[0.0], [1e-5, 1e-6]])
-def test_akt_bak_within_the_gpu_size_passes(values):
-    check_gpu_array_sizes({"vertical_mixing_settings": {"akt_bak": values}})
+@pytest.mark.parametrize("n", [1, 64])
+def test_forcing_files_within_the_gpu_limit_pass(n):
+    check_gpu_array_sizes(_frcfiles(n))
 
 
 @pytest.mark.parametrize(
     "settings",
     [
-        {"vertical_mixing_settings": {"akt_bak": 0.0}},
-        {"vertical_mixing_settings": {"akv_bak": 0.0}},
+        {"forcing_files": {"frcfiles": "roms_frc.nc"}},
+        {"forcing_files": {}},
         {},
     ],
 )
-def test_a_scalar_or_missing_akt_bak_passes(settings):
+def test_a_scalar_or_missing_frcfiles_passes(settings):
     check_gpu_array_sizes(settings)
 
 
-def test_more_akt_bak_values_than_the_gpu_reads_raise():
+def test_more_forcing_files_than_the_gpu_reads_raise():
     with pytest.raises(NamelistConsistencyError) as raised:
-        check_gpu_array_sizes({"vertical_mixing_settings": {"akt_bak": [0.0] * 3}})
+        check_gpu_array_sizes(_frcfiles(65))
     assert raised.value.rule == "gpu_array_sizes"
-    assert raised.value.section == "vertical_mixing_settings"
-    assert raised.value.keys == ("akt_bak",)
-    assert "&vertical_mixing_settings akt_bak: 3 values; the GPU model reads 2" in str(
-        raised.value
+    assert raised.value.section == "forcing_files"
+    assert raised.value.keys == ("frcfiles",)
+    message = str(raised.value)
+    assert (
+        "&forcing_files frcfiles: 65 values; the GPU model reads at most 64" in message
     )
-    assert "namelist_overrides" in str(raised.value)
+    assert "Use fewer, larger forcing files" in message
 
 
-def test_a_live_cpu_namelist_is_refused(v0_11_0_namelist):
-    """A CPU 0.11.0 namelist gives one `akt_bak` per tracer."""
+@pytest.mark.parametrize("n", [3, 28, 512])
+def test_one_akt_bak_and_tnu2_per_tracer_passes(n):
+    """v0.1.3-beta reads ``akt_bak`` and ``tnu2`` one value per tracer, as ucla-roms."""
+    check_gpu_array_sizes(
+        {
+            "vertical_mixing_settings": {"akt_bak": [0.0] * n},
+            "tracer_diff2": {"tnu2": [0.0] * n},
+        }
+    )
+
+
+def test_a_live_cpu_namelist_passes(v0_11_0_namelist):
+    """A CPU 0.11.0 namelist, one `akt_bak` per tracer, is one the GPU reads."""
     assert len(v0_11_0_namelist.vertical_mixing_settings.akt_bak) > 2
-    with pytest.raises(NamelistConsistencyError, match="akt_bak"):
-        check_gpu_array_sizes(v0_11_0_namelist)
-
-
-def test_a_live_namelist_with_two_values_passes(v0_11_0_namelist):
-    v0_11_0_namelist.vertical_mixing_settings.akt_bak = [0.0, 0.0]
     check_gpu_array_sizes(v0_11_0_namelist)
+
+
+def test_a_live_namelist_with_too_many_forcing_files_raises(v0_11_0_namelist):
+    v0_11_0_namelist.forcing_files.frcfiles = [f"f{i}.nc" for i in range(65)]
+    with pytest.raises(NamelistConsistencyError, match="frcfiles: 65 values"):
+        check_gpu_array_sizes(v0_11_0_namelist)

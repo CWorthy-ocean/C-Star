@@ -21,8 +21,8 @@ from cstar.cli.blueprint.schemas import generate_schema
 TEMPLATE_NAME = "blueprint.1.0.0.yaml"
 """The file name of the template for schema 1.0.0 of the blueprint."""
 
-PINNED_TAG = "v0.1.2-beta"
-"""The gpu-ucla-roms release the template pins."""
+PINNED_TAG = "v0.1.3-beta"
+"""The roms-marbl-gpu release the template pins."""
 
 
 @pytest.fixture
@@ -56,11 +56,8 @@ class TestShippedBlueprints:
 
         assert bp.name == "wales-toy-gpu"
         assert bp.compute_needs.nodes == 1
-        # the shared CPU namelist gives one akt_bak per tracer; the GPU reads two
-        assert bp.namelist_overrides["vertical_mixing_settings"]["akt_bak"] == [
-            0.0,
-            0.0,
-        ]
+        # v0.1.3-beta reads the shared CPU namelist's akt_bak, one per tracer
+        assert "vertical_mixing_settings" not in bp.namelist_overrides
 
     def test_schema_ref_names_a_published_schema(
         self, template_dict: dict[str, t.Any]
@@ -248,7 +245,7 @@ class TestNamelistOverrides:
         self, template_dict: dict[str, t.Any]
     ) -> None:
         template_dict["code"]["roms"] = {
-            "location": "https://github.com/CWorthy-ocean/gpu-ucla-roms.git",
+            "location": "https://github.com/CWorthy-ocean/roms-marbl-gpu.git",
             "branch": "main",
         }
         data = _with_overrides(template_dict, {"time_stepping": {"no_such_key": 1}})
@@ -258,7 +255,7 @@ class TestNamelistOverrides:
 
     def test_a_known_key_does_not_warn(self, template_dict: dict[str, t.Any]) -> None:
         template_dict["code"]["roms"] = {
-            "location": "https://github.com/CWorthy-ocean/gpu-ucla-roms.git",
+            "location": "https://github.com/CWorthy-ocean/roms-marbl-gpu.git",
             "branch": "main",
         }
 
@@ -296,21 +293,22 @@ class TestNamelistOverrides:
 
         UclaRomsGpuBlueprint.model_validate(data)
 
-    def test_more_akt_bak_values_than_the_gpu_reads_are_rejected(
+    def test_more_forcing_files_than_the_gpu_reads_are_rejected(
         self, template_dict: dict[str, t.Any]
     ) -> None:
         data = _with_overrides(
-            template_dict, {"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
+            template_dict,
+            {"forcing_files": {"frcfiles": [f"f{i}.nc" for i in range(65)]}},
         )
 
-        with pytest.raises(ValidationError, match="akt_bak: 3 values"):
+        with pytest.raises(ValidationError, match="frcfiles: 65 values"):
             UclaRomsGpuBlueprint.model_validate(data)
 
-    def test_two_akt_bak_values_are_accepted(
+    def test_one_akt_bak_per_tracer_is_accepted(
         self, template_dict: dict[str, t.Any]
     ) -> None:
         data = _with_overrides(
-            template_dict, {"vertical_mixing_settings": {"akt_bak": [1e-5, 1e-6]}}
+            template_dict, {"vertical_mixing_settings": {"akt_bak": [1e-5] * 28}}
         )
 
         UclaRomsGpuBlueprint.model_validate(data)

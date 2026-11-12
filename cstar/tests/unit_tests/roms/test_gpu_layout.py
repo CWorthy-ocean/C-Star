@@ -1,7 +1,7 @@
 """Tests for `cstar.roms.gpu_layout`: the GPU job's rank layout and writer sizing.
 
 The expected writer counts in `test_suggested_writers_per_node_matches_the_script`
-were produced by running gpu-ucla-roms' ``tools/gpu_layout.py --per-node`` (v0.1.2-beta)
+were produced by running roms-marbl-gpu' ``tools/gpu_layout.py --per-node`` (v0.1.2-beta)
 on the namelist each case writes with C-Star's own writer, with ``--gpus-per-node``
 set to tiles / nodes; the column ``NWPN`` of its output is the number hard-coded here.
 """
@@ -180,6 +180,6 @@ def test_writers_per_file_follows_the_model_s_writer_groups(
     writers: int, per_file: int
 ) -> None:
     """``min(4, max(1, writers // 2))``, lowered until it divides the writers
-    (gpu-ucla-roms ``io_server.F90`` ``writer_groups``).
+    (roms-marbl-gpu ``io_server.F90`` ``writer_groups``).
     """
     assert writers_per_file(writers) == per_file

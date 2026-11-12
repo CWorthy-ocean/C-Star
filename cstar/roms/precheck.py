@@ -55,7 +55,7 @@ schema; a commit-hash pin that cannot be resolved falls back to the newest
 schema, so gets the larger limit, as for Rules A and C.
 
 Rule F -- :func:`check_gpu_features` mirrors the GPU model's start-up feature guard
-(gpu-ucla-roms ``src/host/feature_guard.F90``, v0.1.2-beta): the GPU model reads
+(roms-marbl-gpu ``src/host/feature_guard.F90``, v0.1.3-beta): the GPU model reads
 only the namelist groups it knows, so a CPU namelist that switches on a UCLA ROMS
 feature it does not have (``river_analytical``, ``pipe_source``, ``do_zslice``,
 monthly restarts, ...) would otherwise run without that feature and without a
@@ -68,12 +68,12 @@ fails at the desk rather than at start-up on the machine. Ungated by schema
 version: the GPU model has one guard whatever namelist vocabulary it reads, and a
 group C-Star's schema does not have (``tides_settings``) just never matches.
 
-Rule G -- :func:`check_gpu_array_sizes`: gpu-ucla-roms declares some namelist
-arrays smaller than UCLA ROMS does (v0.1.2-beta: ``akt_bak_in(2)`` in
-``src/host/case_io.F90``, temperature and salinity only, where ucla-roms
-allocates ``Akt_bak(NT)``, one value per tracer). A CPU namelist that gives more
-values stops the GPU model while it reads the group (``too many constants to
-initialize group item``). Same scope and call points as Rule F.
+Rule G -- :func:`check_gpu_array_sizes`: roms-marbl-gpu declares some namelist
+arrays smaller than UCLA ROMS does (v0.1.3-beta: ``frcfiles(max_frc)`` with
+``max_frc = 64`` in ``src/host/frc_io.F90``, where ucla-roms 0.11.0 reads 360, see
+Rule E). A namelist that gives more values stops the GPU model while it reads the
+group. Same scope and call points as Rule F; for a GPU run it is the tighter of
+the two forcing-file limits.
 
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
@@ -946,13 +946,16 @@ _GPU_STOP_SWITCHES: tuple[_GpuSwitch, ...] = (
     _GpuSwitch("frc_output_settings", "wrt_frc", "forcing output"),
     _GpuSwitch("surf_flx_output_settings", "wrt_smflx", "surface momentum flux output"),
     _GpuSwitch("surf_flx_output_settings", "wrt_stflx", "surface tracer flux output"),
+    _GpuSwitch(
+        "surf_flx_output_settings", "wrt_rstflx", "surface restoring flux output"
+    ),
     _GpuSwitch("basic_output_settings", "monthly_restarts", "monthly restarts"),
     _GpuSwitch("bgc_settings", "wrt_bgc_dia_avg", "BGC diagnostic averages output"),
     _GpuSwitch("tidal_frc_settings", "ana_tides", "analytical tides"),
     _GpuSwitch("tides_settings", "ana_tides", "analytical tides"),
 )
-"""The ``need_off`` calls of gpu-ucla-roms ``src/host/feature_guard.F90`` at
-v0.1.2-beta, in its order: switches that stop the GPU run when true. Every call
+"""The ``need_off`` calls of roms-marbl-gpu ``src/host/feature_guard.F90`` at
+v0.1.3-beta, in its order: switches that stop the GPU run when true. Every call
 is listed, including those on groups C-Star's namelist schemas do not have
 (``cdr_tracer_output_settings`` after ucla-roms 0.9.0, ``tides_settings``), which
 never match."""
@@ -986,15 +989,15 @@ _GPU_WARN_SWITCHES: tuple[_GpuSwitch, ...] = (
         "restarts will not hold them",
     ),
 )
-"""The ``warn_on`` calls of gpu-ucla-roms ``src/host/feature_guard.F90`` at
-v0.1.2-beta, in its order: switches the GPU model only warns about. ``what`` is
+"""The ``warn_on`` calls of roms-marbl-gpu ``src/host/feature_guard.F90`` at
+v0.1.3-beta, in its order: switches the GPU model only warns about. ``what`` is
 the model's full warning sentence."""
 
 
 def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
     """Raise ``NamelistConsistencyError`` if the namelist switches on a feature the
-    GPU model does not have -- mirrors gpu-ucla-roms' start-up feature guard
-    (``src/host/feature_guard.F90``, v0.1.2-beta; see Rule F in the module
+    GPU model does not have -- mirrors roms-marbl-gpu' start-up feature guard
+    (``src/host/feature_guard.F90``, v0.1.3-beta; see Rule F in the module
     docstring), which stops the run otherwise.
 
     Parameters
@@ -1045,12 +1048,20 @@ def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
         )
 
 
-_GPU_ARRAY_SIZES: tuple[tuple[str, str, int], ...] = (
-    ("vertical_mixing_settings", "akt_bak", 2),
+_GPU_ARRAY_SIZES: tuple[tuple[str, str, int, str], ...] = (
+    (
+        "forcing_files",
+        "frcfiles",
+        64,
+        "Use fewer, larger forcing files (for nest-from boundary files, a larger "
+        "nrpf_extract in the parent run).",
+    ),
 )
-"""``(group, key, size)`` of the namelist arrays gpu-ucla-roms (v0.1.2-beta)
-declares smaller than UCLA ROMS does: ``akt_bak_in(2)`` in ``src/host/case_io.F90``
-(temperature, salinity) against ucla-roms' ``Akt_bak(NT)``."""
+"""``(group, key, size, remedy)`` of the namelist arrays roms-marbl-gpu (v0.1.3-beta)
+declares smaller than UCLA ROMS does: ``frcfiles(max_frc)``, ``max_frc = 64``, in
+``src/host/frc_io.F90``, against ucla-roms 0.11.0's 360 (Rule E). ``remedy`` ends
+the error. (v0.1.3-beta reads ``akt_bak`` and ``tnu2`` with up to 512 values, one
+per tracer as ucla-roms writes them, so they are not listed.)"""
 
 
 def check_gpu_array_sizes(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
@@ -1071,8 +1082,8 @@ def check_gpu_array_sizes(settings: RomsNamelistBase | Mapping[str, Any]) -> Non
         error lists them all; its ``section`` and ``keys`` name the first.
     """
     oversized = [
-        (group, key, size, len(value))
-        for group, key, size in _GPU_ARRAY_SIZES
+        (group, key, size, len(value), remedy)
+        for group, key, size, remedy in _GPU_ARRAY_SIZES
         if isinstance(value := _section(_section(settings, group), key), list | tuple)
         and len(value) > size
     ]
@@ -1081,11 +1092,11 @@ def check_gpu_array_sizes(settings: RomsNamelistBase | Mapping[str, Any]) -> Non
             "The GPU model reads fewer values than this namelist gives, and stops "
             "at start-up on the rest:\n  "
             + "\n  ".join(
-                f"&{group} {key}: {given} values; the GPU model reads {size}"
-                for group, key, size, given in oversized
+                f"&{group} {key}: {given} values; the GPU model reads at most {size}"
+                for group, key, size, given, _ in oversized
             )
-            + "\nGive only those values in the blueprint's namelist_overrides, e.g. "
-            f"{oversized[0][0]}: {{{oversized[0][1]}: [<{oversized[0][2]} values>]}}.",
+            + "\n"
+            + " ".join(dict.fromkeys(remedy for *_, remedy in oversized)),
             rule="gpu_array_sizes",
             section=oversized[0][0],
             keys=(oversized[0][1],),

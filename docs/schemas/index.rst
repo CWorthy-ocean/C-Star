@@ -61,7 +61,7 @@ UCLA-ROMS GPU Blueprint
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The `ucla_roms_gpu` blueprint enables the orchestration of an application that
-executes a UCLA-ROMS simulation on GPUs (gpu-ucla-roms).
+executes a UCLA-ROMS simulation on GPUs (roms-marbl-gpu).
 
 - :download:`UCLA-ROMS GPU Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms_gpu/ucla_roms_gpu_schema.1.0.0.json>`
 
