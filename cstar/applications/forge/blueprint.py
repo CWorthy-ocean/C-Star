@@ -781,15 +781,12 @@ class SourceSpec(_Section):
     )
     """Which GLORYS files Forge stages: ``"regional"`` (daily files cut to this grid)
     or ``"global"`` (whole-globe daily files); the data are the same CMEMS product.
-    Only valid when ``name == "GLORYS"``. Unset takes the layout of the blueprint's
-    first GLORYS source (initial conditions come before boundary), and regional when
-    that one is unset too: an unset source resolves through the ``resolved_datasets``
-    entry the first one recorded.
+    Only valid when ``name == "GLORYS"``. Unset takes the initial conditions' layout,
+    or regional when that is unset too.
 
-    This field and the other source-specific ones (``constants``, ``esper_method``,
-    ``esper_equation``) are left out of saved blueprints while unset, so a source
-    shows only what applies to it. The content hash already leaves out defaults, so
-    that changed no hash."""
+    Left out of saved blueprints while unset, like the other source-specific fields
+    (``constants``, ``esper_method``, ``esper_equation``), so a source shows only
+    what applies to it."""
     path: str | None = None
     """Explicit dataset path override. ``None`` (the default) means the path is
     derived from :class:`SourceDatasets` at processing time (the standard staged/streamed

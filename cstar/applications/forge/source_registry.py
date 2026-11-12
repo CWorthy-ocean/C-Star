@@ -225,7 +225,9 @@ def snapshot_applies(name: str, glorys_layout: str | None) -> bool:
 
     Every source does except GLORYS with an explicit ``glorys_layout``. The snapshot
     holds one entry per logical name, so it cannot tell two layouts apart, and that
-    choice is resolved live.
+    choice is resolved live. A GLORYS source with no layout does go through the
+    snapshot, so it takes the layout of the first GLORYS source the resolver noted
+    (initial conditions before boundary), regional when that one had none either.
     """
     return not (name.upper() == "GLORYS" and glorys_layout is not None)
 
