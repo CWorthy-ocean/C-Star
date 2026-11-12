@@ -154,6 +154,16 @@ class FileSystemCleanupAction(CleanupAction):
         """Return the keep paths strictly inside an asset."""
         return [k for k in self.keep_paths if k != asset and k.is_relative_to(asset)]
 
+    def _present(self, asset: Path) -> bool:
+        """Return `True` when an asset is there to remove.
+
+        A dangling symlink counts, and is unlinked, unless keep paths lie under
+        it: a target out of reach cannot be searched for them.
+        """
+        if asset.exists():
+            return True
+        return asset.is_symlink() and not self._keeps_in(asset)
+
     def execute(self) -> CleanupResult:
         """Perform the cleanup behavior for an associated resource.
 
@@ -168,11 +178,11 @@ class FileSystemCleanupAction(CleanupAction):
         while asset := next(asset_iter, None):
             asset_key = str(asset)
             state = asset_key, CleanupStatus.READY, ""
-            if not asset.exists():
+            if not self._present(asset):
                 results.record(asset_key, CleanupStatus.SKIPPED, "")
                 continue
 
-            asset_type = "file" if asset.is_file() else "directory"
+            asset_type = "directory" if asset.is_dir() else "file"
 
             try:
                 if keeps := self._keeps_in(asset):
@@ -199,7 +209,7 @@ class FileSystemCleanupAction(CleanupAction):
     def mitigated(self) -> bool:
         """Return `True` when all underlying assets are not found or hold only keep paths."""
         return all(
-            not p.exists()
+            not self._present(p)
             or (
                 bool(keeps := self._keeps_in(p))
                 and next(_removable(p, keeps), None) is None
@@ -461,7 +471,6 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     -------
     list[CleanupAction]
     """
-    runstate_paths: set[Path] = set()
     rundata_paths: list[Path] = []
 
     run_repo = TrackingRepository()
@@ -479,14 +488,12 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
         else:
             log.debug(f"Run {run_id!r} not found")
 
-    if run_paths := run_repo.list_runtracking_paths(run_id, all_history=True):
-        runstate_paths.update(run_paths)  # remove history entries
-        runstate_paths.add(run_repo.latest_path(run_id))  # remove symlink to latest
+    runstate_paths = run_repo.removal_paths(run_id)
 
     # the sentinels outlive the run directory; left behind, a later run of this
     # id would adopt them and report its steps done without running them
     if (sentinels_dir := StateDirectoryManager.run_state_dir(run_id=run_id)).is_dir():
-        runstate_paths.add(sentinels_dir)
+        runstate_paths.append(sentinels_dir)
 
     actions: list[CleanupAction] = []
 
@@ -495,7 +502,7 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
             FileSystemCleanupAction(
                 name=f"{run_id!r} State",
                 description="Internal C-Star state information: the run's history and step status.",
-                asset_paths=list(runstate_paths),
+                asset_paths=runstate_paths,
             ),
         )
     if rundata_paths:
