@@ -1564,9 +1564,10 @@ class RomsInputGenerator(InputGenerator):
         via its normal loader (kerchunk's xarray backend auto-detects it); no
         patching involved -- see ``glorys_subchunk.py``.
 
-        Files subchunking can't split (``SubchunkUnsupportedError``: compressed,
-        chunked another way, or not NetCDF4) come back as ``path`` unchanged, with
-        one warning: the same read as ``--no-subchunk``.
+        Files subchunking can't index (``SubchunkUnsupportedError``: compressed,
+        chunked another way, not NetCDF4, or with mismatched time encodings) come
+        back as ``path`` unchanged, with one warning: the same read as
+        ``--no-subchunk``.
 
         Memoized per dataset key so initial_conditions + forcing.boundary (+ the BGC
         physics-boundary companion) share one reference instead of each rebuilding it.

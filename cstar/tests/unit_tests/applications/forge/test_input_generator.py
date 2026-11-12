@@ -13,7 +13,6 @@ Tests cover:
 """
 
 import asyncio
-import json
 import logging
 import re
 import shutil
@@ -4503,12 +4502,14 @@ class TestGlorysSubchunkIntegration:
         src_dir: Path,
         var_encoding: dict[str, Any] | None = None,
         nc_format: str = "NETCDF4",
+        time_units: str | None = "hours since 1950-01-01 00:00:00",
     ) -> list[Path]:
         """Three per-day GLORYS-shaped NetCDF files with a fixed-epoch time encoding
         (matching the real CMEMS convention), so multi-file kerchunk combine works.
 
         ``var_encoding`` applies to each 4D variable; by default they are stored
-        uncompressed and contiguous, as Copernicus Marine writes them.
+        uncompressed and contiguous, as Copernicus Marine writes them. With
+        ``time_units=None`` xarray encodes each file's time relative to its own date.
         """
         import pandas as pd
 
@@ -4543,13 +4544,12 @@ class TestGlorysSubchunkIntegration:
                     "longitude": lon,
                 },
             )
-            encoding = {
-                "time": {
-                    "units": "hours since 1950-01-01 00:00:00",
-                    "calendar": "gregorian",
-                    "dtype": "int32",
-                }
-            } | {v: dict(var_encoding or {}) for v in vars_4d}
+            time_encoding = {"calendar": "gregorian", "dtype": "int32"}
+            if time_units is not None:
+                time_encoding["units"] = time_units
+            encoding = {"time": time_encoding} | {
+                v: dict(var_encoding or {}) for v in vars_4d
+            }
             fn = src_dir / f"fake_GLORYS_{date.strftime('%Y%m%d')}.nc"
             ds.to_netcdf(fn, engine="netcdf4", format=nc_format, encoding=encoding)
             files.append(fn)
@@ -4622,30 +4622,52 @@ class TestGlorysSubchunkIntegration:
                 **self._BUILD_KWARGS,
             )
 
-    def test_reference_built_from_compressed_files_is_not_reused(
+    def test_reference_is_reused_only_for_the_same_files(
         self, tmp_path, synthetic_glorys_files
     ):
-        """A reference an earlier version built from compressed files records their
-        codecs and can't be read, so it is rebuilt rather than returned as is.
+        """The reference holds byte offsets into its files and sits in a cache every
+        domain shares, so another file set with the same run window, or a file
+        replaced in place, gets its own reference rather than this one.
         """
         out_dir = tmp_path / "out"
         ref = build_ref_for_files(
             synthetic_glorys_files, out_dir=out_dir, **self._BUILD_KWARGS
         )
-        doc = json.loads(ref.read_text())
-        meta = json.loads(doc["refs"]["thetao/.zarray"])
-        meta["filters"] = [{"id": "zlib", "level": 4}]
-        doc["refs"]["thetao/.zarray"] = json.dumps(meta)
-        ref.write_text(json.dumps(doc))
-
         assert (
             build_ref_for_files(
                 synthetic_glorys_files, out_dir=out_dir, **self._BUILD_KWARGS
             )
             == ref
         )
-        rebuilt = json.loads(json.loads(ref.read_text())["refs"]["thetao/.zarray"])
-        assert rebuilt["filters"] is None
+
+        other_domain = self._write_glorys_days(tmp_path / "other_domain")
+        assert (
+            build_ref_for_files(other_domain, out_dir=out_dir, **self._BUILD_KWARGS)
+            != ref
+        )
+
+        # Same name, other bytes and size: a user's file copied over Forge's download.
+        replaced = synthetic_glorys_files[-1]
+        replaced.write_bytes(other_domain[-1].read_bytes() + b"\0")
+        assert (
+            build_ref_for_files(
+                synthetic_glorys_files, out_dir=out_dir, **self._BUILD_KWARGS
+            )
+            != ref
+        )
+
+    def test_time_axis_mismatch_publishes_nothing(self, tmp_path, subchunk_deps):
+        """Files whose time encodings differ collapse onto fewer time steps in the
+        combined reference. It is refused like the other layouts, and nothing is left
+        in the cache for a later run to reuse (it used to stay at the final path).
+        """
+        files = self._write_glorys_days(tmp_path / "src", time_units=None)
+        out_dir = tmp_path / "out"
+        with pytest.raises(
+            SubchunkUnsupportedError, match="time encodings likely use different"
+        ):
+            build_ref_for_files(files, out_dir=out_dir, **self._BUILD_KWARGS)
+        assert not any((out_dir / "subchunk").iterdir())
 
     def test_subchunk_swap_memoizes_and_real_dispatch_reads_it(
         self,
