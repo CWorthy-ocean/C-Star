@@ -35,15 +35,29 @@ Caveats
 -------
 - kerchunk only *warns* (never raises) when a multi-file time-concat degenerates (e.g.
   mismatched per-file time encodings collapsing several files onto one timestep).
-  ``build_ref_for_files``/``build_subchunk_refs`` add an explicit post-build check to
-  fail loudly instead of silently handing roms-tools a corrupted time axis.
+  ``build_subchunk_refs`` checks the built reference before publishing it and raises
+  :class:`SubchunkUnsupportedError` instead of handing roms-tools a corrupted time
+  axis. Reading the files directly decodes each file's time on its own, so it copes.
+- Subchunking splits each stored chunk's raw bytes into depth slices, so it only works
+  on files stored uncompressed, one (depth, latitude, longitude) block per time step:
+  how Copernicus Marine downloads are written. kerchunk's own guard misses compressed
+  HDF5 (it records compression as ``filters`` and only checks ``compressor``), so the
+  build checks every file first and raises :class:`SubchunkUnsupportedError` for any
+  other layout. Forge then reads the files directly, as ``--no-subchunk`` does.
+- A reference holds byte offsets into the files it was built from, so it is valid only
+  for those exact files. ``build_ref_for_files`` names it after a fingerprint of their
+  paths, sizes and modification times: domains sharing the source-data cache, or
+  files replaced in place, never pick up a reference built for other bytes.
 """
 
 from __future__ import annotations
 
 import concurrent.futures
 import glob
+import hashlib
 import logging
+import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +71,37 @@ logger = logging.getLogger(__name__)
 #: 4D physics variables GLORYS ships that benefit from depth/lat subchunking.
 #: ``zos`` (sea surface height) is 2D and passes through the combine unchanged.
 DEFAULT_DATA_VARS_4D = ("thetao", "so", "uo", "vo")
+
+
+class SubchunkUnsupportedError(ValueError):
+    """Subchunking can't index these input files.
+
+    Raised before any reference is published. The files are still readable as they
+    are; callers read them directly instead (what ``--no-subchunk`` does).
+    """
+
+
+def _codec_ids(meta: dict[str, Any]) -> list[str]:
+    """Ids of the codecs (compressor and filters) in a zarr ``.zarray`` dict."""
+    codecs = [meta.get("compressor"), *(meta.get("filters") or [])]
+    return [c["id"] for c in codecs if c]
+
+
+def _subchunk_blocker(meta: dict[str, Any], var: str) -> str:
+    """Why ``var``'s chunks (its ``.zarray`` dict) can't be split by depth, or ``""``.
+
+    Splitting a chunk's byte range into equal depth slices is valid only for raw
+    bytes holding a whole (depth, latitude, longitude) block of one time step.
+    """
+    if codecs := _codec_ids(meta):
+        return f"{var!r} is stored compressed or filtered ({', '.join(codecs)})"
+    shape, chunks = meta["shape"], meta["chunks"]
+    if len(shape) != 4 or chunks[0] != 1 or chunks[1] != shape[1]:
+        return (
+            f"{var!r} is not stored as one depth-spanning block per time step "
+            f"(shape {shape}, chunks {chunks})"
+        )
+    return ""
 
 
 def _require_subchunk_deps() -> None:
@@ -121,12 +166,42 @@ def _build_one(
     lat_factor: int | None,
     inline_threshold: int,
 ) -> dict[str, Any]:
+    import h5py
+    import ujson
     from kerchunk.hdf import SingleHdf5ToZarr
 
+    if not h5py.is_hdf5(path):
+        raise SubchunkUnsupportedError(f"{path} is not a NetCDF4 (HDF5) file")
     refs = SingleHdf5ToZarr(path, inline_threshold=inline_threshold).translate()
+    # Checked on the translated refs, before any split: kerchunk's subchunk returns a
+    # flat store without the "refs" wrapper.
+    for v in data_vars_4d:
+        zarray = refs["refs"].get(f"{v}/.zarray")
+        if zarray is not None and (reason := _subchunk_blocker(ujson.loads(zarray), v)):
+            raise SubchunkUnsupportedError(f"{path}: {reason}")
     for v in data_vars_4d:
         refs = _subchunk_var(refs, v, depth_factor, lat_factor)
     return refs
+
+
+def _input_fingerprint(files: list[str]) -> str:
+    """Short digest of the files' paths, sizes and modification times.
+
+    From ``stat`` alone, never the contents (tens of GB per run window).
+    """
+    digest = hashlib.sha256()
+    for f in files:
+        st = os.stat(f)
+        digest.update(f"{f}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+    return digest.hexdigest()[:12]
+
+
+def _remove_reference(path: str) -> None:
+    """Remove a reference: a JSON file, or a parquet directory."""
+    if Path(path).is_dir():
+        shutil.rmtree(path)
+    else:
+        Path(path).unlink(missing_ok=True)
 
 
 def _run(
@@ -248,10 +323,14 @@ def build_subchunk_refs(
         not installed.
     FileNotFoundError
         If ``input_files`` matches no files.
-    RuntimeError
-        If the combined reference's concat dimension doesn't have one entry per input
-        file -- kerchunk only warns (never raises) on this, usually caused by
-        per-file time encodings with mismatched reference dates.
+    SubchunkUnsupportedError
+        If any input file isn't NetCDF4, or stores a ``data_vars_4d`` variable
+        compressed or in chunks other than one depth-spanning block per time step;
+        or if the combined reference's concat dimension doesn't have one entry per
+        input file (kerchunk only warns on this, usually caused by per-file time
+        encodings with mismatched reference dates). Nothing is published: the
+        reference is built under a temporary name and moved to ``out`` only after
+        that check, so an existing ``out`` is always one that passed it.
     """
     _require_subchunk_deps()
 
@@ -262,7 +341,12 @@ def build_subchunk_refs(
     if not files:
         raise FileNotFoundError(f"No input files matched: {input_files!r}")
 
+    # Built under a per-process temporary name and moved into place after the check
+    # below, so a failed check or an interrupted build never leaves a reference at
+    # `out` for a later run to reuse, and concurrent builds don't interleave writes.
+    partial = out
     if output_format != "in-memory":
+        partial = f"{out}.partial-{os.getpid()}{output_format}"
         out = out + output_format
         if Path(out).exists() and not overwrite:
             logger.info(
@@ -280,33 +364,39 @@ def build_subchunk_refs(
     # build runs there rather than patching asyncio process-wide with nest_asyncio
     # (which breaks asyncio's current-task tracking on Python 3.14). An interrupt
     # during the build waits for it to finish.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        result = pool.submit(
-            _run,
-            files=files,
-            out=out,
-            output_format=output_format,
-            data_vars_4d=list(data_vars_4d),
-            concat_dim=concat_dim,
-            identical_dims=list(identical_dims),
-            inline_threshold=inline_threshold,
-            depth_factor=depth_factor,
-            lat_factor=lat_factor,
-        ).result()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(
+                _run,
+                files=files,
+                out=partial,
+                output_format=output_format,
+                data_vars_4d=list(data_vars_4d),
+                concat_dim=concat_dim,
+                identical_dims=list(identical_dims),
+                inline_threshold=inline_threshold,
+                depth_factor=depth_factor,
+                lat_factor=lat_factor,
+            ).result()
+        if output_format == "in-memory":
+            return result
 
-    if output_format != "in-memory" and len(files) > 1:
-        with open_subchunk_ref(out) as check_ds:
-            actual = check_ds.sizes.get(concat_dim)
+        if len(files) > 1:
+            with open_subchunk_ref(partial) as check_ds:
+                actual = check_ds.sizes.get(concat_dim)
             if actual is not None and actual != len(files):
-                raise RuntimeError(
-                    f"Subchunk build for {out} produced {concat_dim!r} size {actual}, "
-                    f"expected {len(files)} (one per input file). kerchunk only warns "
-                    "on this rather than raising -- it usually means the input files' "
-                    "time encoding reference dates differ. Refusing to hand roms-tools "
-                    "a corrupted reference."
+                raise SubchunkUnsupportedError(
+                    f"the {len(files)} files combine into {actual} {concat_dim!r} "
+                    "entries; their time encodings likely use different reference "
+                    "dates"
                 )
-
-    return out if output_format != "in-memory" else result
+        if Path(out).is_dir():  # overwrite=True over a parquet directory
+            shutil.rmtree(out)
+        os.replace(partial, out)
+        return out
+    finally:
+        if output_format != "in-memory":
+            _remove_reference(partial)  # a no-op once it has moved to `out`
 
 
 def build_ref_for_files(
@@ -320,7 +410,15 @@ def build_ref_for_files(
     """Build (or reuse) a subchunked kerchunk reference for a list of GLORYS files.
 
     Wraps :func:`build_subchunk_refs` with forge's naming/caching convention:
-    ``<out_dir>/subchunk/<key>_<startYYYYMMDD>_<endYYYYMMDD>.json``.
+    ``<out_dir>/subchunk/<key>_<startYYYYMMDD>_<endYYYYMMDD>_<fingerprint>.json``,
+    where the fingerprint covers the files' paths, sizes and modification times. A
+    reference holds byte offsets into those files, so it is reused only for the same
+    files unchanged -- not for another domain's regional files with the same run
+    window (``out_dir`` is the shared source-data cache), nor after a file is
+    replaced in place. The reference built for the old files stays behind unused
+    (about 30 kB per input file); nothing prunes it, since a sibling with the same
+    window may belong to another domain. ``subchunk/`` can be cleared while no Forge
+    step is running; Forge rebuilds what it needs.
 
     Uses the JSON reference format rather than parquet: GLORYS regularly has
     chunks that are legitimately missing (fill-value-only, never written to the
@@ -334,9 +432,10 @@ def build_ref_for_files(
     """
     subchunk_dir = Path(out_dir) / "subchunk"
     subchunk_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{key}_{start:%Y%m%d}_{end:%Y%m%d}"
+    input_files = sorted(str(f) for f in files)
+    stem = f"{key}_{start:%Y%m%d}_{end:%Y%m%d}_{_input_fingerprint(input_files)}"
     out_path = build_subchunk_refs(
-        input_files=sorted(str(f) for f in files),
+        input_files=input_files,
         out=str(subchunk_dir / stem),
         output_format=".json",
         data_vars_4d=DEFAULT_DATA_VARS_4D,

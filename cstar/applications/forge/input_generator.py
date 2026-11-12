@@ -575,7 +575,8 @@ class RomsInputGenerator(InputGenerator):
     for multi-file GLORYS sources (see ``glorys_subchunk.py``) and hand its path
     through in place of the raw per-day files. No roms-tools patching involved
     -- kerchunk's own xarray backend auto-detects the reference, so roms-tools reads
-    it via its normal loader. Disable via ``--no-subchunk``."""
+    it via its normal loader. Files subchunking can't split (compressed, for one) are
+    read directly instead, with a warning. Disable via ``--no-subchunk``."""
     verbose: bool = False
     """Runtime diagnostic flag (forwarded from ``ForgeExecutor.verbose``): forwarded
     as ``verbose=`` to the roms-tools calls that support it (make_nesting_info), and
@@ -590,6 +591,9 @@ class RomsInputGenerator(InputGenerator):
     # Memoized subchunk reference paths, keyed by dataset key (e.g. "GLORYS_REGIONAL"),
     # so IC + boundary + bgc-physics-boundary reuse one reference instead of rebuilding.
     _subchunk_refs: dict[str, Path] = field(default_factory=dict, init=False)
+    # Dataset keys whose files subchunking can't split, read directly instead; kept so
+    # later consumers neither re-translate the files nor repeat the warning.
+    _subchunk_skipped: set[str] = field(default_factory=set, init=False)
 
     # Blueprint elements containing input data
     ucla_roms_blueprint_elements: UclaRomsBlueprintInputData = field(init=False)
@@ -1554,28 +1558,48 @@ class RomsInputGenerator(InputGenerator):
         name: str,
         glorys_layout: str | None,
         path: list[Path],
-    ) -> Path:
+    ) -> Path | list[Path]:
         """Build (or reuse) a subchunked kerchunk reference for a multi-file GLORYS
         path, in place of the raw per-day files. roms-tools reads the reference path
         via its normal loader (kerchunk's xarray backend auto-detects it); no
         patching involved -- see ``glorys_subchunk.py``.
 
+        Files subchunking can't index (``SubchunkUnsupportedError``: compressed,
+        chunked another way, not NetCDF4, or with mismatched time encodings) come
+        back as ``path`` unchanged, with one warning: the same read as
+        ``--no-subchunk``.
+
         Memoized per dataset key so initial_conditions + forcing.boundary (+ the BGC
         physics-boundary companion) share one reference instead of each rebuilding it.
         """
-        from cstar.applications.forge.glorys_subchunk import build_ref_for_files
+        from cstar.applications.forge.glorys_subchunk import (
+            SubchunkUnsupportedError,
+            build_ref_for_files,
+        )
 
         key = self.source_data.dataset_key_for_source(name, glorys_layout=glorys_layout)
+        if key in self._subchunk_skipped:
+            return path
         ref = self._subchunk_refs.get(key)
         if ref is None:
             out_dir, start, end = self._require_glorys_subchunk_inputs()
-            ref = build_ref_for_files(
-                path,
-                out_dir=out_dir,
-                key=key,
-                start=start,
-                end=end,
-            )
+            try:
+                ref = build_ref_for_files(
+                    path,
+                    out_dir=out_dir,
+                    key=key,
+                    start=start,
+                    end=end,
+                )
+            except SubchunkUnsupportedError as exc:
+                log.warning(
+                    "Not subchunking %s (%s); reading the files directly, as "
+                    "--no-subchunk does.",
+                    key,
+                    exc,
+                )
+                self._subchunk_skipped.add(key)
+                return path
             self._subchunk_refs[key] = ref
         return ref
 
