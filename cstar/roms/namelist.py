@@ -1665,6 +1665,36 @@ GPU_NAMELIST_SCHEMA_REGISTRY: tuple[
 # last registry entry, but warns: it may read a vocabulary C-Star does not write.
 NEWEST_KNOWN_UCLA_ROMS_GPU: Final[tuple[int, int, int]] = UCLA_ROMS_GPU_0_1_3
 
+# The oldest roms-marbl-gpu release C-Star drives. Earlier releases read two
+# ``akt_bak`` values where C-Star writes one per tracer, so they stop at start-up;
+# the application had no users on them.
+OLDEST_SUPPORTED_UCLA_ROMS_GPU: Final[tuple[int, int, int]] = UCLA_ROMS_GPU_0_1_3
+
+
+def check_supported_gpu_release(version: tuple[int, int, int], ref: str) -> None:
+    """Refuse a roms-marbl-gpu release older than C-Star supports.
+
+    Parameters
+    ----------
+    version : tuple[int, int, int]
+        The release, as parsed from a tag or resolved from a commit.
+    ref : str
+        The tag or ref the user pinned, for the message.
+
+    Raises
+    ------
+    ValueError
+        If `version` is older than :data:`OLDEST_SUPPORTED_UCLA_ROMS_GPU`.
+    """
+    if version < OLDEST_SUPPORTED_UCLA_ROMS_GPU:
+        oldest = format_roms_version(OLDEST_SUPPORTED_UCLA_ROMS_GPU)
+        msg = (
+            f"roms-marbl-gpu {ref} is older than the oldest release C-Star supports "
+            f"({oldest}); pin v{oldest}-beta or later"
+        )
+        raise ValueError(msg)
+
+
 _GPU_RELEASE_RE = re.compile(
     r"(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
@@ -1734,11 +1764,18 @@ def gpu_namelist_schema_for_ref(
         :data:`NEWEST_KNOWN_UCLA_ROMS_GPU`: the GPU rejects a namelist key it
         does not know, so a release that moved to another vocabulary would stop
         on the generated namelist.
+
+    Raises
+    ------
+    ValueError
+        If the release (named, or resolved from a commit hash) is older than
+        :data:`OLDEST_SUPPORTED_UCLA_ROMS_GPU`.
     """
     version = (
         _parse_gpu_release(checkout_target) if checkout_target is not None else None
     )
     release_tag: str | None = None
+    commits_ahead = 0
 
     if (
         version is None
@@ -1754,6 +1791,14 @@ def gpu_namelist_schema_for_ref(
                 _warn_commit_ahead_of_release(
                     checkout_target, release_tag, commits_ahead, "roms-marbl-gpu"
                 )
+
+    if version is not None:
+        pinned = (
+            f"commit {checkout_target} ({commits_ahead} after {release_tag})"
+            if release_tag and commits_ahead
+            else release_tag or str(checkout_target)
+        )
+        check_supported_gpu_release(version, pinned)
 
     last_cls = GPU_NAMELIST_SCHEMA_REGISTRY[-1][2]
     if version is None:

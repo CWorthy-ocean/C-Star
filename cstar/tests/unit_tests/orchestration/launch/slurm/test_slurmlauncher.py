@@ -1307,3 +1307,57 @@ async def test_slurmlauncher_launch_leaves_the_prior_job_of_another_launcher(
     assert task.handle.pid == "4242"
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any("12345" in w and LocalLauncher.name in w for w in warnings)
+
+
+def _gpu_step(wp_templates_dir: Path) -> LiveStep:
+    """A `ucla_roms_gpu` step, scheduled as the workplan transformer leaves it."""
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    step = _scheduled_step(
+        workplan.steps[0], ComputeNeeds(tasks=5, gpu_tasks=4, nodes=1)
+    )
+    return LiveStep.from_step(step, update={"application": "ucla_roms_gpu"})
+
+
+@pytest.mark.usefixtures("read_yaml_intercept", "gpu_account")
+def test_slurmlauncher_refuses_a_gpu_step_where_no_gpu_toolchain_is_registered(
+    wp_templates_dir: Path,
+) -> None:
+    """A system with GPU nodes but no GPU toolchain (Anvil) refuses the step before
+    submission, rather than after the job waits in the queue.
+    """
+    live_step = _gpu_step(wp_templates_dir)
+    sysmgr = mock.Mock()
+    sysmgr.toolchain.side_effect = CstarError(
+        "anvil has no GPU toolchain registered with C-Star"
+    )
+
+    with (
+        mock.patch("cstar.orchestration.launch.slurm.get_sysmgr", return_value=sysmgr),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.create_scheduler_job"
+        ) as create_job,
+        pytest.raises(CstarError, match=r"ucla_roms_gpu.*no GPU toolchain"),
+    ):
+        SlurmLauncher.adapt_step(live_step, [])
+
+    sysmgr.toolchain.assert_called_once_with("gpu")
+    create_job.assert_not_called()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept", "gpu_account")
+def test_slurmlauncher_submits_a_gpu_step_where_the_toolchain_exists(
+    wp_templates_dir: Path,
+) -> None:
+    live_step = _gpu_step(wp_templates_dir)
+    sysmgr = mock.Mock()
+
+    with (
+        mock.patch("cstar.orchestration.launch.slurm.get_sysmgr", return_value=sysmgr),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.create_scheduler_job"
+        ) as create_job,
+    ):
+        SlurmLauncher.adapt_step(live_step, [])
+
+    sysmgr.toolchain.assert_called_once_with("gpu")
+    assert create_job.call_args.kwargs["gpus"] == 4

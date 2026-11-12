@@ -9198,6 +9198,30 @@ def test_inject_compute_rejects_a_node_count_the_spec_refuses() -> None:
         _inject_compute(step, ComputeNeeds(tasks=8, nodes=2))
 
 
+def test_inject_compute_names_every_unknown_slurm_key() -> None:
+    """A misspelled `slurm` key is refused by name, with every other bad key."""
+    step = _live_step_for_defaults(
+        {"slurm": {"num_cpus": 4, "num_gpu": 4, "queue": "debug"}}
+    )
+
+    with pytest.raises(ValueError) as raised:
+        _inject_compute(step, ComputeNeeds(tasks=4))
+
+    message = str(raised.value)
+    assert "'only'" in message
+    assert "num_gpu" in message
+    assert "queue" in message
+    assert "Extra inputs are not permitted" in message
+
+
+def test_inject_compute_defaults_names_the_unknown_key() -> None:
+    step = _live_step_for_defaults({"slurm": {"num_gpu": 4}})
+    env = ComputeEnvironment(slurm=SlurmComputeSpec(queue_name="q"))
+
+    with pytest.raises(ValueError, match="num_gpu"):
+        _inject_compute_defaults(step, env)
+
+
 def test_workplan_transformer_records_blueprint_node_count(
     hello_world_bp_path: Path,
 ) -> None:

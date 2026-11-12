@@ -4,6 +4,7 @@ import typing as t
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from cstar.applications.core import get_application
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
@@ -42,6 +43,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.manager import get_sysmgr
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Workplan
@@ -419,6 +421,38 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
     @staticmethod
+    def _check_toolchain(step: "LiveStep") -> None:
+        """Refuse a step whose application needs a toolchain this system lacks.
+
+        The step's runner would stop in its setup on the compute node, after the
+        job had waited in the queue; here it fails before submission. A CPU
+        application needs nothing beyond the system's default profile.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step about to be submitted.
+
+        Raises
+        ------
+        CstarError
+            If the system registers no toolchain of the kind the step's
+            application builds and runs with (e.g. ``gpu`` on Anvil).
+        """
+        toolchain = get_application(step.application).toolchain
+        if toolchain == "cpu":
+            return
+        try:
+            get_sysmgr().toolchain(toolchain)
+        except CstarError as ex:
+            msg = (
+                f"Step {step.name!r} ({step.application}) cannot run here: {ex}. "
+                f"Submit it from a system with a {toolchain} toolchain (see the "
+                "supported machines in the deployment docs)."
+            )
+            raise CstarError(msg) from ex
+
+    @staticmethod
     def adapt_step(
         step: "LiveStep",
         dependencies: list[SlurmHandle],
@@ -429,7 +463,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Returns
         -------
         str
+
+        Raises
+        ------
+        CstarError
+            If the step's application needs a toolchain the system lacks.
         """
+        SlurmLauncher._check_toolchain(step)
         compute = SlurmLauncher._get_compute_spec(step)
 
         job_dep_ids = [d.pid for d in dependencies]

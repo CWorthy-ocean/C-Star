@@ -12,7 +12,7 @@ start-up printing the layout it expected otherwise (roms-marbl-gpu
 ``src/shared/comm.F90``, v0.1.3-beta).
 
 :class:`GpuRankLayout` holds that arithmetic. :func:`suggested_writers_per_node`
-sizes the writers from the history record, as roms-marbl-gpu'
+sizes the writers from the history record, as roms-marbl-gpu's
 ``tools/gpu_layout.py --per-node`` (v0.1.3-beta) does.
 """
 

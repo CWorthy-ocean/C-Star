@@ -36,6 +36,7 @@ from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
     resolve_compute_environment,
 )
+from cstar.orchestration.formatting import format_validation_errors
 from cstar.orchestration.index import (
     HandleKind,
     RunHandle,
@@ -1612,7 +1613,10 @@ def _inject_compute(step: LiveStep, needs: "ComputeNeeds") -> LiveStep:
     try:
         SlurmComputeSpec.model_validate(new_overrides["slurm"])
     except ValidationError as ex:
-        msg = f"Step {step.name!r}: invalid compute overrides: {ex.errors()[0]['msg']}"
+        msg = (
+            f"Step {step.name!r}: invalid compute overrides: "
+            f"{format_validation_errors(ex)}"
+        )
         raise ValueError(msg) from ex
     return LiveStep.from_step(step, update={"compute_overrides": new_overrides})
 
@@ -1658,7 +1662,7 @@ def _inject_compute_defaults(step: LiveStep, env: ComputeEnvironment) -> LiveSte
     except ValidationError as ex:
         msg = (
             f"Step {step.name!r}: the workplan's compute_environment.slurm defaults "
-            f"conflict with the step's compute overrides: {ex.errors()[0]['msg']}"
+            f"conflict with the step's compute overrides: {format_validation_errors(ex)}"
         )
         raise ValueError(msg) from ex
     return LiveStep.from_step(step, update={"compute_overrides": new_overrides})

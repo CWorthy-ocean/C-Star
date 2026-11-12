@@ -68,22 +68,45 @@ def test_the_gpu_tier_is_findable_by_name_for_a_build_record():
     assert namelist_schema_named("RomsNamelistV0_11_0") is RomsNamelistV0_11_0
 
 
-@pytest.mark.parametrize(
-    "ref",
-    [
-        "v0.1.0-beta",
-        "v0.1.1-beta",
-        "v0.1.2-beta",
-        "v0.1.3-beta",
-        "0.1.3-beta",
-        "0.1.3",
-        "v0.1.3",
-        "0.1.0",
-    ],
-)
+@pytest.mark.parametrize("ref", ["v0.1.3-beta", "0.1.3-beta", "0.1.3", "v0.1.3"])
 def test_release_tags_select_the_0_11_0_tier_without_warning(ref, recwarn):
     assert gpu_namelist_schema_for_ref(ref) is RomsNamelistV0_11_0
     assert len(recwarn) == 0
+
+
+@pytest.mark.parametrize("ref", ["v0.1.0-beta", "v0.1.1-beta", "v0.1.2-beta", "0.1.2"])
+def test_releases_older_than_supported_are_refused(ref):
+    """Releases before v0.1.3-beta read two `akt_bak` values and stop on C-Star's."""
+    with pytest.raises(
+        ValueError, match=rf"roms-marbl-gpu {ref} is older .* \(0\.1\.3\)"
+    ):
+        gpu_namelist_schema_for_ref(ref)
+
+
+def test_a_commit_resolving_to_an_older_release_is_refused():
+    with (
+        mock.patch(
+            "cstar.roms.namelist._describe_nearest_tag",
+            return_value=("v0.1.2-beta", 0),
+        ),
+        pytest.raises(ValueError, match="roms-marbl-gpu v0.1.2-beta is older"),
+    ):
+        gpu_namelist_schema_for_ref(HASH, repo_path="/some/repo")
+
+
+def test_a_commit_after_an_older_release_is_refused_naming_the_commit():
+    with (
+        mock.patch(
+            "cstar.roms.namelist._describe_nearest_tag",
+            return_value=("v0.1.2-beta", 4),
+        ),
+        warnings.catch_warnings(),
+        pytest.raises(
+            ValueError, match=rf"commit {HASH} \(4 after v0.1.2-beta\) is older"
+        ),
+    ):
+        warnings.simplefilter("ignore")
+        gpu_namelist_schema_for_ref(HASH, repo_path="/some/repo")
 
 
 @pytest.mark.parametrize("ref", [None, "main", "gpu-branch", "abc123def456", HASH])
@@ -121,7 +144,7 @@ def test_a_release_newer_than_known_warns_and_uses_the_last_entry(ref):
 
 def test_a_commit_hash_is_resolved_to_its_nearest_release_tag(recwarn):
     with mock.patch(
-        "cstar.roms.namelist._describe_nearest_tag", return_value=("v0.1.1-beta", 0)
+        "cstar.roms.namelist._describe_nearest_tag", return_value=("v0.1.3-beta", 0)
     ) as describe:
         schema = gpu_namelist_schema_for_ref(HASH, repo_path="/some/repo")
     assert schema is RomsNamelistV0_11_0
@@ -183,8 +206,7 @@ def test_a_branch_is_never_resolved_through_the_clone():
         None,
         "main",
         HASH,
-        "v0.1.0-beta",
-        "v0.1.2-beta",
+        "v0.1.3-beta",
         "0.12.0",
         "v0.13.0",
         "v0.14.0",

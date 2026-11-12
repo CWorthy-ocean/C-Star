@@ -214,6 +214,55 @@ class TestProfileSwitching:
         ]
         assert os.environ["PATH"] == f"{BASE_PATH}:/cpu/netcdf/bin"
 
+    def test_a_failed_switch_reloads_the_previous_profile(
+        self,
+        manager: CStarSystemManager,
+        package_root: Path,
+        lmod_calls: mock.Mock,
+    ) -> None:
+        """Verify a profile that fails to load leaves the previous one loaded."""
+        (package_root / "additional_files/lmod_lists/perlmutter.gpu.lmod").write_text(
+            "nvhpc\n"
+        )
+        cpu = manager.environment
+
+        def lmod(command: str) -> None:
+            if command == "load nvhpc":
+                raise CstarError("module nvhpc not found")
+
+        lmod_calls.side_effect = lmod
+
+        with pytest.raises(CstarError, match="nvhpc"):
+            manager.environment_for("gpu")
+
+        assert manager.environment is cpu
+        assert os.environ["PNETCDFHOME"] == "/cpu/pnetcdf/"
+        assert os.environ["NETCDFHOME"] == "/cpu/netcdf/"
+        assert os.environ["PATH"] == f"{BASE_PATH}:/cpu/netcdf/bin"
+        assert "MPICH_GPU_SUPPORT_ENABLED" not in os.environ
+
+    def test_a_failed_reload_keeps_the_original_error(
+        self,
+        manager: CStarSystemManager,
+        package_root: Path,
+        lmod_calls: mock.Mock,
+    ) -> None:
+        """Verify the profile's own failure, not the reload's, reaches the caller."""
+        (package_root / "additional_files/lmod_lists/perlmutter.gpu.lmod").write_text(
+            "nvhpc\n"
+        )
+
+        def lmod(command: str) -> None:
+            if command == "load nvhpc":
+                raise CstarError("module nvhpc not found")
+            if command == "load gcc":
+                raise CstarError("module gcc not found")
+
+        lmod_calls.side_effect = lmod
+
+        with pytest.raises(CstarError, match="nvhpc"):
+            manager.environment_for("gpu")
+
     def test_unregistered_toolchain_leaves_the_active_profile(
         self, package_root: Path, lmod_calls: mock.Mock
     ) -> None:

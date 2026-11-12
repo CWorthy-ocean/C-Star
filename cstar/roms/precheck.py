@@ -996,7 +996,7 @@ the model's full warning sentence."""
 
 def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
     """Raise ``NamelistConsistencyError`` if the namelist switches on a feature the
-    GPU model does not have -- mirrors roms-marbl-gpu' start-up feature guard
+    GPU model does not have -- mirrors roms-marbl-gpu's start-up feature guard
     (``src/host/feature_guard.F90``, v0.1.3-beta; see Rule F in the module
     docstring), which stops the run otherwise.
 

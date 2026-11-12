@@ -1,7 +1,7 @@
 """Tests for `cstar.roms.gpu_layout`: the GPU job's rank layout and writer sizing.
 
 The expected writer counts in `test_suggested_writers_per_node_matches_the_script`
-were produced by running roms-marbl-gpu' ``tools/gpu_layout.py --per-node`` (v0.1.2-beta)
+were produced by running roms-marbl-gpu's ``tools/gpu_layout.py --per-node`` (v0.1.2-beta; unchanged in v0.1.3-beta)
 on the namelist each case writes with C-Star's own writer, with ``--gpus-per-node``
 set to tiles / nodes; the column ``NWPN`` of its output is the number hard-coded here.
 """

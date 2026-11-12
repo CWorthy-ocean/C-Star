@@ -470,7 +470,8 @@ def create_scheduler_job(
         raise CstarError(
             "GPU jobs on this system need an account: set CSTAR_SLURM_GPU_ACCOUNT "
             "(or CSTAR_SLURM_ACCOUNT), run `cstar init`, or give `account_name` "
-            "in the workplan."
+            "in the step's compute_overrides.slurm (a GPU step does not take the "
+            "workplan-wide account_name)."
         )
 
     return job_type(
@@ -1016,6 +1017,13 @@ class SchedulerJob(ExecutionHandler, ABC):
 
         if cpus_per_node is None:
             cpus_per_node = cpus // nodes
+        elif cpus_per_node * nodes != cpus:
+            raise ValueError(
+                f"Cannot create scheduler job: {cpus_per_node} tasks per node do not "
+                f"place {cpus} tasks on {nodes} node(s); a GPU job carries the same "
+                f"number of tasks on every node ({cpus // nodes} here); correct "
+                "cpus_per_node or leave it out"
+            )
         cores = gpu_nodes.cores_per_node
         if cores is not None and cpus_per_node > cores:
             raise ValueError(

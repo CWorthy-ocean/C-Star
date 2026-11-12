@@ -101,12 +101,17 @@ precedence, a later one replaces an earlier one:
    example).
 
 The SLURM settings (``CSTAR_SLURM_ACCOUNT``, ``CSTAR_SLURM_QUEUE``,
-``CSTAR_SLURM_MAX_WALLTIME``, ``CSTAR_SLURM_GPU_ACCOUNT``,
-``CSTAR_SLURM_GPU_QUEUE``) have no command-line option but two more layers
+``CSTAR_SLURM_MAX_WALLTIME``) have no command-line option but two more layers
 above the environment: the workplan's ``compute_environment.slurm`` block,
 then each step's ``compute_overrides.slurm``. The value that results for
 each step is recorded in the transformed workplan in the run directory. See
 :ref:`workplan_compute_environment`.
+
+A GPU step does not take the workplan's ``account_name`` or ``queue_name``,
+which describe CPU nodes. Its account and queue come from
+``CSTAR_SLURM_GPU_ACCOUNT`` and ``CSTAR_SLURM_GPU_QUEUE`` (the account falls
+back to ``CSTAR_SLURM_ACCOUNT``, the queue to the system's GPU queue), or from
+the step's own ``compute_overrides.slurm``.
 
 Two things to know when running workplans:
 

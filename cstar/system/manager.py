@@ -1138,7 +1138,7 @@ class PerlmutterSystemContext(SystemContext):
                 # the `-L` directory and `-lmpi_gtl_cuda`. With
                 # `MPICH_GPU_SUPPORT_ENABLED=1` (set by perlmutter.gpu.env) the
                 # model aborts at start-up unless libmpi_gtl_cuda is linked.
-                # Not yet verified on the machine (2026-11-06).
+                # Verified on Perlmutter 2026-11-06 (GPU-direct halo exchange on).
                 link_flags="${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}",
             )
         return super().toolchain(name)
@@ -1246,7 +1246,9 @@ class CStarSystemManager:
         Raises
         ------
         CstarError
-            If `name` is ``gpu`` and the system registers no GPU toolchain.
+            If `name` is ``gpu`` and the system registers no GPU toolchain. If the
+            requested profile fails to load, the profile that was active is loaded
+            again before the error propagates.
         """
         if name == self._active:
             return self._environments[name]
@@ -1254,20 +1256,38 @@ class CStarSystemManager:
         # resolve the toolchain first: an unregistered one must not disturb the active
         tc = None if name in self._environments else self._context.toolchain(name)
 
-        if self._active is not None:
-            self._environments[self._active].unload()
+        previous = self._active
+        if previous is not None:
+            self._environments[previous].unload()
             self._active = None
 
-        if tc is None:
-            self._environments[name].load()
-        else:
-            self._environments[name] = CStarEnvironment(
-                system_name=self._context.name,
-                mpi_exec_prefix=tc.mpi_prefix,
-                compiler=tc.compiler,
-                system_settings_klass=self._context.settings_klass(),
-                profile=tc.profile,
-            )
+        try:
+            if tc is None:
+                self._environments[name].load()
+            else:
+                self._environments[name] = CStarEnvironment(
+                    system_name=self._context.name,
+                    mpi_exec_prefix=tc.mpi_prefix,
+                    compiler=tc.compiler,
+                    system_settings_klass=self._context.settings_klass(),
+                    profile=tc.profile,
+                )
+        except Exception:
+            # a profile that fails to load must not leave the process with none
+            if previous is not None:
+                try:
+                    self._environments[previous].load()
+                    self._active = previous
+                except Exception:
+                    # keep the original error; the reload's own is only logged
+                    log.warning(
+                        "Could not reload the %s profile after the %s profile failed "
+                        "to load; no toolchain profile is loaded in this process",
+                        previous,
+                        name,
+                        exc_info=True,
+                    )
+            raise
         self._active = name
         return self._environments[name]
 

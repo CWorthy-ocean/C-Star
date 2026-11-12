@@ -293,6 +293,16 @@ class TestNamelistOverrides:
 
         UclaRomsGpuBlueprint.model_validate(data)
 
+    @pytest.mark.parametrize("tag", ["v0.1.2-beta", "v0.1.0-beta"])
+    def test_a_release_older_than_supported_is_rejected(
+        self, template_dict: dict[str, t.Any], tag: str
+    ) -> None:
+        data = copy.deepcopy(template_dict)
+        data["code"]["roms"]["commit"] = tag
+
+        with pytest.raises(ValidationError, match=f"roms-marbl-gpu {tag} is older"):
+            UclaRomsGpuBlueprint.model_validate(data)
+
     def test_more_forcing_files_than_the_gpu_reads_are_rejected(
         self, template_dict: dict[str, t.Any]
     ) -> None:

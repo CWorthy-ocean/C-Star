@@ -667,6 +667,35 @@ class TestSchedulerJobBase:
         with pytest.raises(ValueError, match="5 GPUs cannot be spread evenly over 2"):
             MockSchedulerJob(**params)
 
+    @pytest.mark.parametrize("cpus_per_node", [3, 5])
+    def test_init_gpu_explicit_cpus_per_node_must_match_the_layout(self, cpus_per_node):
+        """A step's own `cpus_per_node` must place exactly its tasks on its nodes:
+        8 tasks on 2 nodes are 4 per node, so 3 or 5 per node is refused.
+        """
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 2,
+            "cpus": 8,
+            "cpus_per_node": cpus_per_node,
+            "gpus": 8,
+        }
+        with pytest.raises(
+            ValueError, match=rf"{cpus_per_node} tasks per node .* 8 tasks on 2 node"
+        ):
+            MockSchedulerJob(**params)
+
+    def test_init_gpu_explicit_cpus_per_node_that_matches_is_kept(self):
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 2,
+            "cpus": 8,
+            "cpus_per_node": 4,
+            "gpus": 8,
+        }
+        job = MockSchedulerJob(**params)
+
+        assert (job.nodes, job.cpus_per_node, job.cpus) == (2, 4, 8)
+
     def test_init_gpu_tasks_not_even_over_nodes(self):
         """Tasks that do not divide over the nodes are rejected."""
         params = self.common_job_params | {

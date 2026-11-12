@@ -634,7 +634,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         record_gb = history_record_gb(nml)
         seconds = record_gb / (GPU_WRITER_RATE_GBPS * writers_per_file(layout.writers))
         message = (
-            f"tiling.writers_per_node is {layout.writers_per_node}; roms-marbl-gpu' "
+            f"tiling.writers_per_node is {layout.writers_per_node}; roms-marbl-gpu's "
             f"tools/gpu_layout.py suggests {suggested} per node on {layout.nodes} "
             f"node(s) for this namelist's history output (~{record_gb:.2f} GB per "
             f"record, ~{seconds:.0f} s to write with this run's writers)"

@@ -18,7 +18,11 @@ from cstar.orchestration.models import (
     Dataset,
 )
 from cstar.roms.gpu_layout import GpuRankLayout
-from cstar.roms.namelist import _parse_gpu_release, gpu_namelist_schema_for_ref
+from cstar.roms.namelist import (
+    _parse_gpu_release,
+    check_supported_gpu_release,
+    gpu_namelist_schema_for_ref,
+)
 from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
 
 if t.TYPE_CHECKING:
@@ -164,6 +168,10 @@ class UclaRomsGpuBlueprint(Blueprint):
         if self.runtime_params.start_date < self.valid_start_date:
             msg = "start_date is outside the valid range"
             raise ValueError(msg)
+
+        ref = self.code.roms.checkout_target
+        if (release := _parse_gpu_release(ref)) is not None:
+            check_supported_gpu_release(release, ref)
 
         if partitioned := self._partitioned_datasets():
             msg = (
