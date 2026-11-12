@@ -13,6 +13,7 @@ from cstar.system.manager import (
     LinuxARM64SystemContext,
     LinuxSystemContext,
     MacOSSystemContext,
+    OscarSystemContext,
     PerlmutterSystemContext,
     SystemContext,
     SystemSource,
@@ -37,6 +38,7 @@ def test_unique_context_names() -> None:
         LinuxARM64SystemContext,
         LinuxSystemContext,
         MacOSSystemContext,
+        OscarSystemContext,
         PerlmutterSystemContext,
     )
 
@@ -56,6 +58,7 @@ def test_unique_context_names() -> None:
         LinuxARM64SystemContext,
         LinuxSystemContext,
         MacOSSystemContext,
+        OscarSystemContext,
         PerlmutterSystemContext,
     ],
 )

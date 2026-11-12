@@ -904,6 +904,120 @@ class MacOSSystemContext(SystemContext):
         return None
 
 
+class OscarEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Oscar* system.
+
+    NOTE: Oscar's default association needs no account (condo and priority users
+    set one); an unset queue submits to the primary `batch` partition.
+    """
+
+    FILESYSTEM_MARKER: ClassVar[Path] = Path("/oscar/home")
+    """Mount point on Oscar's login and compute nodes that identifies the system.
+
+    No environment variable does: Oscar sets neither LMOD_SYSHOST nor
+    LMOD_SYSTEM_NAME, and its SLURM_CLUSTER_NAME is the generic ``slurmctld``
+    (both seen on the machine 2026-11-09).
+    """
+
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow an empty account.
+    """
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class OscarSystemContext(SystemContext):
+    """The contextual dependencies for the Oscar system (Brown University CCV).
+
+    Written from the public documentation, then corrected from a user's output on the
+    machine 2026-11-09 (the ``/oscar/home`` mount, modules, compilers, library
+    prefix variables and SLURM layout). No ROMS build has run there yet.
+    """
+
+    name: ClassVar[str] = "oscar"
+    """The unique name identifying the Oscar system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Oscar."""
+    mpi_prefix: ClassVar[str] = "srun --mpi=pmix --kill-on-bad-exit=1"
+    """The MPI prefix used on Oscar."""
+    docs: ClassVar[str] = "https://docs.ccv.brown.edu/oscar"
+    """URI for documentation of the Oscar system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        batch_queue = SlurmPartition(
+            name="batch",
+            query_name="batch",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """General purpose computing, the default partition."""
+        # The debug association defaults to the debug QOS, whose MaxWall (01:00:00
+        # on 2026-11-09) is the binding limit; the partition and the QOS share a name.
+        debug_queue = SlurmPartition(
+            name="debug",
+            query_name="debug",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        """Short wait, short run time partition for debugging."""
+
+        # No max_cpus_per_node: batch nodes range from 32 to 192 cores.
+        return SlurmScheduler(
+            queues=[batch_queue, debug_queue],
+            primary_queue_name="batch",
+            other_scheduler_directives={},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+        )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return OscarEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Oscar*.
+
+        No environment variable identifies Oscar, so the presence of the
+        ``/oscar/home`` mount does. Detection runs on every machine, so a failed
+        filesystem check returns `False` rather than raising.
+        """
+        try:
+            return OscarEnvSettings.FILESYSTEM_MARKER.is_dir()
+        except OSError:
+            return False
+
+    @override
+    @classmethod
+    def scratch_root(cls) -> Path | None:
+        """Return the ``~/scratch`` directory, Oscar's documented scratch location.
+
+        Oscar exports no ``SCRATCH`` variable; each user's home carries a
+        ``scratch`` entry instead. A failed check (a stale mount, no home
+        directory) logs a warning and returns ``None`` rather than raising,
+        because this runs while resolving ``CSTAR_DATA_HOME``.
+        """
+        try:
+            scratch = Path.home() / "scratch"
+            return scratch if scratch.is_dir() else None
+        except (OSError, RuntimeError):
+            # Path.home() raises RuntimeError when no home directory can be found
+            log.warning(
+                "Failed to check ~/scratch; set SCRATCH or CSTAR_DATA_HOME to name "
+                "the scratch file system explicitly."
+            )
+            return None
+
+
 class PerlmutterEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Perlmutter* system.
 

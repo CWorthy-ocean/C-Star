@@ -25,12 +25,19 @@ yet supported for full workplan orchestration.
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Expanse (SDSC) <https://www.sdsc.edu/support/user_guides/expanse.html>`__           | ✅         | Untested                |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
+| `Oscar (Brown CCV) <https://docs.ccv.brown.edu/oscar>`__                             | Untested   | Untested                |
++--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Perlmutter (NERSC) <https://docs.nersc.gov/systems/perlmutter/architecture/>`__     | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | MacOS ARM64 (Apple Silicon)                                                          | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | Linux (x86_64 and aarch 64)                                                          | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
+
+Oscar support is a first cut written from the public documentation. A user on the
+machine has supplied its module stack, compilers, library variables and SLURM
+setup, and the ``/oscar/home`` mount C-Star recognises it by, but no ROMS build has
+run there yet. Set ``CSTAR_SYSTEM=oscar`` if C-Star does not recognise the machine.
 
 On Derecho, which uses PBS, ``cstar blueprint submit`` and ``cstar workplan
 submit`` are not available. Run ``cstar blueprint run`` from inside a PBS job

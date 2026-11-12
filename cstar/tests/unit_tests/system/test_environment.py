@@ -68,7 +68,7 @@ class TestSetupEnvironmentFromFiles:
     """
 
     @pytest.mark.parametrize(
-        "lmod_syshost", ["perlmutter", "derecho", "expanse", "anvil"]
+        "lmod_syshost", ["perlmutter", "derecho", "expanse", "anvil", "oscar"]
     )
     @patch(
         "cstar.base.utils.subprocess.run",
@@ -87,7 +87,9 @@ class TestSetupEnvironmentFromFiles:
         self,
         mock_uses_lmod: bool,
         mock_run: Mock,
-        lmod_syshost: t.Literal["anvil", "derecho", "elja", "expanse", "perlmutter"],
+        lmod_syshost: t.Literal[
+            "anvil", "derecho", "elja", "expanse", "oscar", "perlmutter"
+        ],
     ):
         """Tests that the load_lmod_modules function correctly interacts with Linux
         Envionment Modules.
@@ -894,13 +896,12 @@ def test_get_env_item_default(
 
 
 @pytest.mark.parametrize(
-    ("xdg_var", "xdg_value", "cstar_var", "factory_value"),
+    ("xdg_var", "xdg_value", "cstar_var"),
     [
         (
             "XDG_DATA_HOME",
             "",
             ENV_CSTAR_DATA_HOME,
-            hpc_data_directory(),
         ),
     ],
 )
@@ -908,12 +909,13 @@ def test_get_env_item_default_from_factory(
     xdg_var: str,
     xdg_value: str,
     cstar_var: str,
-    factory_value: str,
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the default factory is invoked."""
     monkeypatch.delenv(cstar_var, raising=False)
     monkeypatch.setenv(xdg_var, xdg_value)
+    # computed here, not at collection, so the autouse fixtures apply to both sides
+    factory_value = hpc_data_directory()
 
     env_item = get_env_item(cstar_var)
     actual_value = env_item.value
