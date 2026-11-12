@@ -51,7 +51,10 @@ normally omits), a forge blueprint has these sections:
    checks the files and copies them into ``input_data/``.
 ``datasets``
    The list of source datasets Forge must stage before generating inputs
-   (derived from ``forcing``; see :doc:`source_datasets`).
+   (derived from ``forcing``; see :doc:`source_datasets`). If you change a
+   source by hand, such as a GLORYS ``glorys_layout``, add its dataset here
+   too (``GLORYS_GLOBAL`` or ``GLORYS_REGIONAL``); ``cstar blueprint check``
+   names any that are missing.
 ``model_settings``
    The resolved UCLA-ROMS settings, one section per namelist group plus the
    compile-time ``cppdefs`` switches. These start from the model spec's

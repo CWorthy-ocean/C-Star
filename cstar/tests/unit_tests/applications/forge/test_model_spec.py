@@ -73,6 +73,31 @@ class TestSourceSpec:
         with pytest.raises(ValidationError):
             SourceSpec(name="ERA5", glorys_layout="regional")
 
+    def test_sourcespec_dumps_only_the_source_specific_fields_that_are_set(self):
+        """An unset source-specific field is left out of a dump, so a saved ERA5
+        source carries no `glorys_layout: null` inviting an invalid edit. Files that
+        still write the nulls load as before.
+        """
+        source_specific = (
+            "glorys_layout",
+            "constants",
+            "esper_method",
+            "esper_equation",
+        )
+        dumped = SourceSpec(name="ERA5").model_dump(mode="json")
+        assert not set(source_specific) & set(dumped)
+        assert dumped["path"] is None  # valid on every source, so still shown
+
+        glorys = SourceSpec(name="GLORYS", glorys_layout="global")
+        assert glorys.model_dump()["glorys_layout"] == "global"
+        esper = SourceSpec(name="ESPER", esper_method="nn", esper_equation=16)
+        assert esper.model_dump()["esper_equation"] == 16
+
+        legacy = SourceSpec.model_validate(
+            {"name": "ERA5", **dict.fromkeys(source_specific)}
+        )
+        assert legacy == SourceSpec(name="ERA5")
+
 
 class TestInitialConditionsInput:
     """Tests for InitialConditionsInput class."""

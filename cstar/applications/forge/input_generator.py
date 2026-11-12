@@ -1488,7 +1488,7 @@ class RomsInputGenerator(InputGenerator):
                 try:
                     woa_file = self.source_data.path_for_source("WOA_SALINITY")
                 except KeyError as exc:
-                    # ForgeBlueprint._esper_conditioning_has_its_dataset catches
+                    # ForgeBlueprint._sources_have_their_datasets catches
                     # this at load time; this is the last line for a bare override.
                     raise ValueError(
                         "The ESPER source asks for salinity conditioning, but the "
@@ -1502,7 +1502,7 @@ class RomsInputGenerator(InputGenerator):
         # topography_path semantics: bypass path_for_source entirely rather than
         # merely leaving it unable to override (setdefault below). The resolver
         # skips noting an explicit-path item into resolved_datasets/datasets (see
-        # forge_blueprint_resolve._note), so it was never staged and
+        # SourceSpec.dataset_names), so it was never staged and
         # path_for_source would raise "dataset was not prepared" for it.
         if "path" in out:
             return out
