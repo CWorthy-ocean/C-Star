@@ -588,7 +588,7 @@ class ROMSGpuSimulation(ROMSSimulation):
     def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
         """Check the composed namelist against what gpu-ucla-roms needs.
 
-        Rule E, the GPU model's start-up feature guard, and Rule F, the arrays
+        Rule F, the GPU model's start-up feature guard, and Rule G, the arrays
         it declares smaller than ucla-roms (also checked before the build), then
         the base class's rules. Of those, rule D (file names too long to read) mirrors the model;
         rule A (every output stream's rollover divides the restart period) the
@@ -800,7 +800,7 @@ class ROMSGpuSimulation(ROMSSimulation):
             is not set.
         NamelistConsistencyError
             If the composed namelist gives a GPU-model array more values than
-            the model reads (Rule F), checked before the compile.
+            the model reads (Rule G), checked before the compile.
         RuntimeError
             If an error occurs during the compilation process.
 
@@ -817,7 +817,7 @@ class ROMSGpuSimulation(ROMSSimulation):
             )
 
         self._gpu_environment()
-        # Rule F before the compile: a CPU namelist gives one akt_bak per tracer,
+        # Rule G before the compile: a CPU namelist gives one akt_bak per tracer,
         # which a blueprint that never mentions akt_bak passes at validation
         check_gpu_array_sizes(self._composed_namelist())
         key = self._gpu_build_key()

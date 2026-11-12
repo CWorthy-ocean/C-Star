@@ -295,7 +295,7 @@ GPU_AKT_BAK: dict[str, dict[str, Any]] = {
     "vertical_mixing_settings": {"akt_bak": [0.0, 0.0]}
 }
 """The override a GPU blueprint needs over a CPU namelist: the GPU model reads
-two `akt_bak` values (Rule F), the fixture namelist gives one per tracer."""
+two `akt_bak` values (Rule G), the fixture namelist gives one per tracer."""
 
 
 @pytest.fixture
@@ -650,7 +650,7 @@ class TestRuntimeSettings:
     def test_more_akt_bak_values_than_the_gpu_reads_are_refused(
         self, make_simulation: SimulationFactory
     ) -> None:
-        """The fixture's CPU namelist gives one `akt_bak` per tracer (Rule F)."""
+        """The fixture's CPU namelist gives one `akt_bak` per tracer (Rule G)."""
         sim = make_simulation(
             namelist_overrides={"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
         )
@@ -1064,7 +1064,7 @@ class TestBuild:
         gpu_system: mock.Mock,
         build_tools: FakeBuildTools,
     ) -> None:
-        """Rule F fails the build, not the launch after it."""
+        """Rule G fails the build, not the launch after it."""
         sim = make_simulation(
             namelist_overrides={"vertical_mixing_settings": {"akt_bak": [0.0] * 3}}
         )

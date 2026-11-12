@@ -200,8 +200,8 @@ class UclaRomsGpuBlueprint(Blueprint):
         Unknown group/key names are an error when `code.roms` pins a
         gpu-ucla-roms release and a warning otherwise. `np_xi`/`np_eta`
         conflicts with `tiling`, switches for features the GPU model does
-        not have (Rule E in :mod:`cstar.roms.precheck`) and arrays with more
-        values than it reads (Rule F) are always an error.
+        not have (Rule F in :mod:`cstar.roms.precheck`) and arrays with more
+        values than it reads (Rule G) are always an error.
         Values are re-validated when the overrides are merged onto the real
         namelist before launch.
         """

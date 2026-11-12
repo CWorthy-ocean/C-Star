@@ -1014,6 +1014,34 @@ class TrackingRepository(LoggingMixin):
         items = tuple(filter(lambda p: p.exists(), run_paths))
         return tuple(sorted(list({p.resolve() for p in items})))
 
+    def removal_paths(self, run_id: str) -> list[Path]:
+        """Return every path kept for a run-id, in the order to remove them.
+
+        The "latest" link comes first and is not resolved, so a link whose
+        record is already gone is still found. The run's history directory
+        follows, holding its records and any a crashed writer left half-staged.
+        The run's lock comes last, and only beside one of those: reading a run
+        creates its lock, even for a run-id that was never recorded.
+
+        Parameters
+        ----------
+        run_id : str
+            The run-id whose tracking state will be removed.
+
+        Returns
+        -------
+        list[Path]
+            The paths that exist, a dangling link included.
+        """
+        paths = [
+            path
+            for path in (self.latest_path(run_id), self.run_history_dir(run_id))
+            if path.is_symlink() or path.exists()
+        ]
+        if paths and (lock_path := self._get_lock_path(run_id)).exists():
+            paths.append(lock_path)
+        return paths
+
     def get_workplan_run_sync(
         self,
         run_id: str,

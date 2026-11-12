@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from itertools import chain
+from itertools import chain, pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 
@@ -59,6 +59,7 @@ from cstar.execution.file_system import (
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
+from cstar.io.constants import SourceClassification
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.serialization import load_blueprint
@@ -93,6 +94,8 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
     missing_carbonate_sensitivity_variables,
+    netcdf_dimension_size,
+    netcdf_time_ranges,
 )
 from cstar.roms.namelist import (
     RomsNamelistBase,
@@ -105,6 +108,7 @@ from cstar.roms.precheck import (
     averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
     check_file_name_lengths,
+    check_forcing_file_count,
     check_output_streams_divide_rst,
 )
 from cstar.simulation import Simulation
@@ -1175,8 +1179,10 @@ class ROMSSimulation(Simulation):
             check_averages_end_on_marbl_step(nml, cppdefs)
 
         # Names as written, after the override merge: ROMS cannot read one that
-        # fills its buffer, and a pre-run never starts ROMS to find out.
+        # fills its buffer, and a pre-run never starts ROMS to find out. Likewise
+        # a forcing-file list longer than the pinned release reads.
         check_file_name_lengths(nml)
+        check_forcing_file_count(nml, type(nml))
 
     @property
     def input_datasets(self) -> list[ROMSInputDataset]:
@@ -1592,6 +1598,118 @@ class ROMSSimulation(Simulation):
         print_dict["ROMS"] = simulation_tree_dict
         return f"{self.directory}\n{_dict_to_tree(print_dict)}"
 
+    def _input_staging_names(self) -> list[tuple[ROMSInputDataset, str]]:
+        """Decide the file name each input dataset `setup()` stages is staged under.
+
+        C-Star stages every input in one directory under its source's file name.
+        Two inputs sharing a name are staged side by side, the later ones under
+        `<stem>_<k><suffix>`, only when they are forcing datasets of one class
+        backed by distinct local files whose time records follow on in the order
+        listed (sharing at most the time where one ends and the next begins), as
+        the same-named outputs of chained runs do; ROMS then reads them in order.
+        Any other shared name is refused.
+
+        Returns
+        -------
+        list[tuple[ROMSInputDataset, str]]
+            Every staged dataset in order with the name to stage it under;
+            empty means its own name.
+
+        Raises
+        ------
+        ValueError
+            If any name is shared by inputs that cannot be staged side by side;
+            every such name is reported.
+        """
+        staged = [
+            inp for inp in self.input_datasets if self._overlaps_simulation_dates(inp)
+        ]
+
+        def names_of(inp: ROMSInputDataset) -> list[str]:
+            if inp.source_partitioning:
+                return [s.basename for s in inp.partitioned_source.sources]
+            return [inp.source.basename]
+
+        holders: dict[str, list[ROMSInputDataset]] = {}
+        for inp in staged:
+            for name in names_of(inp):
+                holders.setdefault(name, []).append(inp)
+        used = set(holders)
+
+        renamed: dict[int, str] = {}
+        unresolvable: list[str] = []
+        for name, group in holders.items():
+            if len(group) == 1:
+                continue
+            if not self._follow_on_forcing_files(group):
+                where = "; ".join(f"{g.source.location}" for g in group)
+                unresolvable.append(f"{name} ({where})")
+                continue
+            stem, suffix = Path(name).stem, Path(name).suffix
+            k = 2
+            for inp in group[1:]:
+                while f"{stem}_{k}{suffix}" in used:
+                    k += 1
+                renamed[id(inp)] = f"{stem}_{k}{suffix}"
+                used.add(renamed[id(inp)])
+
+        if unresolvable:
+            raise ValueError(
+                "These input files share a name, and C-Star stages every input "
+                "under its own name in one directory: "
+                + "; ".join(unresolvable)
+                + ". ROMS names an output file after the model time of its first "
+                "record, so outputs of runs that write a file at the same time "
+                "share a name. C-Star stages such files side by side only when "
+                "they are forcing files of one kind whose time records follow on "
+                "in the order listed (sharing at most the time where one ends and "
+                "the next begins). Remove or rename one of them; with a workplan "
+                "directive, copy the files to use into one directory and point "
+                "`path:` at it."
+            )
+
+        if renamed:
+            moves = ", ".join(
+                f"{inp.source.location} -> {renamed[id(inp)]}"
+                for inp in staged
+                if id(inp) in renamed
+            )
+            self.log.info(
+                f"Input files share a name; staging the later ones under new names "
+                f"(ROMS reads them in order): {moves}"
+            )
+        return [(inp, renamed.get(id(inp), "")) for inp in staged]
+
+    def _follow_on_forcing_files(self, group: list[ROMSInputDataset]) -> bool:
+        """Whether same-named input datasets are forcing files whose time records follow on.
+
+        True when all are forcing datasets of one class, each backed by a distinct,
+        existing local file (not partitioned), and every consecutive pair in the
+        order given shares a time variable with the earlier file's last time at
+        or before the later file's first time in each shared one.
+        """
+        forcing = {id(f) for f in self._forcing_datasets}
+        if not (
+            all(id(g) in forcing for g in group)
+            and len({type(g) for g in group}) == 1
+            and all(
+                not g.source_partitioning
+                and g.source.classification is SourceClassification.LOCAL_BINARY_FILE
+                and Path(g.source.location).is_file()
+                for g in group
+            )
+        ):
+            return False
+        paths = [Path(g.source.location).resolve() for g in group]
+        if len(set(paths)) != len(paths):
+            return False
+        ranges = [netcdf_time_ranges(p) for p in paths]
+        for earlier, later in pairwise(ranges):
+            shared = earlier.keys() & later.keys()
+            if not shared or any(earlier[v][1] > later[v][0] for v in shared):
+                return False
+        return True
+
     def setup(self, clobber: bool = False) -> None:
         """Prepare this ROMSSimulation locally by fetching necessary files and compiling
         any external codebases.
@@ -1636,6 +1754,9 @@ class ROMSSimulation(Simulation):
         input_datasets_dir = self.fs_manager.input_datasets_dir
         run_dir = self.fs_manager.run_dir
 
+        # Before the clobber, so a refusal deletes nothing.
+        staging_names = self._input_staging_names()
+
         if clobber:
             self.fs_manager.clear()
 
@@ -1674,14 +1795,14 @@ class ROMSSimulation(Simulation):
 
         # InputDatasets
         self.log.info("📦 Fetching input datasets...")
-        for inp in self.input_datasets:
-            # Download input dataset if its date range overlaps Simulation's date range
-            if self._overlaps_simulation_dates(inp):
-                self.log.debug(f"Fetching {inp.source.location}")
-                inp.get(local_dir=input_datasets_dir)
+        for inp, name in staging_names:
+            # Only datasets whose date range overlaps the Simulation's are staged
+            self.log.debug(f"Fetching {inp.source.location}")
+            inp.get(local_dir=input_datasets_dir, name=name)
 
         # Everything the check reads is staged now: fail before `build()` compiles.
         self._validate_carbonate_sensitivity_inputs()
+        self._validate_river_count()
 
     @property
     def is_setup(self) -> bool:
@@ -1873,14 +1994,23 @@ class ROMSSimulation(Simulation):
             else:
                 partition_dims = (n_procs_x, n_procs_y)
 
-        for inp in self.input_datasets:
-            if not self._overlaps_simulation_dates(inp):
-                continue
+        try:
+            staging_names = self._input_staging_names()
+        except ValueError as e:
+            # Still check every other input under its own name, so the report is
+            # complete; the recorded problem stops the resume either way.
+            problems.append(str(e))
+            staging_names = [
+                (inp, "")
+                for inp in self.input_datasets
+                if self._overlaps_simulation_dates(inp)
+            ]
 
+        for inp, name in staging_names:
             try:
                 just_staged = False
                 try:
-                    inp.attach(self.fs_manager.input_datasets_dir)
+                    inp.attach(self.fs_manager.input_datasets_dir, name=name)
                     self.log.debug(f"Attached {inp.source.location}")
                 except FileNotFoundError:
                     # A resumed run's initial conditions typically point at a
@@ -1888,7 +2018,7 @@ class ROMSSimulation(Simulation):
                     # never staged ahead of time -- this is the one
                     # component `attach()` is allowed to stage rather than
                     # merely adopt.
-                    inp.get(local_dir=self.fs_manager.input_datasets_dir)
+                    inp.get(local_dir=self.fs_manager.input_datasets_dir, name=name)
                     staged.append(inp.source.location)
                     just_staged = True
                     self.log.debug(f"Staged {inp.source.location}")
@@ -2391,6 +2521,9 @@ class ROMSSimulation(Simulation):
             If the build reads carbonate sensitivities from forcing files but
             they are missing or incomplete (see
             `_validate_carbonate_sensitivity_inputs`).
+        ValueError
+            If the namelist's river count does not match the river forcing file
+            (see `_validate_river_count`).
 
         Notes
         -----
@@ -2406,6 +2539,7 @@ class ROMSSimulation(Simulation):
         """
         self._validate_reference_dates()
         self._validate_carbonate_sensitivity_inputs()
+        self._validate_river_count()
 
         if self.io_layout is IOLayout.JOINED:
             if self.use_pio:
@@ -2605,6 +2739,58 @@ class ROMSSimulation(Simulation):
                 "carbonate-sensitivity-from workplan directive."
             )
         raise ValueError(f"{message} {CARBONATE_SENSITIVITY_REMEDY}")
+
+    def _validate_river_count(self) -> None:
+        """Ensure `river_frc_settings.nriv` (effective value, after
+        `namelist_overrides`) matches the `nriver` dimension of the staged river
+        forcing file.
+
+        ROMS reads `nriv` rivers from the file: more than the file holds stops
+        the run with "NetCDF: Start+count exceeds dimension bound", fewer
+        silently leaves rivers out. Does nothing when there is no staged river
+        forcing, or when rivers are off or analytical.
+
+        Raises
+        ------
+        ValueError
+            If the file's `nriver` dimension is missing or differs from `nriv`.
+        """
+        if self.river_forcing is None or not self.river_forcing.exists_locally:
+            return
+        files = self.river_forcing._working_copy_files()
+        if not files:
+            return
+
+        nml, schema, chosen_by = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, chosen_by)
+        settings = getattr(nml, "river_frc_settings", None)
+        if settings is None or not settings.river_source or settings.river_analytical:
+            return
+
+        # Header read of the first file only: all files of one dataset come
+        # from one writer.
+        in_file = netcdf_dimension_size(files[0], "nriver")
+        if in_file == settings.nriv:
+            return
+        if in_file is None:
+            found = (
+                f"{files[0].name} has no nriver dimension, so ROMS cannot read "
+                "rivers from it"
+            )
+        else:
+            found = (
+                f"{files[0].name} holds {in_file} rivers but "
+                f"river_frc_settings.nriv is {settings.nriv}"
+            )
+        raise ValueError(
+            f"The river forcing file does not match the namelist: {found}. "
+            "If the namelist asks for more rivers than the file holds, ROMS stops "
+            'with "NetCDF: Start+count exceeds dimension bound"; if it asks for '
+            "fewer, ROMS silently leaves the rest out. Set "
+            "river_frc_settings.nriv to the file's river count (for example "
+            "through the blueprint's namelist_overrides), or regenerate the "
+            "namelist and the river file together with Forge."
+        )
 
     def prepare_launch(self, job_name: str | None = None) -> LaunchPlan:
         """Prepare everything needed to launch ROMS, without launching it.

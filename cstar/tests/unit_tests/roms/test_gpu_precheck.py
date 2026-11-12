@@ -247,7 +247,7 @@ def test_live_namelist_of_a_schema_without_the_group_is_fine():
     _no_warnings(nml)
 
 
-# Rule F: (group, key, size) of the arrays the GPU model declares smaller than
+# Rule G: (group, key, size) of the arrays the GPU model declares smaller than
 # ucla-roms, restated from upstream (`akt_bak_in(2)`, src/host/case_io.F90:96 at
 # v0.1.2-beta).
 ARRAY_SIZES = [("vertical_mixing_settings", "akt_bak", 2)]
