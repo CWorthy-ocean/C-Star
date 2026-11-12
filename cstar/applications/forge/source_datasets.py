@@ -307,19 +307,19 @@ class SourceDatasets:
         Prefers the injected ``resolved_datasets`` snapshot (frozen at ForgeBlueprint
         build time) over live ``source_registry`` resolution, so a blueprint resolves
         the same dataset key regardless of registry drift on the processing host.
-        GLORYS with an explicit ``glorys_layout`` is the one exception: that
-        resolution is a hardcoded, per-item branch (not a table lookup) and the
-        snapshot is keyed by logical name only (one entry per name, see
-        ``forge_blueprint_resolve._build_forcing``), so it can't disambiguate two
-        GLORYS items with different layouts -- always resolve that case live.
+        GLORYS with an explicit ``glorys_layout`` is the one exception (see
+        ``source_registry.snapshot_applies``). ``ForgeBlueprint`` checks at load time
+        that the key this returns for each of its sources is in ``datasets``, through
+        the same ``source_registry.dataset_key_for_source``.
         """
-        from cstar.applications.forge.source_registry import resolve_dataset_key
+        from cstar.applications.forge.source_registry import dataset_key_for_source
 
-        if not (logical_name.upper() == "GLORYS" and glorys_layout is not None):
-            entry = (self.resolved_datasets or {}).get(logical_name.upper())
-            if entry and entry.get("dataset_key"):
-                return entry["dataset_key"]
-        return resolve_dataset_key(logical_name, glorys_layout)
+        snapshot = {
+            name: entry["dataset_key"]
+            for name, entry in (self.resolved_datasets or {}).items()
+            if entry and entry.get("dataset_key")
+        }
+        return dataset_key_for_source(logical_name, glorys_layout, snapshot)
 
     def streamable_for_source(
         self,
@@ -332,7 +332,9 @@ class SourceDatasets:
         ``dataset_key_for_source``) so streamability is pinned alongside the dataset
         key; falls back to the live ``STREAMABLE_SOURCES`` check.
         """
-        if not (logical_name.upper() == "GLORYS" and glorys_layout is not None):
+        from cstar.applications.forge.source_registry import snapshot_applies
+
+        if snapshot_applies(logical_name, glorys_layout):
             entry = (self.resolved_datasets or {}).get(logical_name.upper())
             if entry is not None and "streamable" in entry:
                 return bool(entry["streamable"])
