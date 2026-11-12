@@ -46,6 +46,14 @@ earlier releases cut a longer name off silently. C-Star applies the same limits 
 every release, with headroom for the rank suffix a non-PIO run appends, which
 ROMS's own check does not allow for. Ungated by schema version.
 
+Rule E -- :func:`check_forcing_file_count` mirrors ucla-roms' ``max_frc_files``
+(``src/roms_read_write.F90``), the size of its ``frcfiles`` array: releases before
+0.13.0 read at most 360 forcing files and stop at startup with "Cannot match
+namelist object name" if the namelist lists more; 0.13.0 (PR #402) raised the
+limit to 10000. :func:`max_forcing_files` picks the limit from the namelist
+schema; a commit-hash pin that cannot be resolved falls back to the newest
+schema, so gets the larger limit, as for Rules A and C.
+
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
 A and C need an explicit, caller-supplied set of active cppdefs to know which
@@ -93,6 +101,14 @@ MAX_OUTPUT_ROOT_NAME_LENGTH: int = 220
 """Longest ``output_root_name`` / ``extract_root_name``. Mirrors the limit ucla-roms
 >= 0.13.0 checks: ``max_name_size`` less 36, the longest tail ROMS appends."""
 
+MAX_FORCING_FILES: int = 10000
+"""Most ``frcfiles`` entries ucla-roms >= 0.13.0 reads. Mirrors
+``max_frc_files = 10000`` in ucla-roms ``src/roms_read_write.F90`` (PR #402)."""
+
+MAX_FORCING_FILES_BEFORE_0_13_0: int = 360
+"""Most ``frcfiles`` entries ucla-roms before 0.13.0 reads. Mirrors
+``max_frc_files = 360`` in ucla-roms ``src/roms_read_write.F90``."""
+
 _FILE_NAME_KEYS: tuple[tuple[str, str, int], ...] = (
     ("grid_settings", "grdname", MAX_NAMELIST_FILE_NAME_LENGTH),
     ("initial_conditions", "inifile", MAX_NAMELIST_FILE_NAME_LENGTH),
@@ -123,10 +139,10 @@ class NamelistConsistencyError(ValueError):
     different vocabulary (e.g. Forge's settings dict) can point a user at the
     field it actually exposes, without this module knowing that vocabulary
     exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
-    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"`` or
-    ``"file_name_lengths"``). ``"file_name_lengths"`` reports every offending
-    key in one error, so its ``section`` may join several group names with
-    ``", "`` and its ``keys`` may span those groups.
+    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"``,
+    ``"file_name_lengths"`` or ``"forcing_file_count"``). ``"file_name_lengths"``
+    reports every offending key in one error, so its ``section`` may join several
+    group names with ``", "`` and its ``keys`` may span those groups.
     """
 
     def __init__(
@@ -189,6 +205,15 @@ def averages_end_on_marbl_step_applies_to_schema(
     ``RomsNamelistV0_13_0`` on subclasses it.
     """
     return issubclass(schema, RomsNamelistV0_13_0)
+
+
+def max_forcing_files(schema: type[RomsNamelistBase]) -> int:
+    """The most ``frcfiles`` entries the ucla-roms release that reads namelist
+    schema ``schema`` accepts (Rule E).
+    """
+    if issubclass(schema, RomsNamelistV0_13_0):
+        return MAX_FORCING_FILES
+    return MAX_FORCING_FILES_BEFORE_0_13_0
 
 
 def _section(container: Any, name: str) -> Any:
@@ -782,3 +807,39 @@ def check_file_name_lengths(settings: RomsNamelistBase | Mapping[str, Any]) -> N
             section=", ".join(dict.fromkeys(group for group, _, _ in too_long)),
             keys=tuple(dict.fromkeys(key for _, key, _ in too_long)),
         )
+
+
+def check_forcing_file_count(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    schema: type[RomsNamelistBase],
+) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist lists more forcing files
+    than the ucla-roms release that reads ``schema`` accepts (see Rule E in the
+    module docstring and :func:`max_forcing_files`).
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`.
+        Reads ``forcing_files.frcfiles``; a missing group or key is skipped.
+    schema
+        The namelist schema of the pinned ucla-roms release.
+    """
+    max_files = max_forcing_files(schema)
+    files = _section(_section(settings, "forcing_files"), "frcfiles") or []
+    if len(files) <= max_files:
+        return
+    message = (
+        f"The namelist lists {len(files)} forcing files, but this ucla-roms release "
+        f"reads at most {max_files}; ROMS stops at startup with "
+        '"Cannot match namelist object name". Use fewer, larger forcing files '
+        "(for nest-from boundary files, a larger nrpf_extract in the parent run)"
+    )
+    if max_files < MAX_FORCING_FILES:
+        message += ", or pin ucla-roms 0.13.0 or later"
+    raise NamelistConsistencyError(
+        message + ".",
+        rule="forcing_file_count",
+        section="forcing_files",
+        keys=("frcfiles",),
+    )

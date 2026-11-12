@@ -80,8 +80,26 @@ class Stager(ABC):
     def __init__(self, source: "SourceData"):
         self.source = source
 
-    def stage(self, target_dir: "Path") -> StagedFile | StagedRepository:
-        """Stage this data using an appropriate strategy."""
+    def _refuse_name(self, name: str) -> None:
+        """Raise if a file name to stage under was given to a stager that cannot honor it."""
+        if name:
+            msg = f"{type(self).__name__} cannot stage under a different name: {name!r}"
+            raise ValueError(msg)
+
+    def stage(
+        self, target_dir: "Path", name: str = ""
+    ) -> StagedFile | StagedRepository:
+        """Stage this data using an appropriate strategy.
+
+        Parameters
+        ----------
+        target_dir : Path
+            The local directory in which to stage the data
+        name : str
+            The file name to stage under; empty means the source's own name.
+            Only a local binary file can be staged under another name.
+        """
+        self._refuse_name(name)
         retrieved_path = self.source.retriever.save(target_dir=target_dir)
         return StagedFile(
             source=self.source,
@@ -106,13 +124,15 @@ class LocalBinaryFileStager(Stager):
     _classification = SourceClassification.LOCAL_BINARY_FILE
 
     # Used for e.g. a local netCDF InputDataset
-    def stage(self, target_dir: "Path") -> "StagedFile":
+    def stage(self, target_dir: "Path", name: str = "") -> "StagedFile":
         """Create a local symlink to a binary file on the current filesystem.
 
         Parameters
         ----------
         target_dir, Path:
             The local directory in which to stage the file
+        name, str:
+            The file name to stage under; empty means the source's own name
         """
         # symlink_to succeeds even when the target is absent, and the model would
         # then fail much later with an opaque I/O error; check up front instead.
@@ -121,7 +141,7 @@ class LocalBinaryFileStager(Stager):
             msg = f"Cannot stage input dataset: file does not exist: {source_path}"
             raise FileNotFoundError(msg)
 
-        target_path = target_dir / self.source.basename
+        target_path = target_dir / (name or self.source.basename)
         symlink_relative(
             target_path, source_path.resolve(), within=DirectoryManager.data_home()
         )
@@ -140,14 +160,17 @@ class RemoteRepositoryStager(Stager):
     _classification = SourceClassification.REMOTE_REPOSITORY
 
     # Used for e.g. an ExternalCodeBase
-    def stage(self, target_dir: "Path") -> "StagedRepository":
+    def stage(self, target_dir: "Path", name: str = "") -> "StagedRepository":
         """Clone and checkout a git repository at a given target.
 
         Parameters
         ----------
         target_dir : Path
             The local directory in which to stage the repository
+        name : str
+            Must be empty: a repository cannot be staged under another name
         """
+        self._refuse_name(name)
         retrieved_path = self.source.retriever.save(target_dir=target_dir)
         retriever = cast("RemoteRepositoryRetriever", self.source.retriever)
         retriever.checkout(target_dir=target_dir)
@@ -159,7 +182,7 @@ class CachedRemoteRepositoryStager(Stager):
     _classification = SourceClassification.REMOTE_REPOSITORY
 
     # Used for e.g. an ExternalCodeBase
-    def stage(self, target_dir: "Path") -> "StagedRepository":
+    def stage(self, target_dir: "Path", name: str = "") -> "StagedRepository":
         """Clone and checkout a git repository at a given target.
 
         Store the result in a local repository cache for re-use. Refreshing the
@@ -174,11 +197,14 @@ class CachedRemoteRepositoryStager(Stager):
         ----------
         target_dir : Path
             The local directory in which to stage the repository
+        name : str
+            Must be empty: a repository cannot be staged under another name
 
         Returns
         -------
         StagedRepository
         """
+        self._refuse_name(name)
         cache_path = self._get_cache_path()
         lock_path = cache_path.parent / f"{cache_path.name}.lock"
         try:

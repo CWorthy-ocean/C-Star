@@ -103,7 +103,7 @@ class InputDataset(ABC, LoggingMixin):
 
         return input_dataset_dict
 
-    def get(self, local_dir: str | Path) -> None:
+    def get(self, local_dir: str | Path, name: str = "") -> None:
         """Make this InputDataset locally available in `local_dir`.
 
         This method updates the `InputDataset.working_copy` attribute,
@@ -112,21 +112,25 @@ class InputDataset(ABC, LoggingMixin):
         -----------
         local_dir: str
             The local directory in which this input dataset will be saved.
+        name: str
+            The file name to stage under; empty means the source's own name.
         """
-        target_path = Path(local_dir).expanduser().resolve() / self.source.basename
+        target_path = Path(local_dir).expanduser().resolve() / (
+            name or self.source.basename
+        )
 
         if self.exists_locally:
             msg = f"⏭️ {target_path} already exists, skipping."
             self.log.info(msg)
             return
 
-        staged = self.source.stage(target_dir=local_dir)
+        staged = self.source.stage(target_dir=local_dir, name=name)
         if not isinstance(staged, (StagedFile, StagedDataCollection)):
             msg = f"Require StagedFile or StagedDataCollection; received {type(staged)}"
             raise TypeError(msg)
         self._working_copy = staged
 
-    def attach(self, local_dir: str | Path) -> None:
+    def attach(self, local_dir: str | Path, name: str = "") -> None:
         """Adopt an existing, already-staged copy of this InputDataset at `local_dir`.
 
         Counterpart of `get()`: instead of (re-)staging the file, this verifies
@@ -138,13 +142,15 @@ class InputDataset(ABC, LoggingMixin):
         -----------
         local_dir: str
             The local directory in which this input dataset is expected to already exist.
+        name: str
+            The file name it was staged under; empty means the source's own name.
 
         Raises:
         -------
         FileNotFoundError
             If the expected local file is missing. A dangling symlink counts as missing.
         """
-        p = Path(local_dir).expanduser().resolve() / self.source.basename
+        p = Path(local_dir).expanduser().resolve() / (name or self.source.basename)
         if not p.exists():
             msg = f"Cannot attach InputDataset: expected file not found: {p}"
             raise FileNotFoundError(msg)
