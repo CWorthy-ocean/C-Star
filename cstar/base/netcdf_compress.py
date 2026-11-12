@@ -32,7 +32,13 @@ default cache never re-decompress a chunk."""
 DEFAULT_DEFLATE_LEVEL: t.Final[int] = 5
 QUANTIZE_MODE: t.Final[str] = "BitGroom"
 _CF_COORDINATE_NAMES: t.Final[frozenset[str]] = frozenset(
-    {"latitude", "longitude", "time", "projection_x_coordinate", "projection_y_coordinate"}
+    {
+        "latitude",
+        "longitude",
+        "time",
+        "projection_x_coordinate",
+        "projection_y_coordinate",
+    }
 )
 
 
@@ -121,8 +127,13 @@ def _even_chunk(n: int, side: int) -> int:
 
 def _nearest_divisor(n: int, target: float) -> int:
     """The divisor of `n` nearest `target` in ratio, else an even split."""
-    best = min((d for d in range(1, n + 1) if n % d == 0), key=lambda d: abs(math.log(d / target)))
-    return best if 0.5 <= best / target <= 2.0 else _even_chunk(n, max(1, round(target)))
+    best = min(
+        (d for d in range(1, n + 1) if n % d == 0),
+        key=lambda d: abs(math.log(d / target)),
+    )
+    return (
+        best if 0.5 <= best / target <= 2.0 else _even_chunk(n, max(1, round(target)))
+    )
 
 
 def default_chunks(
@@ -164,7 +175,11 @@ def default_chunks(
 
 
 def chunk_shape(
-    dims: Sequence[str], shape: Sequence[int], time_dim: str | None, itemsize: int, spec: ChunkSpec
+    dims: Sequence[str],
+    shape: Sequence[int],
+    time_dim: str | None,
+    itemsize: int,
+    spec: ChunkSpec,
 ) -> tuple[int, ...] | None:
     """The chunk shape of one variable: time 1, `spec` where given, derived elsewhere.
 
@@ -243,17 +258,26 @@ def compress_netcdf(src: Path, dst: Path, encoding: Encoding) -> CompressResult:
                     complevel=encoding.deflate_level,
                     shuffle=True,
                     chunksizes=chunk_shape(
-                        var.dimensions, var.shape, time_dim, out_dtype.itemsize, encoding.chunks
+                        var.dimensions,
+                        var.shape,
+                        time_dim,
+                        out_dtype.itemsize,
+                        encoding.chunks,
                     ),
                 )
             if reduce and encoding.significant_digits:
                 kwargs.update(
-                    significant_digits=encoding.significant_digits, quantize_mode=QUANTIZE_MODE
+                    significant_digits=encoding.significant_digits,
+                    quantize_mode=QUANTIZE_MODE,
                 )
             if "_FillValue" in var.ncattrs():
-                kwargs["fill_value"] = np.array(var.getncattr("_FillValue")).astype(out_dtype)
+                kwargs["fill_value"] = np.array(var.getncattr("_FillValue")).astype(
+                    out_dtype
+                )
             out = d.createVariable(name, out_dtype, var.dimensions, **kwargs)
-            out.setncatts({k: var.getncattr(k) for k in var.ncattrs() if k != "_FillValue"})
+            out.setncatts(
+                {k: var.getncattr(k) for k in var.ncattrs() if k != "_FillValue"}
+            )
 
             if reduce:
                 reduced.append(name)
@@ -317,12 +341,14 @@ def verify_compressed(src: Path, dst: Path, encoding: Encoding) -> list[str]:
                 problems.append(f"{name}: shape {out.shape} != {var.shape}")
                 continue
             if not var.shape:
-                same = np.array_equal(var.getValue(), out.getValue(), equal_nan=var.dtype.kind == "f")
+                same = np.array_equal(
+                    var.getValue(), out.getValue(), equal_nan=var.dtype.kind == "f"
+                )
                 if not same:
                     problems.append(f"{name}: scalar value differs")
                 continue
-            records = (
-                _sample_records(var.shape[0])
+            records: list[int | None] = (
+                list(_sample_records(var.shape[0]))
                 if var.dimensions[0] == time_dim
                 else [None]
             )

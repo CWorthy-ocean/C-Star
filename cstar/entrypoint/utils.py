@@ -85,7 +85,9 @@ ARG_SUBMIT_HELP: t.Final[str] = (
     "Submit the compression as a SLURM job (a one-step workplan with the job's resources)."
 )
 ARG_NOW: t.Final[str] = "--now"
-ARG_NOW_HELP: t.Final[str] = "Compress here, in this process, instead of submitting a job."
+ARG_NOW_HELP: t.Final[str] = (
+    "Compress here, in this process, instead of submitting a job."
+)
 
 ARG_OWN: t.Final[str] = "--own"
 ARG_OWN_HELP: t.Final[str] = (

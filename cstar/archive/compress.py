@@ -51,7 +51,9 @@ REPORT_NAME: t.Final[str] = "compress-report.yaml"
 """The per-file report written to the run root."""
 COMPRESSION_KEY: t.Final[str] = "compression"
 """The product metadata key recording how a file was compressed."""
-_SKIPPED_DIRS: t.Final[frozenset[str]] = frozenset({"input", "temp_output", ORIGINALS_DIR_NAME})
+_SKIPPED_DIRS: t.Final[frozenset[str]] = frozenset(
+    {"input", "temp_output", ORIGINALS_DIR_NAME}
+)
 """Step directories never searched for data files: staged inputs, per-rank
 pieces, and kept originals."""
 
@@ -155,7 +157,9 @@ def _walk_data_candidates(step_root: Path) -> Iterator[tuple[str, int]]:
     for dirpath, dirnames, filenames in os.walk(step_root):
         here = Path(dirpath)
         dirnames[:] = sorted(
-            d for d in dirnames if d not in _SKIPPED_DIRS and not (here / d).is_symlink()
+            d
+            for d in dirnames
+            if d not in _SKIPPED_DIRS and not (here / d).is_symlink()
         )
         for name in sorted(filenames):
             path = here / name
@@ -188,7 +192,9 @@ def run_data_files(
     candidates: list[tuple[str, str, Path, str, int]] = []
     for entry in manifest.steps:
         if entry.record is None or entry.record.outcome != "completed":
-            log.warning(f"Step {entry.name!r} did not complete; its files are left as they are")
+            log.warning(
+                f"Step {entry.name!r} did not complete; its files are left as they are"
+            )
             continue
         step_root = root / entry.working_dir
         products = entry.record.products
@@ -201,12 +207,15 @@ def run_data_files(
         else:
             found = list(_walk_data_candidates(step_root))
         candidates.extend(
-            (entry.name, applications[entry.name], step_root, rel, size) for rel, size in found
+            (entry.name, applications[entry.name], step_root, rel, size)
+            for rel, size in found
         )
     return detector.data_files(candidates)
 
 
-def settings_for(data_file: DataFile, file_types: Sequence[FileTypeSettings]) -> FileTypeSettings | None:
+def settings_for(
+    data_file: DataFile, file_types: Sequence[FileTypeSettings]
+) -> FileTypeSettings | None:
     """The first settings whose application and match fit a file, or `None`."""
     for settings in file_types:
         if canonical_application(settings.application) == data_file.application and (
@@ -273,7 +282,9 @@ def plan_jobs(
         if settings is None:
             unmatched.append(data_file)
         elif settings.compress and data_file.header.deflated:
-            log.info(f"{data_file.step}/{data_file.relative_path} is already compressed")
+            log.info(
+                f"{data_file.step}/{data_file.relative_path} is already compressed"
+            )
         elif settings.compress:
             jobs.append(
                 FileJob(
@@ -321,7 +332,9 @@ def _record(root: Path, run_id: str, outcomes: Sequence[FileOutcome]) -> int:
                 if outcome.reduced and product.digest:
                     product.digest = product_digest(step_root / product.path)
                 product.metadata[COMPRESSION_KEY] = (
-                    f"netcdf4;float32 x{len(outcome.reduced)}" if outcome.reduced else "netcdf4;lossless"
+                    f"netcdf4;float32 x{len(outcome.reduced)}"
+                    if outcome.reduced
+                    else "netcdf4;lossless"
                 )
                 changed = True
                 updated += 1
@@ -332,7 +345,9 @@ def _record(root: Path, run_id: str, outcomes: Sequence[FileOutcome]) -> int:
     return updated
 
 
-def _write_report(root: Path, outcomes: Sequence[FileOutcome], unmatched: Sequence[DataFile]) -> Path:
+def _write_report(
+    root: Path, outcomes: Sequence[FileOutcome], unmatched: Sequence[DataFile]
+) -> Path:
     """Write the per-file report to the run root."""
     before = sum(o.size_before for o in outcomes if o.status == "compressed")
     after = sum(o.size_after for o in outcomes if o.status == "compressed")
@@ -388,7 +403,9 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
     files = run_data_files(root, manifest, FileTypeDetector())
     jobs, unmatched = plan_jobs(blueprint, files)
     for f in unmatched:
-        log.warning(f"No file type in the blueprint matches {f.step}/{f.relative_path}; left as it is")
+        log.warning(
+            f"No file type in the blueprint matches {f.step}/{f.relative_path}; left as it is"
+        )
     log.info(f"Compressing {len(jobs)} file(s) with {blueprint.workers} worker(s)")
 
     outcomes: list[FileOutcome] = []
@@ -401,7 +418,9 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
                     f"{outcome.size_before:,} -> {outcome.size_after:,} bytes"
                 )
             else:
-                log.error(f"{outcome.step}/{outcome.relative_path} kept: {outcome.problems}")
+                log.error(
+                    f"{outcome.step}/{outcome.relative_path} kept: {outcome.problems}"
+                )
 
     _record(root, manifest.run_id, outcomes)
     report = _write_report(root, outcomes, unmatched)

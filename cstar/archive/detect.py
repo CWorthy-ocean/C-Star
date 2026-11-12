@@ -85,7 +85,9 @@ class NetcdfHeaderReader:
         from cstar.base.utils import NetCDFFormat, netcdf_format
 
         try:
-            return path.is_file() and netcdf_format(path) is not NetCDFFormat.UNRECOGNIZED
+            return (
+                path.is_file() and netcdf_format(path) is not NetCDFFormat.UNRECOGNIZED
+            )
         except (OSError, ValueError):
             return False
 
@@ -120,7 +122,8 @@ DEFAULT_READERS: t.Final[tuple[HeaderReader, ...]] = (NetcdfHeaderReader(),)
 
 class FileTypeMatch(ConfiguredBaseModel):
     """A portable description of a file type: it ignores dimension sizes, so it
-    matches the same output of another domain."""
+    matches the same output of another domain.
+    """
 
     filename: str
     """A glob for the file's path relative to its step root, e.g. `output/output_cdr.*.nc`."""
@@ -139,7 +142,9 @@ class FileTypeMatch(ConfiguredBaseModel):
         """
         if not fnmatch.fnmatchcase(relative_path, self.filename):
             return False
-        return header is None or all(v in header.variables for v in self.requires_variables)
+        return header is None or all(
+            v in header.variables for v in self.requires_variables
+        )
 
 
 @dataclass
@@ -186,7 +191,11 @@ class FileType:
     def counts(self) -> tuple[int, int]:
         """The numbers of 3-D and 2-D spatial variables."""
         spatial = self.sample.spatial_variables()
-        n3 = sum(1 for v in spatial.values() if len(spatial_dims(v.dims, self.sample.time_dim)) >= 3)
+        n3 = sum(
+            1
+            for v in spatial.values()
+            if len(spatial_dims(v.dims, self.sample.time_dim)) >= 3
+        )
         return n3, len(spatial) - n3
 
     def default_chunks(self, itemsize: int = 4) -> ChunkSpec:
@@ -195,7 +204,9 @@ class FileType:
         if not spatial:
             return ChunkSpec()
         largest = max(spatial.values(), key=lambda v: len(v.dims))
-        shape = [s for d, s in zip(largest.dims, largest.shape) if d != self.sample.time_dim]
+        shape = [
+            s for d, s in zip(largest.dims, largest.shape) if d != self.sample.time_dim
+        ]
         chunks = default_chunks(shape, itemsize)
         return ChunkSpec(
             x=chunks[-1], y=chunks[-2], z=chunks[-3] if len(chunks) >= 3 else None
@@ -255,7 +266,9 @@ class FileTypeDetector:
         for step, application, step_root, relative, size in candidates:
             header = self.read_header(step_root / relative)
             if header is not None and header.spatial_variables():
-                files.append(DataFile(step, application, step_root, relative, size, header))
+                files.append(
+                    DataFile(step, application, step_root, relative, size, header)
+                )
         return files
 
     def detect(self, files: Sequence[DataFile]) -> list[FileType]:
@@ -264,11 +277,15 @@ class FileTypeDetector:
         A template whose files hold different variables is split into types
         labelled `<name>-a`, `<name>-b`, ... Dimension sizes are ignored.
         """
-        groups: dict[tuple[str, str, frozenset[tuple[str, tuple[str, ...]]]], list[DataFile]]
+        groups: dict[
+            tuple[str, str, frozenset[tuple[str, tuple[str, ...]]]], list[DataFile]
+        ]
         groups = defaultdict(list)
         for f in files:
             signature = frozenset((n, v.dims) for n, v in f.header.variables.items())
-            groups[f.application, filename_template(f.relative_path), signature].append(f)
+            groups[f.application, filename_template(f.relative_path), signature].append(
+                f
+            )
 
         by_template: dict[tuple[str, str], list[list[DataFile]]] = defaultdict(list)
         for (application, template, _), members in groups.items():

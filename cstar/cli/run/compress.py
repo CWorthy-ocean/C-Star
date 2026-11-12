@@ -123,14 +123,18 @@ def _ask_chunks(file_type: FileType, yes: bool) -> ChunkSettings:
     shown = ",".join(str(v) for v in (default.x, default.y, default.z) if v is not None)
     if yes:
         return ChunkSettings()
-    answer = typer.prompt(f"  Chunking (x,y,z) [default {shown}]", default="", show_default=False)
+    answer = typer.prompt(
+        f"  Chunking (x,y,z) [default {shown}]", default="", show_default=False
+    )
     if not answer.strip():
         return ChunkSettings()
     values = [int(v) for v in answer.replace(" ", "").split(",") if v]
     return ChunkSettings(**dict(zip(("x", "y", "z"), values)))
 
 
-def _ask_type(file_type: FileType, settings: FileTypeSettings, yes: bool) -> FileTypeSettings:
+def _ask_type(
+    file_type: FileType, settings: FileTypeSettings, yes: bool
+) -> FileTypeSettings:
     """Ask the questions of one file type."""
     typer.echo(f"\n{_describe(file_type, settings)}")
     input_like = _input_like(file_type)
@@ -146,11 +150,15 @@ def _ask_type(file_type: FileType, settings: FileTypeSettings, yes: bool) -> Fil
         typer.echo("  Every variable is protected: lossless compression only.")
     else:
         settings.float32 = _yn("Float32-compress non-protected variables?", False, yes)
-        if settings.float32 and _yn("Additionally bit-reduce (quantize) them?", False, yes):
+        if settings.float32 and _yn(
+            "Additionally bit-reduce (quantize) them?", False, yes
+        ):
             settings.significant_digits = (
                 DEFAULT_DIGITS
                 if yes
-                else typer.prompt("  Significant digits to keep", default=DEFAULT_DIGITS, type=int)
+                else typer.prompt(
+                    "  Significant digits to keep", default=DEFAULT_DIGITS, type=int
+                )
             )
     settings.chunks = _ask_chunks(file_type, yes)
     return settings
@@ -166,8 +174,15 @@ def _protected(application: str) -> list[str]:
 
 def _job_settings(total_bytes: int, yes: bool) -> dict[str, t.Any]:
     """Ask for the SLURM resources of a submitted job; returns `compute_overrides.slurm`."""
-    cpus = 8 if yes else typer.prompt("  Cores (files compressed at once)", default=8, type=int)
-    hours = max(1, math.ceil(1.5 * total_bytes / (max(1, cpus) * _THROUGHPUT_BYTES_PER_S) / 3600))
+    cpus = (
+        8
+        if yes
+        else typer.prompt("  Cores (files compressed at once)", default=8, type=int)
+    )
+    hours = max(
+        1,
+        math.ceil(1.5 * total_bytes / (max(1, cpus) * _THROUGHPUT_BYTES_PER_S) / 3600),
+    )
     walltime = f"{hours:02d}:00:00"
     if not yes:
         walltime = typer.prompt("  Walltime (HH:MM:SS)", default=walltime)
@@ -176,7 +191,11 @@ def _job_settings(total_bytes: int, yes: bool) -> dict[str, t.Any]:
     if not yes:
         queue = typer.prompt("  Queue", default=queue or "shared")
         account = typer.prompt("  Account", default=account, show_default=bool(account))
-    slurm: dict[str, t.Any] = {"num_cpus": cpus, "max_walltime": walltime, "single_node": True}
+    slurm: dict[str, t.Any] = {
+        "num_cpus": cpus,
+        "max_walltime": walltime,
+        "single_node": True,
+    }
     if queue:
         slurm["queue_name"] = queue
     if account:
@@ -192,14 +211,18 @@ def _write_yaml(path: Path, data: dict[str, t.Any]) -> Path:
 
 @app.command(name=COMMAND_COMPRESS, help=HELP_LONG, short_help=HELP_SHORT)
 def compress(
-    run: t.Annotated[Path, typer.Argument(help="The run directory (holding cstar-run.yaml).")],
+    run: t.Annotated[
+        Path, typer.Argument(help="The run directory (holding cstar-run.yaml).")
+    ],
     answers: t.Annotated[
         Path | None, typer.Option(ARG_ANSWERS, help=ARG_ANSWERS_HELP)
     ] = None,
     submit: t.Annotated[bool, typer.Option(ARG_SUBMIT, help=ARG_SUBMIT_HELP)] = False,
     now: t.Annotated[bool, typer.Option(ARG_NOW, help=ARG_NOW_HELP)] = False,
     yes: t.Annotated[bool, typer.Option(ARG_YES, help="Accept every default.")] = False,
-    dry_run: t.Annotated[bool, typer.Option(ARG_DRY_RUN, help=ARG_DRY_RUN_HELP)] = False,
+    dry_run: t.Annotated[
+        bool, typer.Option(ARG_DRY_RUN, help=ARG_DRY_RUN_HELP)
+    ] = False,
 ) -> None:
     """Compress the data files of a finished run in place."""
     if submit and now:
@@ -207,9 +230,13 @@ def compress(
     root = run.expanduser().resolve()
     manifest = read_run_manifest(root)
     if manifest is None:
-        raise typer.BadParameter(f"{str(root)!r} holds no run manifest (cstar-run.yaml)")
+        raise typer.BadParameter(
+            f"{str(root)!r} holds no run manifest (cstar-run.yaml)"
+        )
     if manifest.attempts and manifest.attempts[-1].finished_at is None:
-        raise typer.BadParameter(f"the latest attempt of {manifest.run_id!r} has not finished")
+        raise typer.BadParameter(
+            f"the latest attempt of {manifest.run_id!r} has not finished"
+        )
     fold_step_records(manifest, root)
 
     typer.echo(f"Reading the headers of the data files of {manifest.run_id!r}...")
@@ -226,7 +253,9 @@ def compress(
     settings: list[FileTypeSettings] = []
     for file_type in types:
         known = (
-            settings_for(file_type.files[0], saved.file_types) if saved is not None else None
+            settings_for(file_type.files[0], saved.file_types)
+            if saved is not None
+            else None
         )
         if known is not None:
             typer.echo(f"\n{_describe(file_type, known)}\n  (settings from {answers})")
@@ -238,16 +267,23 @@ def compress(
 
     chosen = [s for s in settings if s.compress]
     total = sum(
-        t_.total_bytes for t_ in types for s in chosen if s.match == t_.match and s.application == t_.application
+        t_.total_bytes
+        for t_ in types
+        for s in chosen
+        if s.match == t_.match and s.application == t_.application
     )
-    typer.echo(f"\n{len(chosen)} of {len(settings)} file type(s) selected, {_human(total)} to compress.")
+    typer.echo(
+        f"\n{len(chosen)} of {len(settings)} file type(s) selected, {_human(total)} to compress."
+    )
 
     originals: t.Literal["delete", "keep"] = (
         saved.originals
         if saved is not None
         else (
             "delete"
-            if _yn("Delete each original once its compressed copy is verified?", False, yes)
+            if _yn(
+                "Delete each original once its compressed copy is verified?", False, yes
+            )
             else "keep"
         )
     )
@@ -277,7 +313,9 @@ def compress(
     )
     bp_path = _write_yaml(
         root / COMPRESS_DIR_NAME / f"B_{name}.yaml",
-        blueprint.model_dump(mode="json", exclude={"state", "provenance"}, exclude_none=True),
+        blueprint.model_dump(
+            mode="json", exclude={"state", "provenance"}, exclude_none=True
+        ),
     )
     typer.echo(f"Wrote {bp_path}")
 
@@ -301,13 +339,21 @@ def compress(
         typer.echo(f"Wrote {workplan_path}")
 
     if dry_run or not chosen:
-        typer.echo("Nothing compressed." if not chosen else "Dry run: nothing compressed.")
+        typer.echo(
+            "Nothing compressed." if not chosen else "Dry run: nothing compressed."
+        )
         return
 
     if workplan_path is not None:
-        cmd = [sys.executable, "-c", "import sys; from cstar.cli.cli import main; sys.argv[0] = 'cstar'; sys.exit(main())"]
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys; from cstar.cli.cli import main; sys.argv[0] = 'cstar'; sys.exit(main())",
+        ]
         typer.echo(f"Submitting: cstar workplan submit {workplan_path}")
-        raise typer.Exit(subprocess.run([*cmd, "workplan", "submit", str(workplan_path)]).returncode)
+        raise typer.Exit(
+            subprocess.run([*cmd, "workplan", "submit", str(workplan_path)]).returncode
+        )
 
     outcomes = compress_run(blueprint)
     failed = [o for o in outcomes if o.status == "failed"]
@@ -315,7 +361,11 @@ def compress(
     after = sum(o.size_after for o in outcomes if o.status == "compressed")
     typer.echo(
         f"Compressed {len(outcomes) - len(failed)} file(s): {_human(before)} -> {_human(after)}"
-        + (f"; {len(failed)} failed and were kept (see compress-report.yaml)" if failed else "")
+        + (
+            f"; {len(failed)} failed and were kept (see compress-report.yaml)"
+            if failed
+            else ""
+        )
     )
     if failed:
         raise typer.Exit(1)

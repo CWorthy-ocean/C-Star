@@ -1,5 +1,6 @@
 """Tests for run compression: the netCDF engine, file-type detection, the
-compress blueprint, and `cstar run compress`."""
+compress blueprint, and `cstar run compress`.
+"""
 
 import contextlib
 import typing as t
@@ -47,7 +48,12 @@ STEP_DIR: t.Final = "tasks/run"
 
 
 def _write_roms_file(
-    path: Path, *, extra: t.Sequence[str] = (), ny: int = 20, nx: int = 16, records: int = 2
+    path: Path,
+    *,
+    extra: t.Sequence[str] = (),
+    ny: int = 20,
+    nx: int = 16,
+    records: int = 2,
 ) -> Path:
     """Write a small CDF-5 file shaped like ROMS `_cdr` output."""
     rng = np.random.default_rng(0)
@@ -56,13 +62,15 @@ def _write_roms_file(
         ds.createDimension("s_rho", 4)
         ds.createDimension("eta_rho", ny)
         ds.createDimension("xi_rho", nx)
-        ds.createVariable("ocean_time", "f8", ("time",))[:] = np.arange(records) * 86400.0
+        ds.createVariable("ocean_time", "f8", ("time",))[:] = (
+            np.arange(records) * 86400.0
+        )
         for name in ("hDIC", "hDIC_ALT_CO2", "temp", *extra):
             ds.createVariable(name, "f8", ("time", "s_rho", "eta_rho", "xi_rho"))[:] = (
                 2000.0 + rng.random((records, 4, ny, nx))
             )
-        ds.createVariable("FG_CO2", "f8", ("time", "eta_rho", "xi_rho"))[:] = rng.random(
-            (records, ny, nx)
+        ds.createVariable("FG_CO2", "f8", ("time", "eta_rho", "xi_rho"))[:] = (
+            rng.random((records, ny, nx))
         )
     return path
 
@@ -74,7 +82,9 @@ def _build_run(root: Path, files: dict[str, t.Callable[[Path], Path]]) -> Path:
     products = []
     for relative, write in files.items():
         path = write(step_root / relative)
-        products.append(Product(kind="output", path=relative, size_bytes=path.stat().st_size))
+        products.append(
+            Product(kind="output", path=relative, size_bytes=path.stat().st_size)
+        )
     (step_root / "notes.txt").write_text("not netCDF")
     write_step_record(
         step_root,
@@ -82,7 +92,9 @@ def _build_run(root: Path, files: dict[str, t.Callable[[Path], Path]]) -> Path:
             run_id="r1",
             step=STEP,
             application="ucla_roms",
-            blueprint=BlueprintIdentity(kind="Blueprint", application="ucla_roms", name="bp"),
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="ucla_roms", name="bp"
+            ),
             outcome="completed",
             finished_at=START,
             products=products,
@@ -96,7 +108,9 @@ def _build_run(root: Path, files: dict[str, t.Callable[[Path], Path]]) -> Path:
             kind="workplan",
             created_at=START,
             attempts=[Attempt(start_at=START, finished_at=START)],
-            steps=[StepEntry(name=STEP, application="roms_marbl", working_dir=STEP_DIR)],
+            steps=[
+                StepEntry(name=STEP, application="roms_marbl", working_dir=STEP_DIR)
+            ],
         ),
     )
     return root
@@ -105,7 +119,9 @@ def _build_run(root: Path, files: dict[str, t.Callable[[Path], Path]]) -> Path:
 @pytest.fixture(autouse=True)
 def _no_manifest_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the lock (which lives in the user's state directory) out of these tests."""
-    monkeypatch.setattr(compress_mod, "manifest_lock", lambda run_id: contextlib.nullcontext())
+    monkeypatch.setattr(
+        compress_mod, "manifest_lock", lambda run_id: contextlib.nullcontext()
+    )
 
 
 @pytest.fixture
@@ -123,7 +139,9 @@ def run_root(tmp_path: Path) -> Path:
         {
             "output/output_cdr.20140301000000.nc": _write_roms_file,
             "output/output_cdr.20140302000000.nc": _write_roms_file,
-            "output/output_rst.20140302000000.nc": lambda p: _write_roms_file(p, extra=("u",)),
+            "output/output_rst.20140302000000.nc": lambda p: _write_roms_file(
+                p, extra=("u",)
+            ),
             "output/output_scalar.20140302000000.nc": one_d,
         },
     )
@@ -132,7 +150,9 @@ def run_root(tmp_path: Path) -> Path:
 class TestEngine:
     def test_protected_exact_reduced_within_tolerance(self, tmp_path: Path) -> None:
         src = _write_roms_file(tmp_path / "src.nc")
-        enc = Encoding(float32=True, significant_digits=4, protected=("hDIC*", "FG_CO2"))
+        enc = Encoding(
+            float32=True, significant_digits=4, protected=("hDIC*", "FG_CO2")
+        )
         result = compress_netcdf(src, tmp_path / "out.nc", enc)
 
         assert result.reduced == ("temp",)
@@ -157,7 +177,9 @@ class TestEngine:
         with netCDF4.Dataset(tmp_path / "out.nc") as d:
             assert d["temp"].chunking() == [1, 2, 20, 8]
             assert d["FG_CO2"].chunking() == [1, 20, 8]
-        assert default_chunks((100, 1346, 674), 4)[0] == 5  # sqrt(100*262144/(1346*674)) ~ 5.4
+        assert (
+            default_chunks((100, 1346, 674), 4)[0] == 5
+        )  # sqrt(100*262144/(1346*674)) ~ 5.4
 
     def test_verify_reports_a_changed_value(self, tmp_path: Path) -> None:
         src = _write_roms_file(tmp_path / "src.nc")
@@ -165,20 +187,30 @@ class TestEngine:
         compress_netcdf(src, out, Encoding())
         with netCDF4.Dataset(out, "a") as d:
             d["hDIC"][0, 0, 0, 0] = 0.0
-        assert verify_compressed(src, out, Encoding()) == ["hDIC: values differ at record 0"]
+        assert verify_compressed(src, out, Encoding()) == [
+            "hDIC: values differ at record 0"
+        ]
 
 
 class TestDetector:
     def test_template_replaces_timestamps_and_ranks(self) -> None:
-        assert filename_template("output/output_cdr.20140301000000.nc") == "output/output_cdr.*.nc"
-        assert filename_template("output_his.20140301000000.0012.nc") == "output_his.*.*.nc"
+        assert (
+            filename_template("output/output_cdr.20140301000000.nc")
+            == "output/output_cdr.*.nc"
+        )
+        assert (
+            filename_template("output_his.20140301000000.0012.nc")
+            == "output_his.*.*.nc"
+        )
         assert filename_template("grid_201401.nc") == "grid_*.nc"
 
     def test_groups_by_template_and_contents(self, tmp_path: Path) -> None:
         files = [
             _write_roms_file(tmp_path / "output_his.20140101000000.nc"),
             _write_roms_file(tmp_path / "output_his.20140102000000.nc"),
-            _write_roms_file(tmp_path / "output_his.20140103000000.nc", extra=("salt",)),
+            _write_roms_file(
+                tmp_path / "output_his.20140103000000.nc", extra=("salt",)
+            ),
         ]
         detector = FileTypeDetector()
         data = detector.data_files(
@@ -195,7 +227,9 @@ class TestDetector:
     def test_match_ignores_dimension_sizes(self, tmp_path: Path) -> None:
         other = _write_roms_file(tmp_path / "output_cdr.20150101000000.nc", ny=7, nx=5)
         header = FileTypeDetector().read_header(other)
-        match = FileTypeMatch(filename="output_cdr.*.nc", requires_variables=["hDIC", "temp"])
+        match = FileTypeMatch(
+            filename="output_cdr.*.nc", requires_variables=["hDIC", "temp"]
+        )
         assert match.matches(other.name, header)
         assert not match.matches(other.name.replace("cdr", "his"), header)
 
@@ -241,8 +275,12 @@ class TestCompressRun:
         cdr = sizes["output/output_cdr.20140301000000.nc"]
         assert cdr.size_bytes == (run_root / STEP_DIR / cdr.path).stat().st_size
         assert cdr.metadata["compression"] == "netcdf4;float32 x1"
-        assert "compression" not in sizes["output/output_rst.20140302000000.nc"].metadata
-        kept = run_root / ORIGINALS_DIR_NAME / STEP / "output/output_cdr.20140301000000.nc"
+        assert (
+            "compression" not in sizes["output/output_rst.20140302000000.nc"].metadata
+        )
+        kept = (
+            run_root / ORIGINALS_DIR_NAME / STEP / "output/output_cdr.20140301000000.nc"
+        )
         assert kept.is_file()
         report = yaml.safe_load((run_root / REPORT_NAME).read_text())
         assert report["summary"]["compressed"] == 2
@@ -285,9 +323,13 @@ class TestCli:
 
         assert result.exit_code == 0, result.output
         (bp_path,) = (run_root / "compress").glob("B_*.yaml")
-        by_name = {f["name"]: f for f in yaml.safe_load(bp_path.read_text())["file_types"]}
+        by_name = {
+            f["name"]: f for f in yaml.safe_load(bp_path.read_text())["file_types"]
+        }
         assert by_name["output_cdr"]["significant_digits"] == 3
-        with netCDF4.Dataset(run_root / STEP_DIR / "output/output_cdr.20140301000000.nc") as d:
+        with netCDF4.Dataset(
+            run_root / STEP_DIR / "output/output_cdr.20140301000000.nc"
+        ) as d:
             assert d["temp"].dtype == np.float32
 
         replay = CliRunner().invoke(
@@ -300,7 +342,9 @@ class TestCli:
         self, run_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("CSTAR_SLURM_QUEUE", "shared")
-        result = CliRunner().invoke(app, [str(run_root), "--yes", "--submit", "--dry-run"])
+        result = CliRunner().invoke(
+            app, [str(run_root), "--yes", "--submit", "--dry-run"]
+        )
 
         assert result.exit_code == 0, result.output
         (wp_path,) = (run_root / "compress").glob("W_*.yaml")
