@@ -59,7 +59,7 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import _LOGGED_NEWER_THAN_KNOWN, release_ref_for_remote
-from cstar.system.manager import _WARNED_SYSTEM
+from cstar.system.manager import _WARNED_SYSTEM, OscarEnvSettings
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -261,6 +261,20 @@ def _no_system_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     chosen system sets one itself.
     """
     monkeypatch.delenv(ENV_CSTAR_SYSTEM, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_oscar_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point Oscar's detection mount at a path that does not exist, for each unit test.
+
+    Oscar is recognised by its `/oscar/home` mount, not an environment variable, so
+    clearing the environment cannot hide it: run on Oscar, every test that detects
+    the system would find Oscar. A test of that detection points the marker at a
+    real directory itself.
+    """
+    monkeypatch.setattr(
+        OscarEnvSettings, "FILESYSTEM_MARKER", Path("/nonexistent-oscar-home")
+    )
 
 
 @pytest.fixture(autouse=True)

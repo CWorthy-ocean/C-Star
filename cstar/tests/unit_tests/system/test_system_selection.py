@@ -19,6 +19,8 @@ from cstar.system.manager import (
     CStarSystemManager,
     HostNameEvaluator,
     LinuxSystemContext,
+    OscarEnvSettings,
+    OscarSystemContext,
     PerlmutterSystemContext,
     SystemContext,
     SystemSelection,
@@ -48,11 +50,12 @@ DETECTION_VARIABLES = ("RCAC_CLUSTER", "CLUSTER", "SLURM_CLUSTER_NAME", "HOSTNAM
 
 
 @pytest.fixture(autouse=True)
-def _unrecognisable_machine(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Generator[None]:
+def _unrecognisable_machine(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Strip every hint of the host's identity from the environment, and restore the
     environment (which building a system manager also writes to) afterwards.
+
+    Oscar's mount-point marker is pointed away for every unit test by the shared
+    conftest; the tests that need it point it at a real directory.
     """
     hints = [name for name in os.environ if name.startswith("LMOD_")]
     with mock.patch.dict(os.environ):
@@ -179,6 +182,38 @@ def test_lmod_with_a_matching_context_is_detected(
     monkeypatch.setenv("RCAC_CLUSTER", "anvil")
 
     assert select_system() == SystemSelection(AnvilSystemContext, SystemSource.DETECTED)
+
+
+def test_oscar_is_detected_from_its_filesystem_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No environment variable identifies Oscar, so its mount point does."""
+    monkeypatch.setattr(OscarEnvSettings, "FILESYSTEM_MARKER", tmp_path)
+
+    assert select_system() == SystemSelection(OscarSystemContext, SystemSource.DETECTED)
+
+
+def test_oscar_is_not_detected_without_its_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(OscarEnvSettings, "FILESYSTEM_MARKER", tmp_path / "missing")
+
+    assert OscarSystemContext.is_match() is False
+
+
+def test_oscar_marker_check_failure_is_not_a_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detection runs on every machine: a mount that cannot be examined is no match,
+    not an error.
+    """
+
+    def _boom(self: Path) -> bool:
+        raise OSError("stale NFS handle")
+
+    monkeypatch.setattr(Path, "is_dir", _boom)
+
+    assert OscarSystemContext.is_match() is False
 
 
 def test_registered_cluster_still_loads_its_modules(

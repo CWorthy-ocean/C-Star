@@ -56,6 +56,8 @@ What each system needs:
 - **Anvil, Bouchet**: the account and the queue are both required.
 - **Elja**: no account is used; an unset queue submits to ``any_cpu``.
 - **Expanse**: the account is required; an unset queue submits to ``compute``.
+- **Oscar**: no account is needed by default (condo and priority users set
+  one); an unset queue submits to the ``batch`` partition.
 - **Perlmutter**: an unset account charges your default NERSC project; an
   unset queue submits to the ``regular`` QOS. GPU jobs must name an account
   (``CSTAR_SLURM_GPU_ACCOUNT`` or ``CSTAR_SLURM_ACCOUNT``); projects have a
@@ -118,7 +120,8 @@ Project runs area
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``). Check with ``echo $PROJECT $SCRATCH``, and
-set them in your shell profile only if they are empty.
+set them in your shell profile only if they are empty. Oscar exports neither;
+C-Star uses its ``~/scratch`` directory unless you set them.
 
 Keep the environment off ``~/.local``
 --------------------------------------
