@@ -37,6 +37,12 @@ Caveats
   mismatched per-file time encodings collapsing several files onto one timestep).
   ``build_ref_for_files``/``build_subchunk_refs`` add an explicit post-build check to
   fail loudly instead of silently handing roms-tools a corrupted time axis.
+- Subchunking splits each stored chunk's raw bytes into depth slices, so it only works
+  on files stored uncompressed, one (depth, latitude, longitude) block per time step:
+  how Copernicus Marine downloads are written. kerchunk's own guard misses compressed
+  HDF5 (it records compression as ``filters`` and only checks ``compressor``), so the
+  build checks every file first and raises :class:`SubchunkUnsupportedError` for any
+  other layout. Forge then reads the files directly, as ``--no-subchunk`` does.
 """
 
 from __future__ import annotations
@@ -57,6 +63,37 @@ logger = logging.getLogger(__name__)
 #: 4D physics variables GLORYS ships that benefit from depth/lat subchunking.
 #: ``zos`` (sea surface height) is 2D and passes through the combine unchanged.
 DEFAULT_DATA_VARS_4D = ("thetao", "so", "uo", "vo")
+
+
+class SubchunkUnsupportedError(ValueError):
+    """The input files aren't stored in a layout subchunking can split.
+
+    Raised before any reference is written. The files are still readable as they
+    are; callers read them directly instead (what ``--no-subchunk`` does).
+    """
+
+
+def _codec_ids(meta: dict[str, Any]) -> list[str]:
+    """Ids of the codecs (compressor and filters) in a zarr ``.zarray`` dict."""
+    codecs = [meta.get("compressor"), *(meta.get("filters") or [])]
+    return [c["id"] for c in codecs if c]
+
+
+def _subchunk_blocker(meta: dict[str, Any], var: str) -> str:
+    """Why ``var``'s chunks (its ``.zarray`` dict) can't be split by depth, or ``""``.
+
+    Splitting a chunk's byte range into equal depth slices is valid only for raw
+    bytes holding a whole (depth, latitude, longitude) block of one time step.
+    """
+    if codecs := _codec_ids(meta):
+        return f"{var!r} is stored compressed or filtered ({', '.join(codecs)})"
+    shape, chunks = meta["shape"], meta["chunks"]
+    if len(shape) != 4 or chunks[0] != 1 or chunks[1] != shape[1]:
+        return (
+            f"{var!r} is not stored as one depth-spanning block per time step "
+            f"(shape {shape}, chunks {chunks})"
+        )
+    return ""
 
 
 def _require_subchunk_deps() -> None:
@@ -121,12 +158,38 @@ def _build_one(
     lat_factor: int | None,
     inline_threshold: int,
 ) -> dict[str, Any]:
+    import h5py
+    import ujson
     from kerchunk.hdf import SingleHdf5ToZarr
 
+    if not h5py.is_hdf5(path):
+        raise SubchunkUnsupportedError(f"{path} is not a NetCDF4 (HDF5) file")
     refs = SingleHdf5ToZarr(path, inline_threshold=inline_threshold).translate()
+    # Checked on the translated refs, before any split: kerchunk's subchunk returns a
+    # flat store without the "refs" wrapper.
+    for v in data_vars_4d:
+        zarray = refs["refs"].get(f"{v}/.zarray")
+        if zarray is not None and (reason := _subchunk_blocker(ujson.loads(zarray), v)):
+            raise SubchunkUnsupportedError(f"{path}: {reason}")
     for v in data_vars_4d:
         refs = _subchunk_var(refs, v, depth_factor, lat_factor)
     return refs
+
+
+def _reference_codecs(ref_path: str, data_vars_4d: tuple[str, ...]) -> list[str]:
+    """Codec ids recorded for ``data_vars_4d`` in a built reference.
+
+    Non-empty only for a reference built from compressed files before the build
+    checked for them: its depth slices cut through compressed streams, so it is
+    unreadable and must not be reused.
+    """
+    import fsspec
+    import ujson
+
+    fs = fsspec.filesystem("reference", fo=ref_path, remote_protocol="file")
+    return [
+        c for v in data_vars_4d for c in _codec_ids(ujson.loads(fs.cat(f"{v}/.zarray")))
+    ]
 
 
 def _run(
@@ -233,7 +296,8 @@ def build_subchunk_refs(
         subchunk factor along latitude (1 = no latitude subchunking).
     overwrite : bool
         If False (default) and the output already exists, skip and return its path
-        without rebuilding.
+        without rebuilding, unless it was built from compressed files (see
+        ``_reference_codecs``).
 
     Returns
     -------
@@ -248,6 +312,10 @@ def build_subchunk_refs(
         not installed.
     FileNotFoundError
         If ``input_files`` matches no files.
+    SubchunkUnsupportedError
+        If any input file isn't NetCDF4, or stores a ``data_vars_4d`` variable
+        compressed or in chunks other than one depth-spanning block per time step.
+        Nothing is written.
     RuntimeError
         If the combined reference's concat dimension doesn't have one entry per input
         file -- kerchunk only warns (never raises) on this, usually caused by
@@ -265,10 +333,15 @@ def build_subchunk_refs(
     if output_format != "in-memory":
         out = out + output_format
         if Path(out).exists() and not overwrite:
+            if not _reference_codecs(out, data_vars_4d):
+                logger.info(
+                    "%s already exists, skipping (pass overwrite=True to rebuild)", out
+                )
+                return out
             logger.info(
-                "%s already exists, skipping (pass overwrite=True to rebuild)", out
+                "%s was built from compressed files and can't be read; not reusing it",
+                out,
             )
-            return out
 
     if depth_factor is None:
         with xr.open_dataset(files[0]) as ds:

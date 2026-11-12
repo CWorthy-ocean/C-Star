@@ -13,6 +13,7 @@ Tests cover:
 """
 
 import asyncio
+import json
 import logging
 import re
 import shutil
@@ -33,6 +34,7 @@ from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import CarbonateSensitivitySpec
 from cstar.applications.forge.glorys_subchunk import (
+    SubchunkUnsupportedError,
     build_ref_for_files,
     open_subchunk_ref,
 )
@@ -976,6 +978,40 @@ class TestRomsInputGeneratorHelperMethods:
             )
         mock_sub.assert_not_called()
         assert result["path"] == files[:2]
+
+    def test_resolve_source_block_unsplittable_glorys_reads_files_directly(
+        self, sample_roms_input_generator, caplog
+    ):
+        """Files subchunking can't split are passed on as the raw list with one
+        warning, and the next consumer (boundary after IC) doesn't retry the build.
+        """
+        gen = sample_roms_input_generator
+        files = [
+            Path(f"/data/GLORYS_REGIONAL_test_201201{d:02d}.nc") for d in range(1, 4)
+        ]
+        gen.source_data.path_for_source.return_value = files
+        gen.subchunk = True
+        unsupported = SubchunkUnsupportedError(
+            "/data/x.nc: 'thetao' is stored compressed or filtered (zlib)"
+        )
+        with (
+            patch(
+                "cstar.applications.forge.glorys_subchunk.build_ref_for_files",
+                side_effect=unsupported,
+            ) as mock_build,
+            caplog.at_level(logging.WARNING, logger="cstar.applications.forge"),
+        ):
+            first = gen._resolve_source_block("GLORYS")
+            second = gen._resolve_source_block("GLORYS")
+
+        assert first["path"] == second["path"] == files
+        mock_build.assert_called_once()
+        assert gen._subchunk_refs == {}
+        assert not gen._block_is_subchunked(first)
+        (warning,) = [
+            r for r in caplog.records if "Not subchunking GLORYS_REGIONAL" in r.message
+        ]
+        assert "stored compressed or filtered" in warning.message
 
     def test_build_input_args_with_base_kwargs(self, sample_roms_input_generator):
         """Test _build_input_args with base_kwargs."""
@@ -4462,22 +4498,25 @@ class TestGlorysSubchunkIntegration:
     installed.
     """
 
-    @pytest.fixture
-    def synthetic_glorys_files(self, tmp_path):
+    @staticmethod
+    def _write_glorys_days(
+        src_dir: Path,
+        var_encoding: dict[str, Any] | None = None,
+        nc_format: str = "NETCDF4",
+    ) -> list[Path]:
         """Three per-day GLORYS-shaped NetCDF files with a fixed-epoch time encoding
         (matching the real CMEMS convention), so multi-file kerchunk combine works.
-        """
-        pytest.importorskip("kerchunk")
-        pytest.importorskip("fastparquet")
-        pytest.importorskip("ujson")
 
+        ``var_encoding`` applies to each 4D variable; by default they are stored
+        uncompressed and contiguous, as Copernicus Marine writes them.
+        """
         import pandas as pd
 
-        src_dir = tmp_path / "glorys_src"
-        src_dir.mkdir()
+        src_dir.mkdir(parents=True)
         lon = np.linspace(-10, 10, 20)
         lat = np.linspace(30, 40, 15)
         depth = np.array([0.5, 1.5, 5, 10, 20, 50], dtype="float64")
+        vars_4d = ("thetao", "so", "uo", "vo")
 
         files = []
         for i, date in enumerate(pd.date_range("2020-01-01", periods=3, freq="D")):
@@ -4485,26 +4524,17 @@ class TestGlorysSubchunkIntegration:
             shape4d = (1, len(depth), len(lat), len(lon))
             ds = xr.Dataset(
                 {
-                    "thetao": (
+                    v: (
                         ("time", "depth", "latitude", "longitude"),
                         rng.random(shape4d).astype("float32"),
-                    ),
-                    "so": (
-                        ("time", "depth", "latitude", "longitude"),
-                        rng.random(shape4d).astype("float32"),
-                    ),
-                    "uo": (
-                        ("time", "depth", "latitude", "longitude"),
-                        rng.random(shape4d).astype("float32"),
-                    ),
-                    "vo": (
-                        ("time", "depth", "latitude", "longitude"),
-                        rng.random(shape4d).astype("float32"),
-                    ),
+                    )
+                    for v in vars_4d
+                }
+                | {
                     "zos": (
                         ("time", "latitude", "longitude"),
                         np.full((1, len(lat), len(lon)), 0.5, dtype="float32"),
-                    ),
+                    )
                 },
                 coords={
                     "time": [date],
@@ -4519,11 +4549,103 @@ class TestGlorysSubchunkIntegration:
                     "calendar": "gregorian",
                     "dtype": "int32",
                 }
-            }
+            } | {v: dict(var_encoding or {}) for v in vars_4d}
             fn = src_dir / f"fake_GLORYS_{date.strftime('%Y%m%d')}.nc"
-            ds.to_netcdf(fn, engine="netcdf4", encoding=encoding)
+            ds.to_netcdf(fn, engine="netcdf4", format=nc_format, encoding=encoding)
             files.append(fn)
         return files
+
+    @pytest.fixture
+    def subchunk_deps(self):
+        for module in ("kerchunk", "fastparquet", "ujson"):
+            pytest.importorskip(module)
+
+    @pytest.fixture
+    def synthetic_glorys_files(self, tmp_path, subchunk_deps):
+        """Three uncompressed per-day files (see ``_write_glorys_days``)."""
+        return self._write_glorys_days(tmp_path / "glorys_src")
+
+    _BUILD_KWARGS: ClassVar[dict[str, Any]] = {
+        "key": "GLORYS_REGIONAL",
+        "start": datetime(2020, 1, 1),
+        "end": datetime(2020, 1, 3),
+    }
+
+    @pytest.mark.parametrize(
+        ("var_encoding", "nc_format", "reason"),
+        [
+            pytest.param(
+                {"zlib": True, "complevel": 4, "chunksizes": (1, 6, 15, 20)},
+                "NETCDF4",
+                "'thetao' is stored compressed or filtered",
+                id="compressed-whole-column",
+            ),
+            pytest.param(
+                {"chunksizes": (1, 1, 15, 20)},
+                "NETCDF4",
+                "'thetao' is not stored as one depth-spanning block per time step",
+                id="uncompressed-per-level",
+            ),
+            pytest.param(
+                None, "NETCDF3_64BIT_DATA", "is not a NetCDF4 (HDF5) file", id="cdf5"
+            ),
+        ],
+    )
+    def test_build_refuses_files_it_cannot_split(
+        self, tmp_path, subchunk_deps, var_encoding, nc_format, reason
+    ):
+        """Every layout subchunking can't split is refused before anything is written.
+        The compressed whole-column case used to build without complaint (kerchunk
+        keeps HDF5 compression in ``filters``, which its own guard doesn't check) and
+        failed only when roms-tools read the reference.
+        """
+        files = self._write_glorys_days(tmp_path / "src", var_encoding, nc_format)
+        out_dir = tmp_path / "out"
+        with pytest.raises(SubchunkUnsupportedError, match=re.escape(reason)):
+            build_ref_for_files(files, out_dir=out_dir, **self._BUILD_KWARGS)
+        assert not any((out_dir / "subchunk").iterdir())
+
+    def test_build_checks_every_file_not_just_the_first(self, tmp_path, subchunk_deps):
+        """Forge downloads the padding days itself, so a user's compressed files can
+        sit beside uncompressed ones; a compressed last day still stops the build.
+        """
+        plain = self._write_glorys_days(tmp_path / "plain")
+        compressed = self._write_glorys_days(
+            tmp_path / "zlib", {"zlib": True, "complevel": 4}
+        )
+        with pytest.raises(
+            SubchunkUnsupportedError, match=re.escape(str(compressed[2]))
+        ):
+            build_ref_for_files(
+                [*plain[:2], compressed[2]],
+                out_dir=tmp_path / "out",
+                **self._BUILD_KWARGS,
+            )
+
+    def test_reference_built_from_compressed_files_is_not_reused(
+        self, tmp_path, synthetic_glorys_files
+    ):
+        """A reference an earlier version built from compressed files records their
+        codecs and can't be read, so it is rebuilt rather than returned as is.
+        """
+        out_dir = tmp_path / "out"
+        ref = build_ref_for_files(
+            synthetic_glorys_files, out_dir=out_dir, **self._BUILD_KWARGS
+        )
+        doc = json.loads(ref.read_text())
+        meta = json.loads(doc["refs"]["thetao/.zarray"])
+        meta["filters"] = [{"id": "zlib", "level": 4}]
+        doc["refs"]["thetao/.zarray"] = json.dumps(meta)
+        ref.write_text(json.dumps(doc))
+
+        assert (
+            build_ref_for_files(
+                synthetic_glorys_files, out_dir=out_dir, **self._BUILD_KWARGS
+            )
+            == ref
+        )
+        rebuilt = json.loads(json.loads(ref.read_text())["refs"]["thetao/.zarray"])
+        assert rebuilt["filters"] is None
 
     def test_subchunk_swap_memoizes_and_real_dispatch_reads_it(
         self,

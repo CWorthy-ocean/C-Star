@@ -26,7 +26,10 @@ GLORYS
    each side, as a regional subset for the domain (``GLORYS_REGIONAL``) or
    the global fields (``GLORYS_GLOBAL``) depending on the blueprint.
    Multi-file GLORYS sources are read through a just-in-time reference index
-   by default (``cstar forge run --no-subchunk`` turns this off).
+   by default (``cstar forge run --no-subchunk`` turns this off). Compressed
+   GLORYS files can't use the index, so Forge reads them directly. To use a
+   GLORYS archive you already have, point the source at it (see `Your own
+   files`_) instead of copying it into the cache.
 SRTM15
    Bathymetry from Scripps, version pinned (for example ``SRTM15_V2.7``).
 UNIFIED_BGC
