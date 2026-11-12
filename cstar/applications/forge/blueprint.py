@@ -781,7 +781,10 @@ class SourceSpec(_Section):
     )
     """Which GLORYS files Forge stages: ``"regional"`` (daily files cut to this grid)
     or ``"global"`` (whole-globe daily files); the data are the same CMEMS product.
-    Only valid when ``name == "GLORYS"``; unset means regional.
+    Only valid when ``name == "GLORYS"``. Unset takes the layout of the blueprint's
+    first GLORYS source (initial conditions come before boundary), and regional when
+    that one is unset too: an unset source resolves through the ``resolved_datasets``
+    entry the first one recorded.
 
     This field and the other source-specific ones (``constants``, ``esper_method``,
     ``esper_equation``) are left out of saved blueprints while unset, so a source
