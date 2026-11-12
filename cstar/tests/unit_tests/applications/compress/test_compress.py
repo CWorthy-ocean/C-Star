@@ -3,8 +3,10 @@ compress blueprint, and `cstar run compress`.
 """
 
 import contextlib
+import logging
 import typing as t
-from concurrent.futures import Future
+from collections.abc import Iterable, Iterator
+from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -16,6 +18,7 @@ import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.compress import run as run_mod
+from cstar.applications.compress.app import CompressRunner
 from cstar.applications.compress.blueprint import (
     CompressBlueprint,
     FileTypeMatch,
@@ -28,13 +31,15 @@ from cstar.applications.compress.detect import (
 )
 from cstar.applications.compress.run import (
     ORIGINALS_DIR_NAME,
+    PARTIAL_SUFFIX,
     REPORT_NAME,
     FileJob,
     _compress_one,
     compress_run,
+    login_node_warning,
     settings_for,
 )
-from cstar.applications.core import ArtifactKind, get_application
+from cstar.applications.core import ArtifactKind, RunnerRequest, get_application
 from cstar.base.netcdf_compress import (
     ChunkSpec,
     Encoding,
@@ -44,6 +49,8 @@ from cstar.base.netcdf_compress import (
     verify_compressed,
 )
 from cstar.cli.run.compress import app
+from cstar.entrypoint.config import ServiceConfiguration
+from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import (
     Attempt,
     Product,
@@ -56,6 +63,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import Access, WorkplanRun
+from cstar.system.manager import OutsideSchedulerJob
 
 START: t.Final = datetime(2026, 1, 1, tzinfo=UTC)
 STEP: t.Final = "run"
@@ -431,7 +439,7 @@ class TestCompressRun:
         class SerialPool:
             """Runs each job on submit; the second job's worker 'dies'."""
 
-            def __init__(self, max_workers: int) -> None:
+            def __init__(self, max_workers: int, mp_context: t.Any = None) -> None:
                 self.n = 0
 
             def __enter__(self) -> "SerialPool":
@@ -730,3 +738,226 @@ class TestConsumedOutput:
     def test_ordinary_fields_stay_reducible(self, name: str) -> None:
         protected = get_application("ucla_roms").protected_variables()
         assert not matches_any(name, protected)
+
+
+class _InProcessPool:
+    """Runs each job on submit, in this process."""
+
+    def __init__(self, max_workers: int, mp_context: t.Any = None) -> None: ...
+
+    def __enter__(self) -> "_InProcessPool":
+        return self
+
+    def __exit__(self, *exc: object) -> None: ...
+
+    def submit(self, fn: t.Any, job: t.Any) -> Future[t.Any]:
+        future: Future[t.Any] = Future()
+        future.set_result(fn(job))
+        return future
+
+
+def _cdr_blueprint(
+    run_root: Path, glob: str = "output/output_cdr.*.nc"
+) -> CompressBlueprint:
+    return CompressBlueprint(
+        name="c",
+        description="c",
+        run=run_root,
+        file_types=[_settings("cdr", glob, compress=True)],
+    )
+
+
+class TestInterruptedRuns:
+    def test_workers_are_spawned(
+        self, run_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One start method on every platform and Python version."""
+        seen: list[dict[str, t.Any]] = []
+
+        def recording(**kwargs: t.Any) -> ProcessPoolExecutor:
+            seen.append(kwargs)
+            return ProcessPoolExecutor(**kwargs)
+
+        monkeypatch.setattr(run_mod, "ProcessPoolExecutor", recording)
+        compress_run(_cdr_blueprint(run_root))
+
+        assert seen[0]["mp_context"].get_start_method() == "spawn"
+
+    def test_each_file_is_recorded_as_it_finishes(
+        self, run_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The first file is on disk in the step record before the second outcome is taken."""
+        compressed_when_taken: list[int] = []
+
+        def watching(futures: Iterable[Future[t.Any]]) -> Iterator[Future[t.Any]]:
+            for future in futures:
+                record = read_step_record(run_root / STEP_DIR)
+                assert record is not None
+                compressed_when_taken.append(
+                    sum("compression" in p.metadata for p in record.products)
+                )
+                yield future
+
+        monkeypatch.setattr(run_mod, "ProcessPoolExecutor", _InProcessPool)
+        monkeypatch.setattr(run_mod, "as_completed", watching)
+        compress_run(_cdr_blueprint(run_root))
+
+        assert compressed_when_taken == [0, 1]
+
+    def test_a_failing_record_warns_once_and_the_run_goes_on(
+        self, run_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[int] = []
+
+        def broken(root: Path, run_id: str, outcomes: list[t.Any]) -> int:
+            calls.append(len(outcomes))
+            raise OSError("state directory is read-only")
+
+        warning = mock.Mock()
+        monkeypatch.setattr(run_mod, "ProcessPoolExecutor", _InProcessPool)
+        monkeypatch.setattr(run_mod, "as_completed", iter)
+        monkeypatch.setattr(run_mod, "_record", broken)
+        monkeypatch.setattr(run_mod.log, "warning", warning)
+
+        outcomes = compress_run(_cdr_blueprint(run_root))
+
+        assert [o.status for o in outcomes] == ["compressed", "compressed"]
+        # one failed attempt as the first file finished, then one at the end:
+        # a held lock costs its timeout twice, not once per file
+        assert calls == [1, 2]
+        assert (run_root / REPORT_NAME).is_file()
+        (message,) = (
+            c.args[0] for c in warning.call_args_list if "step records" in c.args[0]
+        )
+        assert "not updated for 2 file(s)" in message
+        assert "read-only" in message
+
+    def test_stray_partials_are_removed_at_start(self, run_root: Path) -> None:
+        """A killed run leaves `<file>.partial`; a rerun clears it."""
+        stray = (
+            run_root / STEP_DIR / f"output/output_rst.20140302000000.nc{PARTIAL_SUFFIX}"
+        )
+        stray.write_bytes(b"half a file")
+
+        compress_run(_cdr_blueprint(run_root))  # the restart is not compressed
+
+        assert not stray.exists()
+
+
+class TestCliWorkers:
+    def test_workers_for_a_local_run(self, run_root: Path) -> None:
+        result = invoke(str(run_root), "--yes", "--now", "--workers", "3", "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        assert "with 3 worker(s)" in result.output
+        (bp_path,) = (run_root / "compress").glob("B_*.yaml")
+        assert yaml.safe_load(bp_path.read_text())["workers"] == 3
+
+    def test_workers_are_the_jobs_cores(self, run_root: Path) -> None:
+        result = invoke(
+            str(run_root), "--yes", "--submit", "--workers", "4", "--dry-run"
+        )
+
+        assert result.exit_code == 0, result.output
+        (wp_path,) = (run_root / "compress").glob("W_*.yaml")
+        step = yaml.safe_load(wp_path.read_text())["steps"][0]
+        assert step["compute_overrides"]["slurm"]["num_cpus"] == 4
+
+    def test_workers_override_a_saved_blueprint(self, run_root: Path) -> None:
+        invoke(str(run_root), "--yes", "--now", "--workers", "8", "--dry-run")
+        (saved,) = (run_root / "compress").glob("B_*.yaml")
+        replay = invoke(
+            str(run_root),
+            "--blueprint",
+            str(saved),
+            "--now",
+            "--workers",
+            "2",
+            "--dry-run",
+        )
+
+        assert replay.exit_code == 0, replay.output
+        newest = max(
+            (run_root / "compress").glob("B_*.yaml"), key=lambda p: p.stat().st_mtime_ns
+        )
+        assert yaml.safe_load(newest.read_text())["workers"] == 2
+
+
+class TestLoginNodeWarning:
+    @pytest.mark.usefixtures("login_node")
+    def test_the_command_warns_before_the_estimate(self, run_root: Path) -> None:
+        result = invoke(str(run_root), "--yes", "--now")
+
+        assert result.exit_code == 0, result.output
+        assert "login node of fake_hpc" in result.output
+        assert "CSTAR_ALLOW_LOGIN_NODE_RUN" in result.output
+        assert result.output.index("login node") < result.output.index("Memory:")
+
+    def test_no_warning_where_a_login_node_is_allowed(self, run_root: Path) -> None:
+        """The autouse fixture sets `CSTAR_ALLOW_LOGIN_NODE_RUN=1`."""
+        result = invoke(str(run_root), "--yes", "--now")
+
+        assert result.exit_code == 0, result.output
+        assert "login node" not in result.output
+
+    @pytest.mark.usefixtures("login_node")
+    def test_no_warning_for_a_dry_run(self, run_root: Path) -> None:
+        result = invoke(str(run_root), "--yes", "--now", "--dry-run")
+
+        assert "login node" not in result.output
+
+    @pytest.mark.usefixtures("login_node")
+    def test_no_warning_when_nothing_is_selected(self, tmp_path: Path) -> None:
+        """A run of restarts only: `--yes` compresses nothing, so there is nothing to warn of."""
+        rst = "output/output_rst.20140302000000.nc"
+        root = _build_run(
+            tmp_path / "run",
+            {rst: RUN_FILES[rst]},
+            kinds={rst: ArtifactKind.restart.value},
+        )
+        result = invoke(str(root), "--yes", "--now")
+
+        assert result.exit_code == 0, result.output
+        assert "Nothing compressed." in result.output
+        assert "login node" not in result.output
+
+    def test_an_unrecognised_cluster_is_not_told_to_submit(self) -> None:
+        """C-Star cannot submit there, so the warning offers an allocation instead."""
+        where = OutsideSchedulerJob(system="generic", unsupported_scheduler="PBS")
+        message = login_node_warning(where, "submit it as a job (--submit)")
+
+        assert "PBS scheduler" in message
+        assert "--submit" not in message
+        assert "inside an allocation" in message
+
+    @pytest.mark.usefixtures("login_node")
+    async def test_the_runner_warns(
+        self, run_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        request: RunnerRequest[CompressBlueprint] = RunnerRequest(
+            "unused://blueprint", CompressBlueprint
+        )
+        request._bp = _cdr_blueprint(run_root)
+        runner = CompressRunner(
+            request,
+            ServiceConfiguration(
+                as_service=False,
+                loop_delay=0,
+                health_check_frequency=None,
+                log_level=logging.DEBUG,
+                health_check_log_threshold=10,
+                name="test_compress_runner",
+            ),
+        )
+        monkeypatch.setattr(
+            "cstar.applications.compress.app.compress_run", lambda bp: []
+        )
+        warning = mock.Mock()
+        monkeypatch.setattr(runner.log, "warning", warning)
+
+        await runner.run()
+
+        assert runner.state.status == ExecutionStatus.COMPLETED
+        message = warning.call_args.args[0]
+        assert "login node of fake_hpc" in message
+        assert "--submit" in message

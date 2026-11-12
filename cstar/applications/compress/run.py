@@ -3,10 +3,12 @@
 `compress_run` matches the run's data files to the blueprint's settings,
 compresses them in a process pool (each into `<name>.partial`, verified against
 its source before it replaces it), and records the new sizes in the run's step
-records. Whatever happens to one file, the outcomes gathered so far are always
+records, each file as it finishes, so a killed run leaves the files it finished
+recorded. Whatever happens to one file, the outcomes gathered so far are always
 recorded and reported.
 """
 
+import multiprocessing
 import os
 import typing as t
 from collections.abc import Iterator, Sequence
@@ -24,6 +26,7 @@ from cstar.applications.compress.detect import (
     FileTypeDetector,
 )
 from cstar.base.application_names import canonical_application
+from cstar.base.env import ENV_CSTAR_ALLOW_LOGIN_NODE_RUN
 from cstar.base.log import get_logger
 from cstar.base.netcdf_compress import (
     VERIFIED_RECORDS,
@@ -40,6 +43,9 @@ from cstar.orchestration.manifest import (
     read_run_manifest,
     update_products,
 )
+
+if t.TYPE_CHECKING:
+    from cstar.system.manager import OutsideSchedulerJob
 
 log = get_logger(__name__)
 
@@ -350,11 +356,63 @@ def _write_report(
     return path
 
 
+def login_node_warning(where: "OutsideSchedulerJob", submit_hint: str) -> str:
+    """The warning for compressing outside a scheduler job.
+
+    Parameters
+    ----------
+    where : OutsideSchedulerJob
+        Where the process runs (`outside_scheduler_job`).
+    submit_hint : str
+        How to submit the compression as a job from the caller's interface;
+        offered only on a system C-Star can submit to.
+    """
+    allocation = "run it inside an allocation (salloc, qsub -I)"
+    if where.certain:
+        place = f"on a login node of {where.system}"
+        remedy = f"{submit_hint}, {allocation}"
+    else:
+        place = (
+            f"outside a scheduler job on a machine with a {where.unsupported_scheduler} "
+            f"scheduler, which the system {where.system} cannot submit to"
+        )
+        remedy = allocation
+    return (
+        f"This compresses {place}. Login nodes may stop long or memory-heavy "
+        f"processes: {remedy}, or keep the session alive with tmux or screen "
+        f"(closing the SSH session stops it). Set {ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 "
+        "to silence this warning."
+    )
+
+
+def _remove_partials(files: Sequence[DataFile]) -> int:
+    """Remove the `.partial` files an interrupted run left next to its data files.
+
+    One stat per listed file, no directory walk. Two compress runs of the same
+    run at once would remove each other's in-progress copies (that file then
+    fails verification and keeps its original).
+
+    Returns
+    -------
+    int
+        The number of files removed.
+    """
+    removed = 0
+    for f in files:
+        partial = f.path.with_name(f.path.name + PARTIAL_SUFFIX)
+        if partial.is_file():
+            partial.unlink()
+            removed += 1
+    return removed
+
+
 def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
     """Compress the data files of a run as the blueprint says.
 
-    The step records and the report cover every file whose outcome is known,
-    even when the pool is interrupted part way.
+    Each file is recorded in the step records as it finishes, and the report
+    covers every file whose outcome is known, even when the pool is interrupted
+    part way. Unfinished `.partial` files an earlier interrupted run left are
+    removed first.
 
     Parameters
     ----------
@@ -374,6 +432,10 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
     fold_step_records(manifest, root)
 
     files = run_data_files(root, manifest, FileTypeDetector())
+    if n := _remove_partials(files):
+        log.info(
+            f"Removed {n} unfinished {PARTIAL_SUFFIX} file(s) left by an interrupted run"
+        )
     jobs, unmatched = plan_jobs(blueprint, files)
     for f in unmatched:
         log.warning(
@@ -382,8 +444,25 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
     log.info(f"Compressing {len(jobs)} file(s) with {blueprint.workers} worker(s)")
 
     outcomes: list[FileOutcome] = []
+    unrecorded: list[FileOutcome] = []
+    record_error: Exception | None = None
+
+    def record() -> Exception | None:
+        """Record the finished files not yet recorded; the error if that fails."""
+        try:
+            _record(root, manifest.run_id, unrecorded)
+        except Exception as ex:
+            return ex
+        unrecorded.clear()
+        return None
+
     try:
-        with ProcessPoolExecutor(max_workers=blueprint.workers) as pool:
+        # one start method everywhere: Linux forks on Python 3.12/3.13 and uses
+        # forkserver on 3.14, macOS spawns, and spawn is the one the tests run
+        with ProcessPoolExecutor(
+            max_workers=blueprint.workers,
+            mp_context=multiprocessing.get_context("spawn"),
+        ) as pool:
             # results are taken as they finish, so a broken pool loses none
             futures = [pool.submit(_compress_one, job) for job in jobs]
             for future in as_completed(futures):
@@ -394,18 +473,24 @@ def compress_run(blueprint: CompressBlueprint) -> list[FileOutcome]:
                         f"{outcome.step}/{outcome.relative_path}: "
                         f"{outcome.size_before:,} -> {outcome.size_after:,} bytes"
                     )
+                    unrecorded.append(outcome)
+                    # after one failure (a held lock costs its full timeout each
+                    # time) the rest wait for the single attempt at the end
+                    if record_error is None and (record_error := record()):
+                        log.debug(
+                            f"Recording files as they finish failed ({record_error}); "
+                            "the rest are recorded at the end"
+                        )
                 else:
                     log.error(
                         f"{outcome.step}/{outcome.relative_path} kept: {outcome.problems}"
                     )
     finally:
         # record-keeping never stops the run, nor the report of what happened
-        try:
-            if outcomes:
-                _record(root, manifest.run_id, outcomes)
-        except Exception as ex:
+        if unrecorded and (error := record()):
             log.warning(
-                f"The step records of {manifest.run_id!r} were not updated: {ex}"
+                f"The step records of {manifest.run_id!r} were not updated for "
+                f"{len(unrecorded)} file(s): {error}"
             )
         report = _write_report(root, outcomes, unmatched)
         log.info(f"Wrote {report}")

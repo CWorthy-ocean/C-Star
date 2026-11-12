@@ -96,7 +96,16 @@ Compressing terabytes takes hours. With ``--submit`` the command also asks for
 the job's cores (files compressed at once), walltime, queue and account, writes
 a one-step workplan ``W_compress_<run-id>_<time>.yaml`` carrying them in the
 step's ``compute_overrides``, and submits it with ``cstar workplan submit``.
-``--now`` compresses in the current process instead.
+``--now`` compresses in the current process instead. ``--workers N`` sets the
+number of files compressed at once (the job's cores with ``--submit``) without
+the question, and overrides ``--yes``'s default of 1 and a reused blueprint's
+saved value.
+
+Compressing here on a login node, or on a machine with a scheduler C-Star cannot
+submit to, prints a warning before it asks how many files to compress at once:
+login nodes may stop long or memory-heavy processes, so submit a job, or keep
+the session alive with ``tmux`` or ``screen``. ``cstar blueprint run`` of a compress blueprint logs the same
+warning. ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` silences it.
 
 Each file is written to ``<name>.partial`` and compared with its original on
 the first and last record of each variable (exact variables bit for bit,
@@ -106,3 +115,11 @@ only then renamed over the original. A file that fails the check is left as it
 was. The run's step records get each file's new size, and a ``compression``
 note, and ``<run>/compress-report.yaml`` lists every file. Running the command
 again skips files that are already compressed.
+
+If a run is interrupted, no original is lost: a file is only replaced by a
+verified copy, and each file's step record is written as soon as it finishes.
+Running the command again removes any leftover ``.partial`` files and skips the
+files already compressed. One case is not covered: if only the parent process is
+killed while workers are mid-file, a file a worker finishes afterwards is not
+recorded, and ``cstar run check`` reports its size until you fix the record by
+hand.

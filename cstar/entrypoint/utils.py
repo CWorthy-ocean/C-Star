@@ -88,6 +88,12 @@ ARG_NOW: t.Final[str] = "--now"
 ARG_NOW_HELP: t.Final[str] = (
     "Compress here, in this process, instead of submitting a job."
 )
+ARG_WORKERS: t.Final[str] = "--workers"
+ARG_WORKERS_HELP: t.Final[str] = (
+    "Files compressed at once, one worker process each; with --submit, the job's "
+    "cores. Overrides the question, --yes's default of 1, and a reused "
+    "blueprint's saved value."
+)
 
 ARG_OWN: t.Final[str] = "--own"
 ARG_OWN_HELP: t.Final[str] = (

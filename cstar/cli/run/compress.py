@@ -29,6 +29,7 @@ from cstar.applications.compress.detect import FileType, FileTypeDetector
 from cstar.applications.compress.run import (
     compress_run,
     default_settings,
+    login_node_warning,
     run_data_files,
     settings_for,
 )
@@ -47,6 +48,8 @@ from cstar.entrypoint.utils import (
     ARG_NOW_HELP,
     ARG_SUBMIT,
     ARG_SUBMIT_HELP,
+    ARG_WORKERS,
+    ARG_WORKERS_HELP,
     ARG_YES,
 )
 from cstar.orchestration.manifest import fold_step_records, read_run_manifest
@@ -55,6 +58,7 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import WorkplanRun, require_writable
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.roms.outputs import OUTPUT_STREAMS
+from cstar.system.manager import get_sysmgr, outside_scheduler_job
 
 app = typer.Typer()
 
@@ -249,23 +253,38 @@ def _memory_line(per_worker: int, workers: int) -> str:
     return line
 
 
-def _job_settings(total_bytes: int, per_worker: int, yes: bool) -> dict[str, t.Any]:
-    """Ask for the SLURM resources of a submitted job; returns `compute_overrides.slurm`."""
+def _compress_seconds(total_bytes: int, workers: int) -> float:
+    """The estimated time to compress `total_bytes` with `workers` workers."""
+    return total_bytes / (max(1, workers) * _THROUGHPUT_BYTES_PER_S)
+
+
+def _duration(seconds: float) -> str:
+    """Format a duration: minutes under an hour, else hours with one decimal."""
+    if seconds < 3600:
+        return f"{max(1, math.ceil(seconds / 60))} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+def _job_settings(
+    total_bytes: int, per_worker: int, yes: bool, cpus: int | None
+) -> dict[str, t.Any]:
+    """Ask for the SLURM resources of a submitted job; returns `compute_overrides.slurm`.
+
+    `cpus` skips the question about the cores.
+    """
     typer.echo(
         f"  Each worker compresses one file at a time and needs about {_human(per_worker)}."
     )
-    cpus = (
-        DEFAULT_CORES
-        if yes
-        else typer.prompt(
-            "  Cores (files compressed at once)", default=DEFAULT_CORES, type=int
+    if cpus is None:
+        cpus = (
+            DEFAULT_CORES
+            if yes
+            else typer.prompt(
+                "  Cores (files compressed at once)", default=DEFAULT_CORES, type=int
+            )
         )
-    )
     typer.echo(_memory_line(per_worker, max(1, cpus)))
-    hours = max(
-        1,
-        math.ceil(1.5 * total_bytes / (max(1, cpus) * _THROUGHPUT_BYTES_PER_S) / 3600),
-    )
+    hours = max(1, math.ceil(1.5 * _compress_seconds(total_bytes, cpus) / 3600))
     walltime = f"{hours:02d}:00:00"
     if not yes:
         walltime = typer.prompt("  Walltime (HH:MM:SS)", default=walltime)
@@ -327,6 +346,9 @@ def compress(
     submit: t.Annotated[bool, typer.Option(ARG_SUBMIT, help=ARG_SUBMIT_HELP)] = False,
     now: t.Annotated[bool, typer.Option(ARG_NOW, help=ARG_NOW_HELP)] = False,
     yes: t.Annotated[bool, typer.Option(ARG_YES, help="Accept every default.")] = False,
+    workers: t.Annotated[
+        int | None, typer.Option(ARG_WORKERS, help=ARG_WORKERS_HELP, min=1)
+    ] = None,
     dry_run: t.Annotated[
         bool, typer.Option(ARG_DRY_RUN, help=ARG_DRY_RUN_HELP)
     ] = False,
@@ -396,20 +418,34 @@ def compress(
     if not submit and not now:
         has_slurm = shutil.which("sbatch") is not None
         submit = _yn("Submit as a SLURM job?", has_slurm, yes) if has_slurm else False
-    slurm = _job_settings(total, per_worker, yes) if submit else {}
-    workers = int(slurm.get("num_cpus", 0))
-    if not workers:
-        if saved is not None:
-            workers = saved.workers
+    slurm = _job_settings(total, per_worker, yes, workers) if submit else {}
+    n_workers = int(slurm.get("num_cpus", 0))
+    if not n_workers:
+        if (
+            chosen
+            and not submit
+            and not dry_run
+            and (where := outside_scheduler_job(get_sysmgr()))
+        ):
+            hint = f"submit it as a job ({ARG_SUBMIT})"
+            typer.echo("  Warning: " + login_node_warning(where, hint))
+        if workers is not None:
+            n_workers = workers
+        elif saved is not None:
+            n_workers = saved.workers
         elif yes:
-            workers = 1
+            n_workers = 1
         else:
             typer.echo(
                 f"  Each worker compresses one file at a time and needs about {_human(per_worker)}."
             )
-            workers = typer.prompt("  Files to compress at once", default=1, type=int)
+            n_workers = typer.prompt("  Files to compress at once", default=1, type=int)
         if not submit:
-            typer.echo(_memory_line(per_worker, max(1, workers)))
+            typer.echo(_memory_line(per_worker, max(1, n_workers)))
+            typer.echo(
+                f"  Time: about {_duration(_compress_seconds(total, n_workers))} "
+                f"with {n_workers} worker(s)"
+            )
 
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
     name = f"compress_{manifest.run_id}_{stamp}"
@@ -419,7 +455,7 @@ def compress(
         run=root,
         file_types=settings,
         originals=originals,
-        workers=workers,
+        workers=n_workers,
         working_dir=root / COMPRESS_DIR_NAME / name,
     )
     # every setting written out, defaults included: the file is the record of the answers

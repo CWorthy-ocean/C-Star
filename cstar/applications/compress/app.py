@@ -9,14 +9,16 @@ step's ``compute_overrides``. See `cstar.applications.compress.run`.
 import typing as t
 
 from cstar.applications.compress.blueprint import APP_NAME, CompressBlueprint
-from cstar.applications.compress.run import compress_run
+from cstar.applications.compress.run import compress_run, login_node_warning
 from cstar.applications.core import (
     ApplicationDefinition,
     RunnerResult,
     register_application,
 )
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.entrypoint.utils import ARG_BLUEPRINT, ARG_SUBMIT
 from cstar.execution.handler import ExecutionStatus
+from cstar.system.manager import get_sysmgr, outside_scheduler_job
 
 __all__ = ["APP_NAME", "CompressApplication", "CompressBlueprint", "CompressRunner"]
 
@@ -36,6 +38,12 @@ class CompressRunner(BlueprintRunner[CompressBlueprint]):
         RunnerResult
             The result of the blueprint processing.
         """
+        if where := outside_scheduler_job(get_sysmgr()):
+            hint = (
+                f"submit it with 'cstar run compress {self.blueprint.run} "
+                f"{ARG_BLUEPRINT} <this blueprint> {ARG_SUBMIT}'"
+            )
+            self.log.warning(login_node_warning(where, hint))
         outcomes = compress_run(self.blueprint)
         failed = any(o.status == "failed" for o in outcomes)
         self.add_state(ExecutionStatus.FAILED if failed else ExecutionStatus.COMPLETED)
