@@ -8311,26 +8311,84 @@ class TestForgeBlueprintWizard:
         assert cfg2.forcing.initial_conditions is not None
         assert cfg2.forcing.initial_conditions.source.name == "GLORYS"
 
-    def test_parent_toggle_off_restores_ic_default(self):
+    def test_parent_toggle_off_restores_ic_and_boundary_bgc_defaults(self):
         """Enabling then disabling the parent checkbox must not strand the user
-        on the resolver's non-child hard error: disabling restores IC to the
-        default source when it's still at the "(none)" default the enable-
-        toggle applied.
+        on the resolver's non-child errors: disabling restores IC to the default
+        source and the boundary BGC rows to the selected ForcingSpec's, both of
+        which the enable-toggle cleared.
         """
         w = self._wizard()
+        boundary_bgc = w.config.forcing.boundary.bgc_sources
+        assert boundary_bgc  # sanity: the default MARBL forcing carries some
         w.parent_enable.value = True
         assert w._forcing_editor.ic_name.value == "(none)"
+        assert w._forcing_editor._rows["boundary_bgc"] == []
         assert w.config.forcing.initial_conditions is None
 
         w.parent_enable.value = False
         assert w._forcing_editor.ic_name.value == "GLORYS"
-        # IC is back, so the resolver is no longer stuck on the non-child IC error.
-        # Enabling the parent also cleared the boundary BGC rows, and disabling it
-        # does not bring them back, so under the default MARBL model the resolver
-        # now stops on the boundary alone (not the IC), shown live like any other.
-        assert w.config is None
-        assert "forcing.boundary has no BGC sources" in w.derived.value
-        assert "initial_conditions" not in w.derived.value.split("ucla-roms")[0]
+        cfg = w.config
+        assert cfg is not None, w.derived.value
+        assert cfg.domain.is_child is False
+        assert cfg.forcing.initial_conditions is not None
+        assert cfg.forcing.boundary.bgc_sources == boundary_bgc
+        # back to exactly what the ForcingSpec pick seeded
+        assert cfg.composition.forcing.modified is False
+
+    def test_parent_toggle_off_keeps_hand_added_boundary_bgc_rows(self):
+        """A boundary BGC row the user re-added while parented survives turning
+        the parent off; the ForcingSpec's rows are not put back over it.
+        """
+        w = self._wizard()
+        w.parent_enable.value = True
+        w._forcing_editor._add("boundary_bgc")
+        row = w._forcing_editor._rows["boundary_bgc"][0]
+        row["name"].value = "GLODAP"
+
+        w.parent_enable.value = False
+        rows = w._forcing_editor._rows["boundary_bgc"]
+        assert len(rows) == 1 and rows[0] is row
+        assert row["name"].value == "GLODAP"
+
+    def test_parent_toggle_off_restores_the_spec_picked_while_parented(self):
+        """The restore reads the ForcingSpec selected now, not the seed snapshot,
+        which a pick made while parented takes after the boundary rows are cleared.
+        """
+        w = self._wizard()
+        if "glorys-era5-glodap-woa" not in w._dd_values(w.forcing_dd):
+            pytest.skip("glorys-era5-glodap-woa ForcingSpec not in catalog")
+        w.parent_enable.value = True
+        w.forcing_dd.value = "glorys-era5-glodap-woa"
+        assert w._forcing_editor._rows["boundary_bgc"] == []
+
+        w.parent_enable.value = False
+        spec = w.catalog.forcing_data("glorys-era5-glodap-woa")
+        names = [
+            s["source"]["name"] for s in spec["forcing"]["boundary"]["bgc_sources"]
+        ]
+        cfg = w.config
+        assert cfg is not None, w.derived.value
+        assert [s.source.name for s in cfg.forcing.boundary.bgc_sources] == names
+
+    def test_picking_a_parentless_domain_restores_non_child_defaults(self):
+        """Picking a DomainSpec without a parent turns the parent off while the
+        wizard is suspended, so _on_parent_toggle never runs; _on_domain restores
+        the IC default and boundary BGC rows itself.
+        """
+        w = self._wizard()
+        if "gulf-guinea-toy" not in w._dd_values(w.domain_dd):
+            pytest.skip("gulf-guinea-toy domain not in catalog")
+        boundary_bgc = w.config.forcing.boundary.bgc_sources
+        w.parent_enable.value = True
+        assert w.config.forcing.initial_conditions is None
+
+        w.domain_dd.value = "gulf-guinea-toy"  # carries no grid_kwargs_parent
+        assert w.parent_enable.value is False
+        cfg = w.config
+        assert cfg is not None, w.derived.value
+        assert cfg.domain.is_child is False
+        assert cfg.forcing.initial_conditions is not None
+        assert cfg.forcing.boundary.bgc_sources == boundary_bgc
 
     def test_physics_only_forcing_on_the_default_model_shows_the_bgc_inputs_error(
         self,
