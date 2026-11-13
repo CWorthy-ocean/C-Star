@@ -178,6 +178,13 @@ class CoarseGridMode(StrEnum):
     NEVER = "never"  # always use the full-resolution source
 
 
+class BlendProfile(StrEnum):
+    """Accepted values for roms-tools' ``blend_surface_forcing(blend_profile=...)``."""
+
+    SMOOTHSTEP = "smoothstep"  # zero slope at both ends of the feathered band
+    LINEAR = "linear"  # constant slope across the band
+
+
 class RestoringForce(StrEnum):
     """Variables accepted in ``SurfaceForcing.restoring_forces``."""
 
@@ -255,6 +262,14 @@ class PhysicsSurfaceSource(StrEnum):
     """Source names accepted by SurfaceForcing when type='physics'."""
 
     ERA5 = "ERA5"
+    CONUS404 = "CONUS404"  # regional (contiguous US), streamed; curvilinear grid
+
+
+# These sources cover only part of the globe, so their product is NaN outside the
+# source's footprint, and they can't be a blend fallback.
+REGIONAL_PHYSICS_SURFACE_SOURCES: frozenset[str] = frozenset(
+    {PhysicsSurfaceSource.CONUS404.value}
+)
 
 
 class BgcSurfaceSource(StrEnum):
@@ -901,6 +916,65 @@ _OPTIONS_HELP = (
 )
 
 
+class SurfaceBlendFallback(_Section):
+    """The global product a blended surface item layers its regional primary over."""
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, use_attribute_docstrings=True
+    )
+
+    source: SourceSpec
+    """Fallback source (a global one such as ``ERA5``); a bare name string is accepted."""
+    correct_radiation: bool = Field(default=False)
+    """Apply the ERA5 radiation correction to the fallback product."""
+    options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
+    """Raw roms-tools kwargs for the fallback, merged like the item's ``options``."""
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _bare_source_name(cls, v: Any) -> Any:
+        return {"name": v} if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _source_is_global(self) -> SurfaceBlendFallback:
+        if self.source.name.upper() in REGIONAL_PHYSICS_SURFACE_SOURCES:
+            raise ValueError(
+                f"blend fallback source {self.source.name!r} is regional; the "
+                "fallback fills every point the primary misses, so it must be a "
+                "global source such as ERA5"
+            )
+        return self
+
+
+# Item fields the blend fallback is built with; the rest (source,
+# correct_radiation, the regrid knobs, options) belong to each product.
+BLEND_FALLBACK_INHERITED_FIELDS: tuple[str, ...] = (
+    "type",
+    "coarse_grid_mode",
+    "wind_dropoff",
+)
+
+
+class SurfaceBlend(_Section):
+    """Layer a regional surface product over a global one (roms-tools'
+    ``blend_surface_forcing``).
+
+    The fallback is built with the item's ``BLEND_FALLBACK_INHERITED_FIELDS``,
+    dates and grid; every other setting belongs to the product it is declared on.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, use_attribute_docstrings=True
+    )
+
+    fallback: SurfaceBlendFallback
+    """The global product that fills every point outside the primary's footprint."""
+    width_km: float = Field(default=0.0, ge=0)
+    """Width of the feathered band inside the primary's footprint; 0 is a hard edge."""
+    profile: BlendProfile = Field(default=BlendProfile.SMOOTHSTEP)
+    """Shape of the transition across the band."""
+
+
 class SurfaceForcingItem(_Section):
     source: SourceSpec
     type: SurfaceType = SurfaceType.PHYSICS
@@ -916,6 +990,36 @@ class SurfaceForcingItem(_Section):
     )
     extrap_kwargs: dict[str, Any] | None = None
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
+    blend: SurfaceBlend | None = Field(default=None, exclude_if=lambda v: v is None)
+    """Layer this item's product (the primary) over a fallback source; physics only.
+    Left out of saved blueprints, the content hash and the roms-tools call while
+    unset."""
+
+    @model_validator(mode="after")
+    def _blend_and_regional_source_rules(self) -> SurfaceForcingItem:
+        if self.blend is not None and self.type != SurfaceType.PHYSICS:
+            raise ValueError(
+                f"blend is only valid for type physics (got type {self.type.value})"
+            )
+        if self.source.name.upper() not in REGIONAL_PHYSICS_SURFACE_SOURCES:
+            return self
+        name = self.source.name
+        problems = []
+        if self.correct_radiation:
+            problems.append(
+                f"correct_radiation cannot be applied to {name} (the correction is "
+                "ERA5-specific); set correct_radiation: false"
+            )
+        if self.source.climatology:
+            problems.append(f"{name} has no climatology; set source.climatology: false")
+        if self.regrid_method == RegridMethod.SCIPY:
+            problems.append(
+                f"{name} is on a curvilinear grid and needs xESMF; set regrid_method "
+                "to xesmf or leave it unset"
+            )
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
 
 
 class TidalForcingItem(_Section):
@@ -1334,9 +1438,29 @@ class Forcing(_Section):
     # theirs separately) is recorded under its dataset key, e.g. GLORYS_GLOBAL.
     resolved_datasets: dict[str, ResolvedDataset] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _blend_needs_one_pinned_coarse_mode(self) -> Forcing:
+        if all(item.blend is None for item in self.surface):
+            return self
+        modes = {item.coarse_grid_mode for item in self.surface}
+        if len(modes) == 1 and CoarseGridMode.AUTO not in modes:
+            return self
+        listed = ", ".join(
+            f"surface[{i}] ({item.type.value}) {item.coarse_grid_mode.value}"
+            for i, item in enumerate(self.surface)
+        )
+        raise ValueError(
+            "a surface blend needs both products on the same grid, and every "
+            "surface file in a run shares one coarse/fine setting, while "
+            "coarse_grid_mode auto picks per source (CONUS404 resolves fine, "
+            "ERA5 and BGC climatologies coarse); give every surface item the same "
+            f"coarse_grid_mode, never or always (now: {listed})"
+        )
+
     def labelled_sources(self) -> Iterator[tuple[str, SourceSpec]]:
         """Every ``SourceSpec`` in the sections, with where it sits (e.g.
         ``"boundary.bgc_sources[1]"``), in the order the resolver notes them.
+        A blended surface item's fallback source follows the item's own.
         A river item's ``bgc_source``/``surface_forcing_source`` are plain dicts,
         not ``SourceSpec``s, and are not included.
         """
@@ -1349,11 +1473,11 @@ class Forcing(_Section):
             yield label, section.source
             for i, item in enumerate(section.bgc_sources):
                 yield f"{label}.bgc_sources[{i}]", item.source
-        for label, items in (
-            ("surface", self.surface),
-            ("tidal", self.tidal),
-            ("river", self.river),
-        ):
+        for i, surface in enumerate(self.surface):
+            yield f"surface[{i}]", surface.source
+            if surface.blend is not None:
+                yield f"surface[{i}].blend.fallback", surface.blend.fallback.source
+        for label, items in (("tidal", self.tidal), ("river", self.river)):
             for i, item in enumerate(items):
                 yield f"{label}[{i}]", item.source
 

@@ -745,6 +745,15 @@ def _prepare_era5(self: SourceDatasets) -> None:
     )
 
 
+@register_dataset("CONUS404")
+def _prepare_conus404(self: SourceDatasets) -> None:
+    """No-op handler for CONUS404, streamed from S3 by roms-tools like ERA5."""
+    logger.info(
+        "CONUS404 is a streamable source (read directly by roms-tools at run time); "
+        "no local file is staged by Forge."
+    )
+
+
 # ---------------------------
 # TPXO handler (user-provided dataset)
 # ---------------------------

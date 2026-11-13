@@ -48,6 +48,7 @@ from cstar.applications.forge import runtime as forge_run
 from cstar.applications.forge.app import ForgeApplication, ForgeRunner, input_products
 from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
+    SurfaceForcingItem,
     emitted_blueprint_description,
     producer_ref,
 )
@@ -511,6 +512,41 @@ class TestForgeExecutorProperties:
         detail = RomsInputGenerator._forcing_detail_suffix("bgc", source_name, use_vars)
         if expected_detail is not None:
             assert detail == expected_detail
+
+        planned = builder._planned_netcdf_outputs()
+
+        expected = builder.input_data_dir / netcdf_basename(
+            builder.name, f"surface-{detail}"
+        )
+        assert expected.resolve() in planned
+
+    @pytest.mark.parametrize("as_model", [False, True])
+    def test_planned_blended_surface_name_matches_the_generator(
+        self, minimal_cstar_spec_builder_args, as_model
+    ):
+        """A blended surface item is planned as ``surface-physics-{primary}-
+        {fallback}``, whether the entry is a kwargs dict or a model.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        entry: Any = {
+            "type": "physics",
+            "source": {"name": "CONUS404"},
+            "blend": {"fallback": {"source": {"name": "ERA5"}}},
+        }
+        if as_model:
+            entry = SurfaceForcingItem.model_validate(
+                {
+                    "type": "physics",
+                    "source": {"name": "CONUS404"},
+                    "coarse_grid_mode": "never",
+                    "blend": {"fallback": {"source": {"name": "ERA5"}}},
+                }
+            )
+        builder.forcing_override = {"forcing": {"surface": [entry]}}
+        detail = RomsInputGenerator._forcing_detail_suffix(
+            "physics", "CONUS404", blend_fallback_name="ERA5"
+        )
+        assert detail == "physics-conus404-era5"
 
         planned = builder._planned_netcdf_outputs()
 

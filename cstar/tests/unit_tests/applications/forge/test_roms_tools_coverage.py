@@ -273,6 +273,8 @@ def test_bgc_marbl_process_bgc_fields_params_are_data_inputs():
 _ITEM_MODEL_PAIRS = [
     ("InitialConditionsInput", "InitialConditions"),
     ("SurfaceForcingItem", "SurfaceForcingItem"),
+    ("SurfaceBlend", "SurfaceBlend"),
+    ("SurfaceBlendFallback", "SurfaceBlendFallback"),
     ("BoundaryForcing", "BoundaryForcing"),
     ("TidalForcingItem", "TidalForcingItem"),
     ("RiverForcingItem", "RiverForcingItem"),

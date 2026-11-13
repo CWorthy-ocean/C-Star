@@ -97,6 +97,7 @@ GLOFAS_FILENAME = "glofas_v4_rivers_daily_w_rivr2o.nc"
 # --- logical source-name -> dataset key --------------------------------------
 SOURCE_ALIAS: dict[str, str] = {
     "ERA5": "ERA5",
+    "CONUS404": "CONUS404",
     # GLORYS defaults to regional when only the logical name is known
     # (see SourceSpec.glorys_layout / resolve_dataset_key).
     "GLORYS": "GLORYS_REGIONAL",
@@ -133,7 +134,7 @@ ROMS_TOOLS_SOURCE_NAME: dict[str, str] = {"WOA_BGC": "WOA"}
 # auto-downloads its own file (river_tracer_defaults.nc) at generation time, so
 # Forge must never try to resolve/verify a staged path for it (there is no
 # @register_dataset("CONSTANTS") handler and none is needed).
-STREAMABLE_SOURCES = ["ERA5", "DAI", "CONSTANTS"]
+STREAMABLE_SOURCES = ["ERA5", "CONUS404", "DAI", "CONSTANTS"]
 
 # Recognized dataset keys that Forge does NOT stage locally — they have no SourceDatasets
 # handler because something else provides them:
@@ -175,6 +176,7 @@ DATASET_METADATA: dict[str, dict[str, str]] = {
     "TPXO": {},
     "ETOPO5": {},
     "ERA5": {},
+    "CONUS404": {},
     "DAI": {},
     "GLOFAS": {"url": GLOFAS_CDS_URL},
     "EMOD": {},  # user-staged (EMODnet has no canonical download URL Forge can pin)

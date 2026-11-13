@@ -52,7 +52,7 @@ Staged
    WOA_BGC, WOA_SALINITY, MBL_CO2) or checked for user-provided files (TPXO, WOA, GLODAP,
    GLOFAS, RIVR2O, EMOD).
 Streamable
-   ``STREAMABLE_SOURCES`` (ERA5, DAI, the default river CONSTANTS): read by
+   ``STREAMABLE_SOURCES`` (ERA5, CONUS404, DAI, the default river CONSTANTS): read by
    ROMS-Tools at generation time and skipped by ``prepare_all()``.
 Unstaged
    ``UNSTAGED_DATASETS`` (ETOPO5, DAI): recognized names with no handler, because

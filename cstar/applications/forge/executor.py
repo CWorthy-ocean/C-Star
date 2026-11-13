@@ -870,6 +870,9 @@ class ForgeExecutor(BaseModel):
                             forcing_type,
                             generator.item_source_name(entry),
                             generator.item_use_vars(entry),
+                            blend_fallback_name=generator.item_blend_fallback_name(
+                                entry
+                            ),
                         )
                         _add_nc(f"{category}-{detail}" if detail else category)
                     continue

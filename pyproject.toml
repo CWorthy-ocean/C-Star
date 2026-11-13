@@ -61,6 +61,9 @@ dependencies = [
     "threadpoolctl",
     "numba",
     "fsspec",
+    # streams the CONUS404 surface source from its S3 store (roms-tools reads it
+    # through fsspec; s3fs is the S3 backend)
+    "s3fs",
     "kerchunk",
     "ujson",
     "fastparquet",

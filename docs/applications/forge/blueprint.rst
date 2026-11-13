@@ -86,6 +86,41 @@ The bundled toy domain used in the :doc:`blueprint tutorial
 
 :download:`Download the full file <forge-blueprint-example.wio-toy.yaml>`.
 
+.. _forge-regional-surface-forcing:
+
+Regional surface forcing
+------------------------
+
+CONUS404 is a 4 km atmospheric reanalysis that covers North America and
+its coastal ocean. Over a domain it covers completely, use it like ERA5. Over
+a domain it covers only in part, give the surface item a ``blend``: grid
+points inside CONUS404's footprint take its values, and the rest come from a
+global product.
+
+.. code-block:: yaml
+
+   forcing:
+     surface:
+       - type: physics
+         source: {name: CONUS404}
+         correct_radiation: false
+         coarse_grid_mode: never
+         blend:
+           fallback:
+             source: {name: ERA5}
+             correct_radiation: true
+           width_km: 150
+           profile: smoothstep
+
+``width_km`` is a band just inside the footprint's edge over which the two
+products are averaged, with a ``smoothstep`` or ``linear`` profile; ``0``,
+the default, switches from one to the other at the edge. The fallback is
+built on the same grid as CONUS404, so when any surface item has a blend,
+every surface item must set the same ``coarse_grid_mode``, ``never`` or
+``always``.
+If you leave out the blend and the grid reaches past the footprint, Forge
+stops and asks for one.
+
 Checking validity
 -----------------
 
