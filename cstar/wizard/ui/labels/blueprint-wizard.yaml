@@ -605,6 +605,15 @@ fields:
     label: Coastal wind drop-off
   forcing.row.coarse_grid_mode:
     label: Coarse grid
+  forcing.row.blend_fallback:
+    label: Fallback source
+  forcing.row.blend_fallback_correct_radiation:
+    label: Correct fallback radiation
+  forcing.row.blend_width_km:
+    label: Blend width
+    unit: km
+  forcing.row.blend_profile:
+    label: Blend profile
   forcing.row.restoring_forces:
     label: Restore variables
   forcing.row.use_vars:

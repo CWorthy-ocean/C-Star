@@ -40,11 +40,13 @@ from pydantic import BaseModel
 
 from cstar.applications.forge.blueprint import (
     DEFAULT_APPLICATION,
+    REGIONAL_PHYSICS_SURFACE_SOURCES,
     BgcBoundarySource,
     BgcInitialConditionsSource,
     BgcInterpMethod,
     BgcSourceItem,
     BgcSurfaceSource,
+    BlendProfile,
     BoundaryForcing,
     CarbonateSensitivitySpec,
     CdrSpec,
@@ -67,6 +69,8 @@ from cstar.applications.forge.blueprint import (
     RiverTemperatureSource,
     SourceSpec,
     SpecRef,
+    SurfaceBlend,
+    SurfaceBlendFallback,
     SurfaceForcingItem,
     SurfaceType,
     TidalForcingItem,
@@ -417,6 +421,26 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     ): "'auto' — interpolate onto a factor-2 coarsened grid only when roms-tools detects "
     "the source is coarser than the ROMS grid (default). 'always' — always coarsen. "
     "'never' — always use the full-resolution source.",
+    (
+        "surface",
+        "blend_fallback",
+    ): "Global product that fills every grid point the regional source does not cover. "
+    "'none' uses the regional source alone, which needs it to cover the whole domain.",
+    (
+        "surface",
+        "blend_fallback_correct_radiation",
+    ): "Apply the shortwave and longwave radiation corrections to the fallback product. "
+    "The regional source takes none.",
+    (
+        "surface",
+        "blend_width_km",
+    ): "Width of the band, just inside the regional source's edge, over which the two "
+    "products are averaged; 0 switches at the edge.",
+    (
+        "surface",
+        "blend_profile",
+    ): "How the weight moves from the regional source to the fallback across the band: "
+    "'smoothstep' eases in and out, 'linear' changes at a constant rate.",
     (
         "surface",
         "restoring_forces",
@@ -2263,6 +2287,17 @@ class _SettingsEditor:
 # Dropdown option lists derived from the enums so the wizard and schema stay in sync.
 _SURFACE_TYPES = [e.value for e in SurfaceType]
 _COARSE_MODES = [e.value for e in CoarseGridMode]
+_BLEND_PROFILES = [e.value for e in BlendProfile]
+# A blend's fallback is a global physics source; "" = no blend (the row stands alone).
+_BLEND_NONE = ""
+_BLEND_FALLBACK_OPTS: list[tuple[str, str]] = [
+    ("none", _BLEND_NONE),
+    *(
+        (e.value, e.value)
+        for e in PhysicsSurfaceSource
+        if e.value not in REGIONAL_PHYSICS_SURFACE_SOURCES
+    ),
+]
 _BGC_INTERP_METHODS = [e.value for e in BgcInterpMethod]
 # Optional dropdowns include a blank sentinel meaning "leave unset (roms-tools default)"
 _PREFILL_OPTS = [""] + [e.value for e in Prefill]
@@ -2359,6 +2394,20 @@ _DERIVED_BGC_SOURCES = frozenset(
 _SOURCE_LABELS: dict[str, str] = {
     BgcBoundarySource.ESPER.value: "ESPER (experimental)",
 }
+
+
+def _blend_fallback_source(item: dict[str, Any]) -> dict[str, Any]:
+    """The seed item's blend fallback source as a dict (a bare name is accepted)."""
+    fsrc = ((item.get("blend") or {}).get("fallback") or {}).get("source") or {}
+    return {"name": fsrc} if isinstance(fsrc, str) else dict(fsrc)
+
+
+def _is_regional_surface_source(name: str) -> bool:
+    """Whether a surface source covers only part of the globe (see
+    ``REGIONAL_PHYSICS_SURFACE_SOURCES``); such a row needs a blend fallback unless
+    the domain lies wholly inside the source.
+    """
+    return name.upper() in REGIONAL_PHYSICS_SURFACE_SOURCES
 
 
 def _source_dropdown_opts(names: list[str]) -> list[tuple[str, str]]:
@@ -3260,6 +3309,18 @@ class _ForcingEditor:
             show(w["restoring_forces"], t == SurfaceType.RESTORING.value)
         if "correct_radiation" in w:
             show(w["correct_radiation"], t == SurfaceType.PHYSICS.value)
+            # The radiation correction is ERA5-specific, so a regional source cannot
+            # take it (SurfaceForcingItem refuses it); the fallback has its own.
+            w["correct_radiation"].disabled = _is_regional_surface_source(name or "")
+        if "blend_fallback" in w:
+            physics = t == SurfaceType.PHYSICS.value
+            show(w["blend_fallback"], physics)
+            for key in (
+                "blend_fallback_correct_radiation",
+                "blend_width_km",
+                "blend_profile",
+            ):
+                show(w[key], physics and w["blend_fallback"].value != _BLEND_NONE)
         if "wind_dropoff" in w:
             show(w["wind_dropoff"], t == SurfaceType.PHYSICS.value)
         if "glorys_layout" in w:
@@ -3315,6 +3376,97 @@ class _ForcingEditor:
         ):
             if key in w:
                 show(w[key], not hide_dataset_knobs)
+
+    def _add_blend_widgets(
+        self, w: dict[str, Any], item: dict[str, Any], small: dict[str, str]
+    ) -> None:
+        """Build a surface row's blend controls (fallback source, its radiation flag,
+        band width, profile) and the observers tying them to the row.
+
+        The fallback's ``options`` and any source fields beyond its name (``path``...)
+        have no widget; ``_make_row`` carries them as ``_blend_fallback_*`` data, like
+        a bgc row's ``_serialize_dask``, so loading then saving does not drop them.
+        """
+        W = self.W
+        blend = item.get("blend") or {}
+        fallback = blend.get("fallback") or {}
+        fname = str(_blend_fallback_source(item).get("name") or _BLEND_NONE)
+        opts = list(_BLEND_FALLBACK_OPTS)
+        # Case-insensitive match to an offered source; an unknown name is kept as an
+        # extra option so the blueprint validation reports it rather than it vanishing.
+        known = {v.upper(): v for _, v in opts}
+        fname = known.get(fname.upper(), fname)
+        if fname not in known.values():
+            opts.append((fname, fname))
+        w["blend_fallback"] = W.Dropdown(
+            options=opts,
+            value=fname,
+            description=_row_desc("blend_fallback", "fallback"),
+            style=small,
+            layout=W.Layout(width="190px"),
+            tooltip=_tip("surface", "blend_fallback"),
+        )
+        w["blend_fallback_correct_radiation"] = W.Checkbox(
+            value=bool(
+                fallback.get(
+                    "correct_radiation",
+                    SurfaceBlendFallback.model_fields["correct_radiation"].default,
+                )
+            ),
+            description=_row_desc(
+                "blend_fallback_correct_radiation", "fallback corr_rad", colon=False
+            ),
+            indent=False,
+            tooltip=_tip("surface", "blend_fallback_correct_radiation"),
+        )
+        w["blend_width_km"] = W.FloatText(
+            value=float(
+                blend.get("width_km", SurfaceBlend.model_fields["width_km"].default)
+            ),
+            description=_row_desc("blend_width_km", "blend width km"),
+            style=small,
+            layout=W.Layout(width="230px"),
+            tooltip=_tip("surface", "blend_width_km"),
+        )
+        profile = str(
+            blend.get("profile") or SurfaceBlend.model_fields["profile"].default.value
+        )
+        w["blend_profile"] = W.Dropdown(
+            options=_BLEND_PROFILES,
+            value=profile if profile in _BLEND_PROFILES else _BLEND_PROFILES[0],
+            description=_row_desc("blend_profile", "blend profile"),
+            style=small,
+            layout=W.Layout(width="210px"),
+            tooltip=_tip("surface", "blend_profile"),
+        )
+
+        def _on_surface_name_change(_change, ws=w) -> None:
+            # A regional source covers only part of the globe, so offer the first
+            # global product as its fallback. The user may set "none" again (a domain
+            # wholly inside the source); Forge checks coverage at generation.
+            is_physics = ws["type"].value == SurfaceType.PHYSICS.value
+            if is_physics and _is_regional_surface_source(ws["name"].value):
+                if ws["blend_fallback"].value == _BLEND_NONE:
+                    # The correction the user had on the (global) primary moves to
+                    # the global product that now fills in for it.
+                    ws["blend_fallback_correct_radiation"].value = ws[
+                        "correct_radiation"
+                    ].value
+                    ws["blend_fallback"].value = _BLEND_FALLBACK_OPTS[1][1]
+                ws["correct_radiation"].value = False
+            self._apply_row_visibility(ws)
+
+        def _on_fallback_change(change, ws=w) -> None:
+            # A blend needs every surface item pinned to never/always (Forcing
+            # refuses "auto"), so a newly chosen fallback pins the "auto" rows.
+            if change["old"] == _BLEND_NONE and change["new"] != _BLEND_NONE:
+                for row in [ws, *(r for r in self._rows["surface"] if r is not ws)]:
+                    if row["coarse_grid_mode"].value == CoarseGridMode.AUTO.value:
+                        row["coarse_grid_mode"].value = CoarseGridMode.NEVER.value
+            self._apply_row_visibility(ws)
+
+        w["name"].observe(_on_surface_name_change, names="value")
+        w["blend_fallback"].observe(_on_fallback_change, names="value")
 
     def _make_row(self, cat: str, item: dict[str, Any]):
         W = self.W
@@ -3479,6 +3631,7 @@ class _ForcingEditor:
                 layout=W.Layout(width="190px"),
                 tooltip=_tip("surface", "coarse_grid_mode"),
             )
+            self._add_blend_widgets(w, item, small)
             w["restoring_forces"] = W.Text(
                 value=", ".join(item.get("restoring_forces") or []),
                 description=_row_desc("restoring_forces", "restore"),
@@ -3696,6 +3849,14 @@ class _ForcingEditor:
         # wizard round-trips the field instead of silently dropping it.
         if cat in ("ic_bgc", "boundary_bgc") and item.get("serialize_dask"):
             w["_serialize_dask"] = True
+        if cat == "surface":
+            # Carried like `_serialize_dask` (and for the same reason: after the
+            # observe loop, since neither is a widget): the blend fallback's
+            # `options` and non-name source fields have no widget.
+            w["_blend_fallback_source"] = _blend_fallback_source(item)
+            w["_blend_fallback_options"] = dict(
+                (item.get("blend") or {}).get("fallback", {}).get("options") or {}
+            )
         if cat == "river":
             # Custom-file attach row (RiverSource.CUSTOM_FILE): added after the
             # generic per-widget on_change wiring above (mirrors _remove_btn) --
@@ -3973,6 +4134,29 @@ class _ForcingEditor:
             item["wind_dropoff"] = True
         if "coarse_grid_mode" in w:
             item["coarse_grid_mode"] = w["coarse_grid_mode"].value
+        if (
+            "blend_fallback" in w
+            and w["blend_fallback"].value != _BLEND_NONE
+            and w["type"].value == SurfaceType.PHYSICS.value
+        ):
+            fname = w["blend_fallback"].value
+            carried = w["_blend_fallback_source"]
+            # Source fields beyond the name only carry over to the same source.
+            fsrc = (
+                {**carried, "name": fname}
+                if str(carried.get("name", "")).upper() == fname.upper()
+                else {"name": fname}
+            )
+            fallback: dict[str, Any] = {"source": fsrc}
+            if w["blend_fallback_correct_radiation"].value:
+                fallback["correct_radiation"] = True
+            if w["_blend_fallback_options"]:
+                fallback["options"] = dict(w["_blend_fallback_options"])
+            item["blend"] = {
+                "fallback": fallback,
+                "width_km": float(w["blend_width_km"].value),
+                "profile": w["blend_profile"].value,
+            }
         if "restoring_forces" in w and w["restoring_forces"].value.strip():
             item["restoring_forces"] = [
                 p.strip() for p in w["restoring_forces"].value.split(",") if p.strip()
@@ -6574,7 +6758,19 @@ class ForgeBlueprintWizard:
                     }
                     out.append(d)
                     continue
-                d.update(plain(it, cls))
+                # `blend` is a nested model: plain() would hand back the object, so it
+                # is turned into plain data here (the row widgets read it as a dict).
+                d.update(plain(it, cls, skip=("source", "blend")))
+                blend = getattr(it, "blend", None)
+                if blend is not None:
+                    d["blend"] = {
+                        "fallback": {
+                            "source": src(blend.fallback.source),
+                            **plain(blend.fallback, SurfaceBlendFallback),
+                        },
+                        "width_km": blend.width_km,
+                        "profile": blend.profile.value,
+                    }
                 out.append(d)
             forcing[cat] = out
         return {

@@ -21,6 +21,7 @@ from cstar.applications.forge.blueprint import (
     Forcing,
     ForgeBlueprint,
     ForgeProvenance,
+    SurfaceBlend,
     SurfaceForcingItem,
 )
 from cstar.applications.forge.namelist_model import (
@@ -724,6 +725,161 @@ def test_surface_bgc_row_gathers_a_validating_surface_forcing_item(editor):
     item = editor._gather_item("surface", w)
     assert "use_vars" not in item
     SurfaceForcingItem(**item)
+
+
+# ===========================================================================
+# Surface blend: a regional primary layered over a global fallback.
+# ===========================================================================
+
+_BLENDED_ITEM = {
+    "type": "physics",
+    "source": {"name": "CONUS404"},
+    "coarse_grid_mode": "never",
+    "blend": {
+        "fallback": {
+            "source": {"name": "ERA5"},
+            "correct_radiation": True,
+            "options": {"use_dask": True},
+        },
+        "width_km": 150,
+        "profile": "linear",
+    },
+}
+
+
+def test_blend_round_trips_through_sources_to_inputs_and_gather(editor):
+    """A blended item (fallback ``options`` included) survives load-back into the
+    row widgets and gathers to the same ``blend``.
+    """
+    forcing = Forcing.model_validate({"surface": [_BLENDED_ITEM]})
+    seed = ForgeBlueprintWizard._sources_to_inputs(SimpleNamespace(forcing=forcing))
+    blend_seed = seed["forcing"]["surface"][0]["blend"]
+    assert isinstance(blend_seed, dict)  # plain data, not the model object
+
+    w = editor._make_row("surface", seed["forcing"]["surface"][0])
+    assert w["blend_fallback"].value == "ERA5"
+    assert w["blend_fallback_correct_radiation"].value is True
+    assert w["blend_width_km"].value == 150
+    assert w["blend_profile"].value == "linear"
+    assert _display(w["blend_width_km"]) == ""
+
+    item = editor._gather_item("surface", w)
+    assert SurfaceForcingItem(**item).blend == forcing.surface[0].blend
+    assert item["blend"]["fallback"]["options"] == {"use_dask": True}
+
+
+def test_blend_fallback_source_fields_round_trip(editor):
+    """Source fields beyond the name ride along, but only for the same source."""
+    seed = copy.deepcopy(_BLENDED_ITEM)
+    seed["blend"]["fallback"]["source"] = {"name": "ERA5", "path": "/data/era5"}
+    w = editor._make_row("surface", seed)
+    assert editor._gather_item("surface", w)["blend"]["fallback"]["source"] == {
+        "name": "ERA5",
+        "path": "/data/era5",
+    }
+
+
+def test_physics_row_gathers_blend_only_with_a_fallback(editor):
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    assert "blend" not in editor._gather_item("surface", w)
+    assert _display(w["blend_fallback"]) == ""
+    assert _display(w["blend_width_km"]) == "none"
+
+    w["blend_fallback"].value = "ERA5"
+    assert _display(w["blend_width_km"]) == ""
+    item = editor._gather_item("surface", w)
+    # Width, profile and the fallback's radiation flag come from the model defaults.
+    default = SurfaceBlend(fallback={"source": "ERA5"})
+    assert item["blend"] == {
+        "fallback": {"source": {"name": "ERA5"}},
+        "width_km": default.width_km,
+        "profile": default.profile.value,
+    }
+    assert SurfaceForcingItem(**{**item, "coarse_grid_mode": "never"}).blend == default
+
+    w["blend_fallback"].value = ""
+    assert "blend" not in editor._gather_item("surface", w)
+    assert _display(w["blend_width_km"]) == "none"
+
+
+def test_bgc_row_hides_and_never_gathers_blend(editor):
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    assert _display(w["blend_fallback"]) == "none"
+    w["blend_fallback"].value = "ERA5"
+    assert "blend" not in editor._gather_item("surface", w)
+    assert _display(w["blend_width_km"]) == "none"
+
+
+def test_regional_source_disables_radiation_and_defaults_the_fallback(editor):
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    w["correct_radiation"].value = True
+
+    w["name"].value = "CONUS404"
+    assert w["correct_radiation"].value is False
+    assert w["correct_radiation"].disabled is True
+    assert w["blend_fallback"].value == "ERA5"
+    assert "correct_radiation" not in editor._gather_item("surface", w)
+
+    # The user may clear the fallback (a domain wholly inside the source).
+    w["blend_fallback"].value = ""
+    assert w["blend_fallback"].value == ""
+
+    w["blend_fallback"].value = "ERA5"
+    w["name"].value = "ERA5"
+    assert w["correct_radiation"].disabled is False
+    assert w["blend_fallback"].value == "ERA5"  # left as the user had it
+
+
+def test_regional_switch_moves_the_radiation_correction_to_the_fallback(editor):
+    w = editor._make_row(
+        "surface",
+        {"type": "physics", "source": {"name": "ERA5"}, "correct_radiation": True},
+    )
+    w["name"].value = "CONUS404"
+    assert w["blend_fallback"].value == "ERA5"
+    assert w["blend_fallback_correct_radiation"].value is True
+    assert w["correct_radiation"].value is False
+    assert w["correct_radiation"].disabled is True
+
+
+def test_loaded_invalid_regional_row_is_not_mutated(editor):
+    w = editor._make_row(
+        "surface",
+        {
+            "type": "physics",
+            "source": {"name": "CONUS404"},
+            "correct_radiation": True,
+        },
+    )
+    assert w["correct_radiation"].value is True
+
+
+def test_choosing_a_fallback_pins_auto_coarse_grid_modes(editor):
+    """Every surface row on ``auto`` goes to ``never``, so the blueprint validates."""
+    editor._rows["surface"] = []
+    editor._add("surface")
+    editor._add("surface")
+    bgc = editor._rows["surface"][1]
+    bgc["type"].value = "bgc"
+    editor._rows["surface"][0]["name"].value = "CONUS404"  # fallback -> ERA5
+    assert bgc["coarse_grid_mode"].value == "never"
+    assert editor._rows["surface"][0]["coarse_grid_mode"].value == "never"
+    Forcing.model_validate({"surface": editor.gather()["forcing"]["surface"]})
+
+
+def test_blend_with_auto_coarse_mode_surfaces_the_forcing_error():
+    """A user who sets ``auto`` back on a blended row sees the Forcing error."""
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    row = wiz._forcing_editor._rows["surface"][0]
+    row["blend_fallback"].value = "ERA5"
+    assert wiz.config is not None, wiz.derived.value
+    row["coarse_grid_mode"].value = "auto"
+    assert wiz.config is None
+    assert "Invalid blueprint" in wiz.derived.value
+    assert "validation error for Forcing" in wiz.derived.value
 
 
 # ===========================================================================
