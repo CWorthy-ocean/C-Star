@@ -60,7 +60,7 @@ class NestIcBlueprint(Blueprint):
     blend from the parent column's bottom value to the value of the nearest parent
     column that has water at that depth. ``0`` takes that value at once; ``.inf``
     copies the bottom value down. Leave it unset to use roms-tools' default."""
-    schema_version: str = "1.2.0"
+    schema_version: str = "1.2.1"
     """The current schema version for this blueprint."""
 
 

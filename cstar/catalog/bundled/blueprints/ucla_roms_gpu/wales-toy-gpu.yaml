@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms_gpu/ucla_roms_gpu_schema.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms_gpu/ucla_roms_gpu_schema.1.0.1.json
 name: wales-toy-gpu
 description: >-
   toy domain near wales on one 4-GPU node, for a quick check of a GPU system
@@ -53,4 +53,4 @@ cdr_forcing:
   data:
   - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/my_cdr_forcing.nc
 application: ucla_roms_gpu
-schema_version: 1.0.0
+schema_version: 1.0.1

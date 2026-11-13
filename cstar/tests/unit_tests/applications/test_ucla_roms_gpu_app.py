@@ -78,7 +78,7 @@ class TestRegistration:
     def test_application_declares_its_schema_and_capabilities(self) -> None:
         app = get_application(APP_NAME)
 
-        assert app.schema_version == "1.0.0"
+        assert app.schema_version == "1.0.1"
         assert app.resumable
         assert app.pre_runnable
         assert app.migrations is None

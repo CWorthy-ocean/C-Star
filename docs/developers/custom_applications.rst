@@ -437,11 +437,11 @@ automatic migration, and has no effect on a compatible older file. For example:
 
 .. code-block:: text
 
-   ucla_roms schema 9.9.9 is newer than this build of cstar-ocean reads (3.3.0). Upgrade cstar-ocean to read this file.
+   ucla_roms schema 9.9.9 is newer than this build of cstar-ocean reads (3.3.1). Upgrade cstar-ocean to read this file.
 
-   ucla_roms schema 3.4.0 is newer than this build of cstar-ocean reads (3.3.0) and sets runtime_params.new_option, which this build does not know. Upgrade cstar-ocean to read this file.
+   ucla_roms schema 3.4.0 is newer than this build of cstar-ocean reads (3.3.1) and sets runtime_params.new_option, which this build does not know. Upgrade cstar-ocean to read this file.
 
-   ucla_roms schema 0.5.0 has no automatic migration to 3.3.0 from 0.x. Update the blueprint by hand to the 3.3.0 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
+   ucla_roms schema 0.5.0 has no automatic migration to 3.3.1 from 0.x. Update the blueprint by hand to the 3.3.1 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
 
 Tying it Together
 -----------------

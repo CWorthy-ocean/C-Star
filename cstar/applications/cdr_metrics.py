@@ -181,6 +181,8 @@ class CdrMetricsBlueprint(Blueprint):
 
     application: str = APP_NAME
     """The application identifier."""
+    schema_version: str = "1.1.1"
+    """The current schema version for this blueprint."""
     domains: dict[RequiredString, CdrDomain] = Field(min_length=1)
     """The domains to compute metrics for, by domain name, ordered child to parent:
     first the domain holding the release, then its parent, and so on (C-Star's

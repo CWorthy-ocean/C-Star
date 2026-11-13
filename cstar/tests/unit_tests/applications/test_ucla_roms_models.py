@@ -675,8 +675,9 @@ class TestCarbonateSensitivity:
         return complete_blueprint_dict
 
     def test_schema_version(self):
-        """Adding the optional field was a minor bump of the schema, now at 3.3.0."""
-        assert UclaRomsBlueprint.model_fields["schema_version"].default == "3.3.0"
+        """Adding the optional field was a minor bump of the schema, to 3.3.0."""
+        current = UclaRomsBlueprint.model_fields["schema_version"].default
+        assert tuple(int(part) for part in current.split(".")) >= (3, 3, 0)
 
     def test_defaults_to_none(self, complete_blueprint_dict):
         """A blueprint without the field validates, with no sensitivity forcing."""

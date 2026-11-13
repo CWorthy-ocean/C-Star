@@ -115,6 +115,8 @@ class UpscalerBlueprint(Blueprint):
 
     application: str = APP_NAME
     """The application identifier."""
+    schema_version: str = "1.1.1"
+    """The current schema version for this blueprint."""
     uscl_file_location: str
     """Path to the .uscl file."""
     pio: bool = Field(default=True)

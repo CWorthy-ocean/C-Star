@@ -82,6 +82,8 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 dev = [
     "check-manifest",
     "coverage>=7.13",
+    # the published blueprint schemas are checked against blueprints C-Star writes
+    "jsonschema",
     "mypy>=1.16.1",
     # forge's test suite (cstar/tests/unit_tests/applications/forge/) reads/writes
     # NetCDF fixtures directly via netCDF4, not only through xarray/roms_tools.

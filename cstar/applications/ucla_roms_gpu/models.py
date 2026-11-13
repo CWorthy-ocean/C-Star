@@ -102,7 +102,7 @@ class TilingParameterSet(ParameterSet):
 class UclaRomsGpuBlueprint(Blueprint):
     """Blueprint schema for running a UCLA-ROMS simulation on GPUs with roms-marbl-gpu."""
 
-    schema_version: str = Field(default="1.0.0")
+    schema_version: str = Field(default="1.0.1")
     """The blueprint schema version."""
 
     application: str = Field(default=APP_NAME)
