@@ -47,6 +47,8 @@ from cstar.entrypoint.utils import ARG_INSTALL, ARG_YES
 from cstar.execution.file_system import DirectoryManager, write_bytes_atomic
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_ACCOUNT,
+    ENV_CSTAR_SLURM_GPU_QUEUE,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
@@ -382,9 +384,16 @@ def system_section(
 
 
 def scheduler_section(
-    context: "SystemContext", config: UserConfig, yes: bool
+    context: "SystemContext",
+    config: UserConfig,
+    yes: bool,
+    scheduler: "Scheduler | None" = None,
 ) -> list[Decision]:
-    """Prompt for the SLURM account, queue and walltime."""
+    """Prompt for the SLURM account, queue and walltime.
+
+    On a system whose `scheduler` registers GPU nodes, also offers the optional
+    GPU account and queue.
+    """
     header("Scheduler (SLURM)")
     echo("A workplan run on this system submits jobs with these settings; a")
     echo("workplan can override them per step.")
@@ -401,6 +410,23 @@ def scheduler_section(
     for name, label in prompts:
         suffix = " (required on this system)" if name in required else ""
         decisions.append(ask(f"{label}{suffix}", resolve(name, config, context), yes))
+    gpu = scheduler.gpu if scheduler is not None else None
+    if gpu is not None:
+        echo(
+            f"GPU jobs go to the `{gpu.queue}` queue on this system unless you set one."
+        )
+        gpu_prompts = (
+            (
+                ENV_CSTAR_SLURM_GPU_ACCOUNT,
+                "SLURM account for GPU jobs (optional; defaults to the SLURM account)",
+            ),
+            (
+                ENV_CSTAR_SLURM_GPU_QUEUE,
+                f"Queue for GPU jobs (optional; defaults to {gpu.queue})",
+            ),
+        )
+        for gpu_name, gpu_label in gpu_prompts:
+            decisions.append(ask(gpu_label, resolve(gpu_name, config, context), yes))
     for decision in decisions:
         setting = decision.resolved.item.name
         unset = (
@@ -680,7 +706,7 @@ def init(
                 "C-Star does not recognise this system; scheduler settings are skipped."
             )
     if context is not None and isinstance(scheduler, SlurmScheduler):
-        decisions += scheduler_section(context, config, yes)
+        decisions += scheduler_section(context, config, yes, scheduler)
     cluster = scheduler is not None or bool(
         selection and selection.unsupported_scheduler(os.environ)
     )

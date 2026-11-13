@@ -68,6 +68,25 @@ class TestUclaRomsArtifacts:
         }
         assert all(v.size_bytes == 1 for v in found.values())
 
+    def test_declares_specs_in_priority_order(self) -> None:
+        """The list is the shared ROMS declaration with cppdefs after the namelist."""
+        app = get_application("ucla_roms")
+
+        specs = app.artifacts(app.blueprint.model_construct())
+
+        assert [(s.kind.value, s.pattern, s.metadata) for s in specs] == [
+            *(
+                (kind.value, f"output/{stem}.*.nc", dict(metadata))
+                for stem, kind, metadata in OUTPUT_STREAMS
+            ),
+            ("output", "output/*.nc", {}),
+            ("config", "work/cstar_generated_roms.nml", {"role": "namelist"}),
+            ("config", "input/compile_time_code/cppdefs.opt", {"role": "cppdefs"}),
+            ("config", "input/runtime_code/marbl_in", {"role": "marbl_in"}),
+            ("build", "input/compile_time_code/roms", {}),
+            ("log", "logs/*.out", {}),
+        ]
+
     def test_every_stream_in_the_table_is_declared(self) -> None:
         """The hook's table and the declaration are one table."""
         app = get_application("roms_marbl")

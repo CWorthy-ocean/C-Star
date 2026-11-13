@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import typing as t
+from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
@@ -34,6 +35,7 @@ from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.manifest import Product
 from cstar.orchestration.models import (
     Application,
+    Blueprint,
 )
 from cstar.orchestration.serialization import register_representer, strenum_representer
 from cstar.orchestration.transforms import (
@@ -59,6 +61,8 @@ if TYPE_CHECKING:
 
 _APP_NAME_LONG: t.Literal["UCLA-ROMS simulation runner"] = "UCLA-ROMS simulation runner"
 log = get_logger(__name__)
+
+TRomsBlueprint = t.TypeVar("TRomsBlueprint", bound=Blueprint)
 
 
 def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Product]:
@@ -108,24 +112,125 @@ def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Prod
     return products
 
 
-class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
-    """Worker class to run c-star simulations."""
+def roms_artifacts(
+    fs: RomsFileSystemManager,
+    *,
+    executable: Path,
+    extra_config: "Sequence[ArtifactSpec]" = (),
+) -> list[ArtifactSpec]:
+    """Declare the files every ROMS application's run leaves in its step root.
+
+    The files the model's file layout fixes: the joined output streams, the
+    namelist C-Star generates, the MARBL configuration and the run log. An
+    application adds the files its model alone has, and says where its
+    executable is.
+
+    Parameters
+    ----------
+    fs : RomsFileSystemManager
+        The file layout of the run's working directory; a manager on a
+        placeholder root is enough, since only its paths are read.
+    executable : Path
+        The compiled model, under `fs.root_dir`.
+    extra_config : Sequence[ArtifactSpec]
+        Further configuration files the model reads, declared after the
+        namelist.
+
+    Returns
+    -------
+    list[ArtifactSpec]
+        The joined output files by stream (the streams other steps consume under
+        their own kinds) and every other `output/*.nc` file, the namelist,
+        `extra_config`, `marbl_in`, the executable and the run log, in that
+        order.
+    """
+
+    def rel(path: Path) -> str:
+        return path.relative_to(fs.root_dir).as_posix()
+
+    streams = [
+        ArtifactSpec(
+            kind=kind,
+            pattern=rel(fs.output_dir / f"{stem}.*.nc"),
+            metadata=dict(metadata),
+        )
+        for stem, kind, metadata in OUTPUT_STREAMS
+    ]
+    return [
+        *streams,
+        ArtifactSpec(kind=ArtifactKind.output, pattern=rel(fs.output_dir / "*.nc")),
+        ArtifactSpec(
+            kind=ArtifactKind.config,
+            pattern=rel(fs.run_dir / GENERATED_NAMELIST_NAME),
+            metadata={"role": "namelist"},
+        ),
+        *extra_config,
+        ArtifactSpec(
+            kind=ArtifactKind.config,
+            pattern=rel(fs.runtime_code_dir / "marbl_in"),
+            metadata={"role": "marbl_in"},
+        ),
+        ArtifactSpec(kind=ArtifactKind.build, pattern=rel(executable)),
+        ArtifactSpec(kind=ArtifactKind.log, pattern=rel(fs.logs_dir / "*.out")),
+    ]
+
+
+class RomsSimulationRunner(BlueprintRunner[TRomsBlueprint]):
+    """Worker class to run a `ROMSSimulation` from a blueprint.
+
+    The lifecycle is the same for every ROMS application: refuse a launch
+    outside a scheduler job, build the simulation (from a derived blueprint when
+    resuming), set it up, build and pre-run it, launch it, and post-run it. An
+    application's runner names its simulation class and how its blueprint is
+    resumed.
+    """
 
     simulation: Final["ROMSSimulation"]
     """The simulation instance created from the blueprint."""
     _handler: ExecutionHandler | None = None
     """The execution handler for the simulation."""
 
-    def __init__(
-        self,
-        request: RunnerRequest[UclaRomsBlueprint],
-        service_cfg: "ServiceConfiguration",
-    ) -> None:
-        """Initialize the UclaRomsRunner with the supplied configuration.
+    @classmethod
+    @abstractmethod
+    def _simulation_class(cls) -> "type[ROMSSimulation]":
+        """Return the simulation class this runner builds from its blueprint.
+
+        Resolved when the runner is constructed, not at import, because
+        `cstar.roms.simulation` imports this package.
+
+        Returns
+        -------
+        type[ROMSSimulation]
+        """
+
+    @classmethod
+    @abstractmethod
+    def _resume_blueprint(cls, blueprint_uri: str) -> str:
+        """Derive the blueprint a resumed attempt runs from.
 
         Parameters
         ----------
-        request: RunnerRequest[UclaRomsBlueprint]
+        blueprint_uri : str
+            The URI of the interrupted attempt's blueprint.
+
+        Returns
+        -------
+        str
+            The URI of the blueprint that continues from the interrupted
+            attempt's last usable restart, or `blueprint_uri` unchanged when
+            there is none.
+        """
+
+    def __init__(
+        self,
+        request: RunnerRequest[TRomsBlueprint],
+        service_cfg: "ServiceConfiguration",
+    ) -> None:
+        """Initialize the runner with the supplied configuration.
+
+        Parameters
+        ----------
+        request: RunnerRequest[TRomsBlueprint]
             A request containing information about the simulation to run
 
         service_cfg: ServiceConfiguration
@@ -140,20 +245,20 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         """
         super().__init__(request, service_cfg)
 
-        from cstar.roms.simulation import ROMSSimulation
+        simulation_class = self._simulation_class()
 
         # refuse before anything is derived or written: a refusal that reached
         # the service's shutdown would replace a prior attempt's step record
         if not self.request.pre_run:
-            ROMSSimulation.check_launch_location()
+            simulation_class.check_launch_location()
 
         # a resumed attempt runs from a derived blueprint that continues from
         # the interrupted attempt's last usable restart; the original is kept
         blueprint_uri = self.request.blueprint_uri
         if self.request.resume:
-            blueprint_uri = prepare_resume_blueprint(blueprint_uri)
+            blueprint_uri = self._resume_blueprint(blueprint_uri)
 
-        self.simulation = ROMSSimulation.from_blueprint(blueprint_uri)
+        self.simulation = simulation_class.from_blueprint(blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)
 
     @override
@@ -198,7 +303,7 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         self._handler = self.simulation.run(job_name=self.request.name)
 
     @override
-    async def run(self) -> RunnerResult[UclaRomsBlueprint]:
+    async def run(self) -> RunnerResult[TRomsBlueprint]:
         """Execute the c-star simulation."""
         if self._handler is None:
             msg = "Simulation did not start up successfully"
@@ -242,6 +347,22 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
             self.log.debug(msg)
 
 
+class UclaRomsRunner(RomsSimulationRunner[UclaRomsBlueprint]):
+    """Worker class to run c-star simulations."""
+
+    @classmethod
+    @override
+    def _simulation_class(cls) -> "type[ROMSSimulation]":
+        from cstar.roms.simulation import ROMSSimulation
+
+        return ROMSSimulation
+
+    @classmethod
+    @override
+    def _resume_blueprint(cls, blueprint_uri: str) -> str:
+        return prepare_resume_blueprint(blueprint_uri)
+
+
 @register_application
 class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunner]):
     name: str = APP_NAME
@@ -280,42 +401,18 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
         """
         # a manager on a placeholder root only spells the layout; it touches no disk
         fs = RomsFileSystemManager(Path("/"))
-
-        def rel(directory: Path, name: str) -> str:
-            return (directory / name).relative_to(fs.root_dir).as_posix()
-
-        streams = [
-            ArtifactSpec(
-                kind=kind,
-                pattern=rel(fs.output_dir, f"{stem}.*.nc"),
-                metadata=dict(metadata),
-            )
-            for stem, kind, metadata in OUTPUT_STREAMS
-        ]
-        return [
-            *streams,
-            ArtifactSpec(kind=ArtifactKind.output, pattern=rel(fs.output_dir, "*.nc")),
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=rel(fs.run_dir, GENERATED_NAMELIST_NAME),
-                metadata={"role": "namelist"},
-            ),
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=rel(fs.compile_time_code_dir, "cppdefs.opt"),
-                metadata={"role": "cppdefs"},
-            ),
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=rel(fs.runtime_code_dir, "marbl_in"),
-                metadata={"role": "marbl_in"},
-            ),
-            ArtifactSpec(
-                kind=ArtifactKind.build,
-                pattern=rel(fs.compile_time_code_dir, ROMS_EXECUTABLE_NAME),
-            ),
-            ArtifactSpec(kind=ArtifactKind.log, pattern=rel(fs.logs_dir, "*.out")),
-        ]
+        cppdefs = fs.compile_time_code_dir / "cppdefs.opt"
+        return roms_artifacts(
+            fs,
+            executable=fs.compile_time_code_dir / ROMS_EXECUTABLE_NAME,
+            extra_config=[
+                ArtifactSpec(
+                    kind=ArtifactKind.config,
+                    pattern=cppdefs.relative_to(fs.root_dir).as_posix(),
+                    metadata={"role": "cppdefs"},
+                )
+            ],
+        )
 
 
 def main() -> int:

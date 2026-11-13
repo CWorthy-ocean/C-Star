@@ -16,6 +16,7 @@ from cstar.base.application_names import legacy_names
 from cstar.base.utils import generate_schema_ref
 from cstar.orchestration.models import (
     Blueprint,
+    ComputeNeeds,
     ConfiguredBaseModel,
     Dataset,
     DocLocMixin,
@@ -24,12 +25,108 @@ from cstar.orchestration.models import (
 from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
 from cstar.system.migration import version_key
 
+if t.TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from cstar.roms.namelist import RomsNamelistBase
+
 APP_NAME: t.Literal["ucla_roms"] = "ucla_roms"
 
 SCHEMA_PUBLISHED_AS_APP_NAME: t.Final[str] = "3.3.0"
 """The first blueprint schema version published under `APP_NAME`. Earlier
 versions were published under the application's earlier name, so a blueprint
 of an earlier version names that schema in its ``$schema`` header."""
+
+
+def processor_grid_conflicts(
+    overrides: "Mapping[str, Mapping[str, t.Any]]",
+    processor_grid: tuple[int | None, int | None],
+    block: str,
+) -> list[str]:
+    """List the `np_xi`/`np_eta` namelist overrides that disagree with a blueprint.
+
+    The blueprint's processor grid is authoritative at run time, so a
+    conflicting override is a mistake whatever the namelist schema.
+
+    Parameters
+    ----------
+    overrides : Mapping[str, Mapping[str, Any]]
+        The blueprint's `namelist_overrides`.
+    processor_grid : tuple[int | None, int | None]
+        The blueprint's processes (or tiles) along x and y.
+    block : str
+        The blueprint block that sets the grid, for the message.
+
+    Returns
+    -------
+    list[str]
+        One violation per conflicting override.
+    """
+    param_overrides = overrides.get("param_settings", {})
+    return [
+        f"namelist override {key!r} ({value!r}) conflicts with the "
+        f"blueprint {block} ({expected!r})"
+        for key, expected in zip(("np_xi", "np_eta"), processor_grid, strict=True)
+        if (value := param_overrides.get(key)) is not None
+        and expected is not None
+        and value != expected
+    ]
+
+
+def unknown_override_names(
+    overrides: dict[str, dict[str, t.Any]],
+    ref: str,
+    *,
+    pinned: bool,
+    schema_for_ref: "Callable[[str], type[RomsNamelistBase]]",
+    codebase: str,
+) -> list[str]:
+    """Check the group and key names of a blueprint's `namelist_overrides`.
+
+    When `ref` pins a release, the namelist schema is certain and an unknown name
+    is a violation. Otherwise the schema is a best guess, so unknown names are
+    warned about and none is returned.
+
+    Parameters
+    ----------
+    overrides : dict[str, dict[str, Any]]
+        The blueprint's `namelist_overrides`.
+    ref : str
+        The model repository's checkout target.
+    pinned : bool
+        Whether `ref` names a release of the model.
+    schema_for_ref : Callable[[str], type[RomsNamelistBase]]
+        Selects the namelist schema for `ref`.
+    codebase : str
+        The model repository's name, for the warning.
+
+    Returns
+    -------
+    list[str]
+        One violation per unknown name when `pinned`, else empty.
+
+    Warns
+    -----
+    UserWarning
+        If `ref` is not pinned and the overrides name something the assumed
+        schema lacks.
+    """
+    if pinned:
+        return schema_for_ref(ref).unknown_override_keys(overrides)
+
+    with warnings.catch_warnings():
+        # suppress the unparseable-ref fallback warning; unknown names are
+        # reported below only if any are found
+        warnings.simplefilter("ignore", UserWarning)
+        schema = schema_for_ref(ref)
+    if unknown := schema.unknown_override_keys(overrides):
+        warnings.warn(
+            f"namelist_overrides contain names not in {schema.__name__} "
+            f"(assumed for unpinned {codebase} ref {ref!r}): " + "; ".join(unknown),
+            UserWarning,
+            stacklevel=3,
+        )
+    return []
 
 
 class ForcingConfiguration(ConfiguredBaseModel):
@@ -384,50 +481,39 @@ class UclaRomsBlueprint(Blueprint):
         if not self.namelist_overrides:
             return
 
-        param_overrides = self.namelist_overrides.get("param_settings", {})
-        violations = [
-            f"namelist override {key!r} ({value!r}) conflicts with the "
-            f"blueprint partitioning ({expected!r})"
-            for key, expected in (
-                ("np_xi", self.partitioning.n_procs_x),
-                ("np_eta", self.partitioning.n_procs_y),
-            )
-            if (value := param_overrides.get(key)) is not None
-            and expected is not None
-            and value != expected
-        ]
-
         ref = self.code.roms.checkout_target
-        pinned_release = _parse_semver(ref) is not None
-        if pinned_release:
-            schema = namelist_schema_for_ref(ref)
-            violations += schema.unknown_override_keys(self.namelist_overrides)
-        else:
-            with warnings.catch_warnings():
-                # suppress the unparseable-ref fallback warning; unknown names
-                # are reported below only if any are found
-                warnings.simplefilter("ignore", UserWarning)
-                schema = namelist_schema_for_ref(ref)
-            if unknown := schema.unknown_override_keys(self.namelist_overrides):
-                warnings.warn(
-                    f"namelist_overrides contain names not in {schema.__name__} "
-                    f"(assumed for unpinned ucla-roms ref {ref!r}): "
-                    + "; ".join(unknown),
-                    UserWarning,
-                    stacklevel=2,
-                )
+        violations = [
+            *processor_grid_conflicts(
+                self.namelist_overrides, self.processor_grid, "partitioning"
+            ),
+            *unknown_override_names(
+                self.namelist_overrides,
+                ref,
+                pinned=_parse_semver(ref) is not None,
+                schema_for_ref=namelist_schema_for_ref,
+                codebase="ucla-roms",
+            ),
+        ]
 
         if violations:
             raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
 
     @property
-    def cpus_needed(self) -> int:
-        """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
+    def compute_needs(self) -> ComputeNeeds:
+        """The MPI tasks ROMS needs (derived from the partitioning parameters)."""
         if self.partitioning.n_cores is not None:
-            return self.partitioning.n_cores
+            return ComputeNeeds(tasks=self.partitioning.n_cores)
 
         if (dims := self.partitioning.dims) is None:
             msg = "partitioning must supply n_cores or both n_procs_x and n_procs_y"
             raise ValueError(msg)
 
-        return dims[0] * dims[1]
+        return ComputeNeeds(tasks=dims[0] * dims[1])
+
+    @property
+    def processor_grid(self) -> tuple[int | None, int | None]:
+        """The domain decomposition (processes along x, y).
+
+        Partitioned input datasets were split for it.
+        """
+        return (self.partitioning.n_procs_x, self.partitioning.n_procs_y)

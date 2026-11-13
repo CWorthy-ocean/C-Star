@@ -15,6 +15,7 @@ from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.nest_ic import NestIcBlueprint
 from cstar.applications.plotter import PlotterBlueprint
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms_gpu.models import UclaRomsGpuBlueprint
 from cstar.applications.upscaler import UpscalerBlueprint
 from cstar.cli.blueprint.schemas import all_applications
 from cstar.orchestration.models import Blueprint
@@ -30,6 +31,16 @@ COMPLETE_BLUEPRINT = (
     / "blueprint_complete.yaml"
 )
 """A fully-populated UCLA ROMS blueprint."""
+
+GPU_TEMPLATE = (
+    Path(cstar.__file__).resolve().parent
+    / "additional_files"
+    / "templates"
+    / "bp"
+    / "ucla_roms_gpu"
+    / "blueprint.1.0.0.yaml"
+)
+"""The shipped template of the GPU UCLA ROMS blueprint."""
 
 
 def _plotter(tmp_path: Path) -> Blueprint:
@@ -50,6 +61,12 @@ def _ucla_roms(tmp_path: Path) -> Blueprint:
     data.pop("$schema", None)
     data.pop("schema_version", None)
     return UclaRomsBlueprint.model_validate(data)
+
+
+def _ucla_roms_gpu(tmp_path: Path) -> Blueprint:
+    data = yaml.safe_load(GPU_TEMPLATE.read_text())
+    data.pop("schema_version", None)
+    return UclaRomsGpuBlueprint.model_validate(data)
 
 
 def _hello_world(tmp_path: Path) -> Blueprint:
@@ -106,6 +123,7 @@ def _cdr_metrics(tmp_path: Path) -> Blueprint:
 FACTORIES: dict[str, Callable[[Path], Blueprint]] = {
     "plotter": _plotter,
     "ucla_roms": _ucla_roms,
+    "ucla_roms_gpu": _ucla_roms_gpu,
     "hello_world": _hello_world,
     "nest_ic": _nest_ic,
     "upscaler": _upscaler,

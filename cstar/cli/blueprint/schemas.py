@@ -76,6 +76,7 @@ def all_applications() -> list[str]:
     return [
         "plotter",
         "ucla_roms",
+        "ucla_roms_gpu",
         "hello_world",
         "nest_ic",
         "upscaler",

@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms_gpu/ucla_roms_gpu_schema.1.0.0.json
+name: Test GPU Blueprint
+description: This is the description of my test GPU blueprint
+application: ucla_roms_gpu
+state: draft
+valid_start_date: 2000-01-01 00:00:00
+valid_end_date: 2025-01-01 00:00:00
+working_dir: .
+schema_version: 1.0.0
+code:
+  # roms-marbl-gpu; MARBL is built from its submodule, so there is no marbl entry
+  roms:
+    location: https://github.com/CWorthy-ocean/roms-marbl-gpu.git
+    commit: v0.1.3-beta
+  run_time:
+    location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
+    branch: main
+    filter:
+      directory: wales-toy-domain-namelist-ucla-roms-0.13
+      files:
+        - namelist.nml
+        - marbl_in
+forcing:
+  boundary:
+    data:
+      - location: http://mockdoc.com/boundary1.nc
+        hash: abc
+      - location: http://mockdoc.com/boundary2.nc
+        hash: pqr
+  # no surface restoring data (sss, sst, sDIC, sALK): C-Star cannot switch
+  # restoring on for roms-marbl-gpu yet, so a run with it is refused
+  surface:
+    documentation: http://mockdoc.com/surface
+    locked: false
+    data:
+      - location: http://mockdoc.com/surface.nc
+        hash: abc123
+  corrections:
+    documentation: http://mockdoc.com/corrections
+    locked: false
+    data:
+      - location: http://mockdoc.com/corrections.nc
+        hash: abc123
+  tidal:
+    documentation: http://mockdoc.com/tidal
+    locked: false
+    data:
+      - location: http://mockdoc.com/tidal.nc
+        hash: abc123
+  river:
+    documentation: http://mockdoc.com/river
+    locked: false
+    data:
+      - location: http://mockdoc.com/river.nc
+        hash: abc123
+  # Optional. Carbonate sensitivities (ddic_dco2, ddic_dalk and their time
+  # variables) read by a CDR-LiTE run (nt_cdr_oae or nt_cdr_dor above zero) that
+  # does not compute them online, e.g. the _cdrgas output of an earlier run.
+  # carbonate_sensitivity:
+  #   documentation: http://mockdoc.com/carbonate-sensitivity
+  #   locked: false
+  #   data:
+  #     - location: http://mockdoc.com/output_cdrgas.20200101000000.nc
+  #       hash: abc123
+tiling:
+  documentation: http://mockdoc.com/tiling
+  hash: null
+  locked: false
+  # 8 tiles, one GPU each, on 2 nodes of 4 GPUs; one writer rank per node
+  n_procs_x: 4
+  n_procs_y: 2
+  nodes: 2
+  writers_per_node: 1
+namelist_overrides:
+  time_stepping:
+    dt: 1
+runtime_params:
+  documentation: http://mockdoc.com/runtime-params
+  hash: null
+  locked: false
+  start_date: 2020-01-01 00:00:00
+  end_date: 2021-01-01 00:00:00
+  checkpoint_frequency: 1d
+grid:
+  documentation: http://mockdoc.com/model-params
+  data:
+    - location: http://mockdoc.com/grid.nc
+initial_conditions:
+  data:
+    - location: http://mockdoc.com/initial_conditions.nc

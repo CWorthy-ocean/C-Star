@@ -1,6 +1,10 @@
 import typing as t
 
-from cstar.applications.ucla_roms.models import CodeRepository, UclaRomsBlueprint
+from cstar.applications.ucla_roms.models import (
+    CodeRepository,
+    ForcingConfiguration,
+    UclaRomsBlueprint,
+)
 from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -22,6 +26,66 @@ from cstar.roms.input_dataset import (
 )
 
 
+class RomsInputsBlueprint(t.Protocol):
+    """The parts of a ROMS-family blueprint (ucla_roms, ucla_roms_gpu) the input
+    adapters read.
+    """
+
+    @property
+    def code(self) -> object:
+        """The code repositories, read by name (see `AddtlCodeAdapter`)."""
+        ...
+
+    @property
+    def grid(self) -> models.Dataset:
+        """File defining the grid geometry."""
+        ...
+
+    @property
+    def initial_conditions(self) -> models.Dataset:
+        """File containing the starting conditions of the simulation."""
+        ...
+
+    @property
+    def forcing(self) -> ForcingConfiguration:
+        """Forcing configuration."""
+        ...
+
+    @property
+    def cdr_forcing(self) -> models.Dataset | None:
+        """Location of the CDR input file, if any."""
+        ...
+
+    @property
+    def nesting_info(self) -> models.Dataset | None:
+        """Location of the nesting info input file, if any."""
+        ...
+
+    @property
+    def processor_grid(self) -> tuple[int | None, int | None]:
+        """The domain decomposition (processes along x, y); partitioned input
+        datasets were split for it.
+        """
+        ...
+
+
+class _SourcePartitioning(t.TypedDict):
+    """The keyword arguments naming the processor grid an input dataset was split for."""
+
+    source_np_xi: int | None
+    source_np_eta: int | None
+
+
+def _source_np(model: RomsInputsBlueprint, partitioned: bool) -> _SourcePartitioning:
+    """Return the `source_np_xi`/`source_np_eta` keyword arguments of an input dataset.
+
+    A dataset marked `partitioned` was split for the model's processor grid;
+    any other has no source partitioning.
+    """
+    np_xi, np_eta = model.processor_grid if partitioned else (None, None)
+    return {"source_np_xi": np_xi, "source_np_eta": np_eta}
+
+
 class DiscretizationAdapter(ModelAdapter[UclaRomsBlueprint, ROMSDiscretization]):
     """Create a ROMSDiscretization from a blueprint model."""
 
@@ -34,10 +98,10 @@ class DiscretizationAdapter(ModelAdapter[UclaRomsBlueprint, ROMSDiscretization])
         )
 
 
-class AddtlCodeAdapter(ModelAdapter[UclaRomsBlueprint, AdditionalCode]):
+class AddtlCodeAdapter(ModelAdapter[RomsInputsBlueprint, AdditionalCode]):
     """Create a AdditionalCode from a blueprint model."""
 
-    def __init__(self, model: UclaRomsBlueprint, key: str) -> None:
+    def __init__(self, model: RomsInputsBlueprint, key: str) -> None:
         super().__init__(model)
         self.key = key
 
@@ -99,7 +163,7 @@ class PIOAdapter(ModelAdapter[UclaRomsBlueprint, PIOExternalCodeBase]):
         )
 
 
-class GridAdapter(ModelAdapter[UclaRomsBlueprint, ROMSModelGrid]):
+class GridAdapter(ModelAdapter[RomsInputsBlueprint, ROMSModelGrid]):
     """Create a ROMSModelGrid from a blueprint model."""
 
     @t.override
@@ -113,16 +177,11 @@ class GridAdapter(ModelAdapter[UclaRomsBlueprint, ROMSModelGrid]):
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.grid.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.grid.data[0].partitioned
-            else None,
+            **_source_np(self.model, self.model.grid.data[0].partitioned),
         )
 
 
-class InitialConditionAdapter(ModelAdapter[UclaRomsBlueprint, ROMSInitialConditions]):
+class InitialConditionAdapter(ModelAdapter[RomsInputsBlueprint, ROMSInitialConditions]):
     """Create a ROMSInitialCondition from a blueprint model."""
 
     @t.override
@@ -138,16 +197,11 @@ class InitialConditionAdapter(ModelAdapter[UclaRomsBlueprint, ROMSInitialConditi
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.initial_conditions.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.initial_conditions.data[0].partitioned
-            else None,
+            **_source_np(self.model, self.model.initial_conditions.data[0].partitioned),
         )
 
 
-class TidalForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSTidalForcing]):
+class TidalForcingAdapter(ModelAdapter[RomsInputsBlueprint, ROMSTidalForcing]):
     """Create a ROMSTidalForcing from a blueprint model."""
 
     @t.override
@@ -165,16 +219,11 @@ class TidalForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSTidalForcing]):
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.forcing.tidal.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.forcing.tidal.data[0].partitioned
-            else None,
+            **_source_np(self.model, self.model.forcing.tidal.data[0].partitioned),
         )
 
 
-class RiverForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSRiverForcing]):
+class RiverForcingAdapter(ModelAdapter[RomsInputsBlueprint, ROMSRiverForcing]):
     """Create a ROMSRiverForcing from a blueprint model."""
 
     @t.override
@@ -193,17 +242,12 @@ class RiverForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSRiverForcing]):
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.forcing.river.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.forcing.river.data[0].partitioned
-            else None,
+            **_source_np(self.model, self.model.forcing.river.data[0].partitioned),
         )
 
 
 class BoundaryForcingAdapter(
-    ModelAdapter[UclaRomsBlueprint, list[ROMSBoundaryForcing]]
+    ModelAdapter[RomsInputsBlueprint, list[ROMSBoundaryForcing]]
 ):
     """Create a ROMSBoundaryForcing from a blueprint model."""
 
@@ -215,18 +259,15 @@ class BoundaryForcingAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
+                **_source_np(self.model, f.partitioned),
             )
             for f in self.model.forcing.boundary.data
         ]
 
 
-class SurfaceForcingAdapter(ModelAdapter[UclaRomsBlueprint, list[ROMSSurfaceForcing]]):
+class SurfaceForcingAdapter(
+    ModelAdapter[RomsInputsBlueprint, list[ROMSSurfaceForcing]]
+):
     """Create a ROMSSurfaceForcing from a blueprint model."""
 
     @t.override
@@ -237,18 +278,13 @@ class SurfaceForcingAdapter(ModelAdapter[UclaRomsBlueprint, list[ROMSSurfaceForc
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
+                **_source_np(self.model, f.partitioned),
             )
             for f in self.model.forcing.surface.data
         ]
 
 
-class CdrForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSCdrForcing]):
+class CdrForcingAdapter(ModelAdapter[RomsInputsBlueprint, ROMSCdrForcing]):
     """Create a ROMSCdrForcing from a blueprint model."""
 
     @t.override
@@ -268,7 +304,7 @@ class CdrForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSCdrForcing]):
         )
 
 
-class NestingInfoAdapter(ModelAdapter[UclaRomsBlueprint, ROMSNestingInfo]):
+class NestingInfoAdapter(ModelAdapter[RomsInputsBlueprint, ROMSNestingInfo]):
     """Create a ROMSNestingInfo from a blueprint model."""
 
     @t.override
@@ -289,7 +325,7 @@ class NestingInfoAdapter(ModelAdapter[UclaRomsBlueprint, ROMSNestingInfo]):
 
 
 class ForcingCorrectionAdapter(
-    ModelAdapter[UclaRomsBlueprint, list[ROMSForcingCorrections]]
+    ModelAdapter[RomsInputsBlueprint, list[ROMSForcingCorrections]]
 ):
     """Create a ROMSForcingCorrections from a blueprint model."""
 
@@ -303,19 +339,14 @@ class ForcingCorrectionAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
+                **_source_np(self.model, f.partitioned),
             )
             for f in self.model.forcing.corrections.data
         ]
 
 
 class CarbonateSensitivityAdapter(
-    ModelAdapter[UclaRomsBlueprint, list[ROMSCarbonateSensitivity]]
+    ModelAdapter[RomsInputsBlueprint, list[ROMSCarbonateSensitivity]]
 ):
     """Create a ROMSCarbonateSensitivity from a blueprint model."""
 
@@ -329,12 +360,7 @@ class CarbonateSensitivityAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
+                **_source_np(self.model, f.partitioned),
             )
             for f in self.model.forcing.carbonate_sensitivity.data
         ]

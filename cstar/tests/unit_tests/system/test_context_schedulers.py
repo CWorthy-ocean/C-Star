@@ -18,7 +18,11 @@ DEFAULT_MOCK_HOST_NAME = "mock_system"
 @pytest.mark.parametrize(
     ("wrapped_class", "exp_sched_type", "exp_queue_names"),
     [
-        (AnvilSystemContext, SlurmScheduler, {"wholenode", "shared", "debug"}),
+        (
+            AnvilSystemContext,
+            SlurmScheduler,
+            {"wholenode", "shared", "debug", "gpu", "gpu-debug"},
+        ),
         (PerlmutterSystemContext, SlurmScheduler, {"regular", "shared", "debug"}),
         (MacOSSystemContext, None, None),
         (DerechoSystemContext, PBSScheduler, {"main", "preempt", "develop"}),
