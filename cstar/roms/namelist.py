@@ -1677,7 +1677,7 @@ UCLA_ROMS_GPU_0_1_3: Final[tuple[int, int, int]] = (0, 1, 3)
 # ``v_sponge_trc``, and the GPU rejects both.
 #
 # Recipe for a roms-marbl-gpu release that moves to a newer vocabulary (e.g. a
-# v0.2.0 reading the ucla-roms 0.14.0 namelist, once `RomsNamelistV0_14_0` exists):
+# v0.2.0 reading the ucla-roms 0.14.0 namelist, `RomsNamelistV0_14_0`):
 #   1. Add the release constant:
 #        UCLA_ROMS_GPU_0_2_0: Final[tuple[int, int, int]] = (0, 2, 0)
 #   2. Cap the current last entry's upper bound at the new version:

@@ -1014,6 +1014,7 @@ def test_forcing_file_count_checks_a_live_namelist():
         (RomsNamelist, MAX_FORCING_FILES_BEFORE_0_13_0),
         (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0),
         (RomsNamelistV0_13_0, MAX_FORCING_FILES),
+        (RomsNamelistV0_14_0, MAX_FORCING_FILES),
     ],
 )
 def test_max_forcing_files_follows_the_schema(schema, expected):
