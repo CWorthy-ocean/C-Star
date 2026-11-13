@@ -16,10 +16,18 @@ import yaml
 from pydantic import TypeAdapter, ValidationError
 
 import cstar.catalog
+from cstar.applications.forge.blueprint import (
+    BgcSourceItem,
+    BoundaryForcing,
+    Forcing,
+    InitialConditions,
+    SourceSpec,
+)
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTIONS,
     _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
+    BGC_INPUTS_REQUIRED_MIN_ROMS,
     CDR_LITE_MODE_MIN_ROMS,
     CDR_NZ_CHD_FROM_FILE_MIN_ROMS,
     DIAGNOSTICS_PIO_MIN_ROMS,
@@ -62,6 +70,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_diagnostics_pio,
+    check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_restoring_flux_output,
     check_river_tracer_counts,
@@ -81,6 +90,7 @@ from cstar.applications.forge.settings import write_roms_namelist
 from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
     NEWEST_KNOWN_UCLA_ROMS,
+    UCLA_ROMS_0_14_0,
     RomsNamelist,
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
@@ -2775,3 +2785,116 @@ def test_validate_run_time_sections_reports_the_restoring_flux_switch(
         )
         == []
     )
+
+
+# ---------------------------------------------------------------------------
+# check_marbl_bgc_inputs
+# ---------------------------------------------------------------------------
+_GLORYS = SourceSpec(name="GLORYS", glorys_layout="regional")
+_BGC_ITEM = BgcSourceItem(source=SourceSpec(name="UNIFIED"))
+_OPEN = {"south": False, "east": True, "north": False, "west": False}
+_CLOSED = dict.fromkeys(("south", "east", "north", "west"), False)
+_HASH = "a" * 40
+
+
+def _forcing(*, boundary_bgc=False, ic_bgc=False, boundary=True, ic=True):
+    """A Forcing whose boundary / initial conditions carry BGC sources or not;
+    ``boundary=False`` / ``ic=False`` leave the section out (None).
+    """
+    bgc = [_BGC_ITEM]
+    return Forcing(
+        boundary=(
+            BoundaryForcing(source=_GLORYS, bgc_sources=bgc if boundary_bgc else [])
+            if boundary
+            else None
+        ),
+        initial_conditions=(
+            InitialConditions(source=_GLORYS, bgc_sources=bgc if ic_bgc else [])
+            if ic
+            else None
+        ),
+    )
+
+
+def _check(forcing, **over):
+    kw = {"open_boundaries": _OPEN, "is_child": False, "marbl": True}
+    kw |= {"roms_ref": "0.14.0", **over}
+    check_marbl_bgc_inputs(forcing, **kw)
+
+
+def test_check_marbl_bgc_inputs_refuses_physics_only_naming_both():
+    with pytest.raises(ValueError) as exc:
+        _check(_forcing())
+    msg = str(exc.value)
+    assert "forcing.boundary and initial_conditions have no BGC sources" in msg
+    assert "ucla-roms >= 0.14.0" in msg
+    assert "glorys-era5-unified" in msg and 'bgc_mode "none"' in msg
+
+
+def test_check_marbl_bgc_inputs_names_the_constant():
+    assert BGC_INPUTS_REQUIRED_MIN_ROMS == UCLA_ROMS_0_14_0
+    with (
+        mock.patch(
+            "cstar.applications.forge.namelist_model.BGC_INPUTS_REQUIRED_MIN_ROMS",
+            (0, 20, 0),
+        ),
+        pytest.raises(ValueError, match=r"ucla-roms >= 0\.20\.0"),
+    ):
+        _check(_forcing(), roms_ref="0.20.0")
+
+
+def test_check_marbl_bgc_inputs_refuses_only_the_boundary():
+    with pytest.raises(ValueError, match=r"^forcing\.boundary has no BGC") as exc:
+        _check(_forcing(ic_bgc=True))
+    assert "initial_conditions" not in str(exc.value).split(",")[0]
+
+
+def test_check_marbl_bgc_inputs_refuses_only_the_initial_conditions():
+    with pytest.raises(ValueError, match=r"^initial_conditions has no BGC"):
+        _check(_forcing(boundary_bgc=True))
+
+
+def test_check_marbl_bgc_inputs_passes_with_bgc_on_both():
+    _check(_forcing(boundary_bgc=True, ic_bgc=True))
+
+
+def test_check_marbl_bgc_inputs_passes_with_marbl_off():
+    _check(_forcing(), marbl=False)
+
+
+def test_check_marbl_bgc_inputs_closed_sides_need_no_boundary_but_ic():
+    with pytest.raises(ValueError, match=r"^initial_conditions has no BGC"):
+        _check(_forcing(), open_boundaries=_CLOSED)
+    _check(_forcing(ic_bgc=True), open_boundaries=_CLOSED)
+
+
+def test_check_marbl_bgc_inputs_without_boundary_forcing_is_not_this_rule():
+    _check(_forcing(boundary=False, ic_bgc=True))
+
+
+def test_check_marbl_bgc_inputs_child_takes_its_boundary_from_the_parent():
+    _check(_forcing(boundary=False, ic=False), is_child=True)
+    # a child's boundary section is never required, its explicit IC still is
+    _check(_forcing(ic_bgc=True), is_child=True)
+    with pytest.raises(ValueError, match=r"^initial_conditions has no BGC"):
+        _check(_forcing(boundary=False), is_child=True)
+
+
+@pytest.mark.parametrize(
+    ("ref", "refused"),
+    [
+        ("0.13.1", False),
+        ("v0.13.1", False),
+        ("0.14.0", True),
+        ("0.15.0", True),
+        ("main", True),
+        (None, True),
+        (_HASH, False),
+    ],
+)
+def test_check_marbl_bgc_inputs_gate(ref, refused):
+    if refused:
+        with pytest.raises(ValueError, match="BGC"):
+            _check(_forcing(), roms_ref=ref)
+    else:
+        _check(_forcing(), roms_ref=ref)

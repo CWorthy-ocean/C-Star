@@ -67,6 +67,7 @@ from cstar.roms.namelist import (
     TracerDiff2,
     UbindSettings,
     VerticalMixingSettings,
+    is_commit_hash,
     namelist_schema_for_ref,
     roms_version_from_ref,
 )
@@ -87,6 +88,8 @@ from cstar.roms.precheck import (
 
 if TYPE_CHECKING:
     from collections.abc import Container, Iterable, Mapping, Sequence
+
+    from cstar.applications.forge.blueprint import Forcing
 
 
 def _coerce_pathlike(v):
@@ -991,6 +994,69 @@ def check_diagnostics_pio(cppdefs: Mapping[str, Any], roms_ref: str | None) -> N
             "ucla-roms aborts at the first diagnostics output under ParallelIO "
             f"before {minimum}. Pin ucla-roms >= {minimum}, or turn off use_pio or "
             "cppdefs.diagnostics."
+        )
+
+
+# ucla-roms release from which a MARBL (or BEC2) run stops at startup when a BGC
+# tracer is missing from the open-boundary files or the initial file (#421); earlier
+# releases zero-filled it with a warning. Temperature and salinity were always
+# required, and passive and CDR tracers stay optional.
+BGC_INPUTS_REQUIRED_MIN_ROMS: tuple[int, int, int] = UCLA_ROMS_0_14_0
+
+
+def check_marbl_bgc_inputs(
+    forcing: Forcing,
+    *,
+    open_boundaries: Mapping[str, bool],
+    is_child: bool,
+    marbl: bool,
+    roms_ref: str | None,
+) -> None:
+    """Reject a MARBL run whose boundary forcing or initial conditions carry no BGC
+    sources, on ucla-roms >= :data:`BGC_INPUTS_REQUIRED_MIN_ROMS`, which stops at
+    startup when a BGC tracer is missing from them.
+
+    Gated like Rule C (``averages_end_on_marbl_step_applies_to``): a release tag at or
+    above the minimum, or a branch or ``None`` (the latest release), is checked; a
+    commit hash is not, as this rule refuses runs and a hash from before the minimum
+    must not be refused for a rule its release does not have. A caller that can
+    resolve the hash passes the release tag it resolves to. Nothing is checked
+    without MARBL. The boundary is required only for a domain that is not a child
+    (a child's boundary comes from its parent's nesting file), with an open side
+    and boundary forcing at all; the initial conditions whenever the blueprint
+    carries them (a child without its own takes its state from the parent).
+
+    The resolver, ``process_forge_blueprint`` and ``configure_build`` call this.
+
+    Raises ``ValueError`` naming every input missing BGC sources.
+    """
+    if not marbl or is_commit_hash(roms_ref):
+        return
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < BGC_INPUTS_REQUIRED_MIN_ROMS:
+        return
+    missing = []
+    if (
+        not is_child
+        and any(open_boundaries.values())
+        and forcing.boundary is not None
+        and not forcing.boundary.bgc_sources
+    ):
+        missing.append("forcing.boundary")
+    if (
+        forcing.initial_conditions is not None
+        and not forcing.initial_conditions.bgc_sources
+    ):
+        missing.append("initial_conditions")
+    if missing:
+        minimum = ".".join(str(part) for part in BGC_INPUTS_REQUIRED_MIN_ROMS)
+        raise ValueError(
+            f"{' and '.join(missing)} {'has' if len(missing) == 1 else 'have'} no BGC "
+            f"sources, and ucla-roms >= {minimum} stops a MARBL run when a BGC "
+            "tracer is missing from the boundary or initial files. Add BGC sources "
+            "(forcing.boundary.bgc_sources / initial_conditions.bgc_sources), e.g. "
+            "a ForcingSpec with BGC such as glorys-era5-unified, or turn MARBL off "
+            '(bgc_mode "none").'
         )
 
 

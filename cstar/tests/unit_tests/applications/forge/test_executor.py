@@ -4423,6 +4423,31 @@ class TestGoldenNamelist:
 
     @pytest.mark.parametrize(
         ("model_path", "rejected"),
+        [(_MODEL_PATH_ROMS0140, True), (_MODEL_PATH_ROMS0130, False)],
+    )
+    def test_configure_build_rejects_physics_only_forcing_with_marbl_end_to_end(
+        self, mock_grid, tmp_path, model_path, rejected
+    ):
+        """The net for stored or hand-edited blueprints run with validate=False: a
+        MARBL build whose boundary and initial conditions carry no BGC sources is
+        refused on ucla-roms >= 0.14.0, which stops on it at startup, and accepted
+        below it. The sources are stripped from the executor's forcing after
+        generation, which the mocked roms-tools objects would not survive before.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=model_path
+        )
+        builder.forcing.boundary.bgc_sources = []
+        builder.forcing.initial_conditions.bgc_sources = []
+
+        if rejected:
+            with pytest.raises(ValueError, match=r"have no BGC sources"):
+                self._configure_build_for(cfg, builder)
+        else:
+            self._configure_build_for(cfg, builder)
+
+    @pytest.mark.parametrize(
+        ("model_path", "rejected"),
         [(_MODEL_PATH_ROMS0130, True), (_MODEL_PATH_ROMS0120, False)],
     )
     def test_configure_build_checks_averages_against_the_marbl_step_end_to_end(

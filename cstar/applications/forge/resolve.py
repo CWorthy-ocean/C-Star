@@ -80,6 +80,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_diagnostics_pio,
+    check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_marbl_step_averages,
     check_output_streams_divide_rst,
@@ -1539,6 +1540,19 @@ def build_forge_blueprint(
                 + '\nSet bgc_mode="marbl" or remove these BGC forcing items from '
                 "the ForcingSpec."
             )
+
+    # ----- MARBL needs BGC sources on the boundary and initial conditions -----
+    # The mirror of the check above: ucla-roms >= 0.14.0 stops a MARBL run at
+    # startup when a BGC tracer is missing from them. Keyed on the merged cppdefs
+    # (an override can turn MARBL off after bgc_mode set it), like the checks above;
+    # needs the built forcing, so it sits here rather than with them.
+    check_marbl_bgc_inputs(
+        sources,
+        open_boundaries=open_boundaries,
+        is_child=grid_kwargs_parent is not None,
+        marbl=settings["cppdefs"].get("marbl", False),
+        roms_ref=effective_roms_ref,
+    )
 
     # ----- generated river tracer count --------------------------------------
     # roms-tools' RiverForcing writes T and S, plus the MARBL tracers with

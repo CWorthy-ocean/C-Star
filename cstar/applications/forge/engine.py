@@ -42,7 +42,10 @@ from typing import (
 
 from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
 from cstar.applications.forge.host import HostPaths
-from cstar.applications.forge.namelist_model import validate_run_time_sections
+from cstar.applications.forge.namelist_model import (
+    check_marbl_bgc_inputs,
+    validate_run_time_sections,
+)
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.roms.namelist import release_ref_for_remote
 
@@ -287,6 +290,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         cdr_forcing_file=cfg.cdr.cdr_forcing_file,
         carbonate_sensitivity=cfg.carbonate_sensitivity,
         forcing_override=sources_to_forcing_override(cfg),
+        forcing=cfg.forcing,
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),
         resolved_datasets={
@@ -459,6 +463,16 @@ def process_forge_blueprint(
         if roms_ref:
             roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
         problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
+        try:
+            check_marbl_bgc_inputs(
+                cfg.forcing,
+                open_boundaries=cfg.domain.open_boundaries.model_dump(),
+                is_child=cfg.domain.is_child,
+                marbl=(cfg.model_settings.get("cppdefs") or {}).get("marbl", False),
+                roms_ref=roms_ref,
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
         if problems:
             raise ValueError(
                 "forge_blueprint.model_settings has invalid values (fix before "

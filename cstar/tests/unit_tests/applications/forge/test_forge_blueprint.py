@@ -11,6 +11,7 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
+import copy
 import logging
 import typing as t
 import warnings
@@ -2932,6 +2933,54 @@ def test_resolver_keeps_the_switched_off_constant_fe_in_a_non_marbl_build():
     )
     assert cfg.model_settings["cppdefs"]["marbl"] is False
     assert cfg.model_settings["marbl_bgc"]["use_constant_fe"] is False
+
+
+_PHYSICS_ONLY_CATALOG_FORCING = _CATALOG.forcing_data("glorys-era5-physics")
+
+
+def test_resolver_refuses_physics_only_forcing_with_marbl_on_roms_0_14():
+    """ucla-roms >= 0.14.0 stops a MARBL run missing a BGC tracer from the boundary
+    or initial files, so the resolver refuses before generation, compile and queue.
+    """
+    with pytest.raises(
+        ValueError, match=r"forcing\.boundary and initial_conditions have no BGC"
+    ):
+        _build(
+            model_path=_MODEL_PATH_ROMS0140,
+            forcing_inputs=_PHYSICS_ONLY_CATALOG_FORCING,
+        )
+
+
+def test_resolver_accepts_physics_only_forcing_below_the_bgc_inputs_gate():
+    forcing = copy.deepcopy(_PHYSICS_ONLY_CATALOG_FORCING)
+    # the river tracer count (a separate check) wants BGC rivers under MARBL
+    for item in forcing["forcing"].get("river", []):
+        item["include_bgc"] = True
+    cfg = _build(model_path=_MODEL_PATH_ROMS0130, forcing_inputs=forcing)
+    assert cfg.model_settings["cppdefs"]["marbl"] is True
+    assert cfg.forcing.boundary.bgc_sources == []
+
+
+def test_resolver_accepts_physics_only_forcing_with_marbl_off():
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0140,
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_CATALOG_FORCING,
+    )
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+
+
+def test_resolver_keys_the_bgc_inputs_check_on_the_merged_cppdefs():
+    """A compile-time override can turn MARBL off after bgc_mode set it; ucla-roms
+    then has no BGC tracers to require.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0140,
+        forcing_inputs=_PHYSICS_ONLY_CATALOG_FORCING,
+        compile_time_overrides={"cppdefs": {"marbl": False}},
+        run_time_overrides={"param": {"ntrc_bio": 0}},
+    )
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
 
 
 def test_resolver_rejects_constant_fe_without_marbl():
@@ -8275,9 +8324,28 @@ class TestForgeBlueprintWizard:
 
         w.parent_enable.value = False
         assert w._forcing_editor.ic_name.value == "GLORYS"
-        cfg = w.config
-        assert cfg.domain.is_child is False
-        assert cfg.forcing.initial_conditions is not None
+        # IC is back, so the resolver is no longer stuck on the non-child IC error.
+        # Enabling the parent also cleared the boundary BGC rows, and disabling it
+        # does not bring them back, so under the default MARBL model the resolver
+        # now stops on the boundary alone (not the IC), shown live like any other.
+        assert w.config is None
+        assert "forcing.boundary has no BGC sources" in w.derived.value
+        assert "initial_conditions" not in w.derived.value.split("ucla-roms")[0]
+
+    def test_physics_only_forcing_on_the_default_model_shows_the_bgc_inputs_error(
+        self,
+    ):
+        """The wizard re-resolves on every change, so the MARBL BGC-inputs error shows
+        live: no config, the message in the status banner and the preview.
+        """
+        w = self._wizard()
+        assert w.config is not None
+        w.forcing_dd.value = "glorys-era5-physics"
+        assert w.config is None
+        assert "no BGC sources" in w.derived.value
+        assert "ucla-roms &gt;= 0.14.0" in w.derived.value or (
+            "ucla-roms >= 0.14.0" in w.derived.value
+        )
 
     def test_reselecting_forcing_spec_keeps_ic_cleared_for_child(self):
         """Reseeding the forcing editor from a newly-selected ForcingSpec (which
@@ -8824,6 +8892,40 @@ class TestForgeBlueprintEngine:
             process_forge_blueprint(
                 cfg, executor_factory=_FakeBuilder
             )  # raises before any call
+
+    def test_physics_only_forcing_with_marbl_fails_before_any_call(self):
+        """A stored blueprint whose boundary and initial conditions carry no BGC
+        sources, with MARBL on a pinned 0.14.0, is refused up front (with the other
+        invalid-values problems), before any data is staged.
+        """
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        cfg = _build(model_path=_MODEL_PATH_ROMS0140)
+        cfg.forcing.boundary.bgc_sources = []
+        cfg.forcing.initial_conditions.bgc_sources = []
+        cfg.model_settings["param"]["np_xi"] = "not-an-int"
+        calls = []
+
+        class _Recorder(_FakeBuilder):
+            def ensure_source_data(self, **k):
+                calls.append("ensure")
+
+        with pytest.raises(ValueError, match="invalid values") as exc:
+            process_forge_blueprint(cfg, executor_factory=_Recorder)
+        assert "forcing.boundary and initial_conditions have no BGC" in str(exc.value)
+        assert "np_xi" in str(exc.value)  # reported together with the others
+        assert calls == []
+
+    def test_bgc_inputs_check_is_skipped_for_marbl_off(self):
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        cfg = _build(model_path=_MODEL_PATH_ROMS0140)
+        cfg.forcing.boundary.bgc_sources = []
+        cfg.forcing.initial_conditions.bgc_sources = []
+        cfg.model_settings["cppdefs"]["marbl"] = False
+        cfg.model_settings["param"]["ntrc_bio"] = 0  # the tracer-count check
+        b = process_forge_blueprint(cfg, executor_factory=_FakeBuilder)
+        assert [c[0] for c in b.calls] == ["ensure", "generate", "configure"]
 
     def test_resolve_host_reads_config_not_file(self):
         # Forge's host provider builds a HostPaths from auto-detected config;

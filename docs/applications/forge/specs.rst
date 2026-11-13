@@ -42,8 +42,10 @@ ForcingSpec (``specs/ForcingSpec/<name>.yaml``)
    interpolation method for each. The bundled entries pair GLORYS and ERA5
    with different biogeochemical sources (unified climatology, GLODAP and
    WOA, or ESPER); ``glorys-era5-physics`` carries no biogeochemical source,
-   for ``bgc_mode`` ``none`` and ``cdr_lite``. See :doc:`source_datasets` for
-   the sources.
+   for ``bgc_mode`` ``none`` and ``cdr_lite``. With MARBL on ucla-roms 0.14.0
+   or later, the boundary forcing and the initial conditions need
+   biogeochemical sources (a nested child gets its boundary from its parent).
+   See :doc:`source_datasets` for the sources.
 
 OutputSpec (``specs/OutputSpec/<name>.yaml``)
    Which fields the model writes, how often, and how files are packed, per
