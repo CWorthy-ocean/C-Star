@@ -68,9 +68,10 @@ special case has leaked.
 
 - *Why:* each consumer becomes aware of the feature, and the next consumer
   forgets.
-- *Where:* deferred blueprints (#646) are visible only at
-  ``DeferredBlueprintRef``, one validator, and ``resolve_deferred_blueprint``;
-  every step applies its overrides through the ``apply-overrides`` directive.
+- *Where:* a deferred blueprint (#646) is a ``DeferredBlueprintRef`` that
+  ``resolve_deferred_blueprint`` resolves, and every step applies its
+  overrides through the ``apply-overrides`` directive, not through a second
+  path for deferred steps.
 - *Not covered:* ``isinstance`` on untyped external data (YAML, JSON, CLI
   strings) at a parse boundary, and ``| None`` for data that is stored or
   passed along without changing behavior.
@@ -106,8 +107,8 @@ Never substitute a default with only a log line.
 One source for each default and each derived name
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The model field's ``Field(default=...)`` is the source of its default. Code
-that builds a "default instance" does not restate it. Derived state is a
+The model field's own default is the source of that default. Code that builds
+a "default instance" does not restate it. Derived state is a
 read-only ``@property`` on the model that owns the underlying field.
 
 - *Why:* when the authoritative value changes, every copy must change with it.
@@ -194,7 +195,8 @@ Keep Forge's execution layer free of authoring code
 
 Forge's execution modules under ``cstar/applications/forge/`` do not import
 ``cstar.catalog``, the resolver (``resolve``), host configuration
-(``config``, ``runtime``), or ``cstar.wizard``.
+(``config``, ``runtime``), or ``cstar.wizard``. The authoring modules
+themselves, ``models.py``, and ``app.py`` are outside this rule.
 
 - *Why:* execution runs from a reviewable blueprint on any machine, without
   the catalog or the wizard.
@@ -205,11 +207,13 @@ Pydantic models and adapters
 ----------------------------
 
 - New models set at least ``ConfigDict(extra="forbid",
-  str_strip_whitespace=True, use_attribute_docstrings=True)``. *Why:* unknown
-  keys are errors, stray whitespace is not data, and attribute docstrings
-  become field descriptions (#646).
-- Write defaults as ``Field(default=...)``, not ``= value``. *Why:* the keyword
-  form keeps IDE constructor hints intact.
+  str_strip_whitespace=True, use_attribute_docstrings=True)``, which
+  ``ConfiguredBaseModel`` in ``cstar/orchestration/models.py`` already
+  carries. *Why:* unknown keys are errors, stray whitespace is not data, and
+  attribute docstrings become field descriptions (#646).
+- In new fields, write defaults as ``Field(default=...)``, not ``= value``;
+  many existing fields use the plain form. *Why:* the keyword form keeps IDE
+  constructor hints intact.
 - Prefer ``str = Field(default="")`` over ``str | None`` when an empty string
   means "not set". *Why:* the same truthiness checks work without a ``None``
   case.

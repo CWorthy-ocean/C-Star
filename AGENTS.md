@@ -27,8 +27,9 @@ pip install -e ".[dev]"                     # ".[dev,docs]" for the docs
   shared HPC environment, and ask before changing one you did not create.
 - On macOS the conda `rsync` is required; the system one is too old for the
   ucla-roms Makefiles.
-- Run `python -m cstar` and pytest from this checkout's root: the current
-  directory comes first on `sys.path`, so another checkout's shadows this one.
+- Run `python -m cstar.cli.cli` and pytest from this checkout's root: the
+  current directory comes first on `sys.path`, so an editable install of
+  another checkout does not shadow this one.
 
 ## Tests: never run bare `pytest`
 
@@ -45,12 +46,14 @@ python -m pytest cstar/tests/integration_tests/e2e \
     cstar/tests/integration_tests/ucla_roms
 ```
 
-- Never run `cstar/tests/integration_tests` as a whole. Tell the user before
-  starting Tier 2. There are no pytest markers (`-m` selects nothing), and
-  pytest-xdist is not a dependency (no `-n`).
+- Never run `cstar/tests/integration_tests` as a whole: its `extended/`
+  directory is a heavier suite that only CI runs. Tell the user before
+  starting Tier 2. Select tests by path, not by marker (the registered
+  markers, `network` and `slow`, are unused), and pytest-xdist is not a
+  dependency (no `-n`).
 - Integration tiers need `nccopy`, `mpirun`, and the compilers on `PATH`.
-  Without the environment's `bin/` on `PATH`, most of Tier 1 skips ("nccopy
-  is required") and pytest still exits 0. Read the skip count.
+  Without the environment's `bin/` on `PATH`, the Forge tests in Tier 1 skip
+  ("nccopy is required") and pytest still exits 0. Read the skip count.
 - Golden fixtures encode what the model is given. Regenerate one only for an
   intended change (`UPDATE_GOLDEN=1`, `-k <test>`) and review the diff.
 
