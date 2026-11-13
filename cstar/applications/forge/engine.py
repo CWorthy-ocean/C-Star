@@ -475,8 +475,8 @@ def process_forge_blueprint(
             problems.append(str(exc))
         if problems:
             raise ValueError(
-                "forge_blueprint.model_settings has invalid values (fix before "
-                "processing):\n  " + "\n  ".join(problems)
+                "forge_blueprint has invalid values (fix before processing):\n  "
+                + "\n  ".join(problems)
             )
 
     resolved_only = None
