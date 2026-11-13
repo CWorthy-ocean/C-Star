@@ -10143,13 +10143,24 @@ def test_surface_blend_needs_a_pinned_coarse_mode():
     with pytest.raises(ValidationError) as exc:
         _build(forcing_inputs=fdata)
     msg = str(exc.value)
-    assert "surface[0] (physics), surface[1] (bgc)" in msg
+    assert "surface[0] (physics) auto, surface[1] (bgc) auto" in msg
     assert "never or always" in msg
 
 
-def test_surface_blend_coarse_mode_rule_only_binds_when_blended():
-    # Explicit modes pass, `always` included.
+def test_surface_blend_needs_one_coarse_mode_for_every_surface_item():
+    # The blend on `always`, the bgc and restoring items on `never`: every surface
+    # file shares one interp_frc, so this would fail only at generation.
     fdata = _blend_inputs(coarse_grid_mode="always")
+    with pytest.raises(ValidationError) as exc:
+        _build(forcing_inputs=fdata)
+    assert "surface[0] (physics) always, surface[1] (bgc) never" in str(exc.value)
+
+
+def test_surface_blend_coarse_mode_rule_only_binds_when_blended():
+    # One explicit mode on every surface item passes, `always` included.
+    fdata = _blend_inputs(coarse_grid_mode="always")
+    for item in fdata["forcing"]["surface"][1:]:
+        item["coarse_grid_mode"] = "always"
     _build(forcing_inputs=fdata)
 
     # No blend: auto is fine.

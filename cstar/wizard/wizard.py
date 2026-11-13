@@ -3457,12 +3457,19 @@ class _ForcingEditor:
             self._apply_row_visibility(ws)
 
         def _on_fallback_change(change, ws=w) -> None:
-            # A blend needs every surface item pinned to never/always (Forcing
-            # refuses "auto"), so a newly chosen fallback pins the "auto" rows.
+            # A blend needs every surface item on one explicit mode (Forcing refuses
+            # "auto" and a mix), so a newly chosen fallback pins the "auto" rows to
+            # this row's mode, or to "never" when this row is on "auto" too.
             if change["old"] == _BLEND_NONE and change["new"] != _BLEND_NONE:
-                for row in [ws, *(r for r in self._rows["surface"] if r is not ws)]:
+                own = ws["coarse_grid_mode"].value
+                pin = (
+                    CoarseGridMode.NEVER.value
+                    if own == CoarseGridMode.AUTO.value
+                    else own
+                )
+                for row in self._rows["surface"]:
                     if row["coarse_grid_mode"].value == CoarseGridMode.AUTO.value:
-                        row["coarse_grid_mode"].value = CoarseGridMode.NEVER.value
+                        row["coarse_grid_mode"].value = pin
             self._apply_row_visibility(ws)
 
         w["name"].observe(_on_surface_name_change, names="value")

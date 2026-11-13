@@ -116,7 +116,8 @@ global product.
 products are averaged, with a ``smoothstep`` or ``linear`` profile; ``0``,
 the default, switches from one to the other at the edge. The fallback is
 built on the same grid as CONUS404, so when any surface item has a blend,
-every surface item must set ``coarse_grid_mode`` to ``never`` or ``always``.
+every surface item must set the same ``coarse_grid_mode``, ``never`` or
+``always``.
 If you leave out the blend and the grid reaches past the footprint, Forge
 stops and asks for one.
 

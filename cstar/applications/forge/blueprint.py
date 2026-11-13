@@ -1439,23 +1439,23 @@ class Forcing(_Section):
     resolved_datasets: dict[str, ResolvedDataset] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _blend_needs_a_pinned_coarse_mode(self) -> Forcing:
+    def _blend_needs_one_pinned_coarse_mode(self) -> Forcing:
         if all(item.blend is None for item in self.surface):
             return self
-        auto = [
-            f"surface[{i}] ({item.type.value})"
+        modes = {item.coarse_grid_mode for item in self.surface}
+        if len(modes) == 1 and CoarseGridMode.AUTO not in modes:
+            return self
+        listed = ", ".join(
+            f"surface[{i}] ({item.type.value}) {item.coarse_grid_mode.value}"
             for i, item in enumerate(self.surface)
-            if item.coarse_grid_mode == CoarseGridMode.AUTO
-        ]
-        if auto:
-            raise ValueError(
-                "a surface blend needs both products on the same grid, and every "
-                "surface file in a run shares one coarse/fine setting, while "
-                "coarse_grid_mode auto picks per source (CONUS404 resolves fine, "
-                "ERA5 and BGC climatologies coarse); set coarse_grid_mode to never "
-                f"or always on: {', '.join(auto)}"
-            )
-        return self
+        )
+        raise ValueError(
+            "a surface blend needs both products on the same grid, and every "
+            "surface file in a run shares one coarse/fine setting, while "
+            "coarse_grid_mode auto picks per source (CONUS404 resolves fine, "
+            "ERA5 and BGC climatologies coarse); give every surface item the same "
+            f"coarse_grid_mode, never or always (now: {listed})"
+        )
 
     def labelled_sources(self) -> Iterator[tuple[str, SourceSpec]]:
         """Every ``SourceSpec`` in the sections, with where it sits (e.g.

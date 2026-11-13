@@ -880,6 +880,19 @@ def test_choosing_a_fallback_pins_auto_coarse_grid_modes(editor):
     Forcing.model_validate({"surface": editor.gather()["forcing"]["surface"]})
 
 
+def test_choosing_a_fallback_pins_auto_rows_to_the_blended_rows_mode(editor):
+    """A blended row already on ``always`` takes the ``auto`` rows with it."""
+    editor._rows["surface"] = []
+    editor._add("surface")
+    editor._add("surface")
+    primary, bgc = editor._rows["surface"]
+    bgc["type"].value = "bgc"
+    primary["coarse_grid_mode"].value = "always"
+    primary["blend_fallback"].value = "ERA5"
+    assert bgc["coarse_grid_mode"].value == "always"
+    Forcing.model_validate({"surface": editor.gather()["forcing"]["surface"]})
+
+
 def test_blend_with_auto_coarse_mode_surfaces_the_forcing_error():
     """A user who sets ``auto`` back on a blended row sees the Forcing error."""
     wiz = ForgeBlueprintWizard()
