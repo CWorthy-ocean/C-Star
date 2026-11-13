@@ -1,0 +1,1 @@
+The wizard docs describe the new placement and the diagnostics switch.

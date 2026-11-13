@@ -1,0 +1,1 @@
+Forge wrote the diagnostics output period as a real number (``86400.0``), which ucla-roms cannot read into its integer setting, so any run with ``DIAGNOSTICS`` compiled in stopped at startup.

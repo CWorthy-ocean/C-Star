@@ -1,0 +1,1 @@
+GPU runs are supported on Perlmutter with roms-marbl-gpu v0.1.3-beta, from its public repository.

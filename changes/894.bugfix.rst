@@ -1,0 +1,2 @@
+A blueprint carrying a ``$schema`` key, from a hand edit or a dump made in Python, no longer fails validation in editors and validators against the schema that key names.
+- New schema versions: ucla_roms 3.3.1, ucla_roms_gpu 1.0.1, nest_ic 1.2.1, plotter 2.1.1, and hello_world, upscaler and cdr_metrics 1.1.1; blueprints written at the previous versions still load unchanged.

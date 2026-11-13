@@ -1,0 +1,1 @@
+A workplan's ``slurm`` settings (a step's ``compute_overrides.slurm`` or the workplan's ``compute_environment.slurm``) now reject unknown keys instead of ignoring them; remove or correct the key the error names.

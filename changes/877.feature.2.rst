@@ -1,0 +1,1 @@
+``nest_ic`` blueprints accept ``bottom_fill_blend_m`` for the child's initial conditions, where the child is deeper than the parent (blueprint schema 1.2.0).

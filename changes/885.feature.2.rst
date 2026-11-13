@@ -1,0 +1,4 @@
+Workplan steps can run on GPU nodes: ``num_gpus`` (and optionally ``gpus_per_node``) in a step's ``slurm`` settings requests GPUs, and C-Star lays the job out evenly over the nodes.
+- A GPU step goes to the system's GPU queue unless ``CSTAR_SLURM_GPU_QUEUE`` names another, and is charged to ``CSTAR_SLURM_GPU_ACCOUNT`` when set, else ``CSTAR_SLURM_ACCOUNT``; ``cstar init`` offers both.
+- On Perlmutter a GPU job needs an account (NERSC policy), so C-Star refuses to compose one without.
+- A step whose application needs a toolchain the system does not have (GPU builds on Anvil) is refused before it is submitted, not after it waits in the queue.

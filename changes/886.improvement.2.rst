@@ -1,0 +1,1 @@
+The variables the CDR metrics and the upscaler read are now named once, in their applications, so other parts of C-Star use the same lists.

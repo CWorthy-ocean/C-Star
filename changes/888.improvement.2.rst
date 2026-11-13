@@ -1,0 +1,1 @@
+Pre-run refuses a namelist that lists more forcing files than the pinned ucla-roms reads (360 before 0.13.0, 10000 from 0.13.0).

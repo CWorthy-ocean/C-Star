@@ -1,0 +1,1 @@
+Published the ``nest_ic`` 1.2.0 blueprint schema and described the new field on the ``nest_ic`` page.

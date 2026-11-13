@@ -1,0 +1,1 @@
+Bundled ModelSpecs, the bundled and documentation Forge blueprints are re-pinned to the template commit that adds ``DIAGNOSTICS``; their rendered ``cppdefs.opt`` is unchanged.

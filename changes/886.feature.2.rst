@@ -1,0 +1,1 @@
+The answers are saved as a ``compress`` blueprint in ``<run>/compress/``, which ``--blueprint`` reuses on another run (asking only about file types it does not match) and ``cstar blueprint run`` runs directly.

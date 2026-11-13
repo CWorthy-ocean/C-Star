@@ -1,0 +1,1 @@
+Pre-run now refuses a namelist file name too long for ROMS (more than 250 characters, or more than 220 for ``output_root_name``/``extract_root_name``), listing each one with its length; before, pre-run passed and ROMS stopped at startup (ucla-roms >= 0.13.0) or cut the name off silently (earlier releases).

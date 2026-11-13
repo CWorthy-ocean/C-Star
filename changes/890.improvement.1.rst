@@ -1,0 +1,1 @@
+A forge blueprint whose sources need a dataset missing from ``datasets`` (for example a GLORYS layout changed by hand) is now refused at load, and by ``cstar blueprint check``, naming each section and the dataset key it needs, instead of failing during input generation after staging.

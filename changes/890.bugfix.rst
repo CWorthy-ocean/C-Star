@@ -1,0 +1,1 @@
+Forge blueprints with initial conditions and boundary on different GLORYS layouts staged only one layout, and input generation then failed for the other section.

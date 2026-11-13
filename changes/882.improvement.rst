@@ -1,0 +1,1 @@
+Module lists (``.lmod`` files) may contain blank lines and ``#`` comments; the Perlmutter list now names its login defaults explicitly so a change of site defaults does not change the build.

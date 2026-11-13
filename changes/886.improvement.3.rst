@@ -1,0 +1,1 @@
+The ParallelIO error for a netCDF-4 input now suggests ``nccopy -k cdf5``, and points at ``uncompressed_originals/`` for a file ``cstar run compress`` rewrote.

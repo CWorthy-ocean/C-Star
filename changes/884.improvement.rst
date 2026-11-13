@@ -1,0 +1,3 @@
+Locks on a run's records are bounded: a writer gives up after 60 s instead of waiting forever on a stalled process.
+- ``cstar workplan ls --size`` and ``cstar workplan status --size`` warn that a run's disk usage was not recorded instead of failing.
+- ``cstar run attach`` refuses in one line, and a new run does not start, with a message naming the lock file.

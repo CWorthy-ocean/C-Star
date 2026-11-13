@@ -1,0 +1,1 @@
+Saved forge blueprints leave out ``glorys_layout``, ``constants``, ``esper_method`` and ``esper_equation`` on sources where they are unset, so a source shows only the fields that apply to it; existing files still load and content hashes are unchanged.

@@ -1,0 +1,4 @@
+Forge blueprints accept ``bottom_fill_blend_m`` in ``initial_conditions`` and ``boundary``: the depth below a source column's bottom over which tracers blend into the nearest column with water at that depth.
+- ``0`` takes the neighbouring column's value at once, ``.inf`` copies the bottom value down, and leaving it unset uses roms-tools' default.
+- The wizard has a "Below-bottom blend depth" box in the initial-conditions and boundary interpolation settings.
+- Setting a value needs a roms-tools release with the option; blueprints that leave it unset work with any release.

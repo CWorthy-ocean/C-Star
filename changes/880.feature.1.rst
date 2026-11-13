@@ -1,0 +1,4 @@
+The wizard's diagnostics output row has a Diagnostics switch that compiles ucla-roms with ``DIAGNOSTICS``, writing the ``_dia`` file of momentum and tracer term balances.
+- Off by default; while it is off, the other diagnostics settings are hidden.
+- The temperature and salinity diagnostics boxes sit in the same row and show only while tracer diagnostics are on.
+- With ParallelIO it needs ucla-roms 0.13.1 or later; Forge refuses diagnostics with ParallelIO on an older release pin, which aborts at the first diagnostics output.

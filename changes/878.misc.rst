@@ -1,0 +1,1 @@
+The ESPER entry in the Forge source-datasets docs gives the oxygen floor as 5.0 mmol/m³ (MARBL's ``parm_o2_min``) and explains grooming, ``groom`` and ``groom_settings``.
