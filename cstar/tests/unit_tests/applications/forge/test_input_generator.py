@@ -1382,6 +1382,12 @@ class TestPlannedOutputReuseDetection:
         assert not data._planned_netcdf_already_present(surface_path)
 
 
+def _touch_and_list(ds: Any, path: Path) -> list[Path]:
+    """Stand-in for ``rt.save_blended_surface_forcing``: write the file."""
+    Path(path).touch()
+    return [Path(path)]
+
+
 class TestRomsInputGeneratorGeneration:
     """Tests for input generation methods."""
 
@@ -1755,6 +1761,258 @@ class TestRomsInputGeneratorGeneration:
             )
             > 0
         )
+
+    @staticmethod
+    def _blend(**overrides: Any) -> dict[str, Any]:
+        blend: dict[str, Any] = {
+            "width_km": 50.0,
+            "profile": "smoothstep",
+            "fallback": {
+                "source": {"name": "ERA5", "climatology": False},
+                "correct_radiation": True,
+                "options": {"fallback_opt": 1},
+            },
+        }
+        return {**blend, **overrides}
+
+    @staticmethod
+    def _blend_item() -> dict[str, Any]:
+        return dict(
+            source={"name": "CONUS404", "climatology": False},
+            type="physics",
+            coarse_grid_mode="never",
+            wind_dropoff=True,
+            correct_radiation=False,
+            prefill="inverse_dist",
+            regrid_method="xesmf",
+            options={"primary_opt": 2},
+        )
+
+    def _run_blend(self, gen, tmp_path, **item_overrides):
+        """Run a blended generation with roms-tools patched; return the mocks."""
+        out = tmp_path / "blended.nc"
+        out.touch()
+        primary, fallback = MagicMock(), MagicMock()
+        primary.use_coarse_grid = False
+        fallback.use_coarse_grid = False
+        with (
+            patch(
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing",
+                side_effect=[primary, fallback],
+            ) as sf,
+            patch(
+                "cstar.applications.forge.input_generator.rt.blend_surface_forcing",
+                create=True,
+            ) as blend_fn,
+            patch(
+                "cstar.applications.forge.input_generator.rt.save_blended_surface_forcing",
+                create=True,
+                side_effect=_touch_and_list,
+            ) as save_fn,
+            patch(
+                "cstar.applications.forge.input_generator.rt.blend_to_yaml",
+                create=True,
+            ) as yaml_fn,
+        ):
+            item = {**self._blend_item(), "blend": self._blend(), **item_overrides}
+            gen._generate_surface_forcing(key="forcing.surface", **item)
+        return item, primary, fallback, sf, blend_fn, save_fn, yaml_fn
+
+    def test_blended_fallback_inherits_only_the_declared_fields(
+        self, sample_roms_input_generator, tmp_path
+    ):
+        gen = sample_roms_input_generator
+        item, primary, _, sf, _, _, _ = self._run_blend(gen, tmp_path)
+
+        primary_kwargs = sf.call_args_list[0].kwargs
+        fallback_kwargs = sf.call_args_list[1].kwargs
+        assert "blend" not in primary_kwargs and "blend" not in fallback_kwargs
+        assert primary_kwargs["prefill"] == "inverse_dist"
+        assert primary_kwargs["primary_opt"] == 2
+        assert fallback_kwargs["type"] == "physics"
+        assert fallback_kwargs["coarse_grid_mode"] == "never"
+        assert fallback_kwargs["wind_dropoff"] is True
+        assert fallback_kwargs["source"]["name"] == "ERA5"
+        assert fallback_kwargs["correct_radiation"] is True
+        assert fallback_kwargs["fallback_opt"] == 1
+        for name in ("prefill", "regrid_method", "primary_opt"):
+            assert name not in fallback_kwargs
+        for name in ("start_time", "end_time", "use_dask", "model_reference_date"):
+            assert fallback_kwargs.get(name) == primary_kwargs.get(name)
+        assert fallback_kwargs["grid"] is gen.grid
+        # the caller's kwargs are not mutated
+        assert "blend" in item
+
+    def test_blended_surface_forcing_calls_and_names(
+        self, sample_roms_input_generator, tmp_path
+    ):
+        gen = sample_roms_input_generator
+        _, primary, fallback, _, blend_fn, save_fn, yaml_fn = self._run_blend(
+            gen, tmp_path
+        )
+
+        blend_fn.assert_called_once_with(
+            primary,
+            fallback,
+            grid=gen.grid,
+            blend_width_km=50.0,
+            blend_profile="smoothstep",
+        )
+        expected = gen._forcing_filename(input_name="surface-physics-conus404-era5")
+        assert save_fn.call_args.args[1] == expected
+        assert "format" not in save_fn.call_args.kwargs
+        yaml_fn.assert_called_once_with(
+            blend_fn.return_value,
+            gen._yaml_filename("forcing.surface-physics-conus404-era5"),
+        )
+        primary.save.assert_not_called()
+        assert gen._interp_frc_this_run == 0
+        assert len(gen.ucla_roms_blueprint_elements.forcing.surface.data) == 1
+
+    def test_blended_surface_forcing_interp_frc_comes_from_the_primary(
+        self, sample_roms_input_generator, tmp_path
+    ):
+        gen = sample_roms_input_generator
+        primary, fallback = MagicMock(), MagicMock()
+        primary.use_coarse_grid = True
+        fallback.use_coarse_grid = False
+        with (
+            patch(
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing",
+                side_effect=[primary, fallback],
+            ),
+            patch(
+                "cstar.applications.forge.input_generator.rt.blend_surface_forcing",
+                create=True,
+            ),
+            patch(
+                "cstar.applications.forge.input_generator.rt.save_blended_surface_forcing",
+                create=True,
+                side_effect=_touch_and_list,
+            ),
+            patch(
+                "cstar.applications.forge.input_generator.rt.blend_to_yaml",
+                create=True,
+            ),
+        ):
+            gen._generate_surface_forcing(
+                key="forcing.surface",
+                **{**self._blend_item(), "blend": self._blend()},
+            )
+        assert gen._settings_run_time["blk_frc"]["interp_frc"] == 1
+
+    @patch("cstar.base.utils.subprocess.run")
+    def test_blended_surface_forcing_with_use_pio_goes_through_cdf5(
+        self, mock_run, sample_roms_input_generator, tmp_path
+    ):
+        gen = sample_roms_input_generator
+        gen.use_pio = True
+        out = gen._forcing_filename(input_name="surface-physics-conus404-era5")
+        nc4 = out.with_name(out.stem + "_nc4" + out.suffix)
+
+        _fake_save = _touch_and_list
+
+        def _fake_nccopy(cmd, check):
+            Path(cmd[-1]).touch()
+
+        mock_run.side_effect = _fake_nccopy
+        primary, fallback = MagicMock(), MagicMock()
+        primary.use_coarse_grid = False
+        with (
+            patch(
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing",
+                side_effect=[primary, fallback],
+            ),
+            patch(
+                "cstar.applications.forge.input_generator.rt.blend_surface_forcing",
+                create=True,
+            ),
+            patch(
+                "cstar.applications.forge.input_generator.rt.save_blended_surface_forcing",
+                create=True,
+                side_effect=_fake_save,
+            ) as save_fn,
+            patch(
+                "cstar.applications.forge.input_generator.rt.blend_to_yaml",
+                create=True,
+            ),
+        ):
+            gen._generate_surface_forcing(
+                key="forcing.surface",
+                **{**self._blend_item(), "blend": self._blend()},
+            )
+        assert save_fn.call_args.args[1] == nc4
+        mock_run.assert_called_once_with(
+            ["nccopy", "-k", "cdf5", str(nc4), str(out)], check=True
+        )
+        assert out.exists() and not nc4.exists()
+
+    @patch("cstar.applications.forge.input_generator.rt.SurfaceForcing")
+    def test_blended_reuse_writes_the_sidecar_from_the_file_header(
+        self, mock_sf_class, sample_roms_input_generator
+    ):
+        gen = sample_roms_input_generator
+        gen.input_data_dir.mkdir(parents=True, exist_ok=True)
+        nc_path = gen._forcing_filename(input_name="surface-physics-conus404-era5")
+        xr.Dataset(attrs={"roms_tools_yaml": "recipe: 1\n"}).to_netcdf(nc_path)
+
+        def _fake_blend_to_yaml(ds, filepath):
+            Path(filepath).write_text(ds.attrs["roms_tools_yaml"])
+
+        with patch(
+            "cstar.applications.forge.input_generator.rt.blend_to_yaml",
+            create=True,
+            side_effect=_fake_blend_to_yaml,
+        ):
+            gen._generate_surface_forcing(
+                key="forcing.surface",
+                **{**self._blend_item(), "blend": self._blend()},
+            )
+
+        mock_sf_class.assert_not_called()
+        yaml_path = gen._yaml_filename("forcing.surface-physics-conus404-era5")
+        assert yaml_path.read_text() == "recipe: 1\n"
+
+    @pytest.mark.parametrize(
+        ("attrs", "nan", "raises"),
+        [
+            ({"nan_outside_source_footprint": "True"}, True, True),
+            ({"nan_outside_source_footprint": "True"}, False, False),
+            ({}, True, False),
+        ],
+    )
+    @patch("cstar.applications.forge.input_generator.rt.SurfaceForcing")
+    def test_bare_regional_surface_forcing_refuses_nan_forcing(
+        self, mock_sf_class, attrs, nan, raises, sample_roms_input_generator, tmp_path
+    ):
+        gen = sample_roms_input_generator
+        data = np.ones((2, 3, 4))
+        if nan:
+            data[0, 1, 2] = np.nan
+        mock_sf = MagicMock()
+        mock_sf.use_coarse_grid = False
+        mock_sf.ds = xr.Dataset(
+            {"uwnd": (("time", "eta_rho", "xi_rho"), data)}, attrs=attrs
+        )
+        out = tmp_path / "surface.nc"
+        out.touch()
+        mock_sf.save.return_value = out
+        mock_sf_class.return_value = mock_sf
+
+        def run():
+            gen._generate_surface_forcing(
+                key="forcing.surface", source={"name": "CONUS404"}, type="physics"
+            )
+
+        if raises:
+            with pytest.raises(
+                ValueError, match=r"CONUS404.*1 of 12 grid points.*blend"
+            ):
+                run()
+            mock_sf.save.assert_not_called()
+        else:
+            run()
+            mock_sf.save.assert_called_once()
 
     @patch("cstar.applications.forge.input_generator.rt.BoundaryForcing")
     def test_generate_boundary_forcing(

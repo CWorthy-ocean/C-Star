@@ -29,6 +29,7 @@ from cstar.applications.core import ArtifactKind
 from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import (
     _COMPOSITION_SPEC_KINDS,
+    BLEND_FALLBACK_INHERITED_FIELDS,
     FORGE_BLUEPRINT_VERSION,
     CarbonateSensitivitySpec,
     Composition,
@@ -36,6 +37,7 @@ from cstar.applications.forge.blueprint import (
     ForgeProvenance,
     InitialConditions,
     SpecRef,
+    SurfaceForcingItem,
     UserProvidedFile,
     composition_refs,
     emitted_blueprint_description,
@@ -10203,3 +10205,22 @@ def test_surface_blend_hash_only_moves_when_set():
     wider.forcing.surface[0].blend.width_km = 300
     hashes = [base.content_hash(), blended.content_hash(), wider.content_hash()]
     assert len(set(hashes)) == len(hashes)
+
+
+def test_every_surface_item_field_is_inherited_or_per_product():
+    """A new ``SurfaceForcingItem`` field forces a decision: does the blend
+    fallback inherit it from the item, or does each product carry its own?
+    """
+    per_product = {
+        "source",
+        "correct_radiation",
+        "prefill",
+        "prefill_kwargs",
+        "regrid_method",
+        "extrap_method",
+        "extrap_kwargs",
+        "options",
+        "restoring_forces",
+    }
+    decided = set(BLEND_FALLBACK_INHERITED_FIELDS) | per_product | {"blend"}
+    assert decided == set(SurfaceForcingItem.model_fields)
