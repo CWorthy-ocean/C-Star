@@ -305,6 +305,8 @@
 /
 
 &ts_output_settings
+    wrt_avg_salt = .false.
+    wrt_avg_temp = .false.
     wrt_salt = .false.
     wrt_salt_dia = .false.
     wrt_temp = .false.
