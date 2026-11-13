@@ -1,0 +1,1 @@
+C-Star now requires roms-tools 5.4.0 or later (``roms-tools>=5.4.0,<6``); upgrade roms-tools in your environment along with C-Star.

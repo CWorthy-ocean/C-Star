@@ -1,0 +1,4 @@
+With roms-tools 5.4.0, Forge and ``nest_ic`` write different initial conditions, boundary forcing and surface forcing from an unchanged blueprint.
+- Below a source column's bottom, tracers now blend over 25 m into the nearest column with water at that depth instead of copying the bottom value down; ``bottom_fill_blend_m: .inf`` restores the old fill.
+- ERA5 ``qair`` is computed from ERA5's surface pressure instead of a fixed 1010 hPa, which changes it by about 1% over the ocean.
+- ESPER-derived tracers are groomed by default (``groom: false`` turns it off), and ESPER oxygen is floored at 5.0 mmol/m³ instead of 2.0, with no switch.
