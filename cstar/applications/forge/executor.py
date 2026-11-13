@@ -33,6 +33,7 @@ from cstar.applications.forge import input_generator, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
     CarbonateSensitivitySpec,
+    Forcing,
     OpenBoundaries,
     UserProvidedFile,
     emitted_blueprint_description,
@@ -52,6 +53,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_diagnostics_pio,
+    check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_marbl_step_averages,
     check_output_streams_divide_rst,
@@ -346,6 +348,18 @@ class ForgeExecutor(BaseModel):
             "When provided, overrides model_spec.inputs for initial_conditions and forcing "
             "categories. Set by process_forge_blueprint when cfg.sources contains an authored "
             "ForcingSpec selection; ignored when None (model defaults are used)."
+        ),
+    )
+    forcing: Forcing | None = Field(
+        default=None,
+        validate_default=False,
+        exclude=True,
+        description=(
+            "The ForgeBlueprint ``forcing`` section, kept whole for the build-time "
+            "check that a MARBL run's boundary forcing and initial conditions carry "
+            "BGC sources (``check_marbl_bgc_inputs``); ``forcing_override`` holds "
+            "only the generator's dict form of it. ``None`` (a caller that builds "
+            "the executor directly) skips that check."
         ),
     )
     model_reference_date: datetime | None = Field(
@@ -2626,6 +2640,21 @@ class ForgeExecutor(BaseModel):
             self._settings_run_time.get("marbl_bgc") or {},
             bgc_mode_is_marbl=cppdefs.get("marbl", False),
         )
+
+        # MARBL BGC-inputs net, mirroring the resolver's: a stored or hand-edited
+        # blueprint run with validate=False can pair a MARBL build with physics-only
+        # boundary or initial conditions, which ucla-roms >= 0.14.0 stops on at
+        # startup. Shared via check_marbl_bgc_inputs.
+        if self.forcing is not None:
+            check_marbl_bgc_inputs(
+                self.forcing,
+                open_boundaries=self.open_boundaries.model_dump(),
+                is_child=self.grid_kwargs_parent is not None,
+                marbl=cppdefs.get("marbl", False),
+                roms_ref=str(effective_roms_ref)
+                if effective_roms_ref is not None
+                else None,
+            )
 
         # Restoring-flux output net, mirroring the resolver's, on the cppdefs
         # generation left (it sets sal_restore for an SSS restoring file).

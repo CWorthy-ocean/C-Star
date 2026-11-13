@@ -275,6 +275,8 @@
     "tnu2_default": 0.0
   },
   "ts_output": {
+    "wrt_avg_salt": false,
+    "wrt_avg_temp": false,
     "wrt_salt": false,
     "wrt_salt_dia": false,
     "wrt_temp": false,

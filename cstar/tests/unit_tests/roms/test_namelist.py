@@ -29,6 +29,8 @@ from cstar.roms.namelist import (
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
+    RomsNamelistV0_14_0,
+    TsOutputSettingsV0_14_0,
     VSpongeSettingsV0_13_0,
     _parse_semver,
     format_roms_version,
@@ -45,6 +47,7 @@ V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.
 V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
 V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
 V0_13_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
+V0_14_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_14_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -123,13 +126,23 @@ def test_namelist_schema_for_ref_post_0_12_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.13.0", "v0.13.0"],
+    ["0.13.0", "v0.13.0", "0.13.1", "v0.13.5"],
 )
 def test_namelist_schema_for_ref_post_0_13_0(checkout_target):
-    """Refs at or above 0.13.0 select `RomsNamelistV0_13_0` (newer releases
+    """Refs in `[0.13.0, 0.14.0)` select `RomsNamelistV0_13_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_13_0
+
+
+@pytest.mark.filterwarnings("ignore:ucla-roms release")
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.14.0", "v0.14.0", "0.14.3", "v0.15.0"],
+)
+def test_namelist_schema_for_ref_post_0_14_0(checkout_target):
+    """Refs at or above 0.14.0 select `RomsNamelistV0_14_0` (newer releases
     too, with a warning: see the newer-than-known tests below).
     """
-    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_13_0
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_14_0
 
 
 @pytest.mark.parametrize(
@@ -148,7 +161,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_13_0
+    assert schema is RomsNamelistV0_14_0
 
 
 def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
@@ -195,7 +208,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_13_0
+    assert schema is RomsNamelistV0_14_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -209,12 +222,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
         pytest.warns(UserWarning, match="use at your own risk"),
     ):
         schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_13_0
+    assert schema is RomsNamelistV0_14_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_13_0
+    assert schema is RomsNamelistV0_14_0
 
 
 NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
@@ -458,7 +471,7 @@ def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
     with pytest.warns(
         UserWarning,
         match=rf"Could not resolve .*{'a' * 40}.* latest known namelist schema "
-        rf"\({RomsNamelistV0_13_0.__name__}\)",
+        rf"\({RomsNamelistV0_14_0.__name__}\)",
     ):
         ref = release_ref_for_remote(
             "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
@@ -831,6 +844,48 @@ def test_roms_namelist_v0_13_0_v_sponge_trc_has_no_bounds(value):
     )
 
 
+def test_roms_namelist_v0_14_0_round_trip(tmp_path):
+    """`RomsNamelistV0_14_0.read` parses the 0.14.0 fixture, which writes `temp`
+    (but not `salt`) to the averages file, and a read -> write -> read round trip
+    reproduces the same model.
+    """
+    nml = RomsNamelistV0_14_0.read(V0_14_0_NAMELIST)
+    assert isinstance(nml.ts_output_settings, TsOutputSettingsV0_14_0)
+    assert nml.ts_output_settings.wrt_avg_temp is True
+    assert nml.ts_output_settings.wrt_avg_salt is False
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert "wrt_avg_temp = .true." in out.read_text()
+    assert "wrt_avg_salt = .false." in out.read_text()
+    assert RomsNamelistV0_14_0.read(out) == nml
+
+
+def test_roms_namelist_v0_13_0_rejects_v0_14_0_fixture():
+    """`RomsNamelistV0_13_0` is strict: ucla-roms before 0.14.0 stops on
+    `wrt_avg_temp` and `wrt_avg_salt`, so the 0.13.0 schema rejects them and never
+    writes them.
+    """
+    with pytest.raises(ValidationError, match="wrt_avg_temp"):
+        RomsNamelistV0_13_0.read(V0_14_0_NAMELIST)
+    written = RomsNamelistV0_13_0.read(V0_13_0_NAMELIST).to_f90nml_dict()
+    assert "wrt_avg_temp" not in written["ts_output_settings"]
+    assert "wrt_avg_salt" not in written["ts_output_settings"]
+
+
+def test_roms_namelist_v0_14_0_wrt_avg_defaults_and_always_written():
+    """A 0.13.0 namelist without the keys still validates under
+    `RomsNamelistV0_14_0`, both defaulting to false (the Fortran initializers, so
+    it runs as before), and the written namelist carries them.
+    """
+    nml = RomsNamelistV0_14_0.read(V0_13_0_NAMELIST)
+    assert nml.ts_output_settings.wrt_avg_temp is False
+    assert nml.ts_output_settings.wrt_avg_salt is False
+    written = nml.to_f90nml_dict()["ts_output_settings"]
+    assert written["wrt_avg_temp"] is False
+    assert written["wrt_avg_salt"] is False
+
+
 _TWO_CHILDREN = {
     "do_extract": True,
     "output_period_extract": 3600.0,
@@ -1101,6 +1156,15 @@ class TestUnknownOverrideKeys:
         assert len(violations) == 1
         assert "v_sponge_trc" in violations[0]
 
+    @pytest.mark.parametrize("key", ["wrt_avg_temp", "wrt_avg_salt"])
+    def test_wrt_avg_keys(self, key):
+        """Known from 0.14.0 on; unknown to `RomsNamelistV0_13_0`."""
+        overrides = {"ts_output_settings": {key: True}}
+        assert RomsNamelistV0_14_0.unknown_override_keys(overrides) == []
+        violations = RomsNamelistV0_13_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert key in violations[0]
+
 
 # ---------------------------------------------------------------------------
 # ParamSettings / ParamSettingsV0_4_0 -- passive CDR tracer counts
@@ -1134,6 +1198,7 @@ def test_param_settings_rejects_cdr_tracer_counts():
         RomsNamelistV0_11_0,
         RomsNamelistV0_12_0,
         RomsNamelistV0_13_0,
+        RomsNamelistV0_14_0,
     ],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):

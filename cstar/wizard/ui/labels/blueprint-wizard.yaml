@@ -1035,6 +1035,12 @@ fields:
   settings.ts_output.wrt_salt:
     label: Salinity
     symbol: wrt_salt
+  settings.ts_output.wrt_avg_temp:
+    label: Temperature
+    symbol: wrt_avg_temp
+  settings.ts_output.wrt_avg_salt:
+    label: Salinity
+    symbol: wrt_avg_salt
   settings.ts_output.wrt_temp_dia:
     label: Temperature diagnostics
     symbol: wrt_temp_dia

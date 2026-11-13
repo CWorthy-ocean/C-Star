@@ -1131,8 +1131,8 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # advection fields only render for ModelSpecs that declare them
 # (``roms-marbl-0.8-default``, ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``,
 # ``roms-marbl-0.11-default``, ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``,
-# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
-# that omits the key shows no widget for it.
+# ``roms-marbl-0.14-default``, ``pio-dev``) -- the editor type-infers a checkbox from
+# the composed bool, so a spec that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1462,6 +1462,8 @@ _VARIABLE_GRIDS: dict[str, list[tuple[str, list[_FieldKey]]]] = {
                 "wrt_avg_vb",
                 "wrt_avg_u",
                 "wrt_avg_v",
+                ("ts_output", "wrt_avg_temp"),
+                ("ts_output", "wrt_avg_salt"),
                 "wrt_avg_r",
                 "wrt_avg_o",
                 "wrt_avg_w",
@@ -2845,6 +2847,21 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
         raise ValueError(f"could not reconstruct releases from {path}: {exc}") from exc
 
 
+def _row_seed_items(
+    cat: str, ic: dict[str, Any], forc: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The items a forcing-editor row category is seeded from, read off a
+    ForcingSpec's ``initial_conditions`` (*ic*) and ``forcing`` (*forc*) blocks.
+    "ic_bgc"/"boundary_bgc" are pseudo-categories fed by those blocks'
+    ``bgc_sources``; every other category is its own ``forcing`` list.
+    """
+    if cat == "ic_bgc":
+        return ic.get("bgc_sources") or []
+    if cat == "boundary_bgc":
+        return (forc.get("boundary") or {}).get("bgc_sources") or []
+    return forc.get(cat) or []
+
+
 class _ForcingEditor:
     """Editor for the forcing spec: initial conditions + per-category forcing items,
     with add/remove. ``gather()`` returns an ``inputs``-shaped dict the resolver
@@ -3222,17 +3239,8 @@ class _ForcingEditor:
         self._rows: dict[str, list] = {c: [] for c in _ROW_CATEGORIES}
         self._containers: dict[str, Any] = {}
         for cat in _ROW_CATEGORIES:
-            container = W.VBox([])
-            self._containers[cat] = container
-            if cat == "ic_bgc":
-                seed_items = ic.get("bgc_sources") or []
-            elif cat == "boundary_bgc":
-                seed_items = boundary_block.get("bgc_sources") or []
-            else:
-                seed_items = forc.get(cat) or []
-            for item in seed_items:
-                self._rows[cat].append(self._make_row(cat, item))
-            self._render(cat)
+            self._containers[cat] = W.VBox([])
+            self._set_rows(cat, _row_seed_items(cat, ic, forc))
 
         # The panes now exist; re-run so a seeded "(none)" IC/boundary hides the
         # ic_bgc/boundary_bgc pane (the call during widget construction above
@@ -3866,6 +3874,26 @@ class _ForcingEditor:
         self._render(cat)
         self.on_change()
 
+    def reseed_category(self, cat: str, forcing_inputs: dict[str, Any]):
+        """Undo ``clear_category``: seed an empty row category from
+        *forcing_inputs* (a ForcingSpec's ``{initial_conditions, forcing}``) the
+        way ``__init__`` does. A category that has rows (ones the user re-added
+        by hand) is left alone.
+        """
+        if self._rows[cat]:
+            return
+        ic = forcing_inputs.get("initial_conditions") or {}
+        forc = forcing_inputs.get("forcing") or {}
+        self._set_rows(cat, _row_seed_items(cat, ic, forc))
+        self.on_change()
+
+    def _set_rows(self, cat: str, items: list[dict[str, Any]]):
+        """Replace *cat*'s rows with fresh ones built from *items* (no
+        ``on_change``; callers notify).
+        """
+        self._rows[cat] = [self._make_row(cat, item) for item in items]
+        self._render(cat)
+
     def _sync_bgc(self, from_cat: str, to_cat: str):
         """One-shot copy of every bgc-source row, AND the section-level default
         BGC interpolation method, from ``from_cat`` to ``to_cat`` (``"ic_bgc"``/
@@ -3881,8 +3909,7 @@ class _ForcingEditor:
         ``self.boundary_bgc_interp``).
         """
         items = [self._gather_item(from_cat, w) for w in self._rows[from_cat]]
-        self._rows[to_cat] = [self._make_row(to_cat, item) for item in items]
-        self._render(to_cat)
+        self._set_rows(to_cat, items)
         from_attr = _DEFAULT_INTERP_ATTR[from_cat]
         to_attr = _DEFAULT_INTERP_ATTR[to_cat]
         getattr(self, to_attr).value = getattr(self, from_attr).value
@@ -4301,9 +4328,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.13.1). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.14.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.13-default"
+_DEFAULT_MODEL = "roms-marbl-0.14-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the
@@ -6105,10 +6132,9 @@ class ForgeBlueprintWizard:
         as a *default* -- unlike boundary, IC is widget-state-authoritative, so
         the user can undo this by re-selecting a source.
 
-        Disabling a parent restores the IC default (if it's still "(none)")
-        so a non-child domain isn't stranded on the resolver's hard error for
-        a missing IC -- a user who had manually re-added an explicit IC while
-        parented is left alone.
+        Disabling a parent undoes both (see ``_restore_non_child_defaults``) so a
+        non-child domain isn't stranded on the resolver's errors for a missing IC
+        or (under MARBL) boundary BGC sources.
         """
         if getattr(self, "_suspended", False):
             return
@@ -6116,7 +6142,16 @@ class ForgeBlueprintWizard:
             self._clear_boundary_forcing()
             self._clear_initial_conditions()
         else:
-            self._restore_initial_conditions_default()
+            self._restore_non_child_defaults()
+
+    def _restore_non_child_defaults(self):
+        """Undo what enabling a parent cleared, for a domain that no longer has
+        one: the IC default and the selected ForcingSpec's boundary BGC rows. Each
+        is restored only while still cleared; what the user re-added by hand
+        while parented is left alone.
+        """
+        self._restore_initial_conditions_default()
+        self._restore_boundary_forcing_default()
 
     def _clear_boundary_forcing(self):
         """Remove any boundary-bgc rows from the forcing editor (UX mirror of the
@@ -6151,6 +6186,17 @@ class ForgeBlueprintWizard:
             and self._forcing_editor.ic_name.value == _IC_NONE
         ):
             self._forcing_editor.ic_name.value = _IC_SOURCE_OPTS[0]
+
+    def _restore_boundary_forcing_default(self):
+        """Undo ``_clear_boundary_forcing`` when a parent is turned back off:
+        reseed the boundary-bgc rows from the selected ForcingSpec, if they are
+        still empty. Read from the catalog, not ``_forcing_seed``, which has no
+        boundary rows when the spec was picked while parented.
+        """
+        if getattr(self, "_forcing_editor", None) is None:
+            return
+        fi, _cdr = _split_forcing_data(self.catalog.forcing_data(self.forcing_dd.value))
+        self._forcing_editor.reseed_category("boundary_bgc", fi)
 
     # ---- forcing spec -------------------------------------------------------
     def _model_spec_declared(self) -> dict[str, Any]:
@@ -6597,6 +6643,7 @@ class ForgeBlueprintWizard:
             self._detach_grid_file()
         data = self.catalog.domain_data(name)
         gk = data.get("grid_kwargs", {}) or {}
+        was_parented = self.parent_enable.value
         with self._suspend():
             self.grid_name.value = data.get("grid_name", name)
             for k, w in self.grid_w.items():
@@ -6680,6 +6727,10 @@ class ForgeBlueprintWizard:
                     if k in parent:
                         w.value = parent[k]
                 self._set_nested_topo_widgets("parent", parent)
+            elif was_parented:
+                # Suspended, so _on_parent_toggle skipped this; the rebuilds
+                # below pick up the restored rows.
+                self._restore_non_child_defaults()
         # v_sponge (unlike every other snapshot field) isn't finalized by the
         # widget writes above when untouched -- _rebuild() itself live-derives
         # it from the new grid. Settle that first, then snapshot, then rebuild

@@ -247,12 +247,12 @@ def write_workplan(path: Path, data: dict[str, Path]) -> Path:
     """Write a copy of the example workplan and its forge blueprints for the run under test.
 
     The example's forge blueprints come from the bundled ``roms-marbl-0.13-default``
-    ModelSpec, so they build ucla-roms 0.13.0 unless ``CSTAR_IT_ROMS_REF`` (default
-    ``PINNED_ROMS_REF``) says otherwise; a ref below 0.13.0 loses the child's
+    ModelSpec (ucla-roms 0.13.0), but every forge step adds ``code.roms.commit`` to
+    its ``blueprint_overrides`` with the ref under test, ``CSTAR_IT_ROMS_REF``
+    (default ``PINNED_ROMS_REF``): the published blueprints, and with them the ROMS
+    the next steps build, are for that ref. A ref below 0.13.0 loses the child's
     ``v_sponge_trc`` (`without_v_sponge_trc_before_0_13`). The weekly workflow sets
-    ``CSTAR_IT_ROMS_REF`` to each ref it covers (0.12.0 and main), so every forge step
-    adds ``code.roms.commit`` to its ``blueprint_overrides``: the published blueprints,
-    and with them the ROMS the next steps build, are for that ref. The blueprint copies
+    ``CSTAR_IT_ROMS_REF`` to each ref it covers (the release and main). The blueprint copies
     sit next to the workplan copy and read the pinned registry data
     (`with_registry_sources`).
 

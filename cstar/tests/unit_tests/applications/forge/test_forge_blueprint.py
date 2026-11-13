@@ -11,6 +11,7 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
+import copy
 import logging
 import typing as t
 import warnings
@@ -109,6 +110,11 @@ _MODEL_PATH_ROMS0120 = (
 # used by the versioned-namelist golden test below.
 _MODEL_PATH_ROMS0130 = (
     _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.13-default.yaml"
+)
+# ucla-roms >= 0.14.0 ModelSpec (adds ts_output.wrt_avg_temp/wrt_avg_salt to
+# &TS_OUTPUT_SETTINGS) -- used by the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0140 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.14-default.yaml"
 )
 _GRID_KWARGS = dict(
     nx=6,
@@ -2609,6 +2615,36 @@ def test_golden_model_settings_test_tiny_roms0130():
     )
 
 
+def test_golden_model_settings_test_tiny_roms0140():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.14-default`` ModelSpec
+    (ucla-roms >= 0.14.0), resolved from the same test-tiny domain/forcing/output
+    setup as ``test_golden_model_settings_test_tiny_roms0130``.
+
+    The fixture matches that one: ``ts_output.wrt_avg_temp``/``wrt_avg_salt`` come
+    from the OutputSpec, which every golden of this family carries. Regenerate the
+    fixture with ``json.dumps(cfg.model_settings, indent=2, sort_keys=True,
+    default=str)`` plus a trailing newline, from
+    ``_build(model_path=_MODEL_PATH_ROMS0140)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0140.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_path=_MODEL_PATH_ROMS0140)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.14-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0140.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
 def test_resolver_0_13_model_spec_carries_v_sponge_trc_beside_the_derived_v_sponge():
     """v_sponge stays domain-owned (derived from the grid spacing); v_sponge_trc is
     the ModelSpec's, and is not derived.
@@ -2897,6 +2933,54 @@ def test_resolver_keeps_the_switched_off_constant_fe_in_a_non_marbl_build():
     )
     assert cfg.model_settings["cppdefs"]["marbl"] is False
     assert cfg.model_settings["marbl_bgc"]["use_constant_fe"] is False
+
+
+_PHYSICS_ONLY_CATALOG_FORCING = _CATALOG.forcing_data("glorys-era5-physics")
+
+
+def test_resolver_refuses_physics_only_forcing_with_marbl_on_roms_0_14():
+    """ucla-roms >= 0.14.0 stops a MARBL run missing a BGC tracer from the boundary
+    or initial files, so the resolver refuses before generation, compile and queue.
+    """
+    with pytest.raises(
+        ValueError, match=r"forcing\.boundary and initial_conditions have no BGC"
+    ):
+        _build(
+            model_path=_MODEL_PATH_ROMS0140,
+            forcing_inputs=_PHYSICS_ONLY_CATALOG_FORCING,
+        )
+
+
+def test_resolver_accepts_physics_only_forcing_below_the_bgc_inputs_gate():
+    forcing = copy.deepcopy(_PHYSICS_ONLY_CATALOG_FORCING)
+    # the river tracer count (a separate check) wants BGC rivers under MARBL
+    for item in forcing["forcing"].get("river", []):
+        item["include_bgc"] = True
+    cfg = _build(model_path=_MODEL_PATH_ROMS0130, forcing_inputs=forcing)
+    assert cfg.model_settings["cppdefs"]["marbl"] is True
+    assert cfg.forcing.boundary.bgc_sources == []
+
+
+def test_resolver_accepts_physics_only_forcing_with_marbl_off():
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0140,
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_CATALOG_FORCING,
+    )
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+
+
+def test_resolver_keys_the_bgc_inputs_check_on_the_merged_cppdefs():
+    """A compile-time override can turn MARBL off after bgc_mode set it; ucla-roms
+    then has no BGC tracers to require.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0140,
+        forcing_inputs=_PHYSICS_ONLY_CATALOG_FORCING,
+        compile_time_overrides={"cppdefs": {"marbl": False}},
+        run_time_overrides={"param": {"ntrc_bio": 0}},
+    )
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
 
 
 def test_resolver_rejects_constant_fe_without_marbl():
@@ -4169,6 +4253,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.11-default",
         "roms-marbl-0.12-default",
         "roms-marbl-0.13-default",
+        "roms-marbl-0.14-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -6446,6 +6531,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.11-default", True),
         ("roms-marbl-0.12-default", True),
         ("roms-marbl-0.13-default", True),
+        ("roms-marbl-0.14-default", True),
         ("pio-dev", True),
     ],
 )
@@ -6558,7 +6644,7 @@ def test_committed_example_validates():
     if not example.exists():
         pytest.skip("example file not present")
     cfg = ForgeBlueprint.from_yaml(example)
-    assert cfg.composition.model.name == "roms-marbl-0.13-default"
+    assert cfg.composition.model.name == "roms-marbl-0.14-default"
     assert cfg.composition.model.origin == "catalog"
 
 
@@ -8225,22 +8311,99 @@ class TestForgeBlueprintWizard:
         assert cfg2.forcing.initial_conditions is not None
         assert cfg2.forcing.initial_conditions.source.name == "GLORYS"
 
-    def test_parent_toggle_off_restores_ic_default(self):
+    def test_parent_toggle_off_restores_ic_and_boundary_bgc_defaults(self):
         """Enabling then disabling the parent checkbox must not strand the user
-        on the resolver's non-child hard error: disabling restores IC to the
-        default source when it's still at the "(none)" default the enable-
-        toggle applied.
+        on the resolver's non-child errors: disabling restores IC to the default
+        source and the boundary BGC rows to the selected ForcingSpec's, both of
+        which the enable-toggle cleared.
         """
         w = self._wizard()
+        boundary_bgc = w.config.forcing.boundary.bgc_sources
+        assert boundary_bgc  # sanity: the default MARBL forcing carries some
         w.parent_enable.value = True
         assert w._forcing_editor.ic_name.value == "(none)"
+        assert w._forcing_editor._rows["boundary_bgc"] == []
         assert w.config.forcing.initial_conditions is None
 
         w.parent_enable.value = False
         assert w._forcing_editor.ic_name.value == "GLORYS"
         cfg = w.config
+        assert cfg is not None, w.derived.value
         assert cfg.domain.is_child is False
         assert cfg.forcing.initial_conditions is not None
+        assert cfg.forcing.boundary.bgc_sources == boundary_bgc
+        # back to exactly what the ForcingSpec pick seeded
+        assert cfg.composition.forcing.modified is False
+
+    def test_parent_toggle_off_keeps_hand_added_boundary_bgc_rows(self):
+        """A boundary BGC row the user re-added while parented survives turning
+        the parent off; the ForcingSpec's rows are not put back over it.
+        """
+        w = self._wizard()
+        w.parent_enable.value = True
+        w._forcing_editor._add("boundary_bgc")
+        row = w._forcing_editor._rows["boundary_bgc"][0]
+        row["name"].value = "GLODAP"
+
+        w.parent_enable.value = False
+        rows = w._forcing_editor._rows["boundary_bgc"]
+        assert len(rows) == 1 and rows[0] is row
+        assert row["name"].value == "GLODAP"
+
+    def test_parent_toggle_off_restores_the_spec_picked_while_parented(self):
+        """The restore reads the ForcingSpec selected now, not the seed snapshot,
+        which a pick made while parented takes after the boundary rows are cleared.
+        """
+        w = self._wizard()
+        if "glorys-era5-glodap-woa" not in w._dd_values(w.forcing_dd):
+            pytest.skip("glorys-era5-glodap-woa ForcingSpec not in catalog")
+        w.parent_enable.value = True
+        w.forcing_dd.value = "glorys-era5-glodap-woa"
+        assert w._forcing_editor._rows["boundary_bgc"] == []
+
+        w.parent_enable.value = False
+        spec = w.catalog.forcing_data("glorys-era5-glodap-woa")
+        names = [
+            s["source"]["name"] for s in spec["forcing"]["boundary"]["bgc_sources"]
+        ]
+        cfg = w.config
+        assert cfg is not None, w.derived.value
+        assert [s.source.name for s in cfg.forcing.boundary.bgc_sources] == names
+
+    def test_picking_a_parentless_domain_restores_non_child_defaults(self):
+        """Picking a DomainSpec without a parent turns the parent off while the
+        wizard is suspended, so _on_parent_toggle never runs; _on_domain restores
+        the IC default and boundary BGC rows itself.
+        """
+        w = self._wizard()
+        if "gulf-guinea-toy" not in w._dd_values(w.domain_dd):
+            pytest.skip("gulf-guinea-toy domain not in catalog")
+        boundary_bgc = w.config.forcing.boundary.bgc_sources
+        w.parent_enable.value = True
+        assert w.config.forcing.initial_conditions is None
+
+        w.domain_dd.value = "gulf-guinea-toy"  # carries no grid_kwargs_parent
+        assert w.parent_enable.value is False
+        cfg = w.config
+        assert cfg is not None, w.derived.value
+        assert cfg.domain.is_child is False
+        assert cfg.forcing.initial_conditions is not None
+        assert cfg.forcing.boundary.bgc_sources == boundary_bgc
+
+    def test_physics_only_forcing_on_the_default_model_shows_the_bgc_inputs_error(
+        self,
+    ):
+        """The wizard re-resolves on every change, so the MARBL BGC-inputs error shows
+        live: no config, the message in the status banner and the preview.
+        """
+        w = self._wizard()
+        assert w.config is not None
+        w.forcing_dd.value = "glorys-era5-physics"
+        assert w.config is None
+        assert "no BGC sources" in w.derived.value
+        assert "ucla-roms &gt;= 0.14.0" in w.derived.value or (
+            "ucla-roms >= 0.14.0" in w.derived.value
+        )
 
     def test_reselecting_forcing_spec_keeps_ic_cleared_for_child(self):
         """Reseeding the forcing editor from a newly-selected ForcingSpec (which
@@ -8787,6 +8950,40 @@ class TestForgeBlueprintEngine:
             process_forge_blueprint(
                 cfg, executor_factory=_FakeBuilder
             )  # raises before any call
+
+    def test_physics_only_forcing_with_marbl_fails_before_any_call(self):
+        """A stored blueprint whose boundary and initial conditions carry no BGC
+        sources, with MARBL on a pinned 0.14.0, is refused up front (with the other
+        invalid-values problems), before any data is staged.
+        """
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        cfg = _build(model_path=_MODEL_PATH_ROMS0140)
+        cfg.forcing.boundary.bgc_sources = []
+        cfg.forcing.initial_conditions.bgc_sources = []
+        cfg.model_settings["param"]["np_xi"] = "not-an-int"
+        calls = []
+
+        class _Recorder(_FakeBuilder):
+            def ensure_source_data(self, **k):
+                calls.append("ensure")
+
+        with pytest.raises(ValueError, match="invalid values") as exc:
+            process_forge_blueprint(cfg, executor_factory=_Recorder)
+        assert "forcing.boundary and initial_conditions have no BGC" in str(exc.value)
+        assert "np_xi" in str(exc.value)  # reported together with the others
+        assert calls == []
+
+    def test_bgc_inputs_check_is_skipped_for_marbl_off(self):
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        cfg = _build(model_path=_MODEL_PATH_ROMS0140)
+        cfg.forcing.boundary.bgc_sources = []
+        cfg.forcing.initial_conditions.bgc_sources = []
+        cfg.model_settings["cppdefs"]["marbl"] = False
+        cfg.model_settings["param"]["ntrc_bio"] = 0  # the tracer-count check
+        b = process_forge_blueprint(cfg, executor_factory=_FakeBuilder)
+        assert [c[0] for c in b.calls] == ["ensure", "generate", "configure"]
 
     def test_resolve_host_reads_config_not_file(self):
         # Forge's host provider builds a HostPaths from auto-detected config;

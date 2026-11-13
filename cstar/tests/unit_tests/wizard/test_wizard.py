@@ -33,6 +33,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
     RunTimeSettingsV0_13_0,
+    RunTimeSettingsV0_14_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.catalog.spec_schema import known_spec_keys
@@ -2197,11 +2198,11 @@ class TestBgcModeSettings:
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.13-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.14-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.13-default"
+    assert wiz.model_dd.value == "roms-marbl-0.14-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -2222,15 +2223,15 @@ def test_model_dd_hides_archived_specs_by_default():
     assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
         archived
     )
-    assert wiz.model_dd.value == "roms-marbl-0.13-default"
+    assert wiz.model_dd.value == "roms-marbl-0.14-default"
 
     wiz.show_archived_models.value = True
     assert wiz._dd_values(wiz.model_dd) == list(wiz.catalog.model_names)
-    assert wiz.model_dd.value == "roms-marbl-0.13-default"
+    assert wiz.model_dd.value == "roms-marbl-0.14-default"
     labels = {value: label for label, value in wiz.model_dd.options}
     for name in archived:
         assert labels[name] == f"{name} (bundled, archived)"
-    assert labels["roms-marbl-0.13-default"] == "roms-marbl-0.13-default (bundled)"
+    assert labels["roms-marbl-0.14-default"] == "roms-marbl-0.14-default (bundled)"
 
     wiz.show_archived_models.value = False
     assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
@@ -2264,7 +2265,7 @@ def test_unchecking_show_archived_keeps_an_archived_selection():
     # re-optioning is not a model switch: overrides are kept
     assert wiz._overrides == overrides
 
-    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz.model_dd.value = "roms-marbl-0.14-default"
     wiz.show_archived_models.value = True
     wiz.show_archived_models.value = False
     assert "roms-marbl-0.7-default" not in wiz._dd_values(wiz.model_dd)
@@ -2300,7 +2301,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.13-default (the default model) declares use_pio: true --
+    # roms-marbl-0.14-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -3543,11 +3544,11 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.13-default``) is pinned to
-    ucla-roms ``0.13.0`` -- a registered schema boundary, which both
+    """The default catalog model (``roms-marbl-0.14-default``) is pinned to
+    ucla-roms ``0.14.0`` -- the newest registered schema boundary, which both
     the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_13_0``), not the legacy one. This is an
+    (currently ``RunTimeSettingsV0_14_0``), not the legacy one. This is an
     intentional behavior change from before this ref-awareness was added (the
     editor used to hardcode legacy ``RunTimeSettings``) -- it pins that the
     wizard now agrees with what the executor will actually write. (The tests in tests/test_forge_blueprint.py
@@ -3558,7 +3559,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_14_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -3574,6 +3575,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_11_0,
         RunTimeSettingsV0_12_0,
         RunTimeSettingsV0_13_0,
+        RunTimeSettingsV0_14_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
@@ -4185,6 +4187,10 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
             "roms-marbl-0.13-default",
             {"cdr_carbonate_sensitivity_time_interpolation": True},
         ),
+        (
+            "roms-marbl-0.14-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
@@ -4486,6 +4492,62 @@ def test_saving_a_model_spec_keeps_v_sponge_trc_and_drops_the_derived_v_sponge()
     assert owned["v_sponge"] == {"v_sponge_trc": 0.0}
     # a spec without the key (ucla-roms < 0.13.0) keeps no section at all
     assert "v_sponge" not in _model_owned_settings({"v_sponge": {"v_sponge": 4000.0}})
+
+
+_AVG_TS_KEYS = [("ts_output", "wrt_avg_temp"), ("ts_output", "wrt_avg_salt")]
+
+
+def test_avg_ts_widgets_built_in_the_averages_grid_for_the_0_14_model():
+    """``ts_output.wrt_avg_temp``/``wrt_avg_salt`` (ucla-roms >= 0.14.0, PR #413)
+    get checkboxes in the averages variable grid, right after ``wrt_avg_v``, for
+    ``roms-marbl-0.14-default``: the bundled OutputSpec carries both keys, so the
+    composed settings do.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.14-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_14_0
+    editor = wiz.editor
+    for (section, field), label in zip(
+        _AVG_TS_KEYS, ("Temperature", "Salinity"), strict=True
+    ):
+        assert wiz.config.model_settings[section][field] is False
+        widget, _ = editor._widgets[(section, field)]
+        assert widget.value is False
+        assert widget.description == label
+        assert widget.tooltip.startswith(field)
+
+    temp, salt = (editor._widgets[key][0] for key in _AVG_TS_KEYS)
+    grid = next(
+        n
+        for n in _descendants(editor.output_box)
+        if "forge-var-grid" in getattr(n, "_dom_classes", ()) and temp in n.children
+    )
+    cells = list(grid.children)
+    assert (
+        cells.index(temp)
+        == cells.index(editor._widgets[("ocean_vars", "wrt_avg_v")][0]) + 1
+    )
+    assert cells.index(salt) == cells.index(temp) + 1
+
+
+def test_avg_ts_widgets_absent_for_the_0_13_model():
+    """``roms-marbl-0.13-default`` pins a ucla-roms that stops on the unknown keys:
+    the tier does not model them, so the editor builds neither widget although the
+    OutputSpec carries both (switched off).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
+    for key in _AVG_TS_KEYS:
+        assert key not in wiz.editor._widgets
 
 
 def test_constant_fe_value_hidden_until_use_constant_fe_is_on():

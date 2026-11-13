@@ -16,10 +16,18 @@ import yaml
 from pydantic import TypeAdapter, ValidationError
 
 import cstar.catalog
+from cstar.applications.forge.blueprint import (
+    BgcSourceItem,
+    BoundaryForcing,
+    Forcing,
+    InitialConditions,
+    SourceSpec,
+)
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTIONS,
     _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
+    BGC_INPUTS_REQUIRED_MIN_ROMS,
     CDR_LITE_MODE_MIN_ROMS,
     CDR_NZ_CHD_FROM_FILE_MIN_ROMS,
     DIAGNOSTICS_PIO_MIN_ROMS,
@@ -43,6 +51,9 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
     RunTimeSettingsV0_13_0,
+    RunTimeSettingsV0_14_0,
+    TsOutputCfg,
+    TsOutputCfgV0_14_0,
     VSpongeCfg,
     VSpongeCfgV0_13_0,
     _settings_spellings,
@@ -59,6 +70,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_diagnostics_pio,
+    check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_restoring_flux_output,
     check_river_tracer_counts,
@@ -78,6 +90,7 @@ from cstar.applications.forge.settings import write_roms_namelist
 from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
     NEWEST_KNOWN_UCLA_ROMS,
+    UCLA_ROMS_0_14_0,
     RomsNamelist,
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
@@ -85,6 +98,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
+    RomsNamelistV0_14_0,
     format_roms_version,
     release_ref_for_remote,
 )
@@ -100,6 +114,7 @@ _ALL_SETTINGS_TIERS = (
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
     RunTimeSettingsV0_13_0,
+    RunTimeSettingsV0_14_0,
 )
 
 
@@ -1170,9 +1185,15 @@ def test_run_time_settings_for_ref_0_12_0_up_to_0_13_0_selects_v0_12_0(recwarn):
     assert len(recwarn) == 0
 
 
-def test_run_time_settings_for_ref_0_13_0_and_later_selects_v0_13_0(recwarn):
-    for ref in ("0.13.0", "v0.13.0"):
+def test_run_time_settings_for_ref_0_13_0_up_to_0_14_0_selects_v0_13_0(recwarn):
+    for ref in ("0.13.0", "v0.13.0", "0.13.1"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_13_0
+    assert len(recwarn) == 0
+
+
+def test_run_time_settings_for_ref_0_14_0_and_later_selects_v0_14_0(recwarn):
+    for ref in ("0.14.0", "v0.14.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_14_0
     assert len(recwarn) == 0
 
 
@@ -1195,12 +1216,12 @@ def test_run_time_settings_for_ref_newer_than_known_release_warns(ref):
     """
     with pytest.warns(UserWarning) as record:
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_13_0
+    assert cls is RunTimeSettingsV0_14_0
     assert len(record) == 1
     message = str(record[0].message)
     assert f"ucla-roms release {ref} is {_NEWER_THAN_KNOWN}" in message
     assert f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)})" in message
-    assert RomsNamelistV0_13_0.__name__ in message
+    assert RomsNamelistV0_14_0.__name__ in message
 
 
 def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
@@ -1216,7 +1237,7 @@ def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
         UserWarning, match=f"release {_NEWER_TAG} is {_NEWER_THAN_KNOWN}"
     ):
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_13_0
+    assert cls is RunTimeSettingsV0_14_0
 
 
 def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
@@ -1228,13 +1249,13 @@ def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
         write_roms_namelist(
             _populated_rt_dict(), tmp_path, n_tracers=34, roms_ref=_NEWER_TAG
         )
-    RomsNamelistV0_13_0.read(tmp_path / "namelist.nml")
+    RomsNamelistV0_14_0.read(tmp_path / "namelist.nml")
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_13_0
+    assert cls is RunTimeSettingsV0_14_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -1243,7 +1264,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_13_0
+    assert cls is RunTimeSettingsV0_14_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -1397,6 +1418,7 @@ def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
         RunTimeSettingsV0_11_0,
         RunTimeSettingsV0_12_0,
         RunTimeSettingsV0_13_0,
+        RunTimeSettingsV0_14_0,
     ],
 )
 def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
@@ -1684,7 +1706,7 @@ def test_forge_writes_time_interpolation_cstar_reads_it(tmp_path):
 # ---------------------------------------------------------------------------
 # ucla-roms >= 0.13.0: RunTimeSettingsV0_13_0 (tracer diffusivity of the sponge)
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
 @pytest.mark.parametrize("requested", [0.0, 400.0, "0", "not-a-number", float("nan")])
 def test_pre_0_13_0_tiers_reject_a_requested_v_sponge_trc(settings_cls, requested):
     """ucla-roms < 0.13.0 gives tracers ``v_sponge``: ``extra="ignore"`` would
@@ -1790,6 +1812,147 @@ def test_forge_writes_v_sponge_trc_cstar_reads_it(tmp_path):
     write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.13.0")
     back = RomsNamelistV0_13_0.read(tmp_path / "namelist.nml")
     assert back.v_sponge_settings.v_sponge_trc == 0.0
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.14.0: RunTimeSettingsV0_14_0 (temperature/salinity in averages)
+# ---------------------------------------------------------------------------
+_AVG_TS_KEYS = ("wrt_avg_temp", "wrt_avg_salt")
+
+
+def _ts_output(**switches):
+    """The bundled ``standard`` OutputSpec's ``ts_output`` with ``switches`` set."""
+    return {**default_catalog.output_data("standard")["ts_output"], **switches}
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("key", _AVG_TS_KEYS)
+@pytest.mark.parametrize("requested", [True, "true", 1, "not-a-bool"])
+def test_pre_0_14_0_tiers_reject_a_requested_avg_ts_key(settings_cls, key, requested):
+    """ucla-roms < 0.14.0 cannot write temperature or salinity to the averages
+    file: ``extra="ignore"`` would drop the request, so it is refused, naming the
+    release that supports it. An unparseable value is not an "off" value either.
+    """
+    annotation = settings_cls.model_fields["ts_output"].annotation
+    with pytest.raises(
+        ValidationError,
+        match=rf"ts_output\.{key} requires ucla-roms >= 0\.14\.0",
+    ):
+        TypeAdapter(annotation).validate_python(_ts_output(**{key: requested}))
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+def test_pre_0_14_0_tiers_name_every_requested_avg_ts_key_in_one_error(settings_cls):
+    annotation = settings_cls.model_fields["ts_output"].annotation
+    with pytest.raises(ValidationError) as excinfo:
+        TypeAdapter(annotation).validate_python(
+            _ts_output(wrt_avg_temp=True, wrt_avg_salt=True)
+        )
+    assert len(excinfo.value.errors()) == 1
+    message = str(excinfo.value)
+    assert all(key in message for key in _AVG_TS_KEYS)
+    assert "0.14.0" in message
+
+
+def test_avg_ts_rejection_names_the_version_from_the_constant():
+    """The message formats ``UCLA_ROMS_0_14_0``, never a literal."""
+    from cstar.roms.namelist import UCLA_ROMS_0_14_0
+
+    version = ".".join(map(str, UCLA_ROMS_0_14_0))
+    with pytest.raises(ValidationError, match=rf"requires ucla-roms >= {version}"):
+        TsOutputCfg.model_validate(_ts_output(wrt_avg_temp=True))
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("off", [False, "false", 0, None])
+def test_pre_0_14_0_tiers_drop_a_switched_off_avg_ts_key(settings_cls, off):
+    """A shared spec may carry the keys switched off: they pass and are dropped."""
+    annotation = settings_cls.model_fields["ts_output"].annotation
+    ts_output = TypeAdapter(annotation).validate_python(
+        _ts_output(wrt_avg_temp=off, wrt_avg_salt=off)
+    )
+    assert not set(_AVG_TS_KEYS) & set(ts_output.model_dump())
+
+
+def test_pre_0_14_0_tier_namelist_has_no_avg_ts_keys():
+    d = _populated_rt_dict()
+    d["ts_output"].update(wrt_avg_temp=False, wrt_avg_salt=False)
+    rt = RunTimeSettingsV0_13_0.model_validate(d)
+    assert isinstance(rt.ts_output, TsOutputCfg)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_13_0
+    assert not set(_AVG_TS_KEYS) & set(nml.to_f90nml_dict()["ts_output_settings"])
+
+
+@pytest.mark.parametrize("temp, salt", [(True, False), (False, True), (True, True)])
+def test_build_namelist_v0_14_0_writes_avg_ts(tmp_path, temp, salt):
+    """RunTimeSettingsV0_14_0 builds ``RomsNamelistV0_14_0`` and writes both keys
+    into ``&ts_output_settings``.
+    """
+    d = _populated_rt_dict()
+    d["ts_output"].update(wrt_avg_temp=temp, wrt_avg_salt=salt)
+    rt = RunTimeSettingsV0_14_0.model_validate(d)
+    assert isinstance(rt, RunTimeSettingsV0_13_0)
+    assert isinstance(rt.ts_output, TsOutputCfgV0_14_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_14_0
+    assert nml.ts_output_settings.wrt_avg_temp is temp
+    assert nml.ts_output_settings.wrt_avg_salt is salt
+
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert f"wrt_avg_temp = {'.true.' if temp else '.false.'}" in text
+    assert f"wrt_avg_salt = {'.true.' if salt else '.false.'}" in text
+
+
+def test_run_time_settings_v0_14_0_defaults_avg_ts_when_omitted(tmp_path):
+    """A settings dict without the keys validates to False, the ucla-roms
+    initializers and what earlier releases did, and the namelist carries them.
+    """
+    d = _populated_rt_dict()
+    for key in _AVG_TS_KEYS:
+        d["ts_output"].pop(key, None)
+    rt = RunTimeSettingsV0_14_0.model_validate(d)
+    assert rt.ts_output.wrt_avg_temp is False
+    assert rt.ts_output.wrt_avg_salt is False
+    nml = build_namelist(rt, n_tracers=34)
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "wrt_avg_temp = .false." in text
+    assert "wrt_avg_salt = .false." in text
+
+
+def test_ts_output_cfg_tiers_differ_by_the_averages_keys():
+    old = set(TsOutputCfg.model_fields)
+    assert set(TsOutputCfgV0_14_0.model_fields) - old == set(_AVG_TS_KEYS)
+    assert old <= set(TsOutputCfgV0_14_0.model_fields)
+
+
+@pytest.mark.parametrize(
+    "settings_cls", [RunTimeSettingsV0_13_0, RunTimeSettingsV0_14_0]
+)
+@pytest.mark.parametrize("key", [k.upper() for k in _AVG_TS_KEYS])
+def test_misspelled_avg_ts_key_is_rejected_on_every_tier(settings_cls, key):
+    """Settings keys are lowercase; a case variant would be dropped by
+    ``extra="ignore"`` on the old tier, so it fails there like a field's own.
+    """
+    annotation = settings_cls.model_fields["ts_output"].annotation
+    with pytest.raises(
+        ValidationError, match=rf"{key} \(did you mean {key.lower()}\?\)"
+    ):
+        TypeAdapter(annotation).validate_python(_ts_output(**{key: True}))
+
+
+def test_forge_writes_avg_ts_cstar_reads_it(tmp_path):
+    """``write_roms_namelist`` for a 0.14.0 pin writes a namelist the C-Star
+    schema for that release reads back, keys included.
+    """
+    d = _populated_rt_dict()
+    d["ts_output"].update(wrt_avg_temp=True, wrt_avg_salt=True)
+    write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.14.0")
+    back = RomsNamelistV0_14_0.read(tmp_path / "namelist.nml")
+    assert back.ts_output_settings.wrt_avg_temp is True
+    assert back.ts_output_settings.wrt_avg_salt is True
 
 
 # ---------------------------------------------------------------------------
@@ -2547,7 +2710,7 @@ def _surf_flux(**switches):
     return {**default_catalog.output_data("daily-restarts")["surf_flux"], **switches}
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
 def test_pre_0_13_0_tiers_reject_wrt_rstflx(settings_cls):
     """ucla-roms < 0.13.0 reads ``wrt_rstflx`` but writes no restoring flux."""
     annotation = settings_cls.model_fields["surf_flux"].annotation
@@ -2622,3 +2785,116 @@ def test_validate_run_time_sections_reports_the_restoring_flux_switch(
         )
         == []
     )
+
+
+# ---------------------------------------------------------------------------
+# check_marbl_bgc_inputs
+# ---------------------------------------------------------------------------
+_GLORYS = SourceSpec(name="GLORYS", glorys_layout="regional")
+_BGC_ITEM = BgcSourceItem(source=SourceSpec(name="UNIFIED"))
+_OPEN = {"south": False, "east": True, "north": False, "west": False}
+_CLOSED = dict.fromkeys(("south", "east", "north", "west"), False)
+_HASH = "a" * 40
+
+
+def _forcing(*, boundary_bgc=False, ic_bgc=False, boundary=True, ic=True):
+    """A Forcing whose boundary / initial conditions carry BGC sources or not;
+    ``boundary=False`` / ``ic=False`` leave the section out (None).
+    """
+    bgc = [_BGC_ITEM]
+    return Forcing(
+        boundary=(
+            BoundaryForcing(source=_GLORYS, bgc_sources=bgc if boundary_bgc else [])
+            if boundary
+            else None
+        ),
+        initial_conditions=(
+            InitialConditions(source=_GLORYS, bgc_sources=bgc if ic_bgc else [])
+            if ic
+            else None
+        ),
+    )
+
+
+def _check(forcing, **over):
+    kw = {"open_boundaries": _OPEN, "is_child": False, "marbl": True}
+    kw |= {"roms_ref": "0.14.0", **over}
+    check_marbl_bgc_inputs(forcing, **kw)
+
+
+def test_check_marbl_bgc_inputs_refuses_physics_only_naming_both():
+    with pytest.raises(ValueError) as exc:
+        _check(_forcing())
+    msg = str(exc.value)
+    assert "forcing.boundary and initial_conditions have no BGC sources" in msg
+    assert "ucla-roms >= 0.14.0" in msg
+    assert "glorys-era5-unified" in msg and 'bgc_mode "none"' in msg
+
+
+def test_check_marbl_bgc_inputs_names_the_constant():
+    assert BGC_INPUTS_REQUIRED_MIN_ROMS == UCLA_ROMS_0_14_0
+    with (
+        mock.patch(
+            "cstar.applications.forge.namelist_model.BGC_INPUTS_REQUIRED_MIN_ROMS",
+            (0, 20, 0),
+        ),
+        pytest.raises(ValueError, match=r"ucla-roms >= 0\.20\.0"),
+    ):
+        _check(_forcing(), roms_ref="0.20.0")
+
+
+def test_check_marbl_bgc_inputs_refuses_only_the_boundary():
+    with pytest.raises(ValueError, match=r"^forcing\.boundary has no BGC") as exc:
+        _check(_forcing(ic_bgc=True))
+    assert "initial_conditions" not in str(exc.value).split(",")[0]
+
+
+def test_check_marbl_bgc_inputs_refuses_only_the_initial_conditions():
+    with pytest.raises(ValueError, match=r"^initial_conditions has no BGC"):
+        _check(_forcing(boundary_bgc=True))
+
+
+def test_check_marbl_bgc_inputs_passes_with_bgc_on_both():
+    _check(_forcing(boundary_bgc=True, ic_bgc=True))
+
+
+def test_check_marbl_bgc_inputs_passes_with_marbl_off():
+    _check(_forcing(), marbl=False)
+
+
+def test_check_marbl_bgc_inputs_closed_sides_need_no_boundary_but_ic():
+    with pytest.raises(ValueError, match=r"^initial_conditions has no BGC"):
+        _check(_forcing(), open_boundaries=_CLOSED)
+    _check(_forcing(ic_bgc=True), open_boundaries=_CLOSED)
+
+
+def test_check_marbl_bgc_inputs_without_boundary_forcing_is_not_this_rule():
+    _check(_forcing(boundary=False, ic_bgc=True))
+
+
+def test_check_marbl_bgc_inputs_child_takes_its_boundary_from_the_parent():
+    _check(_forcing(boundary=False, ic=False), is_child=True)
+    # a child's boundary section is never required, its explicit IC still is
+    _check(_forcing(ic_bgc=True), is_child=True)
+    with pytest.raises(ValueError, match=r"^initial_conditions has no BGC"):
+        _check(_forcing(boundary=False), is_child=True)
+
+
+@pytest.mark.parametrize(
+    ("ref", "refused"),
+    [
+        ("0.13.1", False),
+        ("v0.13.1", False),
+        ("0.14.0", True),
+        ("0.15.0", True),
+        ("main", True),
+        (None, True),
+        (_HASH, False),
+    ],
+)
+def test_check_marbl_bgc_inputs_gate(ref, refused):
+    if refused:
+        with pytest.raises(ValueError, match="BGC"):
+            _check(_forcing(), roms_ref=ref)
+    else:
+        _check(_forcing(), roms_ref=ref)
