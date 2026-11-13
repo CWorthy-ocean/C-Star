@@ -5,11 +5,15 @@ the shared schema writer.
 import json
 from pathlib import Path
 
+import pytest
 import typer
 from typer.testing import CliRunner
 
+import cstar
+from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.cli.blueprint.schemas import generate_schema
+from cstar.base.utils import generate_schema_ref
+from cstar.cli.blueprint.schemas import all_applications, generate_schema
 from cstar.cli.common import write_model_schema
 from cstar.cli.run.schemas import CMD_NAME
 from cstar.cli.run.schemas import app as app_schemas
@@ -56,6 +60,18 @@ def test_generate_schema_keeps_its_layout(tmp_path: Path) -> None:
     assert path.parent == tmp_path / "hello_world"
     assert path.name.startswith("hello_world_schema.")
     assert "properties" in json.loads(path.read_text())
+
+
+@pytest.mark.parametrize("app_name", all_applications())
+def test_current_blueprint_schema_is_published(app_name: str) -> None:
+    """Verify each built-in application's current blueprint schema is published
+    where the `$schema` header of the blueprints it writes points.
+    """
+    version = get_application(app_name).schema_version
+    published = generate_schema_ref(app_name, version).split("/docs/schemas/bp/")[1]
+
+    repo_root = Path(cstar.__file__).resolve().parents[1]
+    assert (repo_root / "docs" / "schemas" / "bp" / published).is_file()
 
 
 def test_workplan_schemas_writes_the_current_version(tmp_path: Path) -> None:

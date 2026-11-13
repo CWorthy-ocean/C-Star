@@ -708,8 +708,10 @@ class ROMSInputDataset(InputDataset, ABC):
             if not fmt.is_classic:
                 problems.append(
                     f"{path}: not a classic-format netCDF file (detected: {fmt}). "
-                    "Rewrite it in CDF-5 format, e.g. with "
-                    "xarray's to_netcdf(format='NETCDF3_64BIT_DATA')."
+                    "Rewrite it in CDF-5 format, e.g. with 'nccopy -k cdf5' or "
+                    "xarray's to_netcdf(format='NETCDF3_64BIT_DATA'). If 'cstar run "
+                    "compress' rewrote it, the original may still be in that run's "
+                    "uncompressed_originals/ directory."
                 )
                 continue
 

@@ -19,6 +19,8 @@ dependencies:
   - ujson
   - fastparquet
   - xarray>=2026.9
+  # `cstar run compress`: >=1.6 for netCDF-C's native quantization
+  - netcdf4>=1.6
   # wizard (cstar.wizard) runtime dependencies
   - ipywidgets
   - voila
