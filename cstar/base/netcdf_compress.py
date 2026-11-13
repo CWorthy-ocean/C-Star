@@ -295,6 +295,12 @@ def compress_netcdf(src: Path, dst: Path, encoding: Encoding) -> CompressResult:
     return CompressResult(reduced=tuple(reduced), exact=tuple(exact_floats))
 
 
+VERIFIED_RECORDS: t.Final[str] = "the first and last record of each variable"
+"""What `verify_compressed` compares, for help text and reports: a lossless
+rewrite through netCDF-C either succeeds or raises, so the check samples rather
+than re-reads every record."""
+
+
 def _sample_records(n: int, limit: int = 2) -> list[int]:
     """The record indices `verify_compressed` compares: the first and the last."""
     return sorted({0, n - 1})[:limit] if n else []
@@ -304,9 +310,10 @@ def verify_compressed(src: Path, dst: Path, encoding: Encoding) -> list[str]:
     """Check a compressed copy against its source.
 
     The variables, dimensions and record count must match. On the first and the
-    last record, exact variables must be bit-identical and reduced variables
-    within float32 rounding, or within the quantization tolerance of
-    `significant_digits`.
+    last record of each variable (`VERIFIED_RECORDS`; every value of a variable
+    without a record dimension), exact variables must be bit-identical and
+    reduced variables within float32 rounding, or within the quantization
+    tolerance of `significant_digits`.
 
     Parameters
     ----------

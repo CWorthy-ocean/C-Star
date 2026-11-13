@@ -11,12 +11,14 @@ from typing import TYPE_CHECKING, ClassVar, Final, Protocol, override
 from pydantic import Field
 
 from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
     ENV_CSTAR_SYSTEM,
     get_env_item,
     load_user_config,
     load_user_config_for_repair,
 )
 from cstar.base.exceptions import CstarError
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.system.environment import (
     CStarEnvironment,
@@ -31,6 +33,7 @@ from cstar.system.scheduler import (
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
+    in_scheduler_job,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
     visible_scheduler,
@@ -1038,6 +1041,49 @@ class CStarSystemManager:
             The system scheduler
         """
         return self._scheduler
+
+
+@dataclass(frozen=True)
+class OutsideSchedulerJob:
+    """A process outside any scheduler job on a machine with a scheduler (a login node, say)."""
+
+    system: str
+    """The system's name; for a context C-Star fell back to or was told to use,
+    how it was chosen (`SystemSelection.describe`)."""
+    unsupported_scheduler: str = ""
+    """The scheduler family the machine shows that the system's context cannot
+    submit to; empty when the context has its own scheduler."""
+
+    @property
+    def certain(self) -> bool:
+        """Whether C-Star knows the process is outside a job: the context has a scheduler."""
+        return not self.unsupported_scheduler
+
+
+def outside_scheduler_job(sysmgr: "CStarSystemManager") -> OutsideSchedulerJob | None:
+    """Say whether this process runs outside a scheduler job where it should be in one.
+
+    Parameters
+    ----------
+    sysmgr : CStarSystemManager
+        The system manager of this machine.
+
+    Returns
+    -------
+    OutsideSchedulerJob | None
+        Where the process is, or `None` inside a scheduler job, with
+        `CSTAR_ALLOW_LOGIN_NODE_RUN=1`, or on a machine that shows no scheduler.
+    """
+    if in_scheduler_job(os.environ) or is_flag_enabled(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN):
+        return None
+    if sysmgr.scheduler is not None:
+        return OutsideSchedulerJob(system=sysmgr.name)
+    selection = sysmgr.selection
+    if family := selection.unsupported_scheduler(os.environ):
+        return OutsideSchedulerJob(
+            system=selection.describe(), unsupported_scheduler=family
+        )
+    return None
 
 
 @functools.lru_cache

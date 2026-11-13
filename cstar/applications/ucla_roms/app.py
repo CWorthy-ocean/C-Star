@@ -321,9 +321,13 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
     def protected_variables(self) -> "Sequence[str]":
         """Name the variables compression keeps exact in UCLA-ROMS output.
 
-        The CDR metrics inputs, and both members of each carbonate perturbation
-        pair (a tracer and its `_ALT_CO2` baseline): an analysis takes their
-        difference, which after months is far below float32 resolution.
+        Both members of each carbonate perturbation pair (a tracer and its
+        `_ALT_CO2` baseline): an analysis takes their difference, which after
+        months is far below float32 resolution. And every variable another step
+        reads from this output: the CDR metrics inputs (`_cdr`), the carbonate
+        sensitivities a CDR-LiTE run reads as forcing (`_cdrgas`), and the
+        boundary fluxes and thicknesses the upscaler builds CDR forcing from
+        (`_uscl`).
 
         Returns
         -------
@@ -332,9 +336,18 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
         """
         # deferred: application registration stays light
         from cstar.applications.cdr_metrics import CDR_METRICS_VARIABLES
+        from cstar.applications.upscaler import UPSCALER_INPUT_VARIABLES
+        from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_VARIABLES
 
         return tuple(
-            dict.fromkeys((*CDR_METRICS_VARIABLES, *CARBONATE_PERTURBATION_VARIABLES))
+            dict.fromkeys(
+                (
+                    *CARBONATE_PERTURBATION_VARIABLES,
+                    *CDR_METRICS_VARIABLES,
+                    *CARBONATE_SENSITIVITY_VARIABLES,
+                    *UPSCALER_INPUT_VARIABLES,
+                )
+            )
         )
 
 

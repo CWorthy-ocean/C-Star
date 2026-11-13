@@ -68,6 +68,20 @@ CDR_ADD_VAR_RE: t.Final[re.Pattern[str]] = re.compile(
 )
 """``_uscl`` variables holding the boundary fluxes of dedicated CDR-lite tracers
 (ucla-roms >= 0.11.0 writes ``<tracer>_add_<side>`` for each)."""
+BOUNDARY_SIDES: t.Final[tuple[str, ...]] = ("north", "east", "south", "west")
+"""The boundaries a `_uscl` file can hold, in the order their columns are joined
+into profiles."""
+UPSCALER_INPUT_VARIABLES: t.Final[tuple[str, ...]] = (
+    _AVG_BEGIN,
+    _AVG_END,
+    *(f"{prefix}_{side}" for prefix in ("h", "lat", "lon") for side in BOUNDARY_SIDES),
+    *(f"{tracer}_add_*" for tracer in BASE_TRACER_NAMES),
+    "CDR_*_add_*",
+)
+"""Names and globs of the `_uscl` variables the upscaled CDR forcing is built from:
+the averaging windows, each boundary's layer thickness and position, and the
+boundary tracer fluxes. Compression keeps them exact
+(`UclaRomsApplication.protected_variables`)."""
 
 _CDR_FAMILY_ORDER: t.Final[dict[str, tuple[int, int]]] = {
     "OAE_ALK": (0, 0),
@@ -663,7 +677,7 @@ class CDRUpscaler:
             return np.concatenate(
                 [
                     self.uscl_dataset[f"{var_prefix}_{bry}"].values
-                    for bry in ["north", "east", "south", "west"]
+                    for bry in BOUNDARY_SIDES
                     if self.child_boundaries.get(bry)
                 ],
                 axis=-1,
@@ -675,7 +689,7 @@ class CDRUpscaler:
             Should be faster, but isn't. Huge bottleneck during save().
             """
             data_arrays = []
-            for bry in ["north", "east", "south", "west"]:
+            for bry in BOUNDARY_SIDES:
                 if self.child_boundaries.get(bry):
                     rho_var = "eta_rho" if bry.endswith("st") else "xi_rho"
                     da = self.uscl_dataset[f"{var_prefix}_{bry}"].rename(

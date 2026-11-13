@@ -75,10 +75,10 @@ ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
 ARG_YES: t.Final[str] = "--yes"
 """Option that accepts every prompt without user interaction."""
 
-ARG_ANSWERS: t.Final[str] = "--answers"
-ARG_ANSWERS_HELP: t.Final[str] = (
-    "A compress blueprint whose file-type settings answer the questions; only "
-    "file types it does not match are asked about."
+ARG_BLUEPRINT: t.Final[str] = "--blueprint"
+ARG_BLUEPRINT_HELP: t.Final[str] = (
+    "Reuse the file-type settings of this compress blueprint; only file types "
+    "it does not match are asked about."
 )
 ARG_SUBMIT: t.Final[str] = "--submit"
 ARG_SUBMIT_HELP: t.Final[str] = (
@@ -87,6 +87,12 @@ ARG_SUBMIT_HELP: t.Final[str] = (
 ARG_NOW: t.Final[str] = "--now"
 ARG_NOW_HELP: t.Final[str] = (
     "Compress here, in this process, instead of submitting a job."
+)
+ARG_WORKERS: t.Final[str] = "--workers"
+ARG_WORKERS_HELP: t.Final[str] = (
+    "Files compressed at once, one worker process each; with --submit, the job's "
+    "cores. Overrides the question, --yes's default of 1, and a reused "
+    "blueprint's saved value."
 )
 
 ARG_OWN: t.Final[str] = "--own"

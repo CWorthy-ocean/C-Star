@@ -107,8 +107,12 @@ from cstar.roms.precheck import (
     check_output_streams_divide_rst,
 )
 from cstar.simulation import Simulation
-from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr, warn_once
-from cstar.system.scheduler import in_scheduler_job
+from cstar.system.manager import (
+    DOCS_MACHINES_URL,
+    get_sysmgr,
+    outside_scheduler_job,
+    warn_once,
+)
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
@@ -2580,29 +2584,25 @@ class ROMSSimulation(Simulation):
             If the system has a scheduler, the process is not inside a scheduler
             job, and `CSTAR_ALLOW_LOGIN_NODE_RUN` is not set to `1`.
         """
-        cstar_sysmgr = get_sysmgr()
-        if in_scheduler_job(os.environ) or is_flag_enabled(
-            ENV_CSTAR_ALLOW_LOGIN_NODE_RUN
-        ):
+        where = outside_scheduler_job(get_sysmgr())
+        if where is None:
             return
-        if cstar_sysmgr.scheduler is not None:
+        if where.certain:
             raise CstarError(
-                f"Refusing to launch ROMS outside a scheduler job on {cstar_sysmgr.name}, "
+                f"Refusing to launch ROMS outside a scheduler job on {where.system}, "
                 "which has a scheduler. Submit it with 'cstar blueprint submit "
                 "<blueprint>', run it inside an allocation, or set "
                 f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run it here anyway."
             )
-        selection = cstar_sysmgr.selection
-        if family := selection.unsupported_scheduler(os.environ):
-            warn_once(
-                "ROMS will run outside a scheduler job on a machine with a "
-                f"{family} scheduler, which the system {selection.describe()} "
-                "cannot submit to. If this is a login node, stop it and run it inside "
-                "an allocation (salloc, qsub -I, or your own batch script). Set "
-                f"{ENV_CSTAR_SYSTEM} to the system's name if C-Star lists it, or "
-                f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run here without this "
-                f"warning (see {DOCS_MACHINES_URL})."
-            )
+        warn_once(
+            "ROMS will run outside a scheduler job on a machine with a "
+            f"{where.unsupported_scheduler} scheduler, which the system {where.system} "
+            "cannot submit to. If this is a login node, stop it and run it inside "
+            "an allocation (salloc, qsub -I, or your own batch script). Set "
+            f"{ENV_CSTAR_SYSTEM} to the system's name if C-Star lists it, or "
+            f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run here without this "
+            f"warning (see {DOCS_MACHINES_URL})."
+        )
 
     def run(self, job_name: str | None = None) -> "ExecutionHandler":
         """Execute the ROMS simulation as a local process.

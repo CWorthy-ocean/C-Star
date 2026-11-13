@@ -1940,52 +1940,74 @@ def compute_product_digests(
     return digests
 
 
+def update_products(root: Path, update: "Callable[[str, Product], bool]") -> int:
+    """Apply a change to the recorded products of a run; write what changed.
+
+    The manifest is read again from the run, so what another writer recorded
+    since the caller looked is kept. Each step record that changed, and then the
+    manifest, are written. The caller holds `manifest_lock` around this call
+    only; computing what to record is not done under it.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    update : Callable[[str, Product], bool]
+        Called with each step's name and each of its recorded products, in
+        place; returns whether it changed the product.
+
+    Returns
+    -------
+    int
+        The number of products changed.
+    """
+    manifest = read_run_manifest(root)
+    if manifest is None:
+        log.debug(f"No product updated: {root} holds no run manifest")
+        return 0
+    fold_step_records(manifest, root)
+
+    changed = 0
+    for entry in manifest.steps:
+        if entry.record is None:
+            continue
+        count = sum(update(entry.name, product) for product in entry.record.products)
+        if count:
+            write_step_record(root / entry.working_dir, entry.record)
+            changed += count
+
+    if changed:
+        write_run_manifest(root, manifest)
+    return changed
+
+
 def record_product_digests(root: Path, digests: "Mapping[tuple[str, str], str]") -> int:
     """Record computed product digests in the step records and the manifest.
 
-    The manifest is read again from the run, so what another writer recorded
-    since the digests were computed is kept: a product that has a digest by now
-    keeps it. The step records and the manifest are written
-    only when a digest was recorded.
-
-    The caller holds `manifest_lock` around this call only; computing the digests
-    is not done under it.
+    A product that has a digest by now keeps it. See `update_products` for
+    the write and locking contract.
 
     Parameters
     ----------
     root : Path
         The run root.
     digests : Mapping[tuple[str, str], str]
-        The digests from `compute_product_digests`, by step name and product path.
+        The digests computed, by `(step name, product path)`.
 
     Returns
     -------
     int
         The number of digests recorded.
     """
-    manifest = read_run_manifest(root)
-    if manifest is None:
-        log.debug(f"No digest recorded: {root} holds no run manifest")
-        return 0
-    fold_step_records(manifest, root)
 
-    recorded = 0
-    for entry in manifest.steps:
-        if entry.record is None:
-            continue
-        count = 0
-        for product in entry.record.products:
-            digest = digests.get((entry.name, product.path))
-            if digest and not product.digest:
-                product.digest = digest
-                count += 1
-        if count:
-            write_step_record(root / entry.working_dir, entry.record)
-            recorded += count
+    def record(step: str, product: Product) -> bool:
+        digest = digests.get((step, product.path))
+        if digest and not product.digest:
+            product.digest = digest
+            return True
+        return False
 
-    if recorded:
-        write_run_manifest(root, manifest)
-    return recorded
+    return update_products(root, record)
 
 
 def finalize_standalone_run(
