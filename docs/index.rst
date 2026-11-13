@@ -180,6 +180,7 @@ C-Star is built with these principles in mind:
     :hidden:
 
     contributing
+    developers/conventions
     developers/custom_applications
     developers/system-registration
     developers/forge_internals
