@@ -1,0 +1,1 @@
+Published the ``ucla_roms_gpu`` blueprint schema 1.0.0 and a blueprint template, and documented GPU steps and the two GPU settings in the workplan and HPC deployment pages (GPU runs on Anvil are listed as planned); full application docs follow in a later PR.

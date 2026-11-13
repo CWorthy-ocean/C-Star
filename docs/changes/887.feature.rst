@@ -1,0 +1,4 @@
+Oscar (Brown CCV) is a registered system: C-Star loads its modules, builds with the site's gcc and ``hpcx-mpi``, and submits jobs with ``cstar blueprint submit`` and ``cstar workplan submit``.
+- Jobs go to the ``batch`` partition by default (``debug`` is also known) and launch with ``srun --mpi=pmix``; no ``CSTAR_SLURM_ACCOUNT`` is needed unless you use a condo or priority account.
+- The machine is recognised by its ``/oscar/home`` mount; ``cstar env set CSTAR_SYSTEM oscar`` pins it if detection misses.
+- With no ``SCRATCH`` variable exported, ``CSTAR_DATA_HOME`` resolves onto the user's ``~/scratch`` directory.

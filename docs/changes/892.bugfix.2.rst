@@ -1,0 +1,3 @@
+A cached GLORYS subchunk reference is now reused only for the exact files it was built from, and saved only after it passes its time-axis check.
+- Previously a second domain with the same run window reused the first domain's regional reference.
+- Files replaced in place, a failed time-axis check or an interrupted build previously left a reference that the next run reused.

@@ -1,0 +1,1 @@
+Setup and pre-run refuse a ``river_frc_settings.nriv`` that differs from the river forcing file's river count, which ROMS either stops on or silently drops rivers for.

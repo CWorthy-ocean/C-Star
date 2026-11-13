@@ -1,0 +1,3 @@
+``cstar admin clean --run-id`` no longer leaves a broken link to the run's removed record, after which every ``cstar run ls`` warned that a record could not be read.
+- It also removes the run's empty history folder and its lock file, which were always left behind.
+- Running it again on a partly cleaned run-id now removes what is left, instead of reporting nothing to clean.

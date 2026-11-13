@@ -217,7 +217,10 @@ napolean_google_docstring = False
 napolean_numpy_docstring = True
 
 templates_path = ["_templates"]
-exclude_patterns = []
+# changes/ holds the release-note fragments (see [tool.towncrier] in
+# pyproject.toml): they become docs/releases/<version>.rst at release and are
+# not pages themselves.
+exclude_patterns = ["changes"]
 # exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 napoleon_custom_sections = [

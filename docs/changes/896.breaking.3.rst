@@ -1,0 +1,1 @@
+Branch pins select the newest tier in both Forge and ``ucla_roms``, so a run pinned to a ucla-roms branch without ucla-roms #413 stops on the new keys; a commit-hash pin resolves to its nearest release tag and keeps that release's tier.

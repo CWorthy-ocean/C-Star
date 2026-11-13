@@ -1,0 +1,1 @@
+The wizard has a "Groom ESPER tracers" checkbox on the initial-conditions and boundary sections, checked by default. It keeps any hand-written ``groom_settings`` when a blueprint is loaded and saved again with the box checked, and leaves them out while the box is unchecked.

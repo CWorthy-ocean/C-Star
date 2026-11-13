@@ -1,0 +1,1 @@
+Forge blueprints and ModelSpecs accept ``cppdefs.diagnostics`` to define ``DIAGNOSTICS`` in the generated ``cppdefs.opt``.

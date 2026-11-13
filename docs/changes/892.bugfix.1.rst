@@ -1,0 +1,3 @@
+Forge reads GLORYS files it can't subchunk directly, with one warning, instead of failing or building a reference that later crashed roms-tools with a decompression error.
+- Covers compressed or differently chunked NetCDF4, CDF-5/NetCDF3 files, and files whose time encodings use different reference dates (previously a hard error).
+- Works in workplans as well, where ``--no-subchunk`` can't be passed.

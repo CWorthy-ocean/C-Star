@@ -1,0 +1,1 @@
+The wizard no longer has a separate "Temperature and salinity output" section: the temperature and salinity checkboxes are under "Variables in history files", the only file they affect.

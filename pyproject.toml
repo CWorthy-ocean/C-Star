@@ -93,6 +93,8 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.12.2",
+    # release notes: `towncrier build --draft` previews docs/changes/ fragments
+    "towncrier>=26.9",
     "types-python-dateutil>=2.9.0",
     "types-pytz>=2025.2.0",
     "types-PyYAML>=6.0.12",
@@ -122,9 +124,10 @@ build-backend = "setuptools.build_meta"
 # check-manifest builds a clean sdist from a git-free copy of the tree, so files
 # that setuptools_scm's VCS file finder would normally pick up (it needs .git)
 # are reported missing unless MANIFEST.in covers them too. These are dev-only
-# files intentionally not shipped in the sdist/wheel: docs, CI/release tooling,
-# lint/coverage config, conda env pins, and non-.py test fixtures (test .py
-# files are still picked up via normal package discovery).
+# files intentionally not shipped in the sdist/wheel: docs (with the release-note
+# fragments in docs/changes/), CI/release tooling, lint/coverage config, conda
+# env pins, and non-.py test fixtures (test .py files are still picked up via
+# normal package discovery).
 [tool.check-manifest]
 ignore = [
     ".pre-commit-config.yaml",
@@ -200,6 +203,73 @@ runtime-evaluated-decorators = ["dataclasses.dataclass"]
 
 [tool.pre-commit]
 config = ".pre-commit-config.yaml"
+
+# Release notes: fragments in docs/changes/, named +<name>.<type>.rst (or
+# <PR number>.<type>.rst), assembled into docs/releases/<tag>.rst by
+# finalize_release_notes.yaml: ci/number_fragments.py renames each +<name> to
+# the PR that added it, ci/add_release_include.py lists the new file in
+# docs/releases.rst, then `towncrier build --version <tag>`.
+# See docs/contributing.rst.
+[tool.towncrier]
+# The fragments folder; ci/number_fragments.py and the ci/ tests read it here.
+# docs/conf.py excludes it from the Sphinx build.
+directory = "docs/changes"
+# One file per release, like the releases already in docs/releases/.
+filename = "docs/releases/{version}.rst"
+single_file = false
+# Must not end in .md: towncrier picks Markdown or RST output by this extension.
+template = "ci/towncrier_template.rst"
+# Empty: the template writes the release's anchor and title itself.
+title_format = ""
+# The release title's underline, then the section titles'.
+underlines = ["-", "~"]
+# Numbered fragments must use a PR number; +<name> fragments are exempt.
+issue_pattern = "\\d+"
+# Any ignore list, even an empty one, makes `towncrier build` fail on a
+# misnamed file in the folder instead of silently leaving it out of the release.
+# (README.md is always ignored.)
+ignore = []
+issue_format = "`#{issue} <https://github.com/CWorthy-ocean/C-Star/pull/{issue}>`_"
+
+[[tool.towncrier.type]]
+directory = "breaking"
+name = "Breaking Changes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "breaking-python"
+name = "Python API Changes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "output"
+name = "Changes to Output"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecation"
+name = "Deprecations"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "New features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bug Fixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "improvement"
+name = "Improvements"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Miscellaneous"
+showcontent = true
 
 [tool.setuptools.packages.find]
 exclude = ["tests*", "docs*", "examples*", "additional_files*", "externals*", "ci*", "build*"]

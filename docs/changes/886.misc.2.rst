@@ -1,0 +1,1 @@
+``netCDF4>=1.6`` is now a core dependency (it was a development-only dependency) and is listed in the conda environment files.

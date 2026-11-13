@@ -1,0 +1,6 @@
+New application ``ucla_roms_gpu`` (blueprint schema 1.0.0) runs roms-marbl-gpu on GPU nodes, one GPU per tile, with C-Star building the model from the pinned roms-marbl-gpu release.
+- A ``tiling`` block sets the tiles (``n_procs_x``, ``n_procs_y``), the ``nodes`` the job spans and the ``writers_per_node`` output ranks (default 1); C-Star requests ``tiles + writers_per_node x nodes`` MPI tasks.
+- Namelist settings the GPU model would stop on are refused before the build and again before launch: switches for features it lacks, and more forcing files than it reads (64).
+- Forcing that holds surface restoring data is refused once staged, before the build, since the GPU model would ignore it (see Known gaps).
+- A bundled ``wales-toy-gpu`` example blueprint runs a toy domain on one 4-GPU node.
+- roms-marbl-gpu v0.1.3-beta and later are supported; an older pin is refused when the blueprint is checked.

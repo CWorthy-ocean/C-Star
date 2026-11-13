@@ -1,0 +1,3 @@
+The default ModelSpec, the wizard default and the integration pin move to ``roms-marbl-0.14-default`` (ucla-roms 0.14.0).
+- ucla-roms 0.14.0 changes results wherever water flows in through an open boundary (ucla-roms #415); ``roms-marbl-0.13-default`` stays for reproducing 0.13.1 answers.
+- On 0.14.0 a MARBL run needs BGC sources for its boundary forcing and initial conditions (ucla-roms #421); a physics-only ForcingSpec such as ``glorys-era5-physics`` now needs ``bgc_mode: none``.

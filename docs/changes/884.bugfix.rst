@@ -1,0 +1,3 @@
+Scheduled steps on Perlmutter no longer fail with ``OSError: [Errno 524]`` before the model starts when the state or cache directory is under ``$HOME`` or ``/global/cfs``.
+- Where a file system cannot lock files, C-Star carries on without the lock and logs one warning per directory saying other processes are not kept out there.
+- A workplan run orchestrated inside an allocation on those mounts now writes its run record, sentinels and manifest instead of failing or silently skipping the manifest.

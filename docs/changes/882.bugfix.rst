@@ -1,0 +1,1 @@
+On Perlmutter, C-Star again loads a module set that exists (``cray-hdf5/1.14.3.9``, ``cray-netcdf/4.9.2.3``, ``cray-parallel-netcdf/1.12.3.21`` under ``PrgEnv-gnu/8.7.0`` and ``cray-mpich/9.1.0``), so ``NETCDFHOME`` and ``PNETCDFHOME`` resolve and ROMS builds on CPU nodes.

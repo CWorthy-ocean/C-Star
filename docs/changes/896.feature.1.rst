@@ -1,0 +1,2 @@
+``ts_output.wrt_avg_temp`` and ``ts_output.wrt_avg_salt`` write temperature and salinity to the averages file (ucla-roms 0.14.0); the wizard shows them under "Variables in average files".
+- Both are off by default and take effect only with ``ocean_vars.wrt_file_avg``.

@@ -1,0 +1,2 @@
+Forge blueprints accept ``groom_settings`` on ``initial_conditions`` and ``boundary``, overriding ROMS-Tools' grooming thresholds; it is set by hand in the blueprint YAML only.
+- Unknown keys or invalid values fail when the blueprint loads, and so does ``groom_settings`` with ``groom: false``, since ROMS-Tools applies the settings only while grooming is on. An empty ``groom_settings`` counts as unset.

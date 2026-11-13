@@ -1,0 +1,1 @@
+New documentation page, "Compressing a finished run", under Moving runs, and a published JSON schema for the ``compress`` blueprint.

@@ -1,0 +1,3 @@
+Chained steps whose output files share a name (e.g. ``_cdrgas`` files at a step boundary) no longer crash input staging with ``FileExistsError``.
+- Same-named forcing files whose time records follow on in the order listed are staged side by side, the later one as ``<name>_2.nc``, and ROMS reads both.
+- Any other shared input name is refused with one error listing the files, before ``--clobber`` deletes anything.

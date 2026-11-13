@@ -1,0 +1,2 @@
+Forge blueprints accept ``groom`` on ``initial_conditions`` and ``boundary``; ``groom: false`` turns off ROMS-Tools' grooming of ESPER-derived tracers, which is on by default.
+- On (the default, ROMS-Tools' own) is left out of saved blueprints and the content hash, so existing blueprints keep their hash and an explicit ``groom: true`` hashes the same as leaving it out.

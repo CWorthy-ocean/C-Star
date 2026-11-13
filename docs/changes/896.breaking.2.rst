@@ -1,0 +1,1 @@
+New namelist tier for ucla-roms >= 0.14.0 that adds ``wrt_avg_temp``/``wrt_avg_salt``; earlier releases stop on unknown namelist keys, so they keep the 0.13 tier and Forge rejects either key switched on there with an error naming 0.14.0.

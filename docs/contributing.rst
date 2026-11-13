@@ -175,7 +175,9 @@ Before you open an issue or a pull request, read the
 `[C]Worthy AI policy <https://github.com/CWorthy-ocean/.github/blob/main/AI_POLICY.md>`_.
 Every pull request description carries one ``AI disclosure:`` line, which
 the pull request template provides. Keep each pull request focused on one
-thing, and open an issue first for anything larger than a fix.
+thing, and open an issue first for anything larger than a fix. A pull request
+that changes something users could notice also adds a release note; see
+`Writing a release note`_.
 
 If you have written new code, you can run the tests as described in the
 previous step. You will likely have to iterate here several times until
@@ -232,6 +234,103 @@ maintain code quality and reliability. Follow these guidelines:
   - Select tests by path rather than by marker: the repository defines no
     ``pytest.mark`` categories, and ``-m`` selection does not work here.
 
+Writing a release note
+----------------------
+
+A pull request that changes something users could notice adds a release note:
+a file in the ``docs/changes/`` directory named ``+<name>.<type>.rst``, where
+``<name>`` is any short label, such as ``+river-count.bugfix.rst``. Commit it
+with your code. The ``+`` means the pull request number is filled in at
+release time, from the merge commit, so the note links to your pull request.
+If you already know the number you can use it instead:
+``<PR number>.<type>.rst``. At release time the notes are collected into
+``docs/releases/<version>.rst`` and the files are deleted, so don't edit the
+files in ``docs/releases/`` yourself.
+
+The type decides the section the note appears under:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Type
+     - Section
+     - For
+   * - ``breaking``
+     - Breaking Changes
+     - a workplan, blueprint, catalog, command or script that worked now
+       fails or needs an edit: a renamed or removed option, a key that is now
+       rejected, a file an earlier release can no longer read
+   * - ``breaking-python``
+     - Python API Changes
+     - Python code that imports ``cstar`` and worked now fails or needs an
+       edit: a renamed or removed class, function, argument or attribute
+   * - ``output``
+     - Changes to Output
+     - the same blueprint or workplan still runs, but what C-Star writes
+       differs: generated input files, the namelist, model output, or the
+       layout of a run directory
+   * - ``deprecation``
+     - Deprecations
+     - something that still works but will be removed (see
+       `Deprecations and compatibility`_)
+   * - ``feature``
+     - New features
+     - new capabilities
+   * - ``bugfix``
+     - Bug Fixes
+     - code that did not do what it should, and now does
+   * - ``improvement``
+     - Improvements
+     - better behavior, messages or performance of existing code
+   * - ``misc``
+     - Miscellaneous
+     - documentation, CI, packaging and test changes worth mentioning
+
+Write the note for someone reading the release notes, not for the reviewer:
+what changed for them and anything they need to do, in one line. Details for
+the reviewer go in the pull request description. If the reader needs more, add
+``-`` sub-bullets on the following lines. The note is reStructuredText, like
+this page: code goes in double backticks, and Markdown's single backticks and
+``[text](url)`` links do not render. For example,
+``docs/changes/+shared-output-names.bugfix.rst``, added by pull request 888:
+
+.. code-block:: rst
+
+   Chained steps whose output files share a name no longer crash input staging with ``FileExistsError``.
+   - Same-named forcing files whose time records follow on are staged side by side, the later one as ``<name>_2.nc``.
+   - Any other shared input name is refused with one error listing the files.
+
+becomes, in the release notes:
+
+.. code-block:: rst
+
+   Bug Fixes
+   ~~~~~~~~~
+
+   - Chained steps whose output files share a name no longer crash input staging with ``FileExistsError``. (`#888 <https://github.com/CWorthy-ocean/C-Star/pull/888>`_)
+
+     - Same-named forcing files whose time records follow on are staged side by side, the later one as ``<name>_2.nc``.
+     - Any other shared input name is refused with one error listing the files.
+
+Each note is its own file, so a pull request with several notes adds several
+files, such as ``+groom-switch.feature.rst``, ``+groom-wizard.feature.rst``
+and ``+esper-docs.misc.rst``. A change that both breaks a setup and changes
+output gets one note of each type, and so does one that breaks both a
+blueprint and the Python API.
+
+A pull request with nothing for users to read about, such as a test-only
+change or a typo fix, needs no note; ask a maintainer to add the
+``no-changelog`` label. The ``towncrier check`` job on the pull request fails
+until it has a note or the label.
+
+To preview the notes as they will appear, run this in ``cstar-env``
+(``towncrier`` comes with ``pip install -e ".[dev]"``)::
+
+   towncrier build --draft --version Unreleased
+
+Notes named with a ``+`` show up without their pull request link until the
+release.
+
 Deprecations and compatibility
 ------------------------------
 
@@ -279,17 +378,16 @@ which warns once per process::
 - The message goes out as a ``CstarDeprecationWarning`` (a
   ``FutureWarning``, so Python shows it by default) and as a log line. The CLI
   shows only the log line.
-- Add a bullet under **Breaking Changes** in the pull request:
-  ``Deprecated: <what>, removed in <release>; use <replacement>.`` Pull request
-  descriptions become the release notes.
+- Add a ``deprecation`` release note (see `Writing a release note`_):
+  ``Deprecated: <what>, removed in <release>; use <replacement>.``
 
 **Removing.** When the removal release comes, delete the code that still
 honors the old form, but keep the code that detects it, and raise an error
 naming the migration command, or the edit to make if there is no command.
 Never let an old form silently stop meaning anything: a catalog file in a
 removed layout must not just disappear from listings, and an unknown key
-must not be ignored. Add a ``Removed: <what>; <migration>.`` bullet under
-**Breaking Changes**.
+must not be ignored. Add a ``breaking`` release note:
+``Removed: <what>; <migration>.``
 
 ``ci/check_deprecations.py`` makes sure removals happen. It reads every
 ``deprecated`` call under ``cstar/`` (and every ``deprecation_message`` call,
@@ -299,6 +397,26 @@ release pull request: a release that a deprecation is due in is refused until
 the removal lands on ``main``. A forgotten removal then stops the release, not
 the user. ``cstar/tests/unit_tests/base/test_deprecation.py`` runs the same
 check on every pull request against the newest finalized release.
+
+Making a release
+----------------
+
+For maintainers:
+
+1. Run the *Finalize Release Notes* workflow from the repository's Actions tab
+   with the new version, for example ``0.19.0``. It refuses a release that a
+   deprecation is due in (see above). It renames each ``+<name>`` file in
+   ``docs/changes/`` after the pull request that added it, stopping with an
+   error if it can't find one. It then turns those files into
+   ``docs/releases/0.19.0.rst``, deletes them, lists the new file first in
+   ``docs/releases.rst``, and opens a *Finalize release notes for 0.19.0* pull
+   request from the ``next_release_notes`` branch. If that branch is left over
+   from an earlier attempt, the workflow stops; delete the branch and run it
+   again.
+2. Edit the notes on that pull request if they need it: merge overlapping
+   notes, reorder, fix wording.
+3. Merge it. This creates the tagged GitHub release with those notes, which
+   publishes the package to PyPI.
 
 Building the documentation locally
 ----------------------------------

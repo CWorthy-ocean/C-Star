@@ -1,0 +1,2 @@
+Forge refuses a MARBL build whose boundary forcing or initial conditions have no BGC sources on ucla-roms >= 0.14.0, which would otherwise stop at ROMS startup; the wizard shows the error as you edit.
+- A nested child's boundary (fed by its parent) and domains with no open side are not checked.

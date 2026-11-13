@@ -1,0 +1,1 @@
+The forge blueprint page says to update ``datasets`` when editing a source by hand, and the developer page on source data describes when the ``resolved_datasets`` snapshot is bypassed.

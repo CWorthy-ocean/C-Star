@@ -1,0 +1,2 @@
+``--submit`` submits the compression as a one-step SLURM workplan, ``--now`` compresses in the current process, and ``--workers N`` sets how many files are compressed at once (the job's cores with ``--submit``).
+- Compressing outside a scheduler job on a cluster warns that login nodes may stop the process; ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` silences the warning.

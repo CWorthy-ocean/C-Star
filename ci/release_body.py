@@ -2,10 +2,11 @@
 """
 Print a Markdown release-notes body for a finalized release *tag*.
 
-Reads ``docs/releases/<tag>.rst`` — the per-version file produced by
-``finalize_release_notes.py`` — and converts it to GitHub-flavored Markdown for
-``gh release create --notes-file``. The conversion is deliberately narrow,
-handling only what these release-note files actually contain:
+Reads ``docs/releases/<tag>.rst`` — the per-version file that
+``finalize_release_notes.yaml`` builds with towncrier — and converts it to
+GitHub-flavored Markdown for ``gh release create --notes-file``. The conversion
+is deliberately narrow, handling only what these release-note files actually
+contain:
 
 * ``.. _anchor:`` target lines are dropped,
 * the release title and its underline are dropped (GitHub shows the tag),
@@ -14,9 +15,9 @@ handling only what these release-note files actually contain:
 * RST inline links (the `text <url>`_ form) become [text](url),
 * RST inline literals (the double-backtick form) become single-backtick spans.
 
-Everything else (bullets, prose, blank lines) passes through unchanged. The
-``.. note::`` in-development banner is already removed by ``finalize`` before we
-run, so no directive handling is needed.
+Everything else (bullets, prose, blank lines) passes through unchanged.
+Directives are not handled: a note that uses one reaches the release body as
+written.
 
 With ``--check-only`` nothing is printed; instead ``docs/releases/<tag>.rst`` is
 required to exist and to be the newest ``.. include::`` in ``docs/releases.rst``,

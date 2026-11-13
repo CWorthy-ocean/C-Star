@@ -1,0 +1,4 @@
+New command ``cstar run compress <run>`` compresses the netCDF data files of a finished run in place, keeping the variables analyses and later steps need exact.
+- For each detected file type it asks: compress it, cast non-protected variables to float32, also quantize them (BitGroom, significant digits), and override the chunk shape.
+- Restart, nesting boundary, carbonate sensitivity (``_cdrgas``) and forge files default to not compressed: other runs read them, and a CPU ROMS build with ParallelIO cannot read netCDF-4 input.
+- Each file is checked against its original (the first and last record of each variable) before it replaces it; originals are kept under ``uncompressed_originals/`` unless you choose to delete them.
