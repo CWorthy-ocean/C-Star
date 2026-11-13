@@ -126,11 +126,17 @@ the user's explicit OK; give them the exact command instead.
 
 ## Pull requests
 
-- `ci/update_release_notes.py` copies the Breaking Changes, New Features, Bug
-  Fixes, Improvements, and Miscellaneous sections of each merged description
-  into `docs/releases/`. Write those bullets for users, one line each; put
-  reviewer detail under `## Notes for Reviewers`. Never edit release notes on
-  a branch.
+- A pull request with a user-visible change adds its release note as a file,
+  `changes/+<name>.<type>.rst`, committed with the code (`<name>` is any short
+  label). The types are the `[[tool.towncrier.type]]` entries in
+  `pyproject.toml`. `breaking` (a setup that worked now fails or needs an
+  edit) and `output` (the same setup still runs but C-Star writes different
+  files) are separate types. Write each note for users in reStructuredText, in
+  one line, optionally followed by `- ` sub-bullets, one file per note. At
+  release time the pull request number is filled in and towncrier builds
+  `docs/releases/<version>.rst` from the files, so never edit release notes on
+  a branch. The pull request description is for the reviewer. See "Writing a
+  release note" in `docs/contributing.rst`.
 - The repository squash-merges, so a pull request stacked on another carries
   the base's commits after it merges. Stack only when needed, say so in the
   description, and rebase onto `origin/main` once the base merges.
