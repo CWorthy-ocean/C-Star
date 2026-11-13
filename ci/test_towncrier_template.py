@@ -19,9 +19,12 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 pytest.importorskip("towncrier")
 
@@ -70,7 +73,9 @@ def scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _run(tmp_path, "git", "add", "-A")
     for module in (release_body, add_release_include):
         monkeypatch.setattr(module, "RELEASES_DIR", releases)
-        monkeypatch.setattr(module, "RELEASES_INDEX", tmp_path / "docs" / "releases.rst")
+        monkeypatch.setattr(
+            module, "RELEASES_INDEX", tmp_path / "docs" / "releases.rst"
+        )
     return tmp_path
 
 
@@ -198,10 +203,7 @@ def test_link_stays_on_the_lead(scratch):
     assert result.returncode == 0, result.stderr
     text = _notes(scratch, "0.19.0")
     assert (
-        f"- A feature. {_link(17)}\n\n"
-        "  - A detail.\n\n"
-        "    More on it.\n"
-        "  - Last.\n\n"
+        f"- A feature. {_link(17)}\n\n  - A detail.\n\n    More on it.\n  - Last.\n\n"
     ) in text
     assert (
         f"- A fix. {_link(18)}\n\n"
