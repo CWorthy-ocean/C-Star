@@ -392,6 +392,10 @@ class Provenance(ConfiguredBaseModel):
     """The blueprints and catalog specs the document was derived from."""
 
 
+KEY_SCHEMA: t.Final[str] = "$schema"
+"""The blueprint key naming the published JSON schema the blueprint follows."""
+
+
 def _declare_schema_ref(schema: dict[str, t.Any]) -> None:
     """Declare the optional ``$schema`` key in a blueprint's JSON schema.
 
@@ -399,9 +403,9 @@ def _declare_schema_ref(schema: dict[str, t.Any]) -> None:
     the published schema must accept it alongside ``additionalProperties: false``.
     """
     schema["properties"] = {
-        "$schema": {
+        KEY_SCHEMA: {
             "description": "The URL of the published JSON schema the blueprint follows.",
-            "title": "$schema",
+            "title": KEY_SCHEMA,
             "type": "string",
         },
         **schema.get("properties", {}),
@@ -539,7 +543,7 @@ class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
         return self.model_dump(
             mode="json",
             exclude_defaults=True,
-            exclude={*BLUEPRINT_METADATA_FIELDS, "$schema"},
+            exclude={*BLUEPRINT_METADATA_FIELDS, KEY_SCHEMA},
         )
 
     @property
@@ -581,8 +585,8 @@ class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
         info: "SerializationInfo",
     ) -> dict[str, t.Any]:
         data = handler(self)
-        if not info.exclude or "$schema" not in info.exclude:
-            return {"$schema": self.schema_ref, **data}
+        if not info.exclude or KEY_SCHEMA not in info.exclude:
+            return {KEY_SCHEMA: self.schema_ref, **data}
         return data
 
 

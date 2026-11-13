@@ -131,13 +131,18 @@ def test_every_application_has_a_factory() -> None:
 def test_blueprint_validates_against_published_schema(
     application: str, tmp_path: Path
 ) -> None:
-    """Verify that a blueprint, as dumped and as serialized, matches its schema."""
+    """Verify that the published schema is the model's, and that a blueprint, as
+    dumped and as serialized, matches it.
+    """
     bp = FACTORIES[application](tmp_path)
     assert bp.schema_version == type(bp).model_fields["schema_version"].default
 
     schema_path = SCHEMA_ROOT / bp.schema_ref.split("/docs/schemas/bp/")[1]
     assert schema_path.exists(), f"no published schema at {schema_path}"
     schema = json.loads(schema_path.read_text())
+    assert schema == json.loads(json.dumps(type(bp).model_json_schema())), (
+        f"{schema_path.name} differs from the model's schema; bump schema_version"
+    )
 
     dumped = bp.model_dump(mode="json")
     assert dumped["$schema"] == bp.schema_ref
