@@ -22,6 +22,7 @@ from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
     ForgeProvenance,
     SurfaceBlend,
+    SurfaceBlendFallback,
     SurfaceForcingItem,
 )
 from cstar.applications.forge.namelist_model import (
@@ -745,6 +746,18 @@ _BLENDED_ITEM = {
         "profile": "linear",
     },
 }
+
+
+def test_wizard_handles_every_blend_field():
+    """The surface row reads and writes the blend field by field (load-back, widgets,
+    carried data, gather). A new blend field fails here until the row handles it.
+    """
+    assert set(SurfaceBlend.model_fields) == {"fallback", "width_km", "profile"}
+    assert set(SurfaceBlendFallback.model_fields) == {
+        "source",
+        "correct_radiation",
+        "options",
+    }
 
 
 def test_blend_round_trips_through_sources_to_inputs_and_gather(editor):
