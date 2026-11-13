@@ -129,6 +129,8 @@ build-backend = "setuptools.build_meta"
 ignore = [
     ".pre-commit-config.yaml",
     ".readthedocs.yaml",
+    "AGENTS.md",
+    "CLAUDE.md",
     "ci/**",
     "codecov.yml",
     "coverage.toml",
