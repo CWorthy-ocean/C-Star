@@ -46,6 +46,7 @@ from cstar.base.netcdf_compress import (
     compress_netcdf,
     default_chunks,
     matches_any,
+    time_dimension,
     verify_compressed,
 )
 from cstar.cli.run.compress import app
@@ -233,6 +234,55 @@ class TestEngine:
         assert verify_compressed(src, out, Encoding()) == [
             "hDIC: values differ at record 0"
         ]
+
+    def test_typed_attributes_are_cast_with_the_variable(self, tmp_path: Path) -> None:
+        src = _write_roms_file(tmp_path / "src.nc")
+        with netCDF4.Dataset(src, "a") as ds:
+            for name in ("temp", "hDIC"):
+                ds[name].setncatts(
+                    {"missing_value": 1e20, "valid_range": [-5.0, 40.0], "units": "C"}
+                )
+        out = tmp_path / "out.nc"
+        compress_netcdf(src, out, Encoding(float32=True, protected=("hDIC*",)))
+
+        with netCDF4.Dataset(out) as d:
+            d.set_auto_maskandscale(False)
+            assert d["temp"].getncattr("missing_value").dtype == np.float32
+            assert d["temp"].getncattr("valid_range").dtype == np.float32
+            assert d["temp"].getncattr("units") == "C"
+            assert d["hDIC"].getncattr("missing_value").dtype == np.float64
+
+    def test_a_fixed_size_dimension_with_cf_time_units_is_the_record_dimension(
+        self, tmp_path: Path
+    ) -> None:
+        """roms-tools boundary files have a fixed-size `bry_time`; records are
+        still copied one at a time and chunked one per record.
+        """
+        src = tmp_path / "bry.nc"
+        with netCDF4.Dataset(src, "w", format="NETCDF3_64BIT_DATA") as ds:
+            ds.createDimension("bry_time", 3)
+            ds.createDimension("s_rho", 4)
+            ds.createDimension("xi_rho", 16)
+            ds.createVariable("bry_time", "f8", ("bry_time",)).units = "days"
+            abs_time = ds.createVariable("abs_time", "f8", ("bry_time",))
+            abs_time.units = "hours since 1950-01-01"
+            ds.createVariable("temp_south", "f8", ("bry_time", "s_rho", "xi_rho"))[
+                :
+            ] = np.ones((3, 4, 16))
+        out = tmp_path / "out.nc"
+        compress_netcdf(src, out, Encoding())
+
+        with netCDF4.Dataset(src) as s, netCDF4.Dataset(out) as d:
+            assert time_dimension(s) == "bry_time"
+            assert d["temp_south"].chunking()[0] == 1
+
+    def test_a_file_without_time_has_no_record_dimension(self, tmp_path: Path) -> None:
+        path = tmp_path / "grid.nc"
+        with netCDF4.Dataset(path, "w") as ds:
+            ds.createDimension("eta_rho", 2)
+            ds.createVariable("h", "f8", ("eta_rho",)).units = "meter"
+        with netCDF4.Dataset(path) as ds:
+            assert time_dimension(ds) is None
 
 
 class TestDetector:

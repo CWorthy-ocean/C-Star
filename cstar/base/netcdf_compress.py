@@ -40,6 +40,11 @@ _CF_COORDINATE_NAMES: t.Final[frozenset[str]] = frozenset(
         "projection_y_coordinate",
     }
 )
+_TYPED_ATTRIBUTES: t.Final[frozenset[str]] = frozenset(
+    {"missing_value", "valid_min", "valid_max", "valid_range"}
+)
+"""Attributes CF requires to have their variable's type, so they are cast with it
+(`_FillValue` is set when the variable is created)."""
 
 
 @dataclass(frozen=True)
@@ -86,10 +91,19 @@ def matches_any(name: str, patterns: Iterable[str]) -> bool:
 
 
 def time_dimension(ds: "netCDF4.Dataset") -> str | None:
-    """The name of the record (unlimited) dimension, or of `time` when none is unlimited."""
+    """The name of the record dimension, or `None` when a file has none.
+
+    The unlimited dimension; else the dimension of the first 1-D variable with CF
+    time units (`<unit> since <date>`), as for the fixed-size `bry_time` and
+    `ocean_time` of roms-tools input files; else `time`, when present.
+    """
     for name, dim in ds.dimensions.items():
         if dim.isunlimited():
             return name
+    for var in ds.variables.values():
+        units = str(var.getncattr("units")) if "units" in var.ncattrs() else ""
+        if len(var.dimensions) == 1 and " since " in units.casefold():
+            return str(var.dimensions[0])
     return "time" if "time" in ds.dimensions else None
 
 
@@ -275,9 +289,14 @@ def compress_netcdf(src: Path, dst: Path, encoding: Encoding) -> CompressResult:
                     out_dtype
                 )
             out = d.createVariable(name, out_dtype, var.dimensions, **kwargs)
-            out.setncatts(
-                {k: var.getncattr(k) for k in var.ncattrs() if k != "_FillValue"}
-            )
+            attrs = {k: var.getncattr(k) for k in var.ncattrs() if k != "_FillValue"}
+            if reduce:
+                attrs |= {
+                    k: np.asarray(v).astype(out_dtype)
+                    for k, v in attrs.items()
+                    if k in _TYPED_ATTRIBUTES and np.asarray(v).dtype.kind == "f"
+                }
+            out.setncatts(attrs)
 
             if reduce:
                 reduced.append(name)

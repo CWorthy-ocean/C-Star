@@ -80,6 +80,7 @@ def all_applications() -> list[str]:
         "nest_ic",
         "upscaler",
         "cdr_metrics",
+        "compress",
     ]
 
 

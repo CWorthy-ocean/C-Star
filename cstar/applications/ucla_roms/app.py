@@ -60,6 +60,29 @@ if TYPE_CHECKING:
 _APP_NAME_LONG: t.Literal["UCLA-ROMS simulation runner"] = "UCLA-ROMS simulation runner"
 log = get_logger(__name__)
 
+CARBONATE_PERTURBATION_VARIABLES: Final[tuple[str, ...]] = (
+    "*_source",
+    "*_ALT_CO2",
+    "*_ALT_CO2_*",
+    "ALK*",
+    "DIC*",
+    "hALK*",
+    "hDIC*",
+    "int_z_ALK*",
+    "int_z_DIC*",
+    "FG_CO2",
+    "pCO2SURF",
+    "pH",
+    "PH",
+    "CO3",
+    "MARBL_PH_3D",
+    "MARBL_PH_SURF",
+)
+"""The perturbed carbonate variables of a MARBL CDR run and their `_ALT_CO2`
+baselines, in every form a file holds them (`ALK`, `hALK_avg`, the boundary
+`ALK_north`, ...), and every CDR source, including the CDR-lite tracer sources
+(`*_source`)."""
+
 
 def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Product]:
     """Describe the ROMS output files in a directory by stream, timestamp and format.
@@ -349,30 +372,6 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
                 )
             )
         )
-
-
-CARBONATE_PERTURBATION_VARIABLES: Final[tuple[str, ...]] = (
-    "*_source",
-    "*_ALT_CO2",
-    "*_ALT_CO2_*",
-    "ALK*",
-    "DIC*",
-    "hALK*",
-    "hDIC*",
-    "int_z_ALK*",
-    "int_z_DIC*",
-    "FG_CO2",
-    "pCO2SURF",
-    "pH",
-    "PH",
-    "CO3",
-    "MARBL_PH_3D",
-    "MARBL_PH_SURF",
-)
-"""The perturbed carbonate variables of a MARBL CDR run and their `_ALT_CO2`
-baselines, in every form a file holds them (`ALK`, `hALK_avg`, the boundary
-`ALK_north`, ...), and every CDR source, including the CDR-lite tracer sources
-(`*_source`)."""
 
 
 def main() -> int:
