@@ -232,3 +232,31 @@ def test_section_groom_reaches_roms_tools_kwargs_only_when_set():
     assert "groom_settings" not in set_["initial_conditions"]
     assert "groom" not in set_["forcing"]["boundary"]
     assert set_["forcing"]["boundary"]["groom_settings"] == settings
+
+
+def test_surface_blend_reaches_forcing_override_as_plain_data():
+    from test_forge_blueprint import _blend_inputs
+
+    ov = sources_to_forcing_override(_build(forcing_inputs=_blend_inputs()))
+    surface = ov["forcing"]["surface"]
+    assert surface[0]["source"] == {"name": "CONUS404", "climatology": False}
+    assert surface[0]["blend"] == {
+        "width_km": 150.0,
+        "profile": "smoothstep",
+        "fallback": {
+            "correct_radiation": True,
+            "options": {},
+            "source": {"name": "ERA5", "climatology": False},
+        },
+    }
+    assert all("blend" not in item for item in surface[1:])
+
+
+def test_plain_items_have_no_blend_key_in_the_override():
+    ov = sources_to_forcing_override(_build())
+    items = [
+        *ov["forcing"]["surface"],
+        *ov["forcing"]["tidal"],
+        *ov["forcing"]["river"],
+    ]
+    assert all("blend" not in item for item in items)
