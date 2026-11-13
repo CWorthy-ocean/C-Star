@@ -143,6 +143,16 @@ The `upscaler` blueprint upscales a nested child grid's output to its parent gri
   declares the optional ``$schema`` key that names the schema a blueprint follows.
 
 
+Compress Blueprint
+~~~~~~~~~~~~~~~~~~
+
+The `compress` blueprint compresses the data files of a finished run in place.
+
+- :download:`Compress Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/compress/compress_schema.1.1.0.json>`
+- :download:`Compress Blueprint Schema v1.1.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/compress/compress_schema.1.1.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
+
+
 Forge Blueprint
 ~~~~~~~~~~~~~~~
 

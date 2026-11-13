@@ -11,6 +11,11 @@ import yaml
 
 import cstar
 from cstar.applications.cdr_metrics import CdrMetricsBlueprint
+from cstar.applications.compress.blueprint import (
+    CompressBlueprint,
+    FileTypeMatch,
+    FileTypeSettings,
+)
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.nest_ic import NestIcBlueprint
 from cstar.applications.plotter import PlotterBlueprint
@@ -120,6 +125,25 @@ def _cdr_metrics(tmp_path: Path) -> Blueprint:
     )
 
 
+def _compress(tmp_path: Path) -> Blueprint:
+    run = tmp_path / "run"
+    run.mkdir()
+    return CompressBlueprint(
+        name="test-compress",
+        description="A test compress blueprint.",
+        working_dir=tmp_path / "work",
+        run=run,
+        file_types=[
+            FileTypeSettings(
+                name="output_cdr",
+                application="ucla_roms",
+                match=FileTypeMatch(filename="output/output_cdr.*.nc"),
+                compress=True,
+            )
+        ],
+    )
+
+
 FACTORIES: dict[str, Callable[[Path], Blueprint]] = {
     "plotter": _plotter,
     "ucla_roms": _ucla_roms,
@@ -128,6 +152,7 @@ FACTORIES: dict[str, Callable[[Path], Blueprint]] = {
     "nest_ic": _nest_ic,
     "upscaler": _upscaler,
     "cdr_metrics": _cdr_metrics,
+    "compress": _compress,
 }
 """Factories building a minimal valid blueprint at its current schema version."""
 
