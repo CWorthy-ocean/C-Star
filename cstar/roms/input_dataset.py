@@ -835,6 +835,19 @@ def netcdf_dimension_size(path: Path, dimension: str) -> int | None:
         return ds.sizes.get(dimension)
 
 
+def netcdf_variable_names(path: Path) -> set[str]:
+    """Return the names of the variables of the netCDF file at `path` (a header
+    read; no data is loaded).
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(
+        path, decode_cf=False, decode_times=False, create_default_indexes=False
+    ) as ds:
+        return {str(name) for name in ds.variables}
+
+
 def netcdf_time_ranges(path: Path) -> dict[str, tuple[float, float]]:
     """Return the (min, max) of every time variable of the netCDF file at `path`.
 

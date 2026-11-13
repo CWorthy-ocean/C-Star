@@ -1,4 +1,5 @@
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -9,15 +10,25 @@ from pydantic import ValidationError
 
 import cstar
 from cstar.applications.ucla_roms.adapter import (
+    AddtlCodeAdapter,
+    BoundaryForcingAdapter,
     CarbonateSensitivityAdapter,
+    GridAdapter,
+    InitialConditionAdapter,
     PIOAdapter,
 )
 from cstar.applications.ucla_roms.models import (
+    ForcingConfiguration,
     PartitioningParameterSet,
     RuntimeParameterSet,
     UclaRomsBlueprint,
 )
-from cstar.orchestration.models import BlueprintIdentity, CatalogSpecRef, Provenance
+from cstar.orchestration.models import (
+    BlueprintIdentity,
+    CatalogSpecRef,
+    Dataset,
+    Provenance,
+)
 from cstar.orchestration.serialization import model_to_yaml
 from cstar.pio.external_codebase import PIOExternalCodeBase
 
@@ -428,6 +439,8 @@ class TestCpusNeeded:
         """Test that `cpus_needed` returns `n_procs_x * n_procs_y` by default."""
         bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == (bp.partitioning.n_procs_x * bp.partitioning.n_procs_y)
+        assert bp.compute_needs.tasks == bp.cpus_needed
+        assert bp.compute_needs.gpu_tasks == 0
 
     def test_returns_n_cores_when_set(self, complete_blueprint_dict):
         """Test that `cpus_needed` returns `n_cores` when it is set."""
@@ -438,6 +451,136 @@ class TestCpusNeeded:
         }
         bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == 16
+        assert bp.compute_needs.tasks == 16
+
+
+class TestProcessorGrid:
+    """Tests for the `processor_grid` property on `UclaRomsBlueprint`."""
+
+    def test_is_the_partitioning_pair(self, complete_blueprint_dict):
+        """The processor grid is the partitioning's processes along x and y."""
+        complete_blueprint_dict["partitioning"].update(n_procs_x=3, n_procs_y=2)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.processor_grid == (3, 2)
+
+    def test_is_unset_when_auto_tiling_chooses(self, complete_blueprint_dict):
+        """With `auto_tiling` and only `n_cores`, no processor grid is declared."""
+        complete_blueprint_dict["partitioning"] = {
+            "use_pio": True,
+            "auto_tiling": True,
+            "n_cores": 16,
+        }
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.processor_grid == (None, None)
+
+    def test_is_derived_not_a_field(self, complete_blueprint_dict):
+        """The property adds nothing to the blueprint's fields, dump or schema."""
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert "processor_grid" not in UclaRomsBlueprint.model_fields
+        assert "processor_grid" not in bp.model_dump()
+        assert (
+            "processor_grid" not in UclaRomsBlueprint.model_json_schema()["properties"]
+        )
+
+
+@dataclass(frozen=True)
+class _InputsOnly:
+    """A stand-in blueprint offering only what `RomsInputsBlueprint` names.
+
+    It is not a `UclaRomsBlueprint` and has no `partitioning`: the input adapters
+    must work from the protocol's members alone.
+    """
+
+    code: object
+    grid: Dataset
+    initial_conditions: Dataset
+    forcing: ForcingConfiguration
+    cdr_forcing: Dataset | None
+    nesting_info: Dataset | None
+    processor_grid: tuple[int | None, int | None]
+
+
+class TestInputAdaptersOnTheProtocol:
+    """The input adapters read a `RomsInputsBlueprint`, not a `UclaRomsBlueprint`."""
+
+    @pytest.fixture
+    def stand_in(self, complete_blueprint_dict) -> _InputsOnly:
+        """A stand-in with a partitioned grid, one partitioned boundary file and a
+        processor grid that differs from the real blueprint's partitioning.
+        """
+        complete_blueprint_dict["grid"]["data"][0]["partitioned"] = True
+        complete_blueprint_dict["forcing"]["boundary"]["data"][1]["partitioned"] = True
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert (bp.partitioning.n_procs_x, bp.partitioning.n_procs_y) == (3, 3)
+        return _InputsOnly(
+            code=bp.code,
+            grid=bp.grid,
+            initial_conditions=bp.initial_conditions,
+            forcing=bp.forcing,
+            cdr_forcing=bp.cdr_forcing,
+            nesting_info=bp.nesting_info,
+            processor_grid=(5, 7),
+        )
+
+    def test_partitioned_dataset_takes_the_processor_grid(self, stand_in):
+        """A partitioned dataset is split for the model's processor grid."""
+        with mock.patch("cstar.applications.ucla_roms.adapter.ROMSModelGrid") as grid:
+            GridAdapter(stand_in).adapt()
+
+        assert grid.call_args.kwargs["source_np_xi"] == 5
+        assert grid.call_args.kwargs["source_np_eta"] == 7
+
+    def test_unpartitioned_dataset_has_no_source_partitioning(self, stand_in):
+        """An unpartitioned dataset carries no source partitioning."""
+        with mock.patch(
+            "cstar.applications.ucla_roms.adapter.ROMSInitialConditions"
+        ) as initial_conditions:
+            InitialConditionAdapter(stand_in).adapt()
+
+        assert initial_conditions.call_args.kwargs["source_np_xi"] is None
+        assert initial_conditions.call_args.kwargs["source_np_eta"] is None
+
+    def test_each_dataset_of_a_list_is_judged_alone(self, stand_in):
+        """Only the partitioned entry of a forcing list takes the processor grid."""
+        with mock.patch(
+            "cstar.applications.ucla_roms.adapter.ROMSBoundaryForcing"
+        ) as boundary:
+            BoundaryForcingAdapter(stand_in).adapt()
+
+        assert [
+            (c.kwargs["source_np_xi"], c.kwargs["source_np_eta"])
+            for c in boundary.call_args_list
+        ] == [(None, None), (5, 7)]
+
+    def test_additional_code_is_read_by_name(self, stand_in):
+        """`AddtlCodeAdapter` reads the repository named by `key` from `code`."""
+        with mock.patch(
+            "cstar.applications.ucla_roms.adapter.AdditionalCode"
+        ) as additional_code:
+            AddtlCodeAdapter(stand_in, "run_time").adapt()
+
+        assert additional_code.call_args.kwargs["subdir"] == (
+            "wales-toy-domain/roms_runtime_code"
+        )
+        assert additional_code.call_args.kwargs["files"] == [
+            "namelist.nml",
+            "marbl_in",
+        ]
+
+    def test_a_ucla_roms_blueprint_gives_the_same_datasets(
+        self, complete_blueprint_dict
+    ):
+        """A real blueprint, whose processor grid is its partitioning, is adapted
+        as it was before the adapters took the protocol.
+        """
+        complete_blueprint_dict["grid"]["data"][0]["partitioned"] = True
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        with mock.patch("cstar.applications.ucla_roms.adapter.ROMSModelGrid") as grid:
+            GridAdapter(bp).adapt()
+
+        assert grid.call_args.kwargs["source_np_xi"] == bp.partitioning.n_procs_x
+        assert grid.call_args.kwargs["source_np_eta"] == bp.partitioning.n_procs_y
 
 
 class TestProvenance:

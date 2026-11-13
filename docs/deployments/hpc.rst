@@ -43,6 +43,13 @@ them to your :doc:`configuration file <../getting_started/configuration>`:
    CSTAR_SLURM_ACCOUNT=my-allocation      # the account or allocation jobs are charged to
    CSTAR_SLURM_QUEUE=mpi                  # the partition or queue to submit to
    CSTAR_SLURM_MAX_WALLTIME=01:00:00      # default time requested per job
+   CSTAR_SLURM_GPU_ACCOUNT=my-allocation_g   # optional: the account GPU jobs are charged to
+   CSTAR_SLURM_GPU_QUEUE=gpu                 # optional: the partition or QOS for GPU jobs
+
+A step that asks for GPUs (``num_gpus`` in its ``compute_overrides``, see
+:ref:`workplan_compute_environment`) goes to the system's GPU queue unless
+``CSTAR_SLURM_GPU_QUEUE`` names another, and is charged to
+``CSTAR_SLURM_ACCOUNT`` unless ``CSTAR_SLURM_GPU_ACCOUNT`` is set.
 
 What each system needs:
 
@@ -52,7 +59,12 @@ What each system needs:
 - **Oscar**: no account is needed by default (condo and priority users set
   one); an unset queue submits to the ``batch`` partition.
 - **Perlmutter**: an unset account charges your default NERSC project; an
-  unset queue submits to the ``regular`` QOS.
+  unset queue submits to the ``regular`` QOS. GPU jobs must name an account
+  (``CSTAR_SLURM_GPU_ACCOUNT`` or ``CSTAR_SLURM_ACCOUNT``); projects have a
+  ``_g`` twin for GPU hours. GPU jobs carry ``-C gpu``.
+- **Anvil** GPU jobs (untested; GPU runs there are planned for a later
+  release): need a ``<allocation>-gpu`` account in
+  ``CSTAR_SLURM_GPU_ACCOUNT``; the ``gpu`` partition is the default.
 
 Set the walltime to fit your queue: left unset, a job asks for 48 hours,
 which is more than some queues allow. These settings are the defaults for

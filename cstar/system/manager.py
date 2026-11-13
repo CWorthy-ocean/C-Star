@@ -35,6 +35,7 @@ from cstar.system.scheduler import (
     query_max_walltime_via_sinfo,
     visible_scheduler,
 )
+from cstar.system.toolchain import GpuNodes, Toolchain, ToolchainName
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -153,6 +154,23 @@ class SystemContext(Protocol):
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
         """Instantiate a scheduler configured for the system."""
+
+    @classmethod
+    def toolchain(cls, name: ToolchainName) -> Toolchain:
+        """Return the compiler/MPI/module profile the system offers under `name`.
+
+        The ``cpu`` profile is derived from `compiler` and `mpi_prefix`, so those
+        class variables stay the one source for it. A system with GPU nodes
+        overrides this to supply the ``gpu`` case.
+
+        Raises
+        ------
+        CstarError
+            If `name` is ``gpu`` and the system registers no GPU toolchain.
+        """
+        if name == "gpu":
+            raise CstarError(f"{cls.name} has no GPU toolchain registered with C-Star")
+        return Toolchain(compiler=cls.compiler, mpi_prefix=cls.mpi_prefix)
 
     @classmethod
     def settings_klass(cls) -> type[EnvSettingsBase] | None:
@@ -485,13 +503,38 @@ class AnvilSystemContext(SystemContext):
             max_walltime_method=query_max_walltime_via_sacctmgr,
         )
 
+        # Query names verified on Anvil 2026-11-02.
+        gpu_q = SlurmPartition(
+            name="gpu",
+            query_name="part-gpu",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        gpu_debug_q = SlurmPartition(
+            name="gpu-debug",
+            query_name="part-gpu-debug",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+
         return SlurmScheduler(
-            queues=[regular_q, shared_q, debug_q],
+            queues=[regular_q, shared_q, debug_q, gpu_q, gpu_debug_q],
             primary_queue_name="wholenode",
             other_scheduler_directives={},
             requires_task_distribution=False,
             documentation=cls.docs,
             max_cpus_per_node=128,
+            # Verified on Anvil 2026-11-02: 16 GPU nodes of 4xA100 + 2xEPYC 7763
+            # (128 cores); `gpu` is exclusive, `gpu-debug` is 30 min and at most 2
+            # GPUs; GPUs are requested with `--gpus-per-node`. GPU allocations are
+            # `<allocation>-gpu` accounts with the `gpu` QOS (a CPU allocation is
+            # refused on the `gpu` partition). The site's GPU tree has no
+            # nvfortran-built netCDF-Fortran or CUDA-aware system OpenMPI, so no
+            # GPU build toolchain is registered yet.
+            gpu=GpuNodes(
+                gpus_per_node=4,
+                queue="gpu",
+                directives={"--gpu-bind": "none"},
+                cores_per_node=128,
+            ),
         )
 
     @override
@@ -1064,7 +1107,41 @@ class PerlmutterSystemContext(SystemContext):
             requires_task_distribution=False,
             documentation=cls.docs,
             max_cpus_per_node=128,
+            # Verified on Perlmutter 2026-11-02: GPU nodes = 1xAMD EPYC 7763
+            # (64 cores) + 4xA100; GPU jobs need `-C gpu` and an explicit GPU
+            # request, and are submitted with `-q regular|debug|shared`. The GPU
+            # QOS limits are published under `gpu_regular`, `gpu_debug` and
+            # `gpu_shared` and match the CPU ones for walltime (2 days, 30 min,
+            # 2 days), so the walltime queries on the CPU QOS names stay valid.
+            gpu=GpuNodes(
+                gpus_per_node=4,
+                queue="regular",
+                directives={"-C": "gpu", "--gpu-bind": "none"},
+                cores_per_node=64,
+                # NERSC's policy refuses a GPU job that names no account (checked
+                # with `sbatch --test-only` 2026-11-02); the CPU project or its
+                # `_g` twin both work.
+                account_required=True,
+            ),
         )
+
+    @override
+    @classmethod
+    def toolchain(cls, name: ToolchainName) -> Toolchain:
+        if name == "gpu":
+            return Toolchain(
+                compiler="nvfortran",
+                mpi_prefix=cls.mpi_prefix,
+                profile="gpu",
+                gpu_arch="cc80",
+                # cray-mpich sets these for the `craype-accel-nvidia80` target:
+                # the `-L` directory and `-lmpi_gtl_cuda`. With
+                # `MPICH_GPU_SUPPORT_ENABLED=1` (set by perlmutter.gpu.env) the
+                # model aborts at start-up unless libmpi_gtl_cuda is linked.
+                # Verified on Perlmutter 2026-11-06 (GPU-direct halo exchange on).
+                link_flags="${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}",
+            )
+        return super().toolchain(name)
 
     @override
     @classmethod
@@ -1080,8 +1157,10 @@ class CStarSystemManager:
     """The system context chosen for this machine, and how it was chosen."""
     _context: Final[SystemContext]
     """A context object configured for the current system."""
-    _environment: Final[CStarEnvironment]
-    """An environment manager configured for the current system."""
+    _environments: Final[dict[ToolchainName, CStarEnvironment]]
+    """The environment managers built so far, by toolchain; ``cpu`` is built eagerly."""
+    _active: ToolchainName | None
+    """The toolchain whose modules and env file are loaded in this process."""
     _scheduler: Final[Scheduler | None]
     """The scheduler appropriate for this system."""
 
@@ -1106,12 +1185,9 @@ class CStarSystemManager:
         self._selection = select_system()
         warn_fallback(self._selection)
         self._context = self._selection.context()
-        self._environment = CStarEnvironment(
-            system_name=self._context.name,
-            mpi_exec_prefix=self._context.mpi_prefix,
-            compiler=self._context.compiler,
-            system_settings_klass=self._context.settings_klass(),
-        )
+        self._environments = {}
+        self._active = None
+        self.environment_for("cpu")
 
         self._scheduler = self._context.create_scheduler()
 
@@ -1133,14 +1209,110 @@ class CStarSystemManager:
 
     @property
     def environment(self) -> CStarEnvironment:
-        """Get the environment manager for this system.
+        """Get the environment manager for the toolchain active in this process.
+
+        Reading this never switches profiles: while a GPU toolchain is active it
+        is the GPU environment, otherwise the CPU one (which `__init__` activates).
+        Use `environment_for` to switch.
 
         Returns
         -------
         CStarEnvironment
             The environment manager
         """
-        return self._environment
+        return self._environments[self._active or "cpu"]
+
+    def environment_for(self, name: ToolchainName) -> CStarEnvironment:
+        """Get the environment manager for one of the system's toolchains.
+
+        An environment is built on first request and cached. Activating one loads
+        its profile's modules and env file into `os.environ` for the process, as the
+        CPU profile always has. Only one profile is active in the process: asking
+        for another restores the active profile's env-file variables (see
+        `CStarEnvironment.unload`) and then loads the requested one, so a profile
+        never inherits another's paths. Asking for the active profile changes
+        nothing.
+
+        Parameters
+        ----------
+        name : ToolchainName
+            The toolchain whose environment to return.
+
+        Returns
+        -------
+        CStarEnvironment
+            The environment manager
+
+        Raises
+        ------
+        CstarError
+            If `name` is ``gpu`` and the system registers no GPU toolchain. If the
+            requested profile fails to load, the profile that was active is loaded
+            again before the error propagates.
+        """
+        if name == self._active:
+            return self._environments[name]
+
+        # resolve the toolchain first: an unregistered one must not disturb the active
+        tc = None if name in self._environments else self._context.toolchain(name)
+
+        previous = self._active
+        if previous is not None:
+            self._environments[previous].unload()
+            self._active = None
+
+        try:
+            if tc is None:
+                self._environments[name].load()
+            else:
+                self._environments[name] = CStarEnvironment(
+                    system_name=self._context.name,
+                    mpi_exec_prefix=tc.mpi_prefix,
+                    compiler=tc.compiler,
+                    system_settings_klass=self._context.settings_klass(),
+                    profile=tc.profile,
+                )
+        except Exception:
+            # a profile that fails to load must not leave the process with none
+            if previous is not None:
+                try:
+                    self._environments[previous].load()
+                    self._active = previous
+                except Exception:
+                    # keep the original error; the reload's own is only logged
+                    log.warning(
+                        "Could not reload the %s profile after the %s profile failed "
+                        "to load; no toolchain profile is loaded in this process",
+                        previous,
+                        name,
+                        exc_info=True,
+                    )
+            raise
+        self._active = name
+        return self._environments[name]
+
+    def toolchain(self, name: ToolchainName) -> Toolchain:
+        """Get the compiler, MPI and module profile the system offers under `name`.
+
+        Unlike `environment_for`, this never switches the active profile.
+
+        Parameters
+        ----------
+        name : ToolchainName
+            The toolchain to describe.
+
+        Returns
+        -------
+        Toolchain
+            The toolchain's compiler, MPI prefix, profile and GPU build facts.
+
+        Raises
+        ------
+        CstarError
+            If the system does not register the toolchain, as for ``gpu`` on a
+            system without GPU nodes.
+        """
+        return self._context.toolchain(name)
 
     @property
     def scheduler(self) -> Scheduler | None:

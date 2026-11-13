@@ -1,0 +1,12 @@
+# GPU toolchain: NVIDIA HPC SDK + CUDA-aware Cray MPICH + parallel-HDF5 netCDF.
+# Verified on Perlmutter 2026-11-02 (nvidia/26.5, cudatoolkit/13.2, cray-mpich/9.1.0);
+# roms-marbl-gpu v0.1.2-beta built and linked with this set on 2026-11-06,
+# v0.1.3-beta built and ran with it on one and two nodes on 2026-11-12.
+gpu/1.0  # NERSC's GPU meta-module; keep loaded for CUDA-aware cray-mpich
+PrgEnv-nvidia/8.7.0
+nvidia/26.5  # PrgEnv-nvidia/8.7.0 loads nvidia/25.9 (CUDA 13.0), whose link misses
+             # cudatoolkit/13.2's math libraries (-lcublas); 26.5 ships CUDA 13.2
+cudatoolkit/13.2
+craype-accel-nvidia80
+cray-hdf5-parallel/1.14.3.9
+cray-netcdf-hdf5parallel/4.9.0.13

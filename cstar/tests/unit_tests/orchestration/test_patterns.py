@@ -11,6 +11,7 @@ import yaml
 from cstar.applications.core import EmittedBlueprint
 from cstar.orchestration.models import (
     BlueprintIdentity,
+    ComputeNeeds,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     RunRef,
@@ -327,7 +328,7 @@ def test_forge_then_run_matches_wizard_export() -> None:
         filename="B_x.yaml",
         application="roms_marbl",
         producer=BlueprintIdentity(kind="Blueprint", application="forge", name="x"),
-        cpus_needed=32,
+        compute_needs=ComputeNeeds(tasks=32),
         start_date=dt(2012, 1, 1),
         end_date=dt(2012, 2, 1),
         use_pio=True,
@@ -352,6 +353,39 @@ def test_forge_then_run_matches_wizard_export() -> None:
     renamed = forge_then_run(Path("/data/forge.yaml"), emitted, names=("f", "r"))
     assert [s.name for s in renamed.steps] == ["f", "r"]
     assert renamed.steps[1].depends_on == ["f"]
+
+
+@pytest.mark.parametrize(
+    ("needs", "expected"),
+    [
+        pytest.param(ComputeNeeds(tasks=12), {"num_cpus": 12}, id="cpu"),
+        pytest.param(
+            ComputeNeeds(tasks=12, gpu_tasks=8),
+            {"num_cpus": 12, "num_gpus": 8},
+            id="gpu",
+        ),
+    ],
+)
+def test_forge_then_run_records_compute_needs(
+    needs: ComputeNeeds, expected: dict[str, int]
+) -> None:
+    """Verify the deferred step records `num_gpus` only when the emitted needs
+    include GPU tasks.
+    """
+    emitted = EmittedBlueprint(
+        filename="B_x.yaml",
+        application="roms_marbl",
+        producer=BlueprintIdentity(kind="Blueprint", application="forge", name="x"),
+        compute_needs=needs,
+        start_date=dt(2012, 1, 1),
+        end_date=dt(2012, 2, 1),
+        use_pio=True,
+        grid_filename="g.nc",
+    )
+
+    _, run = forge_then_run(Path("/data/forge.yaml"), emitted).steps
+
+    assert run.compute_overrides == {"slurm": expected}
 
 
 class TestUpscaleChain:

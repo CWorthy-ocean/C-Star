@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms_gpu/ucla_roms_gpu_schema.1.0.0.json
+name: wales-toy-gpu
+description: >-
+  toy domain near wales on one 4-GPU node, for a quick check of a GPU system
+  (bundled example). The namelist directory is the one named for ucla-roms
+  0.13; its file uses only 0.11.0 keys, the vocabulary roms-marbl-gpu reads.
+state: draft
+valid_start_date: 2012-01-01 00:00:00
+valid_end_date: 2012-01-31 12:00:00
+code:
+  roms:
+    documentation: roms-marbl-gpu, the CUDA-Fortran port of ucla-roms
+    location: https://github.com/CWorthy-ocean/roms-marbl-gpu.git
+    commit: v0.1.3-beta
+  run_time:
+    location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
+    branch: main
+    filter:
+      directory: wales-toy-domain-namelist-ucla-roms-0.13
+      files:
+      - marbl_in
+      - namelist.nml
+initial_conditions:
+  data:
+  - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_ini.nc
+grid:
+  data:
+  - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_grd.nc
+forcing:
+  boundary:
+    data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_bry.nc
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_bry_bgc.nc
+  surface:
+    data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_frc.nc
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_frc_bgc.nc
+  tidal:
+    data:
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/roms_tides.nc
+tiling:
+  n_procs_x: 2
+  n_procs_y: 2
+  nodes: 1
+  writers_per_node: 1
+namelist_overrides:
+  time_stepping:
+    dt: 360
+runtime_params:
+  start_date: 2012-01-01 00:00:00
+  end_date: 2012-01-01 00:30:00
+cdr_forcing:
+  data:
+  - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/my_cdr_forcing.nc
+application: ucla_roms_gpu
+schema_version: 1.0.0

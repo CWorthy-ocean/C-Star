@@ -20,7 +20,7 @@ from cstar.applications.core import (
 )
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import BlueprintIdentity
+from cstar.orchestration.models import BlueprintIdentity, ComputeNeeds
 from cstar.orchestration.transforms import DirectiveConfig
 
 
@@ -451,6 +451,13 @@ def test_application_definition_resumable_defaults_false() -> None:
     assert app_config.resumable is False
 
 
+def test_application_definition_toolchain_defaults_cpu() -> None:
+    """Verify an application that does not declare `toolchain` uses `cpu`."""
+    app_config = get_application("hello_world")
+
+    assert app_config.toolchain == "cpu"
+
+
 def test_runnerresult_initial_state(tmp_path: Path) -> None:
     """Verify that the RunnerResult returns the initial status, as expected."""
     fake_bp_path = tmp_path / "fake.yaml"
@@ -781,7 +788,7 @@ _EMITTED_BLUEPRINT_FIELDS = {
     "filename": "B_x.yaml",
     "application": "roms_marbl",
     "producer": BlueprintIdentity(kind="Blueprint", application="forge", name="x"),
-    "cpus_needed": 1,
+    "compute_needs": ComputeNeeds(tasks=1),
     "start_date": "2012-01-01",
     "end_date": "2012-01-02",
     "use_pio": False,
@@ -798,6 +805,19 @@ def test_emitted_blueprint_forbids_unknown_fields() -> None:
     assert [(e["type"], e["loc"]) for e in exc_info.value.errors()] == [
         ("extra_forbidden", ("bogus",))
     ]
+
+
+def test_emitted_blueprint_exposes_compute_needs() -> None:
+    """`EmittedBlueprint` derives `cpus_needed` and `single_node` from `compute_needs`."""
+    fields = {
+        **_EMITTED_BLUEPRINT_FIELDS,
+        "compute_needs": ComputeNeeds(tasks=12, single_node=True),
+    }
+
+    emitted = EmittedBlueprint(**fields)  # type: ignore[arg-type]
+
+    assert emitted.cpus_needed == 12
+    assert emitted.single_node is True
 
 
 def test_emitted_blueprint_requires_a_producer() -> None:

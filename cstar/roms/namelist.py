@@ -46,6 +46,12 @@ ranges to the schema class that applies, and
 ``ROMSSimulation.roms_runtime_settings`` uses this selection to read the
 runtime namelist, apply simulation overrides, and write the run-time copy.
 
+The GPU application's namelist follows a separate, much shorter registry,
+:data:`GPU_NAMELIST_SCHEMA_REGISTRY`, keyed on roms-marbl-gpu versions rather than
+ucla-roms ones: a roms-marbl-gpu release reads the namelist vocabulary of one
+ucla-roms release (today :class:`RomsNamelistV0_11_0` for every release), and
+:func:`gpu_namelist_schema_for_ref` selects it from the pinned roms-marbl-gpu ref.
+
 Every group of a forge-produced namelist (which mirrors the pinned ucla-roms
 namelist) is modeled. The models are strict (``extra="forbid"``): an unknown
 group/key is rejected, catching drift/typos. A namelist that legitimately
@@ -1395,14 +1401,19 @@ def is_commit_hash(ref: str | None) -> bool:
 
 
 def _warn_commit_ahead_of_release(
-    checkout_target: str, tag: str, commits_ahead: int
+    checkout_target: str,
+    tag: str,
+    commits_ahead: int,
+    codebase: str = "ucla-roms",
 ) -> None:
     """Warn that a commit pin may hold namelist changes its release's schema lacks.
 
-    Reported at the caller of the public function that calls this helper.
+    `codebase` names the repository the pin refers to (``"ucla-roms"``, or
+    ``"roms-marbl-gpu"`` for :func:`gpu_namelist_schema_for_ref`). Reported at
+    the caller of the public function that calls this helper.
     """
     warnings.warn(
-        f"ucla-roms commit {checkout_target!r} is {commits_ahead} "
+        f"{codebase} commit {checkout_target!r} is {commits_ahead} "
         f"commit(s) after release {tag}; using that release's "
         f"namelist schema. If the commit contains unreleased "
         f"breaking namelist changes, C-Star may not match them.",
@@ -1608,3 +1619,219 @@ def release_ref_for_remote(location: str, checkout_target: str) -> str:
         stacklevel=2,
     )
     return checkout_target
+
+
+# ---- roms-marbl-gpu schema selection ----
+
+# roms-marbl-gpu releases, as comparable version tuples (named so registry entries
+# read as versions). The repository tags them with a pre-release suffix
+# (``v0.1.3-beta``), which `_parse_gpu_release` drops.
+UCLA_ROMS_GPU_0_1_3: Final[tuple[int, int, int]] = (0, 1, 3)
+
+# Half-open roms-marbl-gpu version ranges ``[lower, upper)`` mapped to the schema
+# class C-Star writes for them, in the shape of `NAMELIST_SCHEMA_REGISTRY`.
+#
+# roms-marbl-gpu is a CUDA-Fortran port of ucla-roms. Each release reads the
+# namelist vocabulary of one ucla-roms release, recorded in the repository's
+# ``NAMELIST_COMPAT`` file and README: every release up to v0.1.3-beta reads the
+# ucla-roms 0.11.0 vocabulary (the file's table has no v0.1.3-beta row yet; the
+# README names 0.11.0), and v0.1.3-beta takes ``akt_bak`` and ``tnu2`` with one
+# value per tracer, as ucla-roms writes them. From v0.1.2-beta a key
+# the GPU does not know, in a group it reads, stops the run, so C-Star writes
+# the 0.11.0 tier (`RomsNamelistV0_11_0`) and never a newer one: ucla-roms
+# 0.12.0 adds ``cdr_carbonate_sensitivity_time_interpolation`` and 0.13.0 adds
+# ``v_sponge_trc``, and the GPU rejects both.
+#
+# Recipe for a roms-marbl-gpu release that moves to a newer vocabulary (e.g. a
+# v0.2.0 reading the ucla-roms 0.14.0 namelist, once `RomsNamelistV0_14_0` exists):
+#   1. Add the release constant:
+#        UCLA_ROMS_GPU_0_2_0: Final[tuple[int, int, int]] = (0, 2, 0)
+#   2. Cap the current last entry's upper bound at the new version:
+#        (None, UCLA_ROMS_GPU_0_2_0, RomsNamelistV0_11_0),
+#   3. Append a new open-ended entry for the new schema:
+#        (UCLA_ROMS_GPU_0_2_0, None, RomsNamelistV0_14_0),
+#   4. Bump NEWEST_KNOWN_UCLA_ROMS_GPU (below) to the new release.
+# A release that only adds keys to the vocabulary it already reads needs no new
+# entry, only the bump in step 4 once checked.
+GPU_NAMELIST_SCHEMA_REGISTRY: tuple[
+    tuple[
+        tuple[int, int, int] | None, tuple[int, int, int] | None, type[RomsNamelistBase]
+    ],
+    ...,
+] = ((None, None, RomsNamelistV0_11_0),)
+
+# The newest roms-marbl-gpu release whose namelist vocabulary C-Star has checked
+# (``NAMELIST_COMPAT`` at that release). A release above it still selects the
+# last registry entry, but warns: it may read a vocabulary C-Star does not write.
+NEWEST_KNOWN_UCLA_ROMS_GPU: Final[tuple[int, int, int]] = UCLA_ROMS_GPU_0_1_3
+
+# The oldest roms-marbl-gpu release C-Star drives. Earlier releases read two
+# ``akt_bak`` values where C-Star writes one per tracer, so they stop at start-up;
+# the application had no users on them.
+OLDEST_SUPPORTED_UCLA_ROMS_GPU: Final[tuple[int, int, int]] = UCLA_ROMS_GPU_0_1_3
+
+
+def check_supported_gpu_release(version: tuple[int, int, int], ref: str) -> None:
+    """Refuse a roms-marbl-gpu release older than C-Star supports.
+
+    Parameters
+    ----------
+    version : tuple[int, int, int]
+        The release, as parsed from a tag or resolved from a commit.
+    ref : str
+        The tag or ref the user pinned, for the message.
+
+    Raises
+    ------
+    ValueError
+        If `version` is older than :data:`OLDEST_SUPPORTED_UCLA_ROMS_GPU`.
+    """
+    if version < OLDEST_SUPPORTED_UCLA_ROMS_GPU:
+        oldest = format_roms_version(OLDEST_SUPPORTED_UCLA_ROMS_GPU)
+        msg = (
+            f"roms-marbl-gpu {ref} is older than the oldest release C-Star supports "
+            f"({oldest}); pin v{oldest}-beta or later"
+        )
+        raise ValueError(msg)
+
+
+_GPU_RELEASE_RE = re.compile(
+    r"(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+"""``major.minor.patch`` with an optional semver pre-release suffix
+(``-beta``, ``-rc.1``), the shape of a roms-marbl-gpu release tag."""
+
+
+def _parse_gpu_release(ref: str) -> tuple[int, int, int] | None:
+    r"""Parse the ``(major, minor, patch)`` out of a roms-marbl-gpu release tag.
+
+    Unlike :func:`_parse_semver`, accepts a pre-release suffix: roms-marbl-gpu
+    tags its releases ``v0.1.3-beta``.
+
+    Parameters
+    ----------
+    ref : str
+        A git ref/tag string, e.g. ``"v0.1.3-beta"`` or ``"0.1.3"``.
+
+    Returns
+    -------
+    tuple[int, int, int] or None
+        The version, or `None` if `ref` is not ``\d+\.\d+\.\d+`` with an
+        optional ``-<pre-release>`` suffix (after at most one leading ``v``),
+        as a branch name or a commit hash is not.
+    """
+    match = _GPU_RELEASE_RE.fullmatch(ref.removeprefix("v"))
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def gpu_namelist_schema_for_ref(
+    checkout_target: str | None, repo_path: str | Path | None = None
+) -> type[RomsNamelistBase]:
+    """Select the namelist schema C-Star writes for a roms-marbl-gpu ref.
+
+    The GPU counterpart of :func:`namelist_schema_for_ref`: the same selection,
+    over :data:`GPU_NAMELIST_SCHEMA_REGISTRY` and roms-marbl-gpu release tags
+    (an optional leading ``v`` and an optional pre-release suffix are accepted:
+    ``v0.1.3-beta``, ``0.1.3``).
+
+    Parameters
+    ----------
+    checkout_target : str or None
+        The roms-marbl-gpu git ref (tag, branch, or commit hash) C-Star is
+        pinned to.
+    repo_path : str or Path, optional
+        Path to a local clone of roms-marbl-gpu. When given and
+        `checkout_target` looks like a commit hash, the hash is resolved to its
+        nearest ancestor release tag (``git describe --tags``) and that
+        release's schema is selected.
+
+    Returns
+    -------
+    type[RomsNamelistBase]
+        The schema class whose version range contains the release
+        `checkout_target` names or resolves to. For anything else (`None`, a
+        branch name, an unresolvable hash) or a release newer than
+        :data:`NEWEST_KNOWN_UCLA_ROMS_GPU`, the last registry entry's class,
+        with a warning.
+
+    Warns
+    -----
+    UserWarning
+        If `checkout_target` is not a release tag, if a commit hash is ahead of
+        its release tag, or if the release is newer than
+        :data:`NEWEST_KNOWN_UCLA_ROMS_GPU`: the GPU rejects a namelist key it
+        does not know, so a release that moved to another vocabulary would stop
+        on the generated namelist.
+
+    Raises
+    ------
+    ValueError
+        If the release (named, or resolved from a commit hash) is older than
+        :data:`OLDEST_SUPPORTED_UCLA_ROMS_GPU`.
+    """
+    version = (
+        _parse_gpu_release(checkout_target) if checkout_target is not None else None
+    )
+    release_tag: str | None = None
+    commits_ahead = 0
+
+    if (
+        version is None
+        and checkout_target is not None
+        and repo_path is not None
+        and is_commit_hash(checkout_target)
+    ):
+        described = _describe_nearest_tag(repo_path, checkout_target)
+        if described is not None:
+            release_tag, commits_ahead = described
+            version = _parse_gpu_release(release_tag)
+            if version is not None and commits_ahead:
+                _warn_commit_ahead_of_release(
+                    checkout_target, release_tag, commits_ahead, "roms-marbl-gpu"
+                )
+
+    if version is not None:
+        pinned = (
+            f"commit {checkout_target} ({commits_ahead} after {release_tag})"
+            if release_tag and commits_ahead
+            else release_tag or str(checkout_target)
+        )
+        check_supported_gpu_release(version, pinned)
+
+    last_cls = GPU_NAMELIST_SCHEMA_REGISTRY[-1][2]
+    if version is None:
+        warnings.warn(
+            f"roms-marbl-gpu ref {checkout_target!r} is not a release tag; using "
+            f"the namelist schema of the latest known release ({last_cls.__name__}). "
+            f"If this ref changed the namelist vocabulary it reads, the GPU model "
+            f"may stop on the generated namelist. Pin a roms-marbl-gpu release tag "
+            f"(e.g. 'v0.1.3-beta') to get version-matched validation.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return last_cls
+    if version > NEWEST_KNOWN_UCLA_ROMS_GPU:
+        pinned = (
+            f"roms-marbl-gpu commit {checkout_target!r} (release {release_tag})"
+            if release_tag
+            else f"roms-marbl-gpu release {checkout_target}"
+        )
+        newest = format_roms_version(NEWEST_KNOWN_UCLA_ROMS_GPU)
+        warnings.warn(
+            f"{pinned} is newer than the newest roms-marbl-gpu release this "
+            f"C-Star knows ({newest}); using its namelist schema "
+            f"({last_cls.__name__}). If the release moved to a newer namelist "
+            f"vocabulary, the GPU model may stop on the generated namelist. "
+            f"Upgrade C-Star, or pin a roms-marbl-gpu release at or below {newest}.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return last_cls
+    for lower, upper, cls in GPU_NAMELIST_SCHEMA_REGISTRY:
+        if (lower is None or version >= lower) and (upper is None or version < upper):
+            return cls
+    # Unreachable given a well-formed, contiguous registry with an open-ended
+    # last entry, but keeps mypy happy about the return type.
+    return last_cls
