@@ -946,13 +946,21 @@ class SurfaceBlendFallback(_Section):
         return self
 
 
+# Item fields the blend fallback is built with; the rest (source,
+# correct_radiation, the regrid knobs, options) belong to each product.
+BLEND_FALLBACK_INHERITED_FIELDS: tuple[str, ...] = (
+    "type",
+    "coarse_grid_mode",
+    "wind_dropoff",
+)
+
+
 class SurfaceBlend(_Section):
     """Layer a regional surface product over a global one (roms-tools'
     ``blend_surface_forcing``).
 
-    The fallback is built with the item's ``type``, ``coarse_grid_mode``,
-    ``wind_dropoff``, dates and grid; each product applies its own radiation
-    correction.
+    The fallback is built with the item's ``BLEND_FALLBACK_INHERITED_FIELDS``,
+    dates and grid; every other setting belongs to the product it is declared on.
     """
 
     model_config = ConfigDict(
