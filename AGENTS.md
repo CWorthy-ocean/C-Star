@@ -119,10 +119,10 @@ variable. Deprecations: "Deprecations and compatibility" in
 
 Never delete, move, or overwrite model output, source data, scratch space,
 anything under `CSTAR_DATA_HOME` or `CSTAR_PROJECT_HOME`, or another user's
-files, even to start fresh. Do not run `--clobber`, `cstar admin clean`,
-`cstar admin migrate-catalog`, `cstar admin migrate-outputs`, or
-`cstar blueprint migrate --inplace` without the user's explicit OK; give them
-the exact command instead.
+files, even to start fresh. Do not run `--clobber`, `cstar run compress`,
+`cstar admin clean`, `cstar admin migrate-catalog`,
+`cstar admin migrate-outputs`, or `cstar blueprint migrate --inplace` without
+the user's explicit OK; give them the exact command instead.
 
 ## Pull requests
 
