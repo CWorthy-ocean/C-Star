@@ -10171,10 +10171,8 @@ def test_section_groom_fields_resolve_from_forcing_inputs():
     assert cfg.forcing.boundary.groom_settings == {"relax_sweeps": 3}
 
 
-def test_groom_settings_validated_by_roms_tools_when_available(monkeypatch):
-    """Early validation calls roms-tools' ``resolve_groom_settings`` when it exists
-    and skips quietly when the installed roms-tools lacks it.
-    """
+def test_groom_settings_validated_by_roms_tools(monkeypatch):
+    """Early validation calls roms-tools' ``resolve_groom_settings``."""
     import sys
     import types
 
@@ -10191,12 +10189,6 @@ def test_groom_settings_validated_by_roms_tools_when_available(monkeypatch):
     assert _check_groom_settings({"ok": 1}) == {"ok": 1}
     with pytest.raises(ValueError, match="bogus"):
         _check_groom_settings({"bogus": 1})
-
-    # A roms-tools without the checker: no validation, no error.
-    monkeypatch.setitem(
-        sys.modules, "roms_tools.setup.bgc_groom", types.ModuleType("x")
-    )
-    assert _check_groom_settings({"bogus": 1}) == {"bogus": 1}
     assert _check_groom_settings({}) == {}
 
 
@@ -10248,10 +10240,9 @@ def test_groom_settings_with_groom_off_is_refused_at_load(section):
     "settings", [{"checks": {"DIC": 5}}, {"checks": []}, {"dz_max": float("nan")}]
 )
 def test_malformed_groom_settings_fail_as_a_validation_error(settings):
-    """With a roms-tools that validates ``groom_settings``, a malformed value fails the
-    blueprint load as a pydantic ``ValidationError``, not a raw exception.
+    """A malformed ``groom_settings`` fails the blueprint load as a pydantic
+    ``ValidationError``, not a raw exception.
     """
-    pytest.importorskip("roms_tools.setup.bgc_groom").resolve_groom_settings
     from pydantic import ValidationError
 
     from cstar.catalog.domain_catalog import default_catalog as cat

@@ -89,8 +89,9 @@ ESPER *(experimental)*
    implausible values and refills them from the surrounding water. Turn this
    off with ``groom: false`` on ``initial_conditions`` or ``boundary`` (the
    wizard's "Groom ESPER tracers" checkbox); the thresholds can be overridden
-   by hand with ``groom_settings`` in the forge blueprint (see the ROMS-Tools
-   datasets overview).
+   by hand with ``groom_settings`` in the forge blueprint (see the `ROMS-Tools
+   datasets overview
+   <https://roms-tools.readthedocs.io/en/latest/datasets_overview.html>`__).
 
 Provided by you
 ---------------
