@@ -10065,3 +10065,141 @@ def test_malformed_groom_settings_fail_as_a_validation_error(settings):
     fdata["initial_conditions"]["groom_settings"] = settings
     with pytest.raises(ValidationError, match="groom_settings"):
         _build(forcing_inputs=fdata)
+
+
+# --- surface blend (a regional primary layered over a global fallback) -------------
+
+
+def _blend_inputs(*, fallback=None, **item):
+    """The bundled forcing spec with surface[0] a CONUS404 primary blended over
+    ``fallback`` (default: ERA5 with radiation correction); ``item`` overrides
+    surface[0] fields.
+    """
+    fdata = _CATALOG.forcing_data("glorys-era5-unified")
+    fdata["forcing"]["surface"][0] = {
+        "type": "physics",
+        "source": {"name": "CONUS404"},
+        "correct_radiation": False,
+        "coarse_grid_mode": "never",
+        "blend": {
+            "fallback": fallback
+            or {"source": {"name": "ERA5"}, "correct_radiation": True},
+            "width_km": 150,
+            "profile": "smoothstep",
+        },
+        **item,
+    }
+    return fdata
+
+
+def test_surface_blend_parses():
+    item = _build(forcing_inputs=_blend_inputs()).forcing.surface[0]
+    assert item.source.name == "CONUS404"
+    assert item.blend.fallback.source.name == "ERA5"
+    assert item.blend.fallback.correct_radiation is True
+    assert item.blend.width_km == 150
+    assert item.blend.profile == "smoothstep"
+
+
+def test_surface_blend_fallback_accepts_a_bare_source_name():
+    fdata = _blend_inputs(fallback={"source": "ERA5"})
+    item = _build(forcing_inputs=fdata).forcing.surface[0]
+    assert item.blend.fallback.source.name == "ERA5"
+    assert item.blend.fallback.correct_radiation is False
+
+
+def test_surface_blend_is_refused_off_physics():
+    fdata = _CATALOG.forcing_data("glorys-era5-unified")
+    fdata["forcing"]["surface"][1]["blend"] = {"fallback": {"source": "ERA5"}}
+    with pytest.raises(ValidationError, match="blend is only valid for type physics"):
+        _build(forcing_inputs=fdata)
+
+
+def test_surface_blend_fallback_must_be_global():
+    fdata = _blend_inputs(fallback={"source": {"name": "conus404"}})
+    with pytest.raises(ValidationError, match="must be a global source such as ERA5"):
+        _build(forcing_inputs=fdata)
+
+
+def test_conus404_primary_refusals_are_reported_together():
+    fdata = _blend_inputs(
+        correct_radiation=True,
+        regrid_method="scipy",
+        source={"name": "CONUS404", "climatology": True},
+    )
+    with pytest.raises(ValidationError) as exc:
+        _build(forcing_inputs=fdata)
+    msg = str(exc.value)
+    assert "correct_radiation" in msg
+    assert "no climatology" in msg
+    assert "needs xESMF" in msg
+
+
+def test_surface_blend_needs_a_pinned_coarse_mode():
+    fdata = _blend_inputs(coarse_grid_mode="auto")
+    fdata["forcing"]["surface"][1]["coarse_grid_mode"] = "auto"
+    with pytest.raises(ValidationError) as exc:
+        _build(forcing_inputs=fdata)
+    msg = str(exc.value)
+    assert "surface[0] (physics), surface[1] (bgc)" in msg
+    assert "never or always" in msg
+
+
+def test_surface_blend_coarse_mode_rule_only_binds_when_blended():
+    # Explicit modes pass, `always` included.
+    fdata = _blend_inputs(coarse_grid_mode="always")
+    _build(forcing_inputs=fdata)
+
+    # No blend: auto is fine.
+    fdata = _CATALOG.forcing_data("glorys-era5-unified")
+    fdata["forcing"]["surface"][0]["coarse_grid_mode"] = "auto"
+    _build(forcing_inputs=fdata)
+
+
+def test_surface_blend_fallback_is_a_labelled_source():
+    cfg = _build(forcing_inputs=_blend_inputs())
+    labels = dict(cfg.forcing.labelled_sources())
+    assert labels["surface[0].blend.fallback"].name == "ERA5"
+    assert labels["surface[0]"].name == "CONUS404"
+
+
+def test_surface_blend_fallback_only_era5_is_still_recorded_as_streamable():
+    """With CONUS404 as the primary, ERA5 appears only as the fallback; both are
+    still snapshotted and staged-list entries, and the blueprint's own dataset
+    check passes.
+    """
+    cfg = _build(forcing_inputs=_blend_inputs())
+    assert not any(i.source.name == "ERA5" for i in cfg.forcing.surface), (
+        "ERA5 must be reachable only through the blend"
+    )
+    for name in ("ERA5", "CONUS404"):
+        assert name in cfg.datasets
+        assert cfg.forcing.resolved_datasets[name].streamable
+    assert cfg.integrity_problem() is None
+    # Round-trips through the dataset validator.
+    ForgeBlueprint.from_yaml_data(yaml.safe_load(cfg.to_yaml_str()))
+
+
+def test_surface_blend_is_written_only_when_set(tmp_path):
+    assert "blend" not in _build().to_yaml_str().replace("bottom_fill_blend_m", "")
+
+    cfg = _build(forcing_inputs=_blend_inputs())
+    text = cfg.to_yaml_str()
+    saved = yaml.safe_load(text)["forcing"]["surface"][0]["blend"]
+    assert saved["fallback"]["source"]["name"] == "ERA5"
+    assert saved["profile"] == "smoothstep"
+
+    back = ForgeBlueprint.from_yaml_data(yaml.safe_load(text))
+    assert back.forcing.surface[0].blend == cfg.forcing.surface[0].blend
+    assert back.content_hash() == cfg.content_hash()
+
+
+def test_surface_blend_hash_only_moves_when_set():
+    base = _build()
+    assert "blend" not in base._hashed_content()["forcing"]["surface"][0]
+
+    blended = _build(forcing_inputs=_blend_inputs())
+    wider = _build(forcing_inputs=_blend_inputs())
+    wider.forcing.surface[0].blend.width_km = 300
+    hashes = [base.content_hash(), blended.content_hash(), wider.content_hash()]
+    assert len(set(hashes)) == len(hashes)

@@ -192,8 +192,16 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         # then leak into output filenames (f"{key}-{type}") and into roms-tools' SafeDumper
         # (which cannot represent a Forge enum) → the "cannot represent an object" warning.
         # Dates are NOT carried here (injected later via `extra`), so json-coercion is safe.
-        d = item.model_dump(exclude={"source"}, mode="json")
+        d = item.model_dump(exclude={"source", "blend"}, mode="json")
         d["source"] = _src(item.source)
+        # Only surface items carry a blend; the generator builds the fallback from it.
+        if (blend := getattr(item, "blend", None)) is not None:
+            fallback = blend.fallback.model_dump(exclude={"source"}, mode="json")
+            fallback["source"] = _src(blend.fallback.source)
+            d["blend"] = {
+                **blend.model_dump(exclude={"fallback"}, mode="json"),
+                "fallback": fallback,
+            }
         return {k: v for k, v in d.items() if v is not None}
 
     def _bgc_section(spec) -> dict[str, Any]:
