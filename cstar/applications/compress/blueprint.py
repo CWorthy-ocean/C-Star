@@ -104,6 +104,8 @@ class CompressBlueprint(Blueprint):
 
     application: str = Field(default=APP_NAME)
     """The application identifier."""
+    schema_version: str = Field(default="1.1.1")
+    """The current schema version for this blueprint."""
     run: Path
     """The root directory of the run to compress."""
     file_types: list[FileTypeSettings] = Field(min_length=1)
