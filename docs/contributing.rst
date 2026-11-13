@@ -405,7 +405,9 @@ For maintainers:
    if it can't find one. It then turns those files into
    ``docs/releases/0.19.0.rst``, deletes them, lists the new file first in
    ``docs/releases.rst``, and opens a *Finalize release notes for 0.19.0* pull
-   request from the ``next_release_notes`` branch.
+   request from the ``next_release_notes`` branch. If that branch is left over
+   from an earlier attempt, the workflow stops; delete the branch and run it
+   again.
 2. Edit the notes on that pull request if they need it: merge overlapping
    notes, reorder, fix wording.
 3. Merge it. This creates the tagged GitHub release with those notes, which
