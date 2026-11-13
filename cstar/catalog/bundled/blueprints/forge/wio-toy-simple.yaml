@@ -47,18 +47,11 @@ forcing:
       climatology: false
       glorys_layout: regional
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     bgc_sources:
     - source:
         name: UNIFIED
         climatology: true
-        glorys_layout: null
         path: null
-        constants: null
-        esper_method: null
-        esper_equation: null
       use_vars: null
       bgc_interpolation_method: null
       serialize_dask: null
@@ -75,11 +68,7 @@ forcing:
   - source:
       name: ERA5
       climatology: false
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -94,11 +83,7 @@ forcing:
   - source:
       name: UNIFIED
       climatology: true
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -116,18 +101,11 @@ forcing:
       climatology: false
       glorys_layout: regional
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     bgc_sources:
     - source:
         name: UNIFIED
         climatology: true
-        glorys_layout: null
         path: null
-        constants: null
-        esper_method: null
-        esper_equation: null
       use_vars: null
       bgc_interpolation_method: null
       serialize_dask: null
@@ -177,6 +155,7 @@ model_settings:
     nhy_forcing: true
     nox_forcing: true
     auto_tiling: false
+    diagnostics: false
     parabolic_splines: false
     upstream_ts_land_curv: false
     obc_west: true
@@ -418,6 +397,8 @@ model_settings:
   ts_output:
     wrt_temp: false
     wrt_salt: false
+    wrt_avg_temp: false
+    wrt_avg_salt: false
     wrt_temp_dia: false
     wrt_salt_dia: false
   frc_output:
@@ -477,7 +458,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.13.0
+    commit: 0.14.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -507,7 +488,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.13-default
+    name: roms-marbl-0.14-default
     origin: catalog
     modified: false
   domain:
@@ -528,19 +509,19 @@ composition:
     modified: false
   overrides: {}
 provenance:
-  generated_at: '2026-10-27T15:50:49.386865Z'
+  generated_at: '2026-11-13T18:48:47.771552Z'
   generated_by:
     tool: wizard
-    id: c70bee26-1ec0-44a7-b254-6f57fc46799f
+    id: b8ad9918-7b54-40a2-a7ac-64cc35877df0
     system: darwin_arm64
     versions:
-      cstar-ocean: 0.17.1.dev74+g1ae9bb7c1.d20261027
-      roms-tools: 5.2.1
+      cstar-ocean: 0.18.1.dev27+gc35923669.d20261113
+      roms-tools: 5.3.0
     run_id: ''
     working_dir: ''
   forge_version: null
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:74143a18b99a7baec907937e2054d1128acef7fbcab6e9d197d360104c10af7d
+  content_hash: bp-v2:3577e91488f01d770700fe88e8594ef0e5b752688edd2b01b9d76ddaf75b31a3
   notes: null

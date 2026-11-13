@@ -46,18 +46,11 @@ forcing:
       climatology: false
       glorys_layout: regional
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     bgc_sources:
     - source:
         name: UNIFIED
         climatology: true
-        glorys_layout: null
         path: null
-        constants: null
-        esper_method: null
-        esper_equation: null
       use_vars: null
       bgc_interpolation_method: null
       serialize_dask: null
@@ -74,11 +67,7 @@ forcing:
   - source:
       name: ERA5
       climatology: false
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -93,11 +82,7 @@ forcing:
   - source:
       name: UNIFIED
       climatology: true
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -112,11 +97,7 @@ forcing:
   - source:
       name: MBL_co2
       climatology: false
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -131,11 +112,7 @@ forcing:
   - source:
       name: WOA
       climatology: true
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     type: restoring
     correct_radiation: false
     coarse_grid_mode: never
@@ -154,18 +131,11 @@ forcing:
       climatology: false
       glorys_layout: regional
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     bgc_sources:
     - source:
         name: UNIFIED
         climatology: true
-        glorys_layout: null
         path: null
-        constants: null
-        esper_method: null
-        esper_equation: null
       use_vars: null
       bgc_interpolation_method: null
       serialize_dask: null
@@ -181,11 +151,7 @@ forcing:
   - source:
       name: TPXO
       climatology: false
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     ntides: 15
     prefill: null
     prefill_kwargs: null
@@ -197,11 +163,7 @@ forcing:
   - source:
       name: DAI
       climatology: false
-      glorys_layout: null
       path: null
-      constants: null
-      esper_method: null
-      esper_equation: null
     include_bgc: true
     convert_to_climatology: if_any_missing
     bgc_source: null
@@ -271,6 +233,7 @@ model_settings:
     nhy_forcing: true
     nox_forcing: true
     auto_tiling: false
+    diagnostics: false
     parabolic_splines: false
     upstream_ts_land_curv: false
     obc_west: true
@@ -512,6 +475,8 @@ model_settings:
   ts_output:
     wrt_temp: false
     wrt_salt: false
+    wrt_avg_temp: false
+    wrt_avg_salt: false
     wrt_temp_dia: false
     wrt_salt_dia: false
   frc_output:
@@ -571,7 +536,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.13.0
+    commit: 0.14.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -601,7 +566,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.13-default
+    name: roms-marbl-0.14-default
     origin: catalog
     modified: false
   domain:
@@ -622,19 +587,19 @@ composition:
     modified: false
   overrides: {}
 provenance:
-  generated_at: '2026-10-27T15:50:48.440332Z'
+  generated_at: '2026-11-13T18:48:46.751687Z'
   generated_by:
     tool: wizard
-    id: be98595c-d975-4171-8a68-8ce7cf11ca8f
+    id: 6139aeb0-d794-4582-ac78-25333031a4ea
     system: darwin_arm64
     versions:
-      cstar-ocean: 0.17.1.dev74+g1ae9bb7c1.d20261027
-      roms-tools: 5.2.1
+      cstar-ocean: 0.18.1.dev27+gc35923669.d20261113
+      roms-tools: 5.3.0
     run_id: ''
     working_dir: ''
   forge_version: null
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:23ffc0c4a9bb431b9e1cde83818f171fc45300bd74ffb6b43bc95ff905604568
+  content_hash: bp-v2:9f6ead6147056675554d4b25886640dadb75dd5e72cbe84606561ba1cabcb96c
   notes: null
