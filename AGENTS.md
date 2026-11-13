@@ -27,6 +27,8 @@ pip install -e ".[dev]"                     # ".[dev,docs]" for the docs
   shared HPC environment, and ask before changing one you did not create.
 - On macOS the conda `rsync` is required; the system one is too old for the
   ucla-roms Makefiles.
+- Run `python -m cstar` and pytest from this checkout's root: the current
+  directory comes first on `sys.path`, so another checkout's shadows this one.
 
 ## Tests: never run bare `pytest`
 
@@ -54,10 +56,11 @@ python -m pytest cstar/tests/integration_tests/e2e \
 
 ## Lint and types
 
-Run `pre-commit run --all-files` from `cstar-env` before committing. It checks
-only `cstar/`: whitespace fixers, `check-yaml`, a 200 kB file limit,
-`ruff-check --fix`, `ruff-format`, mypy, `absolufy-imports`, and
-`check-manifest`.
+Run `pre-commit run --all-files` from `cstar-env` before committing. The file
+hooks check only `cstar/`: whitespace fixers, `check-yaml`, a 200 kB file
+limit, `ruff-check --fix`, `ruff-format`, mypy, and `absolufy-imports`.
+`check-manifest` compares every tracked file with the sdist; add a dev-only
+top-level file to `[tool.check-manifest] ignore` in `pyproject.toml`.
 
 - Absolute imports only (`from cstar.x import y`). Keep new code fully
   annotated; mypy gates commits.
@@ -79,7 +82,8 @@ Read `docs/developers/conventions.rst` before adding a class, model field,
 flag, constant, CLI option, or mechanism. In short: reuse the existing
 extension points and constant families, keep one source for each default, fail
 before compute is spent, and never carry run-scoped state in an environment
-variable. Deprecations: "Deprecations and compatibility" in `contributing.rst`.
+variable. Deprecations: "Deprecations and compatibility" in
+`docs/contributing.rst`.
 
 ## Gotchas
 

@@ -112,9 +112,9 @@ read-only ``@property`` on the model that owns the underlying field.
 
 - *Why:* when the authoritative value changes, every copy must change with it.
 - *Where:* ``Step.clobber`` is a property that reads ``workflow_overrides``,
-  not a second field kept in sync. In Forge, only the blueprint's ``name`` (and
-  dates and process counts) is stored; the case name, namelist title, output
-  root name, and run output directory are derived from it. A blueprint's
+  not a second field kept in sync. In Forge, the blueprint stores ``name``; the
+  case name, namelist title, output root name, and run output directory are
+  computed from it and the run dates, never stored. A blueprint's
   current schema version is the default of its ``schema_version`` field,
   exposed as ``ApplicationDefinition.schema_version``; never restate it.
 
@@ -188,6 +188,18 @@ literal, check whether a constant family (``ARG_*``, ``SOURCE_KEY_*``,
 
 - *Why:* a single-purpose wrapper in a shared module invites a second one
   beside it, and an unnamed copy of a named literal drifts.
+
+Keep Forge's execution layer free of authoring code
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Forge's execution modules under ``cstar/applications/forge/`` do not import
+``cstar.catalog``, the resolver (``resolve``), host configuration
+(``config``, ``runtime``), or ``cstar.wizard``.
+
+- *Why:* execution runs from a reviewable blueprint on any machine, without
+  the catalog or the wizard.
+- *Where:* ``test_forge_app_boundary.py`` in the forge unit tests enforces it;
+  see :ref:`forge-internals` for the two layers.
 
 Pydantic models and adapters
 ----------------------------
