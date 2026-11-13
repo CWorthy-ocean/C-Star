@@ -56,6 +56,8 @@ The `ucla_roms` blueprint enables the orchestration of an application that
 executes a UCLA-ROMS simulation.
 
 - :download:`UCLA-ROMS Blueprint Schema v3.3.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms/ucla_roms_schema.3.3.0.json>`
+- :download:`UCLA-ROMS Blueprint Schema v3.3.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms/ucla_roms_schema.3.3.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
 
 ROMS-MARBL Blueprint (earlier name)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -78,6 +80,8 @@ running custom applications with user-provided blueprints.
 
 - :download:`Hello World Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/hello_world/hello_world_schema.1.0.0.json>`
 - :download:`Hello World Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/hello_world/hello_world_schema.1.1.0.json>`
+- :download:`Hello World Blueprint Schema v1.1.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/hello_world/hello_world_schema.1.1.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
 
 
 Plotter Blueprint
@@ -90,6 +94,8 @@ running a custom application with user-provided blueprints.
 - :download:`Plotter Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.1.0.0.json>`
 - :download:`Plotter Blueprint Schema v2.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.2.0.0.json>`
 - :download:`Plotter Blueprint Schema v2.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.2.1.0.json>`
+- :download:`Plotter Blueprint Schema v2.1.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.2.1.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
 
 
 CDR Metrics Blueprint
@@ -99,6 +105,32 @@ The `cdr_metrics` blueprint computes CDR metrics from the `_cdr` output of
 UCLA-ROMS runs with MARBL.
 
 - :download:`CDR Metrics Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/cdr_metrics/cdr_metrics_schema.1.1.0.json>`
+- :download:`CDR Metrics Blueprint Schema v1.1.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/cdr_metrics/cdr_metrics_schema.1.1.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
+
+
+Nesting Initial Conditions Blueprint
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `nest_ic` blueprint builds a child grid's initial conditions from a parent
+run's restart file.
+
+- :download:`Nest IC Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/nest_ic/nest_ic_schema.1.0.0.json>`
+- :download:`Nest IC Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/nest_ic/nest_ic_schema.1.1.0.json>`
+- :download:`Nest IC Blueprint Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/nest_ic/nest_ic_schema.1.2.0.json>`
+- :download:`Nest IC Blueprint Schema v1.2.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/nest_ic/nest_ic_schema.1.2.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
+
+
+Upscaler Blueprint
+~~~~~~~~~~~~~~~~~~
+
+The `upscaler` blueprint upscales a nested child grid's output to its parent grid.
+
+- :download:`Upscaler Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/upscaler/upscaler_schema.1.0.0.json>`
+- :download:`Upscaler Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/upscaler/upscaler_schema.1.1.0.json>`
+- :download:`Upscaler Blueprint Schema v1.1.1 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/upscaler/upscaler_schema.1.1.1.json>`:
+  declares the optional ``$schema`` key that names the schema a blueprint follows.
 
 
 Forge Blueprint

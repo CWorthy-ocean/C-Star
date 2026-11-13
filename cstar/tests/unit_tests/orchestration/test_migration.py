@@ -512,10 +512,10 @@ def test_migrate_plotter(plotter_v1_0_0_model: dict[str, t.Any]) -> None:
 @pytest.mark.parametrize(
     ("app_name", "exp_version"),
     [
-        (APP_ROMS, "3.3.0"),
-        (APP_PLOTTER, "2.1.0"),
-        (APP_HW, "1.1.0"),
-        (APP_CDR_METRICS, "1.1.0"),
+        (APP_ROMS, "3.3.1"),
+        (APP_PLOTTER, "2.1.1"),
+        (APP_HW, "1.1.1"),
+        (APP_CDR_METRICS, "1.1.1"),
     ],
 )
 def test_application_schema_version(app_name: str, exp_version: str) -> None:

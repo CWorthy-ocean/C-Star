@@ -276,7 +276,7 @@ class PartitioningParameterSet(ParameterSet):
 class UclaRomsBlueprint(Blueprint):
     """Blueprint schema for running a UCLA-ROMS simulation."""
 
-    schema_version: str = "3.3.0"
+    schema_version: str = "3.3.1"
     """The blueprint schema version."""
 
     @property

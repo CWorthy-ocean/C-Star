@@ -392,8 +392,29 @@ class Provenance(ConfiguredBaseModel):
     """The blueprints and catalog specs the document was derived from."""
 
 
+def _declare_schema_ref(schema: dict[str, t.Any]) -> None:
+    """Declare the optional ``$schema`` key in a blueprint's JSON schema.
+
+    The serializer writes the key into every dump and every loader strips it, so
+    the published schema must accept it alongside ``additionalProperties: false``.
+    """
+    schema["properties"] = {
+        "$schema": {
+            "description": "The URL of the published JSON schema the blueprint follows.",
+            "title": "$schema",
+            "type": "string",
+        },
+        **schema.get("properties", {}),
+    }
+
+
 class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """Common elements of all blueprints."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        json_schema_extra=_declare_schema_ref
+    )
+    """Declares the ``$schema`` key the serializer writes in the JSON schema."""
 
     SCHEMA_LABEL: t.ClassVar[str] = "blueprint"
 
