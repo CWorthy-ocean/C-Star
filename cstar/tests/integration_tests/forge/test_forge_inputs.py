@@ -72,6 +72,8 @@ class Expectation:
     """Whether MARBL is built (``code.marbl``, ``#define MARBL``)."""
     cdr_lite: bool
     """Whether the ``cdr_lite`` build mode is on (``#define CDR_LITE``)."""
+    physics_surface: str = "surface-physics"
+    """The physics surface forcing's file stem; a blend names both of its sources."""
 
 
 EXPECTATIONS = {
@@ -81,6 +83,14 @@ EXPECTATIONS = {
         nhy_nox=True,
         marbl=True,
         cdr_lite=False,
+    ),
+    "blend": Expectation(
+        bgc_surface=True,
+        bgc_input_stems=("surface-bgc", "boundary-bgc"),
+        nhy_nox=True,
+        marbl=True,
+        cdr_lite=False,
+        physics_surface="surface-physics-era5-era5",
     ),
     "constants": Expectation(
         bgc_surface=False,
@@ -216,7 +226,7 @@ class TestInputs:
         for stem in (
             "_grid.nc",
             "_initial_conditions.nc",
-            "_surface-physics_",
+            f"_{expect.physics_surface}_",
             "_boundary-physics_",
             *expect.bgc_input_stems,
         ):
@@ -316,7 +326,7 @@ class TestNamelist:
         assert "pio_settings" in _raw_namelist(run)
 
         frcfiles = [Path(f).name for f in nml.forcing_files.frcfiles]
-        assert any("surface-physics" in f for f in frcfiles)
+        assert any(expect.physics_surface in f for f in frcfiles)
         assert any("surface-bgc" in f for f in frcfiles) is expect.bgc_surface
 
     def test_matches_golden(self, run: Run) -> None:
@@ -437,3 +447,32 @@ def test_rerun_reuses_inputs(
     assert (
         rerun_provenance["generated_by"]["id"] != first_provenance["generated_by"]["id"]
     )
+
+
+def test_blended_surface_forcing_records_its_recipe_and_reuses(
+    tmp_path: Path,
+    forge_blueprint_factory: Callable[..., tuple["ForgeBlueprint", Path]],
+) -> None:
+    """A blended physics item writes one blended product carrying the blend's
+    recipe, with the recipe as its YAML sidecar; a re-run with the sidecar gone
+    rewrites it from the file and leaves the inputs alone.
+    """
+    first = _generate("blend", tmp_path, forge_blueprint_factory)
+    stem = EXPECTATIONS["blend"].physics_surface
+    blended = [p for p in first.input_files if f"_{stem}_" in p.name]
+    assert blended
+    assert not [p for p in first.input_files if "_surface-physics_" in p.name]
+    with xr.open_dataset(blended[0], decode_times=False) as ds:
+        assert ds.attrs["blend_method"] == "feathered"
+        assert "SurfaceForcingBlend" in ds.attrs["roms_tools_yaml"]
+
+    (sidecar,) = first.working_dir.rglob(f"_forcing.{stem}.yaml")
+    assert "SurfaceForcingBlend" in sidecar.read_text()
+
+    mtimes = {p: p.stat().st_mtime_ns for p in first.input_files}
+    recipe = sidecar.read_text()
+    sidecar.unlink()
+    process_forge_blueprint(first.cfg, host=first.host, use_dask=False)
+
+    assert {p: p.stat().st_mtime_ns for p in first.input_files} == mtimes
+    assert sidecar.read_text() == recipe

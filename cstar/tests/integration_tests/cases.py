@@ -108,4 +108,5 @@ FORGE_CASES = {
         bgc_mode="cdr_lite",
         cdr={"mode": "simple", "cdr_forcing": CDR_LITE_FORCING},
     ),
+    "blend": ForgeCase("na-test-8x8", "test-glorys-era5-blend"),
 }
