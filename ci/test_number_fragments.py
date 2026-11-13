@@ -90,6 +90,8 @@ def _names(repo: Path) -> list[str]:
         ("+no-extension.misc", "misc"),
         ("+other.feature.txt", "feature"),
         ("+misc.bugfix.rst", "bugfix"),
+        ("+app-enum.breaking-python.rst", "breaking-python"),
+        ("+breaking.breaking-python.1.rst", "breaking-python"),
         ("+thing.bugfixes.rst", None),
     ],
 )

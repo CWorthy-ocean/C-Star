@@ -105,6 +105,7 @@ def test_build_matches_release_notes_style(scratch):
         scratch,
         {
             "12.breaking.rst": "Lead ``text``.\n- First detail.\n- Second detail.\n",
+            "17.breaking-python.rst": "``Old.NAME`` is now ``New.NAME``.\n",
             "16.output.rst": "Different numbers.\n",
             "14.deprecation.rst": "Deprecated: ``a``, removed in 0.21.0; use ``b``.\n",
             "12.feature.rst": "A feature.\n",
@@ -125,6 +126,8 @@ def test_build_matches_release_notes_style(scratch):
         f"- Lead ``text``. {_link(12)}\n\n"
         "  - First detail.\n"
         "  - Second detail.\n\n"
+        "Python API Changes\n~~~~~~~~~~~~~~~~~~\n\n"
+        f"- ``Old.NAME`` is now ``New.NAME``. {_link(17)}\n\n"
         "Changes to Output\n~~~~~~~~~~~~~~~~~\n\n"
         f"- Different numbers. {_link(16)}\n\n"
         "Deprecations\n~~~~~~~~~~~~\n\n"
@@ -160,6 +163,8 @@ def test_build_matches_release_notes_style(scratch):
         f"- Lead `text`. ([#12]({URL}/12))\n\n"
         "  - First detail.\n"
         "  - Second detail.\n\n"
+        "### Python API Changes\n\n"
+        f"- `Old.NAME` is now `New.NAME`. ([#17]({URL}/17))\n\n"
         "### Changes to Output\n\n"
     )
     assert "`_" not in body and ".. _" not in body

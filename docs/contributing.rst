@@ -260,6 +260,10 @@ The type decides the section the note appears under:
      - a workplan, blueprint, catalog, command or script that worked now
        fails or needs an edit: a renamed or removed option, a key that is now
        rejected, a file an earlier release can no longer read
+   * - ``breaking-python``
+     - Python API Changes
+     - Python code that imports ``cstar`` and worked now fails or needs an
+       edit: a renamed or removed class, function, argument or attribute
    * - ``output``
      - Changes to Output
      - the same blueprint or workplan still runs, but what C-Star writes
@@ -311,7 +315,8 @@ becomes, in the release notes:
 Each note is its own file, so a pull request with several notes adds several
 files, such as ``+groom-switch.feature.rst``, ``+groom-wizard.feature.rst``
 and ``+esper-docs.misc.rst``. A change that both breaks a setup and changes
-output gets one note of each type.
+output gets one note of each type, and so does one that breaks both a
+blueprint and the Python API.
 
 A pull request with nothing for users to read about, such as a test-only
 change or a typo fix, needs no note; ask a maintainer to add the

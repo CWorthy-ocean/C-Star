@@ -237,6 +237,11 @@ name = "Breaking Changes"
 showcontent = true
 
 [[tool.towncrier.type]]
+directory = "breaking-python"
+name = "Python API Changes"
+showcontent = true
+
+[[tool.towncrier.type]]
 directory = "output"
 name = "Changes to Output"
 showcontent = true

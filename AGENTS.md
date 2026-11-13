@@ -130,8 +130,9 @@ the user's explicit OK; give them the exact command instead.
   `docs/changes/+<name>.<type>.rst`, committed with the code (`<name>` is any
   short label). The types are the `[[tool.towncrier.type]]` entries in
   `pyproject.toml`. `breaking` (a setup that worked now fails or needs an
-  edit) and `output` (the same setup still runs but C-Star writes different
-  files) are separate types. Write each note for users in reStructuredText, in
+  edit), `breaking-python` (the same for Python code that imports `cstar`) and
+  `output` (the same setup still runs but C-Star writes different files) are
+  separate types. Write each note for users in reStructuredText, in
   one line, optionally followed by `- ` sub-bullets, one file per note. At
   release time the pull request number is filled in and towncrier builds
   `docs/releases/<version>.rst` from the files, so never edit release notes on

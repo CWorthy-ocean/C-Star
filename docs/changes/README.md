@@ -9,14 +9,15 @@ sub-bullets. At release time each `+<name>` file is renamed after the pull
 request that added it, then `towncrier build` turns the fragments into
 [`docs/releases/<version>.rst`](../releases) and deletes them.
 
-| Type          | Section in the release notes |
-|---------------|------------------------------|
-| `breaking`    | Breaking Changes             |
-| `output`      | Changes to Output            |
-| `deprecation` | Deprecations                 |
-| `feature`     | New features                 |
-| `bugfix`      | Bug Fixes                    |
-| `improvement` | Improvements                 |
-| `misc`        | Miscellaneous                |
+| Type              | Section in the release notes |
+|-------------------|------------------------------|
+| `breaking`        | Breaking Changes             |
+| `breaking-python` | Python API Changes           |
+| `output`          | Changes to Output            |
+| `deprecation`     | Deprecations                 |
+| `feature`         | New features                 |
+| `bugfix`          | Bug Fixes                    |
+| `improvement`     | Improvements                 |
+| `misc`            | Miscellaneous                |
 
 The [contributor guide](../contributing.rst) has the details and examples.
