@@ -466,10 +466,7 @@ class ROMSInputDataset(InputDataset, ABC):
             if tempdir_obj:
                 tempdir_obj.cleanup()
 
-    def get(
-        self,
-        local_dir: str | Path,
-    ) -> None:
+    def get(self, local_dir: str | Path, name: str = "") -> None:
         """Obtain and stage this ROMSInputDataset, making it locally available to C-Star.
 
         This method updates the `ROMSInputDataset.working_copy` attribute.
@@ -478,6 +475,14 @@ class ROMSInputDataset(InputDataset, ABC):
         -----------
         local_dir (str or Path):
             Directory to save the dataset files.
+        name (str):
+            The file name to stage under; empty means the source's own name.
+            A partitioned source is staged by its pieces' own names.
+
+        Raises:
+        -------
+        ValueError
+            If `name` is given for a partitioned source.
         """
         # Ensure we're working with a Path object
         local_dir = Path(local_dir).expanduser().resolve()
@@ -485,13 +490,14 @@ class ROMSInputDataset(InputDataset, ABC):
 
         # partitioned source
         if self.source_partitioning:
+            self._refuse_name(name)
             self._get_from_partitioned_source(local_dir)
 
         # regular (netCDF) source
         else:
-            super().get(local_dir=local_dir)
+            super().get(local_dir=local_dir, name=name)
 
-    def attach(self, local_dir: str | Path) -> None:
+    def attach(self, local_dir: str | Path, name: str = "") -> None:
         """Adopt an existing, already-staged copy of this ROMSInputDataset.
 
         Counterpart of `get()`: instead of (re-)staging the file(s), this
@@ -502,15 +508,20 @@ class ROMSInputDataset(InputDataset, ABC):
         -----------
         local_dir (str or Path):
             Directory in which the dataset files are expected to already exist.
+        name (str):
+            The file name it was staged under; empty means the source's own name.
 
         Raises:
         -------
         FileNotFoundError
             If any expected file is missing. Lists every missing path.
+        ValueError
+            If `name` is given for a partitioned source.
         """
         local_dir = Path(local_dir).expanduser().resolve()
 
         if self.source_partitioning:
+            self._refuse_name(name)
             expected = [local_dir / s.basename for s in self.partitioned_source.sources]
             missing = [p for p in expected if not p.exists()]
             if missing:
@@ -523,7 +534,16 @@ class ROMSInputDataset(InputDataset, ABC):
                 for s, p in zip(self.partitioned_source.sources, expected)
             )
         else:
-            super().attach(local_dir)
+            super().attach(local_dir, name=name)
+
+    def _refuse_name(self, name: str) -> None:
+        """Raise if a file name was given for a partitioned source."""
+        if name:
+            msg = (
+                f"Cannot stage a partitioned {self.__class__.__name__} under "
+                f"{name!r}: its pieces are staged by their own names."
+            )
+            raise ValueError(msg)
 
     def _working_copy_files(self) -> list[Path]:
         """Return the file(s) that make up this dataset's current working copy.
@@ -802,6 +822,60 @@ def missing_carbonate_sensitivity_variables(path: Path) -> list[str]:
         return [
             name for name in CARBONATE_SENSITIVITY_VARIABLES if name not in ds.variables
         ]
+
+
+def netcdf_dimension_size(path: Path, dimension: str) -> int | None:
+    """Return the size of dimension `dimension` of the netCDF file at `path`, or
+    None if the file has no such dimension (a header read; no data is loaded).
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(
+        path, decode_cf=False, decode_times=False, create_default_indexes=False
+    ) as ds:
+        return ds.sizes.get(dimension)
+
+
+def netcdf_variable_names(path: Path) -> set[str]:
+    """Return the names of the variables of the netCDF file at `path` (a header
+    read; no data is loaded).
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(
+        path, decode_cf=False, decode_times=False, create_default_indexes=False
+    ) as ds:
+        return {str(name) for name in ds.variables}
+
+
+def netcdf_time_ranges(path: Path) -> dict[str, tuple[float, float]]:
+    """Return the (min, max) of every time variable of the netCDF file at `path`.
+
+    A time variable is a non-empty, 1-D numeric variable whose name ends with
+    "time" (e.g. `ocean_time`, `ddic_dco2_time`), keyed by name. Only those
+    variables are loaded, never the data variables.
+    """
+    # Lazy import: only needed when this check runs
+    import numpy as np
+    import xarray as xr
+
+    ranges: dict[str, tuple[float, float]] = {}
+    with xr.open_dataset(
+        path, decode_cf=False, decode_times=False, create_default_indexes=False
+    ) as ds:
+        for name, var in ds.variables.items():
+            key = str(name)
+            if (
+                key.lower().endswith("time")
+                and var.ndim == 1
+                and var.size > 0
+                and np.issubdtype(var.dtype, np.number)
+            ):
+                values = var.values
+                ranges[key] = (float(values.min()), float(values.max()))
+    return ranges
 
 
 class ROMSCarbonateSensitivity(ROMSInputDataset):

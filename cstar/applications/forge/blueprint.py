@@ -71,12 +71,20 @@ from typing import TYPE_CHECKING, Any, Literal, Self, get_args
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cstar.applications.forge.source_registry import (
+    DERIVED_BGC_SOURCES,
+    UNSTAGED_DATASETS,
+    dataset_key_for_source,
+    map_source_to_dataset_key,
+    resolve_source,
+)
 from cstar.base.digest import digest_scheme, short_digest
 from cstar.base.provenance import package_version, package_versions, system_name
 from cstar.orchestration.models import (
     Blueprint,
     BlueprintIdentity,
     CatalogSpecRef,
+    ComputeNeeds,
     GeneratedBy,
     Provenance,
     SpecSelection,
@@ -87,7 +95,7 @@ from cstar.system.migration import for_writing
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from cstar.orchestration.models import CatalogSpecKind
 
@@ -769,7 +777,17 @@ class SourceSpec(_Section):
 
     name: str
     climatology: bool = False
-    glorys_layout: Literal["global", "regional"] | None = None
+    glorys_layout: Literal["global", "regional"] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    """Which GLORYS files Forge stages: ``"regional"`` (daily files cut to this grid)
+    or ``"global"`` (whole-globe daily files); the data are the same CMEMS product.
+    Only valid when ``name == "GLORYS"``. Unset takes the initial conditions' layout,
+    or regional when that is unset too.
+
+    Left out of saved blueprints while unset, like the other source-specific fields
+    (``constants``, ``esper_method``, ``esper_equation``), so a source shows only
+    what applies to it."""
     path: str | None = None
     """Explicit dataset path override. ``None`` (the default) means the path is
     derived from :class:`SourceDatasets` at processing time (the standard staged/streamed
@@ -779,13 +797,19 @@ class SourceSpec(_Section):
     omitted, PyESPER must be installed in the Python environment (e.g.
     ``pip install -e <checkout>``), in which case it locates its own data
     directories automatically."""
-    constants: dict[str, float] | None = None
+    constants: dict[str, float] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     """Depth-invariant constant value(s) (e.g. ``{"Fe": 3.0e-3}``), mmol/m^3. Required
     (and only valid) when ``name == "constants"``."""
-    esper_method: Literal["lir", "nn", "mixed"] | None = None
+    esper_method: Literal["lir", "nn", "mixed"] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     """PyESPER estimation method. Only valid when ``name == "ESPER"``; roms-tools
     defaults to ``"nn"`` when unset."""
-    esper_equation: Literal[8, 16] | None = None
+    esper_equation: Literal[8, 16] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     """PyESPER predictor equation: 8 (salinity + temperature) or 16 (salinity only).
     Only valid when ``name == "ESPER"``; roms-tools defaults to 8 when unset."""
     esper_salinity_conditioning: bool = Field(default=False, exclude_if=lambda v: not v)
@@ -802,6 +826,26 @@ class SourceSpec(_Section):
     the content hash** (``exclude_if``), so blueprints written before the field
     existed keep their hash, and blueprints saved with it off still load on builds
     that do not know it -- the same arrangement as an unset ``carbonate_sensitivity``."""
+
+    @property
+    def dataset_names(self) -> tuple[str, ...]:
+        """The logical names this source adds to ``Forcing.resolved_datasets`` and
+        ``ForgeBlueprint.datasets``: its own name, or none for a source Forge never
+        stages. That is a derived ``ESPER``/``constants`` source (computed at
+        generation; ``SourceDatasets`` would reject it as an unknown dataset), a
+        ``CUSTOM_FILE`` river source (verified from ``RiverForcingItem.custom_file``),
+        or one with an explicit ``path`` (read verbatim, see
+        ``input_generator._resolve_source_block``). An ``ESPER`` source with
+        ``esper_salinity_conditioning`` adds the WOA23 salinity file it reads.
+        """
+        name = self.name.upper()
+        if name in DERIVED_BGC_SOURCES:
+            if name == "ESPER" and self.esper_salinity_conditioning:
+                return ("WOA_SALINITY",)
+            return ()
+        if not self.name or name == "CUSTOM_FILE" or self.path:
+            return ()
+        return (self.name,)
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
@@ -1285,8 +1329,33 @@ class Forcing(_Section):
     a domain with every open boundary disabled."""
     tidal: list[TidalForcingItem] = Field(default_factory=list)
     river: list[RiverForcingItem] = Field(default_factory=list)
-    # logical-name -> resolved registry entry (snapshot of source_datasets.py tables)
+    # logical-name -> resolved registry entry (snapshot of source_datasets.py tables).
+    # One entry per name, except that a second GLORYS layout (IC and boundary choose
+    # theirs separately) is recorded under its dataset key, e.g. GLORYS_GLOBAL.
     resolved_datasets: dict[str, ResolvedDataset] = Field(default_factory=dict)
+
+    def labelled_sources(self) -> Iterator[tuple[str, SourceSpec]]:
+        """Every ``SourceSpec`` in the sections, with where it sits (e.g.
+        ``"boundary.bgc_sources[1]"``), in the order the resolver notes them.
+        A river item's ``bgc_source``/``surface_forcing_source`` are plain dicts,
+        not ``SourceSpec``s, and are not included.
+        """
+        for label, section in (
+            ("initial_conditions", self.initial_conditions),
+            ("boundary", self.boundary),
+        ):
+            if section is None:
+                continue
+            yield label, section.source
+            for i, item in enumerate(section.bgc_sources):
+                yield f"{label}.bgc_sources[{i}]", item.source
+        for label, items in (
+            ("surface", self.surface),
+            ("tidal", self.tidal),
+            ("river", self.river),
+        ):
+            for i, item in enumerate(items):
+                yield f"{label}[{i}]", item.source
 
 
 # Back-compat alias: code that imported Sources can import Forcing instead.
@@ -1641,25 +1710,43 @@ class ForgeBlueprint(Blueprint):
         return migrate_forge_blueprint_data(data)
 
     @model_validator(mode="after")
-    def _esper_conditioning_has_its_dataset(self) -> ForgeBlueprint:
-        """An ESPER source with ``esper_salinity_conditioning`` on needs the
-        ``WOA_SALINITY`` dataset staged. The resolver notes it automatically; a
-        hand-edited blueprint that only flipped the switch would otherwise fail deep
-        inside input generation, after every other dataset was staged.
+    def _sources_have_their_datasets(self) -> ForgeBlueprint:
+        """Every dataset a source needs staged is in ``datasets``.
+
+        Staging prepares exactly ``datasets``, while input generation looks each
+        source's dataset key up again (``source_registry.dataset_key_for_source``,
+        the rule used here too). The resolver keeps the two in step. A hand edit to a
+        source alone (a GLORYS layout, a swapped BGC source, ESPER's salinity
+        conditioning switched on) would otherwise fail during input generation,
+        after every other dataset was staged. Streamed sources are never staged and
+        need no entry.
         """
-        sections = [self.forcing.initial_conditions, self.forcing.boundary]
-        wants = any(
-            item.source.name.upper() == "ESPER"
-            and item.source.esper_salinity_conditioning
-            for section in sections
-            if section is not None
-            for item in section.bgc_sources
-        )
-        if wants and "WOA_SALINITY" not in self.datasets:
+        snapshot = {
+            name.upper(): entry.dataset_key
+            for name, entry in self.forcing.resolved_datasets.items()
+        }
+        staged = {map_source_to_dataset_key(d) for d in self.datasets}
+        missing = []
+        for where, src in self.forcing.labelled_sources():
+            for name in src.dataset_names:
+                if resolve_source(name, src.glorys_layout)["streamable"]:
+                    continue
+                key = dataset_key_for_source(name, src.glorys_layout, snapshot)
+                if key in staged or key in UNSTAGED_DATASETS:
+                    continue
+                shown = src.model_dump(
+                    include={"name", "glorys_layout", "esper_salinity_conditioning"}
+                )
+                desc = ", ".join(f"{k}: {v}" for k, v in shown.items())
+                missing.append(f"  {where} ({desc}) needs {key}")
+        if missing:
             raise ValueError(
-                "an ESPER source has esper_salinity_conditioning on but 'WOA_SALINITY' "
-                "is not in `datasets`; add it there (the resolver does this when the "
-                "blueprint is built from specs)."
+                "these sources need datasets that are not in `datasets`, so input "
+                "generation would fail after staging:\n"
+                + "\n".join(missing)
+                + f"\n`datasets` has: {', '.join(sorted(self.datasets))}. Add the "
+                "missing keys to `datasets` (building the blueprint from specs, e.g. "
+                "in the wizard, fills it in)."
             )
         return self
 
@@ -1689,14 +1776,21 @@ class ForgeBlueprint(Blueprint):
         )
 
     @property
-    def cpus_needed(self) -> int:
-        """Ballpark CPU count for *processing* this blueprint (the forge run
-        itself: roms-tools input generation), overriding the ``Blueprint`` base
-        default of 1. Deliberately NOT ``n_procs`` -- that is the ROMS
-        partitioning the downstream simulation uses, not what generating the
-        inputs needs. See :func:`estimate_forge_cpus`. Uncapped above its floor:
-        because the run is :attr:`single_node`, the launcher clamps this to the
-        target partition's CPUs per node.
+    def compute_needs(self) -> ComputeNeeds:
+        """What *processing* this blueprint needs (the forge run itself:
+        roms-tools input generation), overriding the ``Blueprint`` base default
+        of one task.
+
+        The task count is a ballpark, deliberately NOT ``n_procs`` -- that is
+        the ROMS partitioning the downstream simulation uses, not what generating
+        the inputs needs. See :func:`estimate_forge_cpus`. It is uncapped above
+        its floor: because the run is ``single_node``, the launcher clamps it to
+        the target partition's CPUs per node.
+
+        The forge run is one Python process (roms-tools on dask's threaded
+        scheduler), not an MPI job: it can never use more than one node. Marking
+        it ``single_node`` lets C-Star's launcher pin the forge step to
+        ``--nodes=1`` instead of requesting extra nodes the run would leave idle.
 
         When ``domain.grid_file`` is set, ``grid_kwargs`` carries no ``nx``/``ny``/
         ``N`` (a user-supplied grid has no generation-geometry keys -- see
@@ -1709,18 +1803,10 @@ class ForgeBlueprint(Blueprint):
         nx = gk.get("nx", param.get("llm", 0))
         ny = gk.get("ny", param.get("mmm", 0))
         nvert = gk.get("N", param.get("n", 0))
-        return estimate_forge_cpus(int(nx or 0), int(ny or 0), int(nvert or 0))
-
-    @property
-    def single_node(self) -> bool:
-        """The forge run is one Python process (roms-tools on dask's threaded
-        scheduler), not an MPI job: it can never use more than one node. Marking
-        it so lets C-Star's launcher pin the forge step to ``--nodes=1`` and clamp
-        :attr:`cpus_needed` to the target partition's CPUs per node, instead of
-        requesting extra nodes the run would leave idle. Overrides the
-        ``Blueprint`` base default of ``False``.
-        """
-        return True
+        return ComputeNeeds(
+            tasks=estimate_forge_cpus(int(nx or 0), int(ny or 0), int(nvert or 0)),
+            single_node=True,
+        )
 
     @property
     def n_tracers(self) -> int:

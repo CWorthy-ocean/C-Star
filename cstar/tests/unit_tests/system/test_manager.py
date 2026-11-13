@@ -26,6 +26,7 @@ from cstar.system.manager import (
     ExpanseSystemContext,
     LinuxSystemContext,
     MacOSSystemContext,
+    OscarSystemContext,
     PerlmutterSystemContext,
     SystemContext,
     SystemSelection,
@@ -157,6 +158,7 @@ class TestSchedulerProperty:
         ),
         pytest.param(EljaSystemContext, set(), id="elja"),
         pytest.param(ExpanseSystemContext, {ENV_CSTAR_SLURM_ACCOUNT}, id="expanse"),
+        pytest.param(OscarSystemContext, set(), id="oscar"),
         pytest.param(PerlmutterSystemContext, set(), id="perlmutter"),
     ],
 )

@@ -1,3 +1,4 @@
+import json
 import logging
 import pickle
 import re
@@ -17,6 +18,7 @@ from pydantic import ValidationError
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_DEBUG_BUILD_MODE,
     ENV_CSTAR_SYSTEM,
     FLAG_OFF,
@@ -27,10 +29,12 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
+from cstar.io.staged_data import StagedFile
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.file_system import BUILD_RECORD_NAME
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
     CARBONATE_SENSITIVITY_VARIABLES,
@@ -44,12 +48,14 @@ from cstar.roms.input_dataset import (
     ROMSModelGrid,
     ROMSNestingInfo,
     ROMSPartitioning,
+    ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
     missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import (
     RomsNamelist,
+    RomsNamelistBase,
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_9_0,
@@ -58,10 +64,11 @@ from cstar.roms.namelist import (
     namelist_schema_for_ref,
 )
 from cstar.roms.precheck import (
+    MAX_FORCING_FILES_BEFORE_0_13_0,
     MAX_NAMELIST_FILE_NAME_LENGTH,
     MAX_OUTPUT_ROOT_NAME_LENGTH,
 )
-from cstar.roms.simulation import ROMSSimulation, _join_workers
+from cstar.roms.simulation import IOLayout, ROMSSimulation, _join_workers
 from cstar.system.manager import (
     DOCS_MACHINES_URL,
     AnvilSystemContext,
@@ -95,6 +102,56 @@ EXAMPLE_NAMELIST_V0_13_0 = (
 )
 _REAL_NAMELIST_READ = RomsNamelist.read
 _REAL_NAMELIST_READ_V0_5_0 = RomsNamelistV0_5_0.read
+
+
+class _JoinedLayoutSimulation(ROMSSimulation):
+    """A simulation whose model always reads and writes whole files, without
+    ParallelIO: the second implementation of the `io_layout` override point.
+    """
+
+    @property
+    def io_layout(self) -> IOLayout:
+        return IOLayout.JOINED
+
+
+def _rebuilt_as(
+    cls: type[ROMSSimulation], sim: ROMSSimulation, **overrides: Any
+) -> ROMSSimulation:
+    """Construct a `cls` from the components of `sim` (a `stub_romssimulation`),
+    with any constructor arguments in `overrides` replacing them.
+    """
+    kwargs: dict[str, Any] = {
+        "name": sim.name,
+        "directory": sim.directory,
+        "discretization": sim.discretization,
+        "runtime_code": sim.runtime_code,
+        "compile_time_code": sim.compile_time_code,
+        "codebase": sim.codebase,
+        "start_date": sim.start_date,
+        "end_date": sim.end_date,
+        "valid_start_date": sim.valid_start_date,
+        "valid_end_date": sim.valid_end_date,
+        "marbl_codebase": sim.marbl_codebase,
+        "model_grid": sim.model_grid,
+        "initial_conditions": sim.initial_conditions,
+        "tidal_forcing": sim.tidal_forcing,
+        "river_forcing": sim.river_forcing,
+        "cdr_forcing": sim.cdr_forcing,
+        "nesting_info": sim.nesting_info,
+        "boundary_forcing": sim.boundary_forcing,
+        "surface_forcing": sim.surface_forcing,
+        "forcing_corrections": sim.forcing_corrections,
+        "carbonate_sensitivity": sim.carbonate_sensitivity,
+    }
+    return cls(**{**kwargs, **overrides})
+
+
+@pytest.fixture
+def joined_simulation(stub_romssimulation: ROMSSimulation) -> ROMSSimulation:
+    """The `stub_romssimulation` as a joined-layout simulation without ParallelIO."""
+    sim = _rebuilt_as(_JoinedLayoutSimulation, stub_romssimulation)
+    assert not sim.use_pio
+    return sim
 
 
 class TestROMSSimulationInitialization:
@@ -887,6 +944,41 @@ class TestROMSSimulationInitialization:
         ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
     )
     @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_forcing_file_count(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """More forcing files than a pre-0.13.0 ROMS reads are refused when the
+        namelist is built; exactly the limit is accepted.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        limit = MAX_FORCING_FILES_BEFORE_0_13_0
+        mock_forcing_paths.return_value = [Path("f.nc")] * limit
+        assert len(sim.roms_runtime_settings.forcing_files.frcfiles) == limit
+
+        mock_forcing_paths.return_value = [Path("f.nc")] * (limit + 1)
+        with pytest.raises(ValueError, match="at most 360") as exc:
+            _ = sim.roms_runtime_settings
+        assert f"{limit + 1} forcing files" in str(exc.value)
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
     def test_roms_runtime_settings_file_name_length(
         self,
         mock_grid_path,
@@ -933,6 +1025,103 @@ class TestROMSSimulationInitialization:
         }
         with pytest.raises(ValueError, match=r"grid_settings\.grdname"):
             _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions,
+        "path_for_roms_unpartitioned",
+        new_callable=mock.PropertyMock,
+    )
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(
+        ROMSModelGrid, "path_for_roms_unpartitioned", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_joined_layout(
+        self,
+        mock_grid_path,
+        mock_grid_path_unpartitioned,
+        mock_ini_path,
+        mock_ini_path_unpartitioned,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        joined_simulation,
+        stageddatacollection_remote_files,
+    ):
+        """A joined `io_layout` without ParallelIO names the whole grid and
+        initial-condition files and writes its output straight into `output`.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            joined_simulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        # the partitioned paths differ, so naming either one is detectable
+        mock_grid_path.return_value = [Path("partitioned_grid.nc")]
+        mock_ini_path.return_value = [Path("partitioned_ini.nc")]
+        mock_grid_path_unpartitioned.return_value = [Path("whole_grid.nc")]
+        mock_ini_path_unpartitioned.return_value = [Path("whole_ini.nc")]
+        assert not sim.use_pio
+
+        result = sim.roms_runtime_settings
+
+        assert result.grid_settings.grdname == "whole_grid.nc"
+        assert result.initial_conditions.inifile == "whole_ini.nc"
+        assert result.simulation_name_settings.output_root_name == "../output/output"
+        assert result.extract_data_settings.extract_root_name == "../output/child"
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_check_runtime_settings_is_an_override_point(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """`roms_runtime_settings` runs the start-up checks through
+        `_check_runtime_settings`, so a subclass that replaces it is honoured:
+        a file name too long for ucla-roms is refused by the base class and
+        accepted by one whose model has no such rule.
+        """
+        too_long = [Path("/" + "a" * MAX_NAMELIST_FILE_NAME_LENGTH + ".nc")]
+
+        checked: list[RomsNamelistBase] = []
+
+        class _NoChecks(ROMSSimulation):
+            def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
+                checked.append(nml)
+
+        for cls, expect_refusal in ((ROMSSimulation, True), (_NoChecks, False)):
+            sim = _rebuilt_as(cls, stub_romssimulation)
+            self._prepare_sim_for_runtime_settings(
+                sim,
+                stageddatacollection_remote_files,
+                mock_grid_path,
+                mock_ini_path,
+                mock_forcing_paths,
+                mock_schema_for_ref,
+            )
+            mock_forcing_paths.return_value = too_long
+
+            if expect_refusal:
+                with pytest.raises(ValueError, match="Shorten these file names"):
+                    _ = sim.roms_runtime_settings
+            else:
+                nml = sim.roms_runtime_settings
+                assert checked == [nml]
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
@@ -4163,6 +4352,125 @@ class TestValidateCarbonateSensitivityInputs:
         mock_partition.assert_not_called()
 
 
+class TestValidateRiverCount:
+    """Tests for `ROMSSimulation._validate_river_count`.
+
+    The raw namelist read is patched; the namelist is a real
+    `RomsNamelistV0_9_0` so `namelist_overrides` layer on it for real, and the
+    river file is a tiny real netCDF file.
+    """
+
+    @staticmethod
+    def _nml(
+        nriv: int, river_source: bool = True, river_analytical: bool = False
+    ) -> RomsNamelistV0_9_0:
+        nml = RomsNamelistV0_9_0.read(EXAMPLE_NAMELIST_V0_9_0)
+        nml.river_frc_settings.nriv = nriv
+        nml.river_frc_settings.river_source = river_source
+        nml.river_frc_settings.river_analytical = river_analytical
+        return nml
+
+    @staticmethod
+    def _staged_river(tmp_path: Path, dims: dict[str, int]) -> ROMSRiverForcing:
+        """Stage a tiny netCDF file with dimensions `dims` as the river forcing."""
+        source = tmp_path / "source" / "rivers.nc"
+        source.parent.mkdir(exist_ok=True)
+        xr.Dataset(
+            {f"v_{name}": (name, np.zeros(size)) for name, size in dims.items()}
+        ).to_netcdf(source)
+        dataset = ROMSRiverForcing(location=str(source))
+        dataset.get(tmp_path / "staged")
+        return dataset
+
+    def _validate(self, sim: ROMSSimulation, nml: Any) -> None:
+        with mock.patch.object(
+            ROMSSimulation,
+            "_read_raw_namelist",
+            return_value=(nml, type(nml), "0.9.0"),
+        ):
+            sim._validate_river_count()
+
+    def test_matching_count_passes(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        self._validate(sim, self._nml(3))
+
+    @pytest.mark.parametrize(("nriv", "in_file"), [(5, 3), (2, 3)])
+    def test_mismatch_names_both_counts(
+        self, stub_romssimulation, tmp_path, nriv, in_file
+    ):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": in_file})
+        with pytest.raises(ValueError, match="does not match") as exc_info:
+            self._validate(sim, self._nml(nriv))
+
+        message = str(exc_info.value)
+        assert f"rivers.nc holds {in_file} rivers" in message
+        assert f"river_frc_settings.nriv is {nriv}" in message
+        assert "Start+count exceeds dimension bound" in message
+        assert "silently leaves the rest out" in message
+        assert "namelist_overrides" in message
+
+    def test_override_of_nriv_is_honored(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        sim.namelist_overrides = {"river_frc_settings": {"nriv": 3}}
+        self._validate(sim, self._nml(5))
+
+    def test_rivers_off_checks_nothing(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        self._validate(sim, self._nml(7, river_source=False))
+
+    def test_analytical_rivers_check_nothing(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"nriver": 3})
+        self._validate(sim, self._nml(7, river_analytical=True))
+
+    def test_no_river_forcing_checks_nothing(self, stub_romssimulation):
+        sim = stub_romssimulation
+        sim.river_forcing = None
+        with mock.patch.object(ROMSSimulation, "_read_raw_namelist") as mock_read:
+            sim._validate_river_count()
+
+        mock_read.assert_not_called()
+
+    def test_unstaged_river_forcing_checks_nothing(self, stub_romssimulation, tmp_path):
+        sim = stub_romssimulation
+        source = tmp_path / "r.nc"
+        xr.Dataset({"v": ("nriver", np.zeros(2))}).to_netcdf(source)
+        sim.river_forcing = ROMSRiverForcing(location=str(source))
+        with mock.patch.object(ROMSSimulation, "_read_raw_namelist") as mock_read:
+            sim._validate_river_count()
+
+        mock_read.assert_not_called()
+
+    def test_file_without_nriver_dimension_is_refused(
+        self, stub_romssimulation, tmp_path
+    ):
+        sim = stub_romssimulation
+        sim.river_forcing = self._staged_river(tmp_path, {"river": 3})
+        with pytest.raises(ValueError, match="has no nriver dimension"):
+            self._validate(sim, self._nml(3))
+
+    def test_pre_run_runs_the_check(self, stub_romssimulation):
+        """`pre_run` runs the check (the other pre-run checks are patched out)."""
+        sim = stub_romssimulation
+        with (
+            mock.patch.object(ROMSSimulation, "_validate_reference_dates"),
+            mock.patch.object(ROMSSimulation, "_validate_carbonate_sensitivity_inputs"),
+            mock.patch.object(
+                ROMSSimulation,
+                "_validate_river_count",
+                side_effect=ValueError("river count"),
+            ) as mock_validate,
+            pytest.raises(ValueError, match="river count"),
+        ):
+            sim.pre_run()
+
+        mock_validate.assert_called_once_with()
+
+
 class TestAttach:
     """Tests for `ROMSSimulation.attach()`.
 
@@ -4382,7 +4690,9 @@ class TestAttach:
         with caplog.at_level(logging.INFO, logger=sim.log.name):
             sim.attach()
 
-        mock_get.assert_called_once_with(local_dir=sim.fs_manager.input_datasets_dir)
+        mock_get.assert_called_once_with(
+            local_dir=sim.fs_manager.input_datasets_dir, name=""
+        )
         mock_partition.assert_called_once_with(np_xi=np_xi, np_eta=np_eta)
         assert sim.initial_conditions.source.location in caplog.text
 
@@ -5114,3 +5424,823 @@ class TestROMSSimulationUsePIO:
             for i in (item if isinstance(item, list) else [item])
         ]
         assert sim._forcing_paths == flat_paths
+
+
+class TestIOLayout:
+    """Tests for `ROMSSimulation.io_layout`, the one property that says whether
+    C-Star partitions inputs and joins outputs, or the model reads and writes
+    whole files.
+    """
+
+    @pytest.mark.parametrize(
+        ("use_pio", "expected"),
+        [
+            pytest.param(False, IOLayout.PARTITIONED, id="no_pio"),
+            pytest.param(True, IOLayout.JOINED, id="pio"),
+        ],
+    )
+    def test_io_layout_follows_use_pio(
+        self, use_pio: bool, expected: IOLayout, stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """A simulation is joined exactly when ParallelIO is used."""
+        stub_romssimulation.use_pio = use_pio
+
+        assert stub_romssimulation.io_layout is expected
+
+    def test_a_subclass_can_override_the_layout(
+        self, joined_simulation: ROMSSimulation
+    ) -> None:
+        """A model that always reads and writes whole files is joined without
+        `use_pio`.
+        """
+        assert joined_simulation.io_layout is IOLayout.JOINED
+        assert not joined_simulation.use_pio
+        assert not joined_simulation.pio_codebase
+
+    @mock.patch.object(ROMSInputDataset, "path_for_roms_unpartitioned")
+    def test_forcing_paths_are_unpartitioned_when_joined(
+        self, mock_path_for_roms_unpartitioned, joined_simulation: ROMSSimulation
+    ) -> None:
+        """A joined layout without ParallelIO names the whole forcing files,
+        without requiring partitioning.
+        """
+        sim = joined_simulation
+        sim.river_forcing = None
+        # (typed loosely: the class attribute is a read-only property, which the
+        # patch above replaces)
+        datasets: list[Any] = sim._forcing_datasets
+        whole = {id(d): Path(f"whole_{i}.nc") for i, d in enumerate(datasets)}
+
+        # `path_for_roms` is left untouched: were it consulted, it would raise
+        # FileNotFoundError as these datasets are never partitioned
+        for d in datasets:
+            d.path_for_roms_unpartitioned = whole[id(d)]
+
+        assert sim._forcing_paths == list(whole.values())
+
+    @mock.patch.object(ROMSSimulation, "_validate_pio_inputs")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_pre_run_does_not_partition_when_joined(
+        self,
+        mock_partition,
+        mock_validate_pio,
+        joined_simulation: ROMSSimulation,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A joined layout without ParallelIO neither partitions its inputs nor
+        checks them for ParallelIO.
+        """
+        sim = joined_simulation
+        caplog.set_level(logging.INFO, logger=sim.log.name)
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(return_value=None),
+        )
+
+        with mock.patch.object(
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+        ) as mock_input_datasets:
+            mock_input_datasets.return_value = [dataset]
+
+            sim.pre_run()
+
+        dataset.partition.assert_not_called()
+        mock_partition.assert_not_called()
+        mock_validate_pio.assert_not_called()
+        assert "Joined file layout: skipping input-dataset partitioning" in caplog.text
+
+    @mock.patch.object(ROMSSimulation, "_validate_pio_inputs")
+    def test_pre_run_with_pio_keeps_its_message(
+        self,
+        mock_validate_pio,
+        stub_romssimulation: ROMSSimulation,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """With ParallelIO, `pre_run` still validates the inputs and says why it
+        does not partition them.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+        caplog.set_level(logging.INFO, logger=sim.log.name)
+
+        with mock.patch.object(
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+        ) as mock_input_datasets:
+            mock_input_datasets.return_value = []
+
+            sim.pre_run()
+
+        mock_validate_pio.assert_called_once()
+        assert (
+            "use_pio is True: skipping input-dataset partitioning "
+            "(ParallelIO reads joined files directly)"
+        ) in caplog.text
+
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_prepare_launch_creates_no_temp_output_when_joined(
+        self,
+        mock_runtime_settings,
+        joined_simulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ) -> None:
+        """A joined layout writes straight into `output`, so `temp_output` is
+        never created.
+        """
+        sim = joined_simulation
+        sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+        sim.exe_path.parent.mkdir(parents=True, exist_ok=True)
+        sim.exe_path.write_text("binary")
+        runtime_code_dir = sim.fs_manager.runtime_code_dir
+        sim.runtime_code._working_copy = stageddatacollection_remote_files(
+            paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+            sources=sim.runtime_code.source,
+        )
+
+        sim.prepare_launch()
+
+        assert sim.fs_manager.output_dir.is_dir()
+        assert not sim.fs_manager.temp_output_dir.exists()
+
+    @mock.patch("subprocess.run")
+    def test_post_run_does_not_join_when_joined(
+        self,
+        mock_subprocess,
+        joined_simulation: ROMSSimulation,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A joined layout without ParallelIO only counts the whole files in
+        `output`: nothing is joined, and a piece in `temp_output` is left alone.
+        """
+        sim = joined_simulation
+        sim.fs_manager.prepare()
+        output_dir = sim.fs_manager.output_dir
+        piece = sim.fs_manager.temp_output_dir / "ocean_his.20240101000000.001.nc"
+        piece.touch()
+        (output_dir / "ocean_his.20240101000000.nc").touch()
+        (output_dir / "ocean_rst.20240101000000.nc").touch()
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+        caplog.set_level(logging.INFO, logger=sim.log.name)
+
+        sim.post_run()
+
+        mock_subprocess.assert_not_called()
+        assert piece.exists()
+        assert f"2 output files in `{output_dir}`" in caplog.text
+        assert "use_pio" not in caplog.text
+
+    def test_post_run_with_pio_keeps_its_message(
+        self, stub_romssimulation: ROMSSimulation, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """With ParallelIO, `post_run` still says so when it counts the outputs."""
+        sim = stub_romssimulation
+        sim.use_pio = True
+        sim.fs_manager.prepare()
+        (sim.fs_manager.output_dir / "ocean_his.20240101000000.nc").touch()
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+        caplog.set_level(logging.INFO, logger=sim.log.name)
+
+        sim.post_run()
+
+        assert (
+            f"use_pio is True: 1 output files in `{sim.fs_manager.output_dir}`"
+            in caplog.text
+        )
+
+    def test_attach_of_a_joined_layout(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ) -> None:
+        """`attach` asks a joined layout for no processor grid and does not warn
+        that `--clobber` deletes `temp_output`, where a partitioned one does.
+        """
+        joined = _rebuilt_as(_JoinedLayoutSimulation, stub_romssimulation)
+        messages: dict[IOLayout, str] = {}
+        for sim in (stub_romssimulation, joined):
+            sim.discretization = ROMSDiscretization()
+            with (
+                mock.patch.object(AdditionalCode, "attach"),
+                mock.patch.object(
+                    ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+                ) as mock_input_datasets,
+                mock.patch.object(
+                    ROMSSimulation, "codebases", new_callable=mock.PropertyMock
+                ) as mock_codebases,
+                mock.patch.object(
+                    ROMSSimulation, "_build_dir", new_callable=mock.PropertyMock
+                ) as mock_build_dir,
+                pytest.raises(CstarExpectationFailed) as exc_info,
+            ):
+                mock_input_datasets.return_value = []
+                mock_codebases.return_value = []
+                # no executable: the one problem a joined layout can have here
+                mock_build_dir.return_value = tmp_path
+                sim.attach()
+            messages[sim.io_layout] = str(exc_info.value)
+
+        assert "Cannot partition input datasets" in messages[IOLayout.PARTITIONED]
+        assert "--clobber deletes" in messages[IOLayout.PARTITIONED]
+        assert "compiled ROMS executable" in messages[IOLayout.JOINED]
+        assert "Cannot partition input datasets" not in messages[IOLayout.JOINED]
+        assert "--clobber deletes" not in messages[IOLayout.JOINED]
+
+
+class TestOverridePoints:
+    """Tests for the narrow hooks a `ROMSSimulation` subclass overrides instead
+    of copying a method: `_check_compile_time_code`, `_build_dir`,
+    `_executable_name`, `_launch_command`, `_build_record`,
+    `_cdr_lite_enabled` (and `_check_runtime_settings`, tested with
+    `roms_runtime_settings`).
+    """
+
+    def test_check_compile_time_code_refuses_none(self) -> None:
+        """The base class requires compile-time code."""
+        with pytest.raises(
+            NotImplementedError, match="could not find a 'compile_time_code' entry"
+        ):
+            ROMSSimulation._check_compile_time_code(None)
+
+    def test_check_compile_time_code_accepts_code(
+        self, roms_compile_time_code: AdditionalCode
+    ) -> None:
+        """Compile-time code passes the check."""
+        ROMSSimulation._check_compile_time_code(roms_compile_time_code)
+
+    def test_a_subclass_without_compile_time_code(
+        self, stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """A subclass whose build takes no compile-time code overrides the
+        check, and has no build directory.
+        """
+
+        class _NoCompileTimeCode(ROMSSimulation):
+            @classmethod
+            def _check_compile_time_code(cls, compile_time_code) -> None:
+                return None
+
+        sim = _rebuilt_as(
+            _NoCompileTimeCode, stub_romssimulation, compile_time_code=None
+        )
+
+        assert sim.compile_time_code is None
+        assert sim._build_dir is None
+
+    def test_build_dir_and_executable_name(
+        self, stub_romssimulation: ROMSSimulation, stageddatacollection_remote_files
+    ) -> None:
+        """The build directory is the staged compile-time code's directory, and
+        there is none before it is staged.
+        """
+        sim = stub_romssimulation
+        assert sim._build_dir is None
+        assert sim._executable_name == "roms"
+
+        build_dir = sim.fs_manager.compile_time_code_dir
+        assert sim.compile_time_code
+        sim.compile_time_code._working_copy = stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
+
+        assert sim._build_dir == build_dir
+
+    def test_attach_looks_for_the_overridden_executable(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ) -> None:
+        """`attach` looks for `_executable_name` in `_build_dir`."""
+        build_dir = tmp_path / "gpu_build"
+        build_dir.mkdir()
+
+        class _OtherBuild(ROMSSimulation):
+            @property
+            def _build_dir(self) -> Path | None:
+                return build_dir
+
+            @property
+            def _executable_name(self) -> str:
+                return "roms_gpu"
+
+        sim = _rebuilt_as(_OtherBuild, stub_romssimulation)
+        with (
+            mock.patch.object(AdditionalCode, "attach"),
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+            mock.patch.object(
+                ROMSSimulation, "codebases", new_callable=mock.PropertyMock
+            ) as mock_codebases,
+            pytest.raises(CstarExpectationFailed) as exc_info,
+        ):
+            mock_input_datasets.return_value = []
+            mock_codebases.return_value = []
+            sim.attach()
+
+        assert f"compiled ROMS executable {build_dir / 'roms_gpu'}" in str(
+            exc_info.value
+        )
+
+    def test_launch_command(self, stub_romssimulation: ROMSSimulation) -> None:
+        """The base class launches `./roms` under the system's MPI prefix."""
+        sim = stub_romssimulation
+
+        assert sim._launch_command("cstar_generated_roms.nml") == (
+            f"{get_sysmgr().environment.mpi_exec_prefix} "
+            f"-n {sim.discretization.n_procs_tot} ./roms cstar_generated_roms.nml"
+        )
+
+    def test_launch_command_uses_the_executable_name(
+        self, stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """The launch command runs the executable the subclass names."""
+
+        class _OtherExecutable(ROMSSimulation):
+            @property
+            def _executable_name(self) -> str:
+                return "roms_gpu"
+
+        sim = _rebuilt_as(_OtherExecutable, stub_romssimulation)
+
+        assert sim._launch_command("x.nml").endswith(" ./roms_gpu x.nml")
+
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_prepare_launch_uses_the_launch_command_hook(
+        self,
+        mock_runtime_settings,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ) -> None:
+        """`prepare_launch` plans the command its subclass builds."""
+
+        class _OtherLaunch(ROMSSimulation):
+            def _launch_command(self, namelist_name: str) -> str:
+                return f"launch-by-hand {namelist_name}"
+
+        sim = _rebuilt_as(_OtherLaunch, stub_romssimulation)
+        sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+        sim.exe_path.parent.mkdir(parents=True, exist_ok=True)
+        sim.exe_path.write_text("binary")
+        runtime_code_dir = sim.fs_manager.runtime_code_dir
+        sim.runtime_code._working_copy = stageddatacollection_remote_files(
+            paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+            sources=sim.runtime_code.source,
+        )
+
+        plan = sim.prepare_launch()
+
+        assert plan.command == "launch-by-hand cstar_generated_roms.nml"
+
+    def test_build_record(self, stub_romssimulation: ROMSSimulation) -> None:
+        """The build record names the schema, the ucla-roms pin and its commit."""
+        sim = stub_romssimulation
+        sim.codebase = mock.MagicMock()
+        sim.codebase.source.checkout_target = "v0.13.0"
+        sim.codebase.working_copy.checkout_hash = "abc123"
+
+        assert sim._build_record(RomsNamelistV0_13_0) == {
+            "namelist_schema": "RomsNamelistV0_13_0",
+            "ucla_roms_ref": "v0.13.0",
+            "ucla_roms_commit": "abc123",
+        }
+
+        sim.codebase.working_copy = None
+
+        assert sim._build_record(RomsNamelistV0_13_0)["ucla_roms_commit"] == ""
+
+    def test_write_build_record_writes_what_the_hook_returns(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ) -> None:
+        """A subclass adds to the build record by overriding `_build_record`."""
+
+        class _RecordsMore(ROMSSimulation):
+            def _build_record(self, schema: Any) -> dict[str, Any]:
+                return {"namelist_schema": schema.__name__, "architecture": "sm_90"}
+
+        sim = _rebuilt_as(_RecordsMore, stub_romssimulation)
+
+        sim._write_build_record(tmp_path, RomsNamelistV0_13_0)
+
+        assert json.loads((tmp_path / BUILD_RECORD_NAME).read_text()) == {
+            "namelist_schema": "RomsNamelistV0_13_0",
+            "architecture": "sm_90",
+        }
+
+    @pytest.mark.parametrize("cppdefs", [{}, {"cdr_lite": False}, {"cdr_lite": True}])
+    def test_cdr_lite_enabled_reads_the_cppdefs(
+        self, cppdefs: dict[str, bool], stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """The base class answers from the staged `cppdefs.opt`."""
+        with mock.patch.object(
+            ROMSSimulation, "_active_cppdefs_for_precheck", return_value=cppdefs
+        ):
+            assert stub_romssimulation._cdr_lite_enabled() is cppdefs.get(
+                "cdr_lite", False
+            )
+
+    def test_cdr_lite_enabled_is_an_override_point(
+        self, stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """The carbonate sensitivity check asks `_cdr_lite_enabled`: a subclass
+        that says no is not checked, where the base class goes on to read the
+        (here unstaged) namelist.
+        """
+
+        class _NoCdrLite(ROMSSimulation):
+            def _cdr_lite_enabled(self) -> bool:
+                return False
+
+        sim = _rebuilt_as(_NoCdrLite, stub_romssimulation)
+
+        with mock.patch.object(
+            ROMSSimulation,
+            "_active_cppdefs_for_precheck",
+            return_value={"cdr_lite": True},
+        ):
+            with pytest.raises(ValueError, match="without local namelist"):
+                stub_romssimulation._validate_carbonate_sensitivity_inputs()
+
+            sim._validate_carbonate_sensitivity_inputs()
+
+
+class TestSameNamedInputs:
+    """Tests for `ROMSSimulation._input_staging_names`, which lets same-named
+    forcing files of chained runs be staged side by side and refuses any other
+    shared name.
+    """
+
+    NAME = "output_cdrgas.20120219000000.nc"
+    T = 100.0
+
+    @staticmethod
+    def _write(path: Path, **times: list[float]) -> str:
+        """Write a tiny netCDF file with the given 1-D time variables and a 2-D
+        data variable; return its location.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        xr.Dataset(
+            {
+                **{k: (k, np.asarray(v)) for k, v in times.items()},
+                "data": (("a", "b"), np.zeros((2, 3))),
+            }
+        ).to_netcdf(path)
+        return str(path)
+
+    def _chain(self, tmp_path: Path) -> tuple[str, str]:
+        """Locations of an earlier and a later averaged `_cdrgas` file following on
+        at `T`, with the time variables ucla-roms writes (output period 1).
+
+        The earlier step's last file holds its last average (stamped at the window
+        midpoint) and its end bracket at `T`; the later step's first file holds its
+        start bracket at `T`, then its averages. Brackets have zero-length windows.
+        """
+        T = self.T
+        earlier = self._write(
+            tmp_path / "a" / self.NAME,
+            ocean_time=[T, T],
+            ddic_dco2_time=[T - 0.5, T],
+            avg_begin_time=[T - 1.0, T],
+            avg_end_time=[T, T],
+        )
+        later = self._write(
+            tmp_path / "b" / self.NAME,
+            ocean_time=[T, T + 1.0, T + 2.0],
+            ddic_dco2_time=[T, T + 0.5, T + 1.5],
+            avg_begin_time=[T, T, T + 1.0],
+            avg_end_time=[T, T + 1.0, T + 2.0],
+        )
+        return earlier, later
+
+    @staticmethod
+    def _sim(
+        sim: ROMSSimulation, *datasets: ROMSCarbonateSensitivity
+    ) -> ROMSSimulation:
+        """Make `datasets` the simulation's only forcing, staged without partitioning."""
+        sim.tidal_forcing = None
+        sim.river_forcing = None
+        sim.boundary_forcing = []
+        sim.surface_forcing = []
+        sim.forcing_corrections = []
+        sim.carbonate_sensitivity = list(datasets)
+        return sim
+
+    @staticmethod
+    def _names(sim: ROMSSimulation) -> list[str]:
+        return [
+            n for inp, n in sim._input_staging_names() if inp in sim._forcing_datasets
+        ]
+
+    def test_following_files_are_staged_side_by_side(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """The later file is staged as `<stem>_2.nc` and ROMS lists both in order."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        earlier, later = self._chain(tmp_path)
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=earlier),
+            ROMSCarbonateSensitivity(location=later),
+        )
+        sim.use_pio = True
+
+        with caplog.at_level(logging.INFO, logger=sim.log.name):
+            names = self._names(sim)
+        assert names == ["", "output_cdrgas.20120219000000_2.nc"]
+        assert f"{later} -> output_cdrgas.20120219000000_2.nc" in caplog.text
+
+        staged_dir = tmp_path / "staged"
+        for inp, name in sim._input_staging_names():
+            if inp in sim._forcing_datasets:
+                inp.get(staged_dir, name=name)
+
+        assert sim._forcing_paths == [
+            staged_dir / self.NAME,
+            staged_dir / "output_cdrgas.20120219000000_2.nc",
+        ]
+        assert (staged_dir / "output_cdrgas.20120219000000_2.nc").resolve() == Path(
+            later
+        ).resolve()
+
+    def test_partitioned_pieces_follow_the_staged_name(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Without ParallelIO, the renamed file's partition pieces carry its staged
+        name and ROMS is pointed at `<stem>_2.nc`.
+        """
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        earlier, later = self._chain(tmp_path)
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=earlier),
+            ROMSCarbonateSensitivity(location=later),
+        )
+        sim.use_pio = False
+        np_xi, np_eta = 2, 1
+
+        staged_dir = tmp_path / "staged"
+        for inp, name in sim._input_staging_names():
+            if inp in sim._forcing_datasets:
+                inp.get(staged_dir, name=name)
+                (staged,) = inp._working_copy_files()
+                for i in range(np_xi * np_eta):
+                    suffix = ROMSPartitioning.suffix(i, np_xi * np_eta)
+                    Path(f"{staged.with_suffix('')}{suffix}").write_text("x")
+                inp.attach_partitions(np_xi, np_eta)
+
+        assert sim._forcing_paths == [
+            staged_dir / self.NAME,
+            staged_dir / "output_cdrgas.20120219000000_2.nc",
+        ]
+
+    def test_overlapping_times_are_refused(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """Files whose times overlap are refused, naming both locations."""
+        T = self.T
+        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[T - 1, T + 1])
+        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[T, T + 2])
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=a),
+            ROMSCarbonateSensitivity(location=b),
+        )
+
+        with pytest.raises(ValueError, match="share a name") as exc_info:
+            sim._input_staging_names()
+
+        message = str(exc_info.value)
+        assert self.NAME in message
+        assert a in message
+        assert b in message
+        assert "point `path:` at it" in message
+
+    def test_files_listed_in_reverse_order_are_refused(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """The right times in the wrong order are not staged side by side."""
+        earlier, later = self._chain(tmp_path)
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=later),
+            ROMSCarbonateSensitivity(location=earlier),
+        )
+
+        with pytest.raises(ValueError, match="share a name"):
+            sim._input_staging_names()
+
+    def test_the_same_file_twice_is_refused(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """One file reached through two spellings is not a pair of chained files."""
+        earlier, _ = self._chain(tmp_path)
+        link = tmp_path / "link"
+        link.symlink_to(Path(earlier).parent)
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=earlier),
+            ROMSCarbonateSensitivity(location=str(link / self.NAME)),
+        )
+
+        with pytest.raises(ValueError, match="share a name"):
+            sim._input_staging_names()
+
+    def test_different_dataset_classes_are_refused(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """A name shared by datasets of two classes is refused."""
+        earlier, later = self._chain(tmp_path)
+        sim = self._sim(stub_romssimulation, ROMSCarbonateSensitivity(location=earlier))
+        sim.forcing_corrections = [ROMSForcingCorrections(location=later)]
+
+        with pytest.raises(ValueError, match="share a name"):
+            sim._input_staging_names()
+
+    def test_files_sharing_no_time_variable_are_refused(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """Without a shared time variable there is nothing to order the files by."""
+        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[1.0, 2.0])
+        b = self._write(tmp_path / "b" / self.NAME, bry_time=[3.0, 4.0])
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=a),
+            ROMSCarbonateSensitivity(location=b),
+        )
+
+        with pytest.raises(ValueError, match="share a name"):
+            sim._input_staging_names()
+
+    def test_new_name_skips_names_already_used(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """A staged input already called `<stem>_2.nc` pushes the rename to `_3`."""
+        earlier, later = self._chain(tmp_path)
+        taken = self._write(
+            tmp_path / "c" / "output_cdrgas.20120219000000_2.nc", ocean_time=[0.0]
+        )
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=earlier),
+            ROMSCarbonateSensitivity(location=later),
+        )
+        sim.forcing_corrections = [ROMSForcingCorrections(location=taken)]
+
+        assert self._names(sim) == ["", "", "output_cdrgas.20120219000000_3.nc"]
+
+    def test_every_unresolvable_name_is_reported_at_once(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """One error lists every shared name that cannot be resolved."""
+        a1 = self._write(tmp_path / "a1" / "one.nc", ocean_time=[1.0])
+        a2 = self._write(tmp_path / "a2" / "one.nc", ocean_time=[0.0])
+        b1 = self._write(tmp_path / "b1" / "two.nc", ocean_time=[1.0])
+        b2 = self._write(tmp_path / "b2" / "two.nc", ocean_time=[0.0])
+        sim = self._sim(
+            stub_romssimulation,
+            *(ROMSCarbonateSensitivity(location=x) for x in (a1, a2, b1, b2)),
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            sim._input_staging_names()
+
+        message = str(exc_info.value)
+        for item in ("one.nc", "two.nc", a1, a2, b1, b2):
+            assert item in message
+
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_refuses_before_clobbering(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+    ):
+        """An unresolvable name stops `setup(clobber=True)` before it deletes anything."""
+        T = self.T
+        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[T - 1, T + 1])
+        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[T, T + 2])
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=a),
+            ROMSCarbonateSensitivity(location=b),
+        )
+        keep = sim.fs_manager.input_datasets_dir / "keep.txt"
+        keep.parent.mkdir(parents=True)
+        keep.write_text("x")
+
+        with pytest.raises(ValueError, match="share a name"):
+            sim.setup(clobber=True)
+
+        assert keep.exists()
+        mock_inputdataset_get.assert_not_called()
+
+    @mock.patch.object(ROMSSimulation, "_validate_build_flags")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_finds_the_renamed_file(
+        self,
+        mock_partition: mock.Mock,
+        mock_marbl_attach: mock.Mock,
+        mock_roms_attach: mock.Mock,
+        mock_verify_linkage: mock.Mock,
+        mock_validate_flags: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+    ):
+        """Resuming adopts the later file under its `_2` name."""
+        earlier, later = self._chain(tmp_path)
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=earlier),
+            ROMSCarbonateSensitivity(location=later),
+        )
+        assert sim.compile_time_code
+        TestAttach._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        TestAttach._stage_additional_code(
+            sim.runtime_code, sim.fs_manager.runtime_code_dir
+        )
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        assert np_xi is not None and np_eta is not None
+        input_dir = sim.fs_manager.input_datasets_dir
+        for inp, name in sim._input_staging_names():
+            path = TestAttach._stage_input_dataset(input_dir, inp, np_xi, np_eta)
+            if name:
+                renamed = path.with_name(name)
+                path.rename(renamed)
+                for i in range(np_xi * np_eta):
+                    suffix = ROMSPartitioning.suffix(i, np_xi * np_eta)
+                    Path(f"{path.with_suffix('')}{suffix}").rename(
+                        f"{renamed.with_suffix('')}{suffix}"
+                    )
+        (sim.fs_manager.compile_time_code_dir / "roms").write_text("binary")
+
+        sim.attach()
+
+        second = sim.carbonate_sensitivity[1]
+        assert isinstance(second.working_copy, StagedFile)
+        assert (
+            second.working_copy.path == input_dir / "output_cdrgas.20120219000000_2.nc"
+        )
+
+    @mock.patch.object(ROMSSimulation, "_validate_build_flags")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_reports_a_clash_and_still_checks_every_input(
+        self,
+        mock_partition: mock.Mock,
+        mock_marbl_attach: mock.Mock,
+        mock_roms_attach: mock.Mock,
+        mock_verify_linkage: mock.Mock,
+        mock_validate_flags: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+    ):
+        """On resume, a name clash is reported and every input is still checked."""
+        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[0.0, 2.0])
+        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[1.0, 3.0])
+        sim = self._sim(
+            stub_romssimulation,
+            ROMSCarbonateSensitivity(location=a),
+            ROMSCarbonateSensitivity(location=b),
+        )
+        expected = [
+            inp for inp in sim.input_datasets if sim._overlaps_simulation_dates(inp)
+        ]
+
+        with (
+            mock.patch.object(
+                ROMSInputDataset,
+                "attach",
+                autospec=True,
+                side_effect=FileNotFoundError("not staged"),
+            ) as mock_attach,
+            mock.patch.object(
+                ROMSInputDataset,
+                "get",
+                autospec=True,
+                side_effect=FileNotFoundError("not staged"),
+            ),
+            pytest.raises(CstarExpectationFailed) as exc_info,
+        ):
+            sim.attach()
+
+        assert "share a name" in str(exc_info.value)
+        assert [c.args[0] for c in mock_attach.call_args_list] == expected

@@ -581,6 +581,37 @@ def test_tracking_get_run_paths_skips_a_half_staged_record(
     assert repo.list_runtracking_paths(run_id, all_history) == (persisted.resolve(),)
 
 
+@pytest.mark.parametrize("record_gone", [False, True])
+def test_tracking_removal_paths_put_the_latest_link_first(
+    tmp_path: Path, record_gone: bool
+) -> None:
+    """Verify the removal paths are the latest link, the history directory and
+    the lock, in that order, and the link is found even when it dangles.
+    """
+    run_id = "to-remove"
+    repo = TrackingRepository()
+    persisted = repo.put_workplan_run_sync(_record(run_id, tmp_path / "output"))
+    if record_gone:
+        persisted.unlink()
+
+    assert repo.removal_paths(run_id) == [
+        repo.latest_path(run_id),
+        repo.run_history_dir(run_id),
+        repo._get_lock_path(run_id),
+    ]
+
+
+def test_tracking_removal_paths_leave_the_lock_of_an_unrecorded_run() -> None:
+    """Verify the lock a read creates for an unknown run-id is not, by itself,
+    something to remove.
+    """
+    repo = TrackingRepository()
+
+    assert repo.get_workplan_run_sync("never-recorded") is None
+    assert repo._get_lock_path("never-recorded").exists()
+    assert repo.removal_paths("never-recorded") == []
+
+
 @pytest.mark.asyncio
 async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
     """Verify a mixed-case run-id query resolves to the slugified run record.

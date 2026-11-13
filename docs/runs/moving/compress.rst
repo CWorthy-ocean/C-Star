@@ -58,7 +58,7 @@ An application names the variables compression must keep exact; they are only
 chunked and deflated, never cast or quantized. Coordinates and time variables
 are always kept exact.
 
-- ``ucla_roms``: both members of every carbonate perturbation pair (``ALK*``,
+- ``ucla_roms`` and ``ucla_roms_gpu``: both members of every carbonate perturbation pair (``ALK*``,
   ``DIC*``, ``hALK*``, ``int_z_*``, ``pH``, ``pCO2SURF``, ``CO3`` and their
   ``*_ALT_CO2`` baselines, including the boundary forms such as ``ALK_north``),
   since an analysis takes the difference of a pair, which after months is far

@@ -529,6 +529,35 @@ def test_cli_admin_clean_keep_path_symlink(tmp_path: Path) -> None:
     assert action.mitigated()
 
 
+def test_cli_admin_clean_unlinks_a_dangling_symlink(tmp_path: Path) -> None:
+    """Verify an asset that is a symlink to nothing is unlinked, not skipped."""
+    link = tmp_path / "latest.yaml"
+    link.symlink_to(tmp_path / "gone.yaml")
+    action = FileSystemCleanupAction(name="state", asset_paths=[link])
+    assert not action.mitigated()
+
+    result = action.execute()
+
+    assert not link.is_symlink()
+    assert result.ledger == {str(link): (CleanupStatus.DONE, "")}
+    assert action.mitigated()
+
+
+def test_cli_admin_clean_skips_a_dangling_symlink_holding_keep_paths(
+    tmp_path: Path,
+) -> None:
+    """Verify a dangling link whose target would hold keep paths is left alone."""
+    home = tmp_path / "data"
+    home.symlink_to(tmp_path / "unmounted", target_is_directory=True)
+    action = _keep_action(home, home / "source-data")
+    assert action.mitigated()
+
+    result = action.execute()
+
+    assert home.is_symlink()
+    assert result.ledger == {str(home): (CleanupStatus.SKIPPED, "")}
+
+
 @pytest.mark.asyncio
 async def test_cli_admin_clean_keep_paths_dry_run(data_home: Path) -> None:
     """Verify dry-run removes nothing when keep paths are configured."""
@@ -651,6 +680,53 @@ def test_cli_admin_clean_run_actions_of_a_scheduled_run_include_its_data(
     assert data.asset_paths == [run.output_path]
 
 
+def _tracking_paths(run_id: str) -> list[Path]:
+    """The tracking paths of `run_id`: its latest link, history directory and lock."""
+    repo = TrackingRepository()
+    return [
+        repo.latest_path(run_id),
+        repo.run_history_dir(run_id),
+        repo._get_lock_path(run_id),
+    ]
+
+
+def test_cli_admin_clean_run_actions_remove_the_latest_link_first(
+    tmp_path: Path,
+) -> None:
+    """Verify the state assets come in a fixed order, with the latest link
+    before the history record it points at.
+    """
+    _track(tmp_path / "ordered", "ordered")
+    state_dir = _leave_sentinel("ordered")
+
+    state = t.cast("FileSystemCleanupAction", get_run_actions("ordered")[0])
+
+    assert state.asset_paths == [*_tracking_paths("ordered"), state_dir]
+
+
+@pytest.mark.parametrize("link_left", [True, False])
+def test_cli_admin_clean_removes_what_an_earlier_clean_left(
+    tmp_path: Path, link_left: bool
+) -> None:
+    """Verify one clean removes the tracking an earlier, partial clean left: a
+    latest link to a removed record (or no link), an empty history directory
+    and the lock.
+    """
+    _track(tmp_path / "partial", "partial")
+    latest, history, _ = _tracking_paths("partial")
+    for record in history.iterdir():
+        record.unlink()
+    if not link_left:
+        latest.unlink()
+
+    result = CliRunner().invoke(
+        app, ["--run-id", "partial", ARG_YES], color=False, catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not [p for p in _tracking_paths("partial") if os.path.lexists(p)]
+
+
 @pytest.mark.parametrize("fields", [{"access": Access.owned}, {}])
 def test_cli_admin_clean_run_actions_of_an_owned_attached_run_include_its_data(
     tmp_path: Path, fields: dict[str, Access]
@@ -722,7 +798,7 @@ def test_cli_admin_clean_removes_the_tracking_of_a_read_only_run_but_not_its_dat
     )
 
     assert result.exit_code == 0, result.output
-    assert not latest.exists()
+    assert not [p for p in _tracking_paths("frozen") if os.path.lexists(p)]
     assert TrackingRepository().get_workplan_run_sync("frozen") is None
     assert (run.output_path / "data.nc").read_text() == "data"
 

@@ -34,6 +34,8 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.precheck import (
     _STREAM_CHECKS,
+    MAX_FORCING_FILES,
+    MAX_FORCING_FILES_BEFORE_0_13_0,
     MAX_NAMELIST_FILE_NAME_LENGTH,
     MAX_OUTPUT_ROOT_NAME_LENGTH,
     NamelistConsistencyError,
@@ -42,8 +44,10 @@ from cstar.roms.precheck import (
     averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
     check_file_name_lengths,
+    check_forcing_file_count,
     check_output_streams_divide_rst,
     check_restart_period_divisible_by_dt,
+    max_forcing_files,
 )
 
 V0_5_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
@@ -944,3 +948,64 @@ def test_file_name_lengths_checks_a_live_namelist():
     nml.marbl_biogeochemistry_settings.marbl_config_file = "m" * 251
     with pytest.raises(NamelistConsistencyError, match="marbl_config_file"):
         check_file_name_lengths(nml)
+
+
+@pytest.mark.parametrize(
+    ("schema", "limit"),
+    [
+        (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0),
+        (RomsNamelistV0_13_0, MAX_FORCING_FILES),
+    ],
+)
+def test_forcing_file_count_accepts_exactly_the_limit(schema, limit):
+    check_forcing_file_count({"forcing_files": {"frcfiles": ["f.nc"] * limit}}, schema)
+
+
+@pytest.mark.parametrize(
+    ("schema", "limit", "mentions_pin"),
+    [
+        (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0, True),
+        (RomsNamelistV0_13_0, MAX_FORCING_FILES, False),
+    ],
+)
+def test_forcing_file_count_refuses_one_over_the_limit(schema, limit, mentions_pin):
+    settings = {"forcing_files": {"frcfiles": ["f.nc"] * (limit + 1)}}
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_forcing_file_count(settings, schema)
+
+    assert excinfo.value.rule == "forcing_file_count"
+    assert excinfo.value.section == "forcing_files"
+    assert excinfo.value.keys == ("frcfiles",)
+    message = str(excinfo.value)
+    assert f"{limit + 1} forcing files" in message
+    assert f"at most {limit}" in message
+    assert "Cannot match namelist object name" in message
+    assert "nrpf_extract" in message
+    assert ("0.13.0" in message) is mentions_pin
+
+
+@pytest.mark.parametrize(
+    "settings", [{}, {"forcing_files": {}}, {"forcing_files": None}]
+)
+def test_forcing_file_count_skips_a_missing_group_or_key(settings):
+    check_forcing_file_count(settings, RomsNamelistV0_12_0)
+
+
+def test_forcing_file_count_checks_a_live_namelist():
+    nml = RomsNamelistV0_13_0.read(V0_13_0_NAMELIST)
+    nml.forcing_files.frcfiles = ["f.nc"] * (MAX_FORCING_FILES + 1)
+    with pytest.raises(NamelistConsistencyError, match="forcing files"):
+        check_forcing_file_count(nml, type(nml))
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [
+        (RomsNamelist, MAX_FORCING_FILES_BEFORE_0_13_0),
+        (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0),
+        (RomsNamelistV0_13_0, MAX_FORCING_FILES),
+    ],
+)
+def test_max_forcing_files_follows_the_schema(schema, expected):
+    assert max_forcing_files(schema) == expected
+    assert (MAX_FORCING_FILES, MAX_FORCING_FILES_BEFORE_0_13_0) == (10000, 360)

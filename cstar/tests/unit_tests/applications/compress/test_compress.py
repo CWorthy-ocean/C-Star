@@ -789,6 +789,13 @@ class TestConsumedOutput:
         protected = get_application("ucla_roms").protected_variables()
         assert not matches_any(name, protected)
 
+    def test_gpu_output_is_protected_like_cpu_output(self) -> None:
+        """The GPU model writes the same streams, so it protects the same variables."""
+        assert (
+            get_application("ucla_roms_gpu").protected_variables()
+            == get_application("ucla_roms").protected_variables()
+        )
+
 
 class _InProcessPool:
     """Runs each job on submit, in this process."""

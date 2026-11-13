@@ -46,6 +46,35 @@ earlier releases cut a longer name off silently. C-Star applies the same limits 
 every release, with headroom for the rank suffix a non-PIO run appends, which
 ROMS's own check does not allow for. Ungated by schema version.
 
+Rule E -- :func:`check_forcing_file_count` mirrors ucla-roms' ``max_frc_files``
+(``src/roms_read_write.F90``), the size of its ``frcfiles`` array: releases before
+0.13.0 read at most 360 forcing files and stop at startup with "Cannot match
+namelist object name" if the namelist lists more; 0.13.0 (PR #402) raised the
+limit to 10000. :func:`max_forcing_files` picks the limit from the namelist
+schema; a commit-hash pin that cannot be resolved falls back to the newest
+schema, so gets the larger limit, as for Rules A and C.
+
+Rule F -- :func:`check_gpu_features` mirrors the GPU model's start-up feature guard
+(roms-marbl-gpu ``src/host/feature_guard.F90``, v0.1.3-beta): the GPU model reads
+only the namelist groups it knows, so a CPU namelist that switches on a UCLA ROMS
+feature it does not have (``river_analytical``, ``pipe_source``, ``do_zslice``,
+monthly restarts, ...) would otherwise run without that feature and without a
+word, which is why the model stops instead. Five further switches act on the CPU
+only with a cpp key the GPU cannot see (or only add nesting fields to the
+restart); the model prints a warning for them, and so does the rule. It applies to
+the ``ucla_roms_gpu`` application only, and runs on the blueprint's namelist
+overrides at validation and on the composed namelist before launch, so the run
+fails at the desk rather than at start-up on the machine. Ungated by schema
+version: the GPU model has one guard whatever namelist vocabulary it reads, and a
+group C-Star's schema does not have (``tides_settings``) just never matches.
+
+Rule G -- :func:`check_gpu_array_sizes`: roms-marbl-gpu declares some namelist
+arrays smaller than UCLA ROMS does (v0.1.3-beta: ``frcfiles(max_frc)`` with
+``max_frc = 64`` in ``src/host/frc_io.F90``, where ucla-roms 0.11.0 reads 360, see
+Rule E). A namelist that gives more values stops the GPU model while it reads the
+group. Same scope and call points as Rule F; for a GPU run it is the tighter of
+the two forcing-file limits.
+
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
 A and C need an explicit, caller-supplied set of active cppdefs to know which
@@ -67,6 +96,7 @@ forge-shaped dict must first convert it (see
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -92,6 +122,14 @@ appends, which ROMS's own check (names of 256 or more characters) misses."""
 MAX_OUTPUT_ROOT_NAME_LENGTH: int = 220
 """Longest ``output_root_name`` / ``extract_root_name``. Mirrors the limit ucla-roms
 >= 0.13.0 checks: ``max_name_size`` less 36, the longest tail ROMS appends."""
+
+MAX_FORCING_FILES: int = 10000
+"""Most ``frcfiles`` entries ucla-roms >= 0.13.0 reads. Mirrors
+``max_frc_files = 10000`` in ucla-roms ``src/roms_read_write.F90`` (PR #402)."""
+
+MAX_FORCING_FILES_BEFORE_0_13_0: int = 360
+"""Most ``frcfiles`` entries ucla-roms before 0.13.0 reads. Mirrors
+``max_frc_files = 360`` in ucla-roms ``src/roms_read_write.F90``."""
 
 _FILE_NAME_KEYS: tuple[tuple[str, str, int], ...] = (
     ("grid_settings", "grdname", MAX_NAMELIST_FILE_NAME_LENGTH),
@@ -123,10 +161,13 @@ class NamelistConsistencyError(ValueError):
     different vocabulary (e.g. Forge's settings dict) can point a user at the
     field it actually exposes, without this module knowing that vocabulary
     exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
-    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"`` or
-    ``"file_name_lengths"``). ``"file_name_lengths"`` reports every offending
-    key in one error, so its ``section`` may join several group names with
-    ``", "`` and its ``keys`` may span those groups.
+    ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"``,
+    ``"file_name_lengths"``, ``"forcing_file_count"``, ``"gpu_features"`` or
+    ``"gpu_array_sizes"``). ``"file_name_lengths"`` reports every offending key in
+    one error, so its ``section`` may join several group names with ``", "`` and
+    its ``keys`` may span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"``
+    also report every offender in one error, but their ``section`` and ``keys``
+    name the first of them only.
     """
 
     def __init__(
@@ -189,6 +230,15 @@ def averages_end_on_marbl_step_applies_to_schema(
     ``RomsNamelistV0_13_0`` on subclasses it.
     """
     return issubclass(schema, RomsNamelistV0_13_0)
+
+
+def max_forcing_files(schema: type[RomsNamelistBase]) -> int:
+    """The most ``frcfiles`` entries the ucla-roms release that reads namelist
+    schema ``schema`` accepts (Rule E).
+    """
+    if issubclass(schema, RomsNamelistV0_13_0):
+        return MAX_FORCING_FILES
+    return MAX_FORCING_FILES_BEFORE_0_13_0
 
 
 def _section(container: Any, name: str) -> Any:
@@ -781,4 +831,273 @@ def check_file_name_lengths(settings: RomsNamelistBase | Mapping[str, Any]) -> N
             rule="file_name_lengths",
             section=", ".join(dict.fromkeys(group for group, _, _ in too_long)),
             keys=tuple(dict.fromkeys(key for _, key, _ in too_long)),
+        )
+
+
+def check_forcing_file_count(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    schema: type[RomsNamelistBase],
+) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist lists more forcing files
+    than the ucla-roms release that reads ``schema`` accepts (see Rule E in the
+    module docstring and :func:`max_forcing_files`).
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`.
+        Reads ``forcing_files.frcfiles``; a missing group or key is skipped.
+    schema
+        The namelist schema of the pinned ucla-roms release.
+    """
+    max_files = max_forcing_files(schema)
+    files = _section(_section(settings, "forcing_files"), "frcfiles") or []
+    if len(files) <= max_files:
+        return
+    message = (
+        f"The namelist lists {len(files)} forcing files, but this ucla-roms release "
+        f"reads at most {max_files}; ROMS stops at startup with "
+        '"Cannot match namelist object name". Use fewer, larger forcing files '
+        "(for nest-from boundary files, a larger nrpf_extract in the parent run)"
+    )
+    if max_files < MAX_FORCING_FILES:
+        message += ", or pin ucla-roms 0.13.0 or later"
+    raise NamelistConsistencyError(
+        message + ".",
+        rule="forcing_file_count",
+        section="forcing_files",
+        keys=("frcfiles",),
+    )
+
+
+@dataclass(frozen=True)
+class _GpuSwitch:
+    """One ``need_off`` or ``warn_on`` call in the GPU model's ``feature_guard.F90``.
+
+    Parameters
+    ----------
+    group
+        ``RomsNamelistBase`` group field name (the ``&<group>`` header in
+        ``namelist.nml``) the switch lives in.
+    key
+        Real Fortran namelist key of the switch.
+    what
+        The feature the switch turns on, in the GPU model's own wording.
+    when
+        ``(group, key)`` of a gate switch that must itself be true for the GPU
+        model to look at this one (the ``if (is_true(...))`` around the call),
+        or ``None`` for an unconditional check.
+    """
+
+    group: str
+    key: str
+    what: str
+    when: tuple[str, str] | None = None
+
+    def is_on(self, settings: RomsNamelistBase | Mapping[str, Any]) -> bool:
+        """Whether the GPU model sees this switch on in ``settings``.
+
+        A switch is on only when its value is ``True``; a missing group or key
+        is off, as it is for the model, which scans the namelist text.
+        """
+        if self.when is not None and not _is_true(settings, *self.when):
+            return False
+        return _is_true(settings, self.group, self.key)
+
+
+def _is_true(
+    settings: RomsNamelistBase | Mapping[str, Any], group: str, key: str
+) -> bool:
+    """Whether ``group``.``key`` is set to ``True`` in ``settings``."""
+    return _section(_section(settings, group), key) is True
+
+
+_GPU_STOP_SWITCHES: tuple[_GpuSwitch, ...] = (
+    _GpuSwitch(
+        "river_frc_settings",
+        "river_analytical",
+        "analytical river forcing",
+        when=("river_frc_settings", "river_source"),
+    ),
+    _GpuSwitch("pipe_frc_settings", "pipe_source", "pipe (point source) forcing"),
+    _GpuSwitch(
+        "cdr_output_settings",
+        "cdr_monthly_averages",
+        "monthly CDR averages",
+        when=("cdr_output_settings", "do_cdr_output"),
+    ),
+    _GpuSwitch(
+        "cdr_tracer_output_settings", "do_cdr_tracer_output", "CDR tracer output"
+    ),
+    _GpuSwitch(
+        "cdr_gas_exch_output_settings",
+        "cdr_gas_monthly_averages",
+        "monthly CDR gas-exchange averages",
+        when=("cdr_gas_exch_output_settings", "do_cdr_gas_exch_output"),
+    ),
+    _GpuSwitch(
+        "cdr_lite_output_settings",
+        "cdr_lite_monthly_averages",
+        "monthly CDR_LITE averages",
+        when=("cdr_lite_output_settings", "do_cdr_lite_output"),
+    ),
+    _GpuSwitch("zslice_settings", "do_zslice", "z-slice output"),
+    _GpuSwitch("particles_settings", "floats", "particles (floats)"),
+    _GpuSwitch("frc_output_settings", "wrt_frc", "forcing output"),
+    _GpuSwitch("surf_flx_output_settings", "wrt_smflx", "surface momentum flux output"),
+    _GpuSwitch("surf_flx_output_settings", "wrt_stflx", "surface tracer flux output"),
+    _GpuSwitch(
+        "surf_flx_output_settings", "wrt_rstflx", "surface restoring flux output"
+    ),
+    _GpuSwitch("basic_output_settings", "monthly_restarts", "monthly restarts"),
+    _GpuSwitch("bgc_settings", "wrt_bgc_dia_avg", "BGC diagnostic averages output"),
+    _GpuSwitch("tidal_frc_settings", "ana_tides", "analytical tides"),
+    _GpuSwitch("tides_settings", "ana_tides", "analytical tides"),
+)
+"""The ``need_off`` calls of roms-marbl-gpu ``src/host/feature_guard.F90`` at
+v0.1.3-beta, in its order: switches that stop the GPU run when true. Every call
+is listed, including those on groups C-Star's namelist schemas do not have
+(``cdr_tracer_output_settings`` after ucla-roms 0.9.0, ``tides_settings``), which
+never match."""
+
+_GPU_WARN_SWITCHES: tuple[_GpuSwitch, ...] = (
+    _GpuSwitch(
+        "diagnostics_settings",
+        "diag_uv",
+        "momentum budget diagnostics (DIAGNOSTICS cpp key on the CPU) "
+        "are not on the GPU",
+    ),
+    _GpuSwitch(
+        "diagnostics_settings",
+        "diag_trc",
+        "tracer budget diagnostics (DIAGNOSTICS cpp key on the CPU) are not on the GPU",
+    ),
+    _GpuSwitch(
+        "sponge_tune_settings",
+        "ub_tune",
+        "sponge tuning (SPONGE_TUNE cpp key on the CPU) is not on the GPU",
+    ),
+    _GpuSwitch(
+        "sponge_tune_settings",
+        "wrt_sponge",
+        "sponge tuning output (SPONGE_TUNE cpp key on the CPU) is not on the GPU",
+    ),
+    _GpuSwitch(
+        "calc_pflx_settings",
+        "calc_pflx",
+        "pressure-flux fields for nesting are not computed; "
+        "restarts will not hold them",
+    ),
+)
+"""The ``warn_on`` calls of roms-marbl-gpu ``src/host/feature_guard.F90`` at
+v0.1.3-beta, in its order: switches the GPU model only warns about. ``what`` is
+the model's full warning sentence."""
+
+
+def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist switches on a feature the
+    GPU model does not have -- mirrors roms-marbl-gpu's start-up feature guard
+    (``src/host/feature_guard.F90``, v0.1.3-beta; see Rule F in the module
+    docstring), which stops the run otherwise.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`
+        (a live ``RomsNamelistBase``, or a mapping of group name to group
+        mapping, such as a blueprint's namelist overrides). A missing group or key
+        counts as off, and a switch is on only when its value is ``True``.
+
+    Raises
+    ------
+    NamelistConsistencyError
+        If any switch in ``_GPU_STOP_SWITCHES`` is on. One error lists them all, in
+        the model's wording; its ``section`` and ``keys`` name the first.
+
+    Warns
+    -----
+    UserWarning
+        If any switch in ``_GPU_WARN_SWITCHES`` is on: one warning lists them all.
+        Emitted before the error, when both apply, as the model prints its warnings
+        and errors together.
+    """
+    warned = [s for s in _GPU_WARN_SWITCHES if s.is_on(settings)]
+    if warned:
+        warnings.warn(
+            "The GPU model does not honour these namelist settings (it warns about them "
+            "at start-up):\n  "
+            + "\n  ".join(f"&{s.group} {s.key} = .true.: {s.what}" for s in warned),
+            UserWarning,
+            stacklevel=2,
+        )
+
+    unsupported = [s for s in _GPU_STOP_SWITCHES if s.is_on(settings)]
+    if unsupported:
+        raise NamelistConsistencyError(
+            "The GPU model stops at start-up on these namelist settings "
+            "(feature_guard):\n  "
+            + "\n  ".join(
+                f"&{s.group} {s.key} = .true.: {s.what} is not available on the "
+                "GPU model."
+                for s in unsupported
+            )
+            + "\nSet them to .false. to run on the GPU.",
+            rule="gpu_features",
+            section=unsupported[0].group,
+            keys=(unsupported[0].key,),
+        )
+
+
+_GPU_ARRAY_SIZES: tuple[tuple[str, str, int, str], ...] = (
+    (
+        "forcing_files",
+        "frcfiles",
+        64,
+        "Use fewer, larger forcing files (for nest-from boundary files, a larger "
+        "nrpf_extract in the parent run).",
+    ),
+)
+"""``(group, key, size, remedy)`` of the namelist arrays roms-marbl-gpu (v0.1.3-beta)
+declares smaller than UCLA ROMS does: ``frcfiles(max_frc)``, ``max_frc = 64``, in
+``src/host/frc_io.F90``, against ucla-roms 0.11.0's 360 (Rule E). ``remedy`` ends
+the error. (v0.1.3-beta reads ``akt_bak`` and ``tnu2`` with up to 512 values, one
+per tracer as ucla-roms writes them, so they are not listed.)"""
+
+
+def check_gpu_array_sizes(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist gives a GPU-model array
+    more values than the model declares (Rule G in the module docstring), which
+    stops the model while it reads the group.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_gpu_features`. A missing
+        group or key, or a scalar value, passes.
+
+    Raises
+    ------
+    NamelistConsistencyError
+        If any array in ``_GPU_ARRAY_SIZES`` has more values than its size. One
+        error lists them all; its ``section`` and ``keys`` name the first.
+    """
+    oversized = [
+        (group, key, size, len(value), remedy)
+        for group, key, size, remedy in _GPU_ARRAY_SIZES
+        if isinstance(value := _section(_section(settings, group), key), list | tuple)
+        and len(value) > size
+    ]
+    if oversized:
+        raise NamelistConsistencyError(
+            "The GPU model reads fewer values than this namelist gives, and stops "
+            "at start-up on the rest:\n  "
+            + "\n  ".join(
+                f"&{group} {key}: {given} values; the GPU model reads at most {size}"
+                for group, key, size, given, _ in oversized
+            )
+            + "\n"
+            + " ".join(dict.fromkeys(remedy for *_, remedy in oversized)),
+            rule="gpu_array_sizes",
+            section=oversized[0][0],
+            keys=(oversized[0][1],),
         )

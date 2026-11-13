@@ -126,6 +126,17 @@ class TestInputDatasetGet:
         fakeinputdataset_local.get(local_dir_resolved)
         mock_stage.assert_not_called()
 
+    @mock.patch.object(SourceData, "stage")
+    def test_get_passes_the_name_to_the_source(
+        self, mock_stage, fakeinputdataset_local, tmp_path
+    ):
+        """`get` stages under the given name."""
+        mock_stage.return_value = mock.MagicMock(spec=StagedFile)
+
+        fakeinputdataset_local.get(tmp_path, name="other.nc")
+
+        mock_stage.assert_called_once_with(target_dir=tmp_path, name="other.nc")
+
 
 class TestAttach:
     """Test class for the `InputDataset.attach` method."""
@@ -141,6 +152,20 @@ class TestAttach:
 
         assert isinstance(fakeinputdataset_local.working_copy, StagedFile)
         assert fakeinputdataset_local.working_copy.path == target
+
+    def test_attach_with_a_name_adopts_that_file(
+        self, fakeinputdataset_local, tmp_path, mock_path_resolve
+    ):
+        """`attach` looks for the file under the given name, not the source's."""
+        target = tmp_path / "other.nc"
+        target.write_text("data")
+
+        fakeinputdataset_local.attach(tmp_path, name="other.nc")
+
+        assert fakeinputdataset_local.working_copy.path == target
+
+        with pytest.raises(FileNotFoundError):
+            fakeinputdataset_local.attach(tmp_path, name="absent.nc")
 
     def test_attach_happy_path_with_valid_symlink(
         self, fakeinputdataset_local, tmp_path, mock_path_resolve

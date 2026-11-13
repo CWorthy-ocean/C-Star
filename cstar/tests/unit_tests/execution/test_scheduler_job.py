@@ -32,6 +32,7 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
 )
+from cstar.system.toolchain import GpuNodes
 
 
 class MockSchedulerJob(SchedulerJob):
@@ -98,6 +99,15 @@ class MockScheduler(Scheduler):
     @property
     def global_max_mem_per_node_gb(self) -> float | None:
         return 128  # Mocked maximum memory in GB
+
+
+def gpu_mock_scheduler(gpus_per_node: int = 4) -> MockScheduler:
+    """A `MockScheduler` that also has GPU nodes of `gpus_per_node` GPUs."""
+    scheduler = MockScheduler()
+    scheduler.gpu = GpuNodes(
+        gpus_per_node, "gpu-queue", {"-C": "gpu", "--gpu-bind": "none"}, 64
+    )
+    return scheduler
 
 
 class TestSchedulerJobBase:
@@ -600,6 +610,175 @@ class TestSchedulerJobBase:
         assert job.cpus_per_node is None
         assert "C-Star cannot determine the CPUs per node" in caplog.text
 
+    @pytest.mark.parametrize(
+        (
+            "gpus",
+            "cpus",
+            "gpu_capacity",
+            "expected_nodes",
+            "expected_cpus_per_node",
+            "expected_gpus_per_node",
+        ),
+        [
+            (4, 4, None, 1, 4, 4),  # fills one 4-GPU node
+            (1, 4, None, 1, 4, 1),  # one GPU is requested, not the node's four
+            (2, 2, None, 1, 2, 2),  # two GPUs on a 4-GPU node
+            (8, 8, None, 2, 4, 4),
+            (6, 6, None, 2, 3, 3),  # six GPUs spread over two nodes, three each
+            (6, 6, 2, 3, 2, 2),  # a 2-GPU capacity plans 3 nodes
+        ],
+    )
+    def test_init_gpu_node_math(
+        self,
+        gpus,
+        cpus,
+        gpu_capacity,
+        expected_nodes,
+        expected_cpus_per_node,
+        expected_gpus_per_node,
+    ):
+        """The node count of a GPU job follows from the GPUs a node holds, which
+        is the system's unless overridden; the tasks and the GPUs requested are
+        spread uniformly over the nodes.
+        """
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": None,
+            "cpus": cpus,
+            "gpus": gpus,
+            "gpus_per_node": gpu_capacity,
+        }
+        job = MockSchedulerJob(**params)
+
+        assert job.gpus == gpus
+        assert job.nodes == expected_nodes
+        assert job.cpus == cpus
+        assert job.cpus_per_node == expected_cpus_per_node
+        assert job.gpus_per_node == expected_gpus_per_node
+
+    def test_init_gpu_gpus_not_even_over_nodes(self):
+        """GPUs that do not divide over the nodes are rejected."""
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": None,
+            "cpus": 6,
+            "gpus": 5,  # two nodes of a 4-GPU system
+        }
+        with pytest.raises(ValueError, match="5 GPUs cannot be spread evenly over 2"):
+            MockSchedulerJob(**params)
+
+    @pytest.mark.parametrize("cpus_per_node", [3, 5])
+    def test_init_gpu_explicit_cpus_per_node_must_match_the_layout(self, cpus_per_node):
+        """A step's own `cpus_per_node` must place exactly its tasks on its nodes:
+        8 tasks on 2 nodes are 4 per node, so 3 or 5 per node is refused.
+        """
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 2,
+            "cpus": 8,
+            "cpus_per_node": cpus_per_node,
+            "gpus": 8,
+        }
+        with pytest.raises(
+            ValueError, match=rf"{cpus_per_node} tasks per node .* 8 tasks on 2 node"
+        ):
+            MockSchedulerJob(**params)
+
+    def test_init_gpu_explicit_cpus_per_node_that_matches_is_kept(self):
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 2,
+            "cpus": 8,
+            "cpus_per_node": 4,
+            "gpus": 8,
+        }
+        job = MockSchedulerJob(**params)
+
+        assert (job.nodes, job.cpus_per_node, job.cpus) == (2, 4, 8)
+
+    def test_init_gpu_tasks_not_even_over_nodes(self):
+        """Tasks that do not divide over the nodes are rejected."""
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 2,
+            "cpus": 5,
+            "gpus": 4,
+        }
+        with pytest.raises(
+            ValueError, match="5 tasks cannot be spread evenly over 2 node"
+        ):
+            MockSchedulerJob(**params)
+
+    def test_init_gpu_tasks_exceed_gpu_node_cores(self):
+        """Tasks per node beyond the GPU node's cores are rejected."""
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),  # 64-core nodes
+            "nodes": None,
+            "cpus": 256,
+            "gpus": 4,
+        }
+        with pytest.raises(ValueError, match="256 tasks per node.*64 cores"):
+            MockSchedulerJob(**params)
+
+    def test_init_gpu_job_uses_gpu_queue_and_directives(self):
+        """A GPU job defaults to the system's GPU queue and directives; an explicit
+        queue wins, and a CPU job on the same scheduler is unchanged.
+        """
+        scheduler = gpu_mock_scheduler()
+        params = self.common_job_params | {"scheduler": scheduler, "nodes": None}
+
+        gpu_job = MockSchedulerJob(**params | {"gpus": 1})
+        explicit = MockSchedulerJob(**params | {"gpus": 1, "queue_name": "other"})
+        cpu_job = MockSchedulerJob(**params)
+
+        assert gpu_job.queue_name == "gpu-queue"
+        assert gpu_job.scheduler_directives == {"-C": "gpu", "--gpu-bind": "none"}
+        assert explicit.queue_name == "other"
+        assert cpu_job.queue_name == "default_queue"
+        assert cpu_job.scheduler_directives == {"-mock_directive": "mock_value"}
+        assert cpu_job.gpus == 0
+
+    def test_init_gpu_explicit_nodes_too_few_for_gpus(self):
+        """Fewer nodes than the GPUs need is rejected."""
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 1,
+            "cpus": 5,
+            "gpus": 5,
+        }
+        with pytest.raises(ValueError, match="5 GPUs do not fit on 1 node"):
+            MockSchedulerJob(**params)
+
+    def test_init_gpu_single_node_over_one_nodes_gpus(self):
+        """A single-node job cannot ask for more GPUs than one node has."""
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": None,
+            "cpus": 5,
+            "gpus": 5,
+            "single_node": True,
+        }
+        with pytest.raises(ValueError, match="'single_node' is set but 5 GPUs"):
+            MockSchedulerJob(**params)
+
+    def test_init_gpu_single_node_rejects_multiple_nodes(self):
+        """A single-node GPU job with a node count other than 1 is a contradiction."""
+        params = self.common_job_params | {
+            "scheduler": gpu_mock_scheduler(),
+            "nodes": 2,
+            "cpus": 4,
+            "gpus": 4,
+            "single_node": True,
+        }
+        with pytest.raises(ValueError, match="'single_node' is set but nodes=2"):
+            MockSchedulerJob(**params)
+
+    def test_init_gpus_without_gpu_nodes(self):
+        """A GPU request on a system with no GPU nodes registered fails loudly."""
+        params = self.common_job_params | {"nodes": None, "gpus": 2}
+        with pytest.raises(CstarError, match="no GPU nodes registered"):
+            MockSchedulerJob(**params)
+
 
 ##
 @pytest.mark.filterwarnings(
@@ -818,6 +997,95 @@ class TestCreateSchedulerJob:
     @patch(
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
+    @patch("cstar.system.scheduler.SlurmQOS.max_walltime", new_callable=PropertyMock)
+    def test_create_slurm_gpu_job(self, mock_max_walltime, mock_scheduler):
+        """`gpus` and `gpus_per_node` reach the job, which takes the GPU queue."""
+        mock_max_walltime.return_value = "02:00:00"
+        mock_scheduler.return_value = SlurmScheduler(
+            queues=[
+                SlurmQOS(name="test_queue", query_name="test_queue"),
+                SlurmQOS(name="regular", query_name="regular"),
+            ],
+            primary_queue_name="test_queue",
+            gpu=GpuNodes(4, "regular", {"-C": "gpu"}, 64),
+        )
+
+        job = create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=6,
+            gpus=6,
+            gpus_per_node=3,
+            account_key="test_account",
+            walltime="01:00:00",
+        )
+
+        assert isinstance(job, SlurmJob)
+        assert job.gpus == 6
+        assert job.gpus_per_node == 3
+        assert job.nodes == 2
+        assert job.cpus_per_node == 3
+        assert job.queue_name == "regular"
+
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
+    @patch(
+        "cstar.system.scheduler.PBSScheduler.global_max_cpus_per_node",
+        new_callable=PropertyMock,
+    )
+    def test_create_pbs_gpu_job(self, mock_global_max_cpus, mock_scheduler):
+        """A PBS GPU job selects whole GPU nodes: the node's cores, the tasks per
+        node and the GPUs per node.
+        """
+        mock_global_max_cpus.return_value = 128
+        mock_scheduler.return_value = PBSScheduler(
+            queues=[
+                PBSQueue(name="test_queue", max_walltime="02:00:00"),
+                PBSQueue(name="gpu_q", max_walltime="02:00:00"),
+            ],
+            primary_queue_name="test_queue",
+            gpu=GpuNodes(4, "gpu_q", {"-l": "place=scatter"}, 64),
+        )
+
+        job = create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=8,
+            gpus=8,
+            account_key="pbs_account",
+            walltime="02:00:00",
+        )
+
+        assert isinstance(job, PBSJob)
+        assert (
+            "#PBS -l select=2:ncpus=64:mpiprocs=4:ngpus=4,walltime=02:00:00"
+            in job.script.split("\n")
+        )
+        assert "#PBS -q gpu_q" in job.script.split("\n")
+        assert "#PBS -l place=scatter" in job.script.split("\n")
+
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
+    def test_create_pbs_gpu_job_needs_uniform_tasks(self, mock_scheduler):
+        """PBS needs the same task count on every node of a GPU job."""
+        mock_scheduler.return_value = PBSScheduler(
+            queues=[PBSQueue(name="gpu_q", max_walltime="02:00:00")],
+            primary_queue_name="gpu_q",
+            gpu=GpuNodes(4, "gpu_q", {}, 64),
+        )
+
+        with pytest.raises(ValueError, match="7 tasks cannot be spread evenly"):
+            create_scheduler_job(
+                commands="echo Hello, World",
+                cpus=7,
+                gpus=8,
+                account_key="pbs_account",
+                walltime="02:00:00",
+            )
+
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
     def test_unsupported_scheduler(self, mock_scheduler):
         """Confirms that a `TypeError` is raised when calling create_scheduler_job
         without a scheduler.
@@ -999,6 +1267,164 @@ def test_create_scheduler_job_empty_walltime_uses_queue_maximum() -> None:
 
     assert job.queue_name == "test_queue"
     assert job.walltime == "02:00:00"
+
+
+@pytest.fixture
+def gpu_slurm_system() -> Iterator[None]:
+    """Make the active system a SLURM system with a CPU queue, `test_queue`, and
+    registered GPU nodes whose queue is `gpu_queue`.
+    """
+    scheduler = SlurmScheduler(
+        queues=[
+            SlurmQOS(name="test_queue", query_name="test_queue"),
+            SlurmQOS(name="gpu_queue", query_name="gpu_queue"),
+        ],
+        primary_queue_name="test_queue",
+        gpu=GpuNodes(4, "gpu_queue", {"--gpu-bind": "none"}, 128),
+    )
+    with (
+        patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            new_callable=PropertyMock,
+            return_value=scheduler,
+        ),
+        patch(
+            "cstar.system.scheduler.SlurmQOS.max_walltime",
+            new_callable=PropertyMock,
+            return_value="02:00:00",
+        ),
+        patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            AnvilEnvSettings,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.usefixtures("gpu_slurm_system")
+def test_create_scheduler_job_gpu_job_takes_system_queue() -> None:
+    """Verify a GPU job needs no queue where the system requires one: it goes to
+    the system's GPU queue, while a CPU job without a queue is still refused.
+    """
+    job = create_scheduler_job(
+        commands="echo Hello, World",
+        cpus=4,
+        gpus=4,
+        account_key="acct",
+        queue_name="",
+        walltime="01:00:00",
+    )
+    assert job.queue_name == "gpu_queue"
+
+    with pytest.raises(CstarError, match=f"{ENV_CSTAR_SLURM_QUEUE} must be set"):
+        create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            account_key="acct",
+            queue_name="",
+            walltime="01:00:00",
+        )
+
+
+@pytest.mark.usefixtures("gpu_slurm_system")
+def test_create_scheduler_job_gpu_job_still_needs_account() -> None:
+    """Verify a GPU job is refused without the account the system requires."""
+    with pytest.raises(CstarError, match=f"{ENV_CSTAR_SLURM_ACCOUNT} must be set"):
+        create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            gpus=4,
+            account_key="",
+            queue_name="",
+            walltime="01:00:00",
+        )
+
+
+@pytest.fixture
+def account_required_gpu_system() -> Iterator[None]:
+    """Make the active system a SLURM system with a CPU queue and GPU nodes that
+    require an account, on settings that do not themselves require one.
+    """
+    scheduler = SlurmScheduler(
+        queues=[
+            SlurmQOS(name="test_queue", query_name="test_queue"),
+            SlurmQOS(name="gpu_queue", query_name="gpu_queue"),
+        ],
+        primary_queue_name="test_queue",
+        max_cpus_per_node=64,
+        gpu=GpuNodes(4, "gpu_queue", {"-C": "gpu"}, 64, account_required=True),
+    )
+    with (
+        patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            new_callable=PropertyMock,
+            return_value=scheduler,
+        ),
+        patch(
+            "cstar.system.scheduler.SlurmQOS.max_walltime",
+            new_callable=PropertyMock,
+            return_value="02:00:00",
+        ),
+        patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            None,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.usefixtures("account_required_gpu_system")
+def test_create_scheduler_job_gpu_account_required() -> None:
+    """Verify a GPU job without an account is refused where the GPU nodes need one,
+    builds once it has one, and a CPU job without an account is unaffected.
+    """
+    with pytest.raises(CstarError, match="CSTAR_SLURM_GPU_ACCOUNT"):
+        create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            gpus=4,
+            account_key="",
+            walltime="01:00:00",
+        )
+
+    gpu_job = create_scheduler_job(
+        commands="echo Hello, World",
+        cpus=4,
+        gpus=4,
+        account_key="acct",
+        walltime="01:00:00",
+    )
+    assert gpu_job.account_key == "acct"
+
+    cpu_job = create_scheduler_job(
+        commands="echo Hello, World",
+        cpus=4,
+        account_key="",
+        walltime="01:00:00",
+    )
+    assert cpu_job.account_key == ""
+
+
+@pytest.mark.usefixtures("slurm_system")
+def test_create_scheduler_job_gpu_job_without_gpu_nodes() -> None:
+    """Verify a GPU job on a system with no GPU nodes is refused, even when it
+    names a queue.
+    """
+    with (
+        patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            AnvilEnvSettings,
+        ),
+        pytest.raises(CstarError, match="no GPU nodes registered"),
+    ):
+        create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            gpus=4,
+            account_key="acct",
+            queue_name="test_queue",
+            walltime="01:00:00",
+        )
 
 
 @pytest.mark.asyncio

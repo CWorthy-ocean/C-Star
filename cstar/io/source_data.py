@@ -322,9 +322,11 @@ class SourceData:
             self._retriever = get_retriever(self)
         return self._retriever
 
-    def stage(self, target_dir: str | Path) -> "StagedData":
-        """Stages the data, making it available to C-Star"""
-        return self.stager.stage(target_dir=Path(target_dir))
+    def stage(self, target_dir: str | Path, name: str = "") -> "StagedData":
+        """Stages the data, making it available to C-Star, under `name` when given
+        (empty means the source's own name).
+        """
+        return self.stager.stage(target_dir=Path(target_dir), name=name)
 
 
 class SourceDataCollection:

@@ -227,6 +227,47 @@ class TestStagerSubclasses:
         assert target.is_symlink()
         assert target.read_bytes() == b"123"
 
+    def test_local_binary_file_stager_stages_under_a_given_name(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        mocksourcedata_local_file: SourceDataFactory,
+    ) -> None:
+        """A name given to `stage()` replaces the source's own file name."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        src_file = tmp_path / "src" / "source.nc"
+        src_file.parent.mkdir()
+        src_file.write_bytes(b"123")
+        source = mocksourcedata_local_file(location=src_file, identifier=None)
+        staging_dir = tmp_path / "stage"
+        staging_dir.mkdir()
+
+        result = stager.LocalBinaryFileStager(source).stage(
+            staging_dir, name="source_2.nc"
+        )
+
+        target = staging_dir / "source_2.nc"
+        assert target.read_bytes() == b"123"
+        assert result.path == target
+        assert not (staging_dir / "source.nc").exists()
+
+    def test_remote_stager_refuses_a_name(
+        self, tmp_path: Path, mocksourcedata_remote_file: SourceDataFactory
+    ) -> None:
+        """A stager that cannot stage under another name refuses one."""
+        s = stager.RemoteBinaryFileStager(mocksourcedata_remote_file())
+        with pytest.raises(ValueError, match="different name"):
+            s.stage(tmp_path, name="other.nc")
+
+    def test_repository_stagers_refuse_a_name(
+        self, tmp_path: Path, mocksourcedata_remote_repo: SourceDataFactory
+    ) -> None:
+        """Repository stagers refuse a name before touching anything."""
+        source = mocksourcedata_remote_repo()
+        for cls in (stager.RemoteRepositoryStager, stager.CachedRemoteRepositoryStager):
+            with pytest.raises(ValueError, match="different name"):
+                cls(source).stage(tmp_path, name="other")
+
     def test_local_binary_file_stager_missing_source_raises(
         self, tmp_path: Path, mocksourcedata_local_file: SourceDataFactory
     ) -> None:

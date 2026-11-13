@@ -565,7 +565,8 @@ def collect_output_files(
     Returns
     -------
     list[TimestampedOutputFile]
-        The files of every source in the order given, without duplicates.
+        The files of every source in the order given; the same file reached twice
+        counts once.
 
     Raises
     ------
@@ -600,7 +601,7 @@ def collect_output_files(
 
     deduped: dict[Path, _OutputFileT] = {}
     for file in found_files:
-        deduped.setdefault(file.path, file)
+        deduped.setdefault(file.path.resolve(), file)
 
     return list(deduped.values())
 

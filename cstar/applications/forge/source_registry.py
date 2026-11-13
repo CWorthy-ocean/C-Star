@@ -16,6 +16,11 @@ processing layer eventually moves to C-Star, this module travels with ``source_d
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 # --- versioned constants -----------------------------------------------------
 SRTM15_VERSION = "V2.7"
 SRTM15_URL = f"https://topex.ucsd.edu/pub/srtm15_plus/SRTM15_{SRTM15_VERSION}.nc"
@@ -212,3 +217,33 @@ def resolve_source(name: str, glorys_layout: str | None = None) -> dict[str, obj
         "streamable": name.upper() in _STREAMABLE_UPPER
         or key.upper() in _STREAMABLE_UPPER,
     }
+
+
+def snapshot_applies(name: str, glorys_layout: str | None) -> bool:
+    """Whether a source resolves through a blueprint's registry snapshot
+    (``Forcing.resolved_datasets``) rather than the live tables here.
+
+    Every source does except GLORYS with an explicit ``glorys_layout``. The snapshot
+    holds one entry per logical name, so it cannot tell two layouts apart, and that
+    choice is resolved live. A GLORYS source with no layout does go through the
+    snapshot, so it takes the layout of the first GLORYS source the resolver noted
+    (initial conditions before boundary), regional when that one had none either.
+    """
+    return not (name.upper() == "GLORYS" and glorys_layout is not None)
+
+
+def dataset_key_for_source(
+    name: str, glorys_layout: str | None, snapshot: Mapping[str, str]
+) -> str:
+    """The dataset key input generation looks up for a source.
+
+    ``snapshot`` maps upper-cased logical names to the dataset keys a blueprint
+    recorded when it was built, so a processing host with a newer registry resolves
+    the same keys. It wins when it applies (:func:`snapshot_applies`) and has the
+    name; otherwise the key comes from :func:`resolve_dataset_key`.
+    """
+    if snapshot_applies(name, glorys_layout):
+        key = snapshot.get(name.upper())
+        if key:
+            return key
+    return resolve_dataset_key(name, glorys_layout)

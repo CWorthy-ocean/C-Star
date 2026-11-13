@@ -38,7 +38,12 @@ resolves it itself). ``prepare_all()`` runs each dataset's handler and records i
 result in ``paths``; input generation then asks ``path_for_source()`` and
 ``streamable_for_source()`` for each source it reads. When the blueprint carries a
 ``resolved_datasets`` snapshot, those lookups use it rather than the live tables,
-so a blueprint resolves the same way on another host or a later C-Star.
+so a blueprint resolves the same way on another host or a later C-Star. The
+exception is a GLORYS source with an explicit ``glorys_layout``: the snapshot
+holds one entry per name, and IC and boundary may choose different layouts, so
+that key is resolved live (``source_registry.dataset_key_for_source``). The
+resolver records a second layout under its dataset key, and ``ForgeBlueprint``
+refuses to load if a key any source needs is missing from ``datasets``.
 
 Source names fall into four groups:
 

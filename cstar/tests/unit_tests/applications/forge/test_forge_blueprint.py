@@ -440,6 +440,7 @@ def test_forge_blueprint_is_single_node():
     """
     cfg = _build()
     assert cfg.single_node is True
+    assert cfg.compute_needs.single_node is True
 
 
 def test_cpus_needed_is_grid_sized_forge_estimate():
@@ -451,6 +452,7 @@ def test_cpus_needed_is_grid_sized_forge_estimate():
     cfg = _build()
     gk = cfg.domain.grid_kwargs
     assert cfg.cpus_needed == estimate_forge_cpus(gk["nx"], gk["ny"], gk["N"])
+    assert cfg.compute_needs.tasks == cfg.cpus_needed
 
 
 def test_forge_blueprint_import_stays_light():
@@ -3449,6 +3451,121 @@ def test_esper_conditioning_on_requires_the_woa_salinity_dataset():
     data["datasets"] = [d for d in data["datasets"] if d != "WOA_SALINITY"]
     with pytest.raises(ValueError, match="WOA_SALINITY"):
         ForgeBlueprint.from_yaml_data(data)
+
+
+# ---------------------------------------------------------------------------
+# Sources vs `datasets`: staging prepares exactly `datasets`, so it must hold every
+# dataset input generation will look up for the sections' sources.
+# ---------------------------------------------------------------------------
+def _with_glorys_layouts(ic: str | None, boundary: str | None) -> dict[str, t.Any]:
+    """The bundled GLORYS/ERA5/UNIFIED forcing with the IC and boundary GLORYS
+    layouts set (``None`` leaves the layout unset).
+    """
+    import copy
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    for src, layout in (
+        (fdata["initial_conditions"]["source"], ic),
+        (fdata["forcing"]["boundary"]["source"], boundary),
+    ):
+        src.pop("glorys_layout", None)
+        if layout is not None:
+            src["glorys_layout"] = layout
+    return fdata
+
+
+def test_glorys_layout_edited_in_the_sections_only_is_rejected_at_load():
+    """A layout changed by hand in the sections but not in `datasets` used to load,
+    stage the old layout, and fail in input generation. It is now refused at load,
+    naming each section and the key it needs.
+    """
+    data = yaml.safe_load(_build().to_yaml_str())
+    assert "GLORYS_REGIONAL" in data["datasets"]
+    for section in ("initial_conditions", "boundary"):
+        data["forcing"][section]["source"]["glorys_layout"] = "global"
+
+    with pytest.raises(ValueError) as exc_info:
+        ForgeBlueprint.from_yaml_data(data)
+    message = str(exc_info.value)
+    for section in ("initial_conditions", "boundary"):
+        assert (
+            f"{section} (name: GLORYS, glorys_layout: global) needs GLORYS_GLOBAL"
+            in message
+        )
+
+    # The dataset is all that is missing: an explicit layout is looked up live, not
+    # in the resolved_datasets snapshot.
+    data["datasets"].append("GLORYS_GLOBAL")
+    ForgeBlueprint.from_yaml_data(data)
+
+
+def test_sources_vs_datasets_check_names_a_swapped_source():
+    data = yaml.safe_load(_build().to_yaml_str())
+    data["forcing"]["boundary"]["bgc_sources"][0]["source"]["name"] = "GLODAP"
+    with pytest.raises(
+        ValueError, match=r"boundary\.bgc_sources\[0\] \(name: GLODAP\) needs GLODAP"
+    ):
+        ForgeBlueprint.from_yaml_data(data)
+
+
+def test_sources_vs_datasets_check_accepts_what_generation_accepts():
+    """A streamed source (ERA5) is never looked up in `datasets`, and `datasets`
+    names are read through the registry aliases, as staging reads them.
+    """
+    data = yaml.safe_load(_build().to_yaml_str())
+    data["datasets"] = [
+        "UNIFIED" if d == "UNIFIED_BGC" else d for d in data["datasets"] if d != "ERA5"
+    ]
+    ForgeBlueprint.from_yaml_data(data)
+
+
+def test_resolver_stages_both_glorys_layouts_when_ic_and_boundary_differ():
+    """IC and boundary choose their layouts separately (the wizard has a dropdown
+    for each). The snapshot used to keep only the first, so the second layout was
+    never staged.
+    """
+    from cstar.applications.forge.source_datasets import SourceDatasets
+
+    cfg = _build(forcing_inputs=_with_glorys_layouts("regional", "global"))
+
+    assert {"GLORYS_REGIONAL", "GLORYS_GLOBAL"} <= set(cfg.datasets)
+    resolved = cfg.forcing.resolved_datasets
+    assert resolved["GLORYS"].dataset_key == "GLORYS_REGIONAL"
+    assert resolved["GLORYS_GLOBAL"].dataset_key == "GLORYS_GLOBAL"
+    sd = SourceDatasets(
+        datasets=cfg.datasets,
+        resolved_datasets={name: rd.model_dump() for name, rd in resolved.items()},
+    )
+    assert sd.dataset_key_for_source("GLORYS", "regional") == "GLORYS_REGIONAL"
+    assert sd.dataset_key_for_source("GLORYS", "global") == "GLORYS_GLOBAL"
+    ForgeBlueprint.from_yaml_data(yaml.safe_load(cfg.to_yaml_str()))
+
+
+@pytest.mark.parametrize(
+    ("ic", "boundary", "expected"),
+    [("regional", "regional", "GLORYS_REGIONAL"), ("global", None, "GLORYS_GLOBAL")],
+)
+def test_resolver_notes_one_glorys_dataset_when_the_layouts_agree(
+    ic: str, boundary: str | None, expected: str
+) -> None:
+    """One layout keeps the single `GLORYS` snapshot entry it always had, and a
+    source with no layout follows that entry instead of adding the regional default.
+    """
+    cfg = _build(forcing_inputs=_with_glorys_layouts(ic, boundary))
+
+    glorys = [name for name in cfg.forcing.resolved_datasets if "GLORYS" in name]
+    assert glorys == ["GLORYS"]
+    assert cfg.forcing.resolved_datasets["GLORYS"].dataset_key == expected
+    assert [d for d in cfg.datasets if "GLORYS" in d] == [expected]
+
+
+def test_saved_blueprint_shows_glorys_layout_only_on_glorys_sources():
+    """A source that isn't GLORYS writes no `glorys_layout: null` a user might be
+    tempted to fill in; the GLORYS sources keep theirs.
+    """
+    text = _build().to_yaml_str()
+    assert "glorys_layout: null" not in text
+    assert text.count("glorys_layout: regional") == 2
 
 
 def test_resolver_ic_bgc_constants_source_excluded_from_datasets():
@@ -9598,6 +9715,7 @@ def test_forge_application_emitted_blueprint(use_pio):
 
     assert emitted.filename == f"B_{cfg.name}.yaml"
     assert emitted.application == "ucla_roms"
+    assert emitted.compute_needs.tasks == cfg.n_procs
     assert emitted.cpus_needed == cfg.n_procs
     assert emitted.single_node is False
     assert emitted.start_date == cfg.run.start_date
