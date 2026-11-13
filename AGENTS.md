@@ -127,8 +127,8 @@ the user's explicit OK; give them the exact command instead.
 ## Pull requests
 
 - A pull request with a user-visible change adds its release note as a file,
-  `changes/+<name>.<type>.rst`, committed with the code (`<name>` is any short
-  label). The types are the `[[tool.towncrier.type]]` entries in
+  `docs/changes/+<name>.<type>.rst`, committed with the code (`<name>` is any
+  short label). The types are the `[[tool.towncrier.type]]` entries in
   `pyproject.toml`. `breaking` (a setup that worked now fails or needs an
   edit) and `output` (the same setup still runs but C-Star writes different
   files) are separate types. Write each note for users in reStructuredText, in

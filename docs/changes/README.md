@@ -7,7 +7,7 @@ reStructuredText, like the rest of the docs (double backticks for
 ``` ``code`` ```): one line for the release reader, optionally followed by `- `
 sub-bullets. At release time each `+<name>` file is renamed after the pull
 request that added it, then `towncrier build` turns the fragments into
-[`docs/releases/<version>.rst`](../docs/releases) and deletes them.
+[`docs/releases/<version>.rst`](../releases) and deletes them.
 
 | Type          | Section in the release notes |
 |---------------|------------------------------|
@@ -19,4 +19,4 @@ request that added it, then `towncrier build` turns the fragments into
 | `improvement` | Improvements                 |
 | `misc`        | Miscellaneous                |
 
-The [contributor guide](../docs/contributing.rst) has the details and examples.
+The [contributor guide](../contributing.rst) has the details and examples.

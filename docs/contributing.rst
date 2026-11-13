@@ -238,7 +238,7 @@ Writing a release note
 ----------------------
 
 A pull request that changes something users could notice adds a release note:
-a file in the ``changes/`` directory named ``+<name>.<type>.rst``, where
+a file in the ``docs/changes/`` directory named ``+<name>.<type>.rst``, where
 ``<name>`` is any short label, such as ``+river-count.bugfix.rst``. Commit it
 with your code. The ``+`` means the pull request number is filled in at
 release time, from the merge commit, so the note links to your pull request.
@@ -288,7 +288,7 @@ the reviewer go in the pull request description. If the reader needs more, add
 ``-`` sub-bullets on the following lines. The note is reStructuredText, like
 this page: code goes in double backticks, and Markdown's single backticks and
 ``[text](url)`` links do not render. For example,
-``changes/+shared-output-names.bugfix.rst``, added by pull request 888:
+``docs/changes/+shared-output-names.bugfix.rst``, added by pull request 888:
 
 .. code-block:: rst
 
@@ -401,8 +401,8 @@ For maintainers:
 1. Run the *Finalize Release Notes* workflow from the repository's Actions tab
    with the new version, for example ``0.19.0``. It refuses a release that a
    deprecation is due in (see above). It renames each ``+<name>`` file in
-   ``changes/`` after the pull request that added it, stopping with an error
-   if it can't find one. It then turns those files into
+   ``docs/changes/`` after the pull request that added it, stopping with an
+   error if it can't find one. It then turns those files into
    ``docs/releases/0.19.0.rst``, deletes them, lists the new file first in
    ``docs/releases.rst``, and opens a *Finalize release notes for 0.19.0* pull
    request from the ``next_release_notes`` branch. If that branch is left over

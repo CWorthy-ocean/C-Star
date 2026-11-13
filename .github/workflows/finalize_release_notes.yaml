@@ -1,6 +1,6 @@
 name: Finalize Release Notes
 
-# Builds the release notes for <tag> from the fragments in changes/ and opens the
+# Builds the release notes for <tag> from the fragments in docs/changes/ and opens the
 # "Finalize release notes for <tag>" PR from next_release_notes. Edit the notes
 # on that PR if needed; merging it makes publish_release.yaml create the GitHub
 # release and delete next_release_notes. The branch name and PR title are what
@@ -91,7 +91,7 @@ jobs:
           python ci/add_release_include.py "$TAG"
           git add docs/releases.rst
 
-      - name: Build the release notes from changes/
+      - name: Build the release notes from docs/changes/
         # Writes docs/releases/<tag>.rst and stages it, and git-removes the
         # fragments it used.
         env:
@@ -116,4 +116,4 @@ jobs:
             --base main \
             --head next_release_notes \
             --title "Finalize release notes for $TAG" \
-            --body "Release notes for \`$TAG\`, built by towncrier from the fragments in \`changes/\`. Edit them here before merging; merging creates the GitHub release."
+            --body "Release notes for \`$TAG\`, built by towncrier from the fragments in \`docs/changes/\`. Edit them here before merging; merging creates the GitHub release."

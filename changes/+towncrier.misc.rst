@@ -1,1 +1,0 @@
-Release notes are now written as one file per note in ``changes/`` and assembled by towncrier at release, instead of being copied from pull request descriptions; the contributor guide's "Writing a release note" section has the format.

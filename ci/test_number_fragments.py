@@ -29,6 +29,9 @@ assert _SPEC is not None and _SPEC.loader is not None
 nf = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(nf)
 
+# The fragments folder, as [tool.towncrier] names it (relative to the root).
+CHANGES = nf.fragment_directory(REPO / "pyproject.toml")
+
 # Keep the developer's git config (hooks, signing, identity) out of the tests.
 _GIT = [
     "git",
@@ -51,7 +54,7 @@ def _git(repo: Path, *args: str) -> str:
 
 def _commit(repo: Path, files: dict[str, str], subject: str) -> None:
     for name, text in files.items():
-        (repo / "changes" / name).write_text(text)
+        (repo / CHANGES / name).write_text(text)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", subject)
 
@@ -67,8 +70,8 @@ def repo(tmp_path: Path) -> Path:
     (tmp_path / "ci").mkdir()
     shutil.copy(REPO / "ci" / "towncrier_template.rst", tmp_path / "ci")
     (tmp_path / "docs" / "releases").mkdir(parents=True)
-    (tmp_path / "changes").mkdir()
-    shutil.copy(REPO / "changes" / "README.md", tmp_path / "changes")
+    (tmp_path / CHANGES).mkdir(parents=True)
+    shutil.copy(REPO / CHANGES / "README.md", tmp_path / CHANGES)
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-q", "-m", "Start")
@@ -76,7 +79,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _names(repo: Path) -> list[str]:
-    return sorted(p.name for p in (repo / "changes").iterdir())
+    return sorted(p.name for p in (repo / CHANGES).iterdir())
 
 
 @pytest.mark.parametrize(
@@ -138,7 +141,7 @@ def test_github_lookup_when_subject_has_no_number(repo):
 def test_unresolved_fragment_stops_before_any_rename(repo):
     _commit(repo, {"+ok.misc.rst": "Fine.\n"}, "Fine (#42)")
     _commit(repo, {"+lost.misc.rst": "Lost.\n"}, "No number here")
-    (repo / "changes" / "+uncommitted.misc.rst").write_text("New.\n")
+    (repo / CHANGES / "+uncommitted.misc.rst").write_text("New.\n")
     with pytest.raises(SystemExit, match=r"\+lost\.misc\.rst.*\+uncommitted\.misc"):
         nf.number_fragments(repo, lookup=_no_lookup)
     assert "+ok.misc.rst" in _names(repo)
@@ -146,7 +149,7 @@ def test_unresolved_fragment_stops_before_any_rename(repo):
 
 def test_renamed_fragment_keeps_the_pr_that_wrote_it(repo):
     _commit(repo, {"+note.misc.rst": "A longer note about something.\n"}, "Add (#43)")
-    _git(repo, "mv", "changes/+note.misc.rst", "changes/+note.bugfix.rst")
+    _git(repo, "mv", f"{CHANGES}/+note.misc.rst", f"{CHANGES}/+note.bugfix.rst")
     _git(repo, "commit", "-q", "-m", "Fix the note's type (#44)")
     assert nf.number_fragments(repo, lookup=_no_lookup) == {
         "+note.bugfix.rst": "43.bugfix.rst"
@@ -159,7 +162,7 @@ def test_any_extension_and_untyped_files(repo):
         "+plain.misc": "45.misc.rst"
     }
     _commit(repo, {"+typo.bugfixes.rst": "Misnamed.\n"}, "Add (#46)")
-    with pytest.raises(SystemExit, match=r"No fragment type in changes/\+typo"):
+    with pytest.raises(SystemExit, match=rf"No fragment type in {CHANGES}/\+typo"):
         nf.number_fragments(repo, lookup=_no_lookup)
 
 
@@ -186,5 +189,5 @@ def test_release_commit_holds_only_notes_and_deletions(repo):
     assert f"- A fix. (`#40 <{URL}/40>`_)" in notes
     assert sorted(_git(repo, "status", "--porcelain").splitlines()) == [
         "A  docs/releases/0.19.0.rst",
-        "D  changes/+fill.bugfix.rst",
+        f"D  {CHANGES}/+fill.bugfix.rst",
     ]

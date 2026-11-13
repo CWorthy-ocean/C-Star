@@ -1,5 +1,5 @@
 """
-Tests for the towncrier setup that turns ``changes/`` into ``docs/releases/``.
+Tests for the towncrier setup that turns the fragments into ``docs/releases/``.
 
 Run with ``pytest ci/test_towncrier_template.py``. Needs ``towncrier`` (in the
 ``dev`` extra) and is skipped without it; like the other ``ci/`` tests, CI does
@@ -47,6 +47,8 @@ def _load(name: str) -> ModuleType:
 
 release_body = _load("release_body")
 add_release_include = _load("add_release_include")
+# The fragments folder, as [tool.towncrier] names it (relative to the root).
+CHANGES = _load("number_fragments").fragment_directory(REPO / "pyproject.toml")
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -67,8 +69,8 @@ def scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     releases.mkdir(parents=True)
     (releases / "0.18.0.rst").write_text(OLD_RELEASE)
     (tmp_path / "docs" / "releases.rst").write_text(INDEX)
-    (tmp_path / "changes").mkdir()
-    shutil.copy(REPO / "changes" / "README.md", tmp_path / "changes")
+    (tmp_path / CHANGES).mkdir(parents=True)
+    shutil.copy(REPO / CHANGES / "README.md", tmp_path / CHANGES)
     _run(tmp_path, "git", "init", "-q")
     _run(tmp_path, "git", "add", "-A")
     for module in (release_body, add_release_include):
@@ -81,7 +83,7 @@ def scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _add_fragments(repo: Path, fragments: dict[str, str]) -> None:
     for name, text in fragments.items():
-        (repo / "changes" / name).write_text(text)
+        (repo / CHANGES / name).write_text(text)
     _run(repo, "git", "add", "-A")
 
 
@@ -142,7 +144,7 @@ def test_build_matches_release_notes_style(scratch):
         f"- Another note. {_link(15)}",
         f"- One note. {_link(15)}",
     ]
-    assert [p.name for p in (scratch / "changes").iterdir()] == ["README.md"]
+    assert [p.name for p in (scratch / CHANGES).iterdir()] == ["README.md"]
     # Earlier releases are left alone, and the new one is listed first.
     assert _notes(scratch, "0.18.0") == OLD_RELEASE
     assert (scratch / "docs" / "releases.rst").read_text() == INDEX.replace(
@@ -277,5 +279,5 @@ def test_draft_previews_without_writing(scratch):
         ".. _Unreleased:\n\nUnreleased\n----------\n\n"
         "Miscellaneous\n~~~~~~~~~~~~~\n\n- A note.\n\n"
     )
-    assert (scratch / "changes" / "+note.misc.rst").exists()
+    assert (scratch / CHANGES / "+note.misc.rst").exists()
     assert not (scratch / "docs" / "releases" / "Unreleased.rst").exists()
