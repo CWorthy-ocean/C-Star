@@ -27,6 +27,8 @@ forcing:
         hash: abc
       - location: http://mockdoc.com/boundary2.nc
         hash: pqr
+  # no surface restoring data (sss, sst, sDIC, sALK): C-Star cannot switch
+  # restoring on for roms-marbl-gpu yet, so a run with it is refused
   surface:
     documentation: http://mockdoc.com/surface
     locked: false

@@ -36,7 +36,12 @@ from cstar.roms.gpu_simulation import (
     fortran_double_literal,
     gpu_make_command,
 )
-from cstar.roms.input_dataset import ROMSInitialConditions, ROMSModelGrid
+from cstar.roms.input_dataset import (
+    ROMSForcingCorrections,
+    ROMSInitialConditions,
+    ROMSModelGrid,
+    ROMSSurfaceForcing,
+)
 from cstar.roms.namelist import RomsNamelistV0_11_0
 from cstar.roms.precheck import (
     MAX_NAMELIST_FILE_NAME_LENGTH,
@@ -604,6 +609,117 @@ class TestGpuEnvironment:
             sim.attach()
 
         mock_attach.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# surface restoring data
+# ---------------------------------------------------------------------------
+
+
+def write_forcing(path: Path, *names: str) -> Path:
+    """Write a one-point netCDF file holding the variables `names`."""
+    xr.Dataset({name: ("xi_rho", [1.0]) for name in names}).to_netcdf(path)
+    return path
+
+
+class TestRestoringData:
+    """roms-marbl-gpu ignores restoring data unless GPU-only switches C-Star cannot
+    write are on, so a run whose staged forcing holds it is refused.
+    """
+
+    @pytest.fixture
+    def data(self, tmp_path: Path) -> Path:
+        data = tmp_path / "data"
+        data.mkdir()
+        return data
+
+    @staticmethod
+    def stage(sim: ROMSGpuSimulation, *datasets: Any) -> None:
+        for dataset in datasets:
+            dataset.get(sim.fs_manager.input_datasets_dir)
+
+    def test_names_the_file_its_variables_and_their_switches(
+        self, make_simulation: SimulationFactory, data: Path
+    ) -> None:
+        physics = ROMSSurfaceForcing(
+            location=str(write_forcing(data / "frc_physics.nc", "uwnd", "vwnd"))
+        )
+        restoring = ROMSSurfaceForcing(
+            location=str(write_forcing(data / "frc_restoring.nc", "sss", "sst"))
+        )
+        sim = make_simulation(surface_forcing=[physics, restoring])
+        self.stage(sim, physics, restoring)
+
+        with pytest.raises(ValueError, match="surface restoring data") as raised:
+            sim._refuse_restoring_data()
+
+        message = str(raised.value)
+        assert "frc_restoring.nc: sss (sflx_corr), sst (qcorrection)" in message
+        assert "frc_physics.nc" not in message
+        assert "SFLX_CORR, QCORRECTION, CFLX_CORR" in message
+        assert "remove the restoring file" in message
+
+    def test_dic_and_alk_restoring_in_the_corrections_is_refused(
+        self, make_simulation: SimulationFactory, data: Path
+    ) -> None:
+        corrections = ROMSForcingCorrections(
+            location=str(write_forcing(data / "corrections.nc", "sDIC", "sALK"))
+        )
+        sim = make_simulation(forcing_corrections=[corrections])
+        self.stage(sim, corrections)
+
+        with pytest.raises(
+            ValueError, match=r"corrections.nc: sDIC \(cflx_corr\), sALK \(cflx_corr\)"
+        ):
+            sim._refuse_restoring_data()
+
+    def test_upper_case_flux_fields_are_not_restoring_data(
+        self, make_simulation: SimulationFactory, data: Path
+    ) -> None:
+        flux = ROMSSurfaceForcing(
+            location=str(write_forcing(data / "frc_flux.nc", "SSS", "SST", "sustr"))
+        )
+        sim = make_simulation(surface_forcing=[flux])
+        self.stage(sim, flux)
+
+        sim._refuse_restoring_data()  # no error
+
+    def test_an_unstaged_dataset_is_not_read(
+        self, make_simulation: SimulationFactory, data: Path
+    ) -> None:
+        restoring = ROMSSurfaceForcing(
+            location=str(write_forcing(data / "frc_restoring.nc", "sss"))
+        )
+        sim = make_simulation(surface_forcing=[restoring])
+
+        with mock.patch("cstar.roms.gpu_simulation.netcdf_variable_names") as mock_read:
+            sim._refuse_restoring_data()
+
+        mock_read.assert_not_called()
+
+    @pytest.mark.usefixtures("gpu_system")
+    @pytest.mark.parametrize("step", ["setup", "attach"])
+    def test_setup_and_attach_refuse_once_the_base_class_has_staged(
+        self, make_simulation: SimulationFactory, data: Path, step: str
+    ) -> None:
+        restoring = ROMSSurfaceForcing(
+            location=str(write_forcing(data / "frc_restoring.nc", "sss"))
+        )
+        sim = make_simulation(surface_forcing=[restoring])
+
+        # the base class stages the file, so the guard sees it only if it runs after
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                step,
+                autospec=True,
+                side_effect=lambda *_, **__: self.stage(sim, restoring),
+            ) as mock_base_step,
+            pytest.raises(ValueError, match=r"sss \(sflx_corr\)"),
+        ):
+            getattr(sim, step)()
+
+        mock_base_step.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

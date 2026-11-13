@@ -65,6 +65,7 @@ from cstar.roms.gpu_layout import (
     suggested_writers_per_node,
     writers_per_file,
 )
+from cstar.roms.input_dataset import netcdf_variable_names
 from cstar.roms.namelist import gpu_namelist_schema_for_ref
 from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
 from cstar.roms.simulation import IOLayout, ROMSSimulation
@@ -106,6 +107,18 @@ roms-marbl-gpu v0.1.3-beta)."""
 GPU_BUILD_RECORD_KEY: Final = "gpu_build"
 """The entry of the build record that holds the `GpuBuildKey` the executable was
 built for."""
+
+GPU_RESTORING_DATA: Final[tuple[tuple[str, str, str], ...]] = (
+    ("sss", "sflx_corr", "SFLX_CORR"),
+    ("sst", "qcorrection", "QCORRECTION"),
+    ("sDIC", "cflx_corr", "CFLX_CORR"),
+    ("sALK", "cflx_corr", "CFLX_CORR"),
+)
+"""Surface restoring data roms-marbl-gpu v0.1.3-beta looks for in the forcing files
+(`warn_unused_restoring`, `src/host/frc_io.F90`), as (variable, the GPU-only
+`&surf_frc_settings` switch that uses it, the ucla-roms cpp key the switch stands
+in for). The names are case-sensitive: a flux file's upper-case `SST` and `SSS` are
+not restoring data."""
 
 
 def fortran_double_literal(value: float) -> str:
@@ -528,9 +541,13 @@ class ROMSGpuSimulation(ROMSSimulation):
         ------
         CstarError
             If the system has no GPU toolchain.
+        ValueError
+            If the staged forcing holds surface restoring data (see
+            `_refuse_restoring_data`).
         """
         self._gpu_environment()
         super().setup(clobber=clobber)
+        self._refuse_restoring_data()
 
     def attach(self) -> None:
         """Adopt a previously staged and built working directory, in the system's
@@ -546,9 +563,59 @@ class ROMSGpuSimulation(ROMSSimulation):
             If the system has no GPU toolchain.
         CstarExpectationFailed
             Listing every previously staged component that is missing or invalid.
+        ValueError
+            If the staged forcing holds surface restoring data (see
+            `_refuse_restoring_data`).
         """
         self._gpu_environment()
         super().attach()
+        self._refuse_restoring_data()
+
+    def _refuse_restoring_data(self) -> None:
+        """Refuse a run whose staged forcing holds surface restoring data.
+
+        roms-marbl-gpu restores sea-surface salinity, temperature or DIC/ALK only
+        when GPU-only `&surf_frc_settings` switches (`sflx_corr`, `qcorrection`,
+        `cflx_corr`, default off) are on, where ucla-roms uses cpp keys. C-Star's
+        0.11.0 namelist cannot write those switches, so the model would ignore the
+        data and only warn in its log. Refused instead until C-Star models them.
+
+        Reads the header of the first staged file of each forcing dataset (all
+        files of one dataset come from one writer) for the variables in
+        `GPU_RESTORING_DATA`. A dataset with no staged file is skipped: the base
+        class reports missing inputs.
+
+        Raises
+        ------
+        ValueError
+            Naming each forcing file that holds restoring data and its variables.
+        """
+        found: list[str] = []
+        for dataset in self._forcing_datasets:
+            files = dataset._working_copy_files()
+            if not files or not files[0].exists():
+                continue
+            names = netcdf_variable_names(files[0])
+            held = [
+                f"{var} ({switch})"
+                for var, switch, _ in GPU_RESTORING_DATA
+                if var in names
+            ]
+            if held:
+                found.append(f"{files[0].name}: {', '.join(held)}")
+        if not found:
+            return
+        cpp_keys = ", ".join(dict.fromkeys(key for _, _, key in GPU_RESTORING_DATA))
+        raise ValueError(
+            "The staged forcing holds surface restoring data that roms-marbl-gpu "
+            f"would ignore: {'; '.join(found)}. The GPU model restores only when "
+            "the named &surf_frc_settings switch is on, and C-Star cannot set "
+            "these switches yet (ucla-roms uses the cpp keys "
+            f"{cpp_keys} instead; C-Star cannot tell whether this case's CPU "
+            "build defined them). To run without restoring, remove the restoring "
+            "file from the blueprint's forcing; to run with restoring, use the "
+            "ucla_roms application."
+        )
 
     @property
     def _build_dir(self) -> Path | None:
