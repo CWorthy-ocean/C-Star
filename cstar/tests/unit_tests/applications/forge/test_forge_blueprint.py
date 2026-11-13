@@ -3957,9 +3957,7 @@ def test_bottom_fill_blend_m_survives_resolve_and_override():
 
 
 def test_bottom_fill_blend_m_unset_is_absent_from_the_override():
-    """Unset, the field is not passed on at all, so a roms-tools release without
-    the option still builds the section.
-    """
+    """Unset, the field is not passed on at all, so roms-tools' own default applies."""
     from cstar.applications.forge.engine import sources_to_forcing_override
 
     cfg = _build()

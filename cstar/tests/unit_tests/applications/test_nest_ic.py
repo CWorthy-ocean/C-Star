@@ -371,8 +371,8 @@ class TestCreateInitialConditionsRouting:
         self,
         blueprint_kwargs: dict[str, Any],
     ) -> None:
-        """Without `bottom_fill_blend_m` the keyword is left out, so a roms-tools
-        release that predates the option keeps working.
+        """Without `bottom_fill_blend_m` the keyword is left out, so roms-tools' own
+        default applies.
         """
         from cstar.applications import nest_ic as nest_ic_module
 

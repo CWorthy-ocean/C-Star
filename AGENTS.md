@@ -110,7 +110,7 @@ variable. Deprecations: "Deprecations and compatibility" in
   which Forge renders from `cppdefs.opt.j2`, select model features and the
   libraries the build links.
 - [roms-tools](https://github.com/CWorthy-ocean/roms-tools) writes the input
-  NetCDF files and YAML; C-Star pins `roms_tools>=5.3.0,<6`. With an editable
+  NetCDF files and YAML; C-Star pins `roms_tools>=5.4.0,<6`. With an editable
   sibling install, check what is installed (`pip show`) before trusting it.
 - Forge emits `ucla_roms` blueprints, so a `ucla_roms` schema change updates
   Forge in the same pull request.

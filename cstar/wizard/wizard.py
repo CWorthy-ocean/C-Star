@@ -380,8 +380,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "own bottom value to the value of the nearest source column at the same depth. Blank = "
     "roms-tools' default, right for most domains. Use 100 or more for shelf-only "
     "domains, especially on a grid much finer than its source. '0' takes the neighbour's "
-    "value at once; 'inf' copies each column's bottom value down, as roms-tools releases "
-    "before this option did. Setting a value needs a roms-tools release with this option.",
+    "value at once; 'inf' copies each column's bottom value down.",
     # ---- surface forcing -------------------------------------------------------
     (
         "surface",
@@ -492,8 +491,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "roms-tools' default, right for most domains. Use 0 to 25 on deep, steep-slope "
     "domains, and 100 or more for shelf-only domains, especially on a grid much finer than "
     "its source. '0' takes the neighbour's value at once; 'inf' copies each column's bottom "
-    "value down, as roms-tools releases before this option did. Setting a value needs a "
-    "roms-tools release with this option.",
+    "value down.",
     # ---- tidal forcing ---------------------------------------------------------
     (
         "tidal",

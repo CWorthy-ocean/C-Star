@@ -188,7 +188,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             self.blueprint.parent_rst
         )
 
-        # roms-tools releases before the option existed do not accept the keyword
+        # unset (None) leaves roms-tools' own default in force
         if self.blueprint.bottom_fill_blend_m is not None:
             ic_kwargs["bottom_fill_blend_m"] = self.blueprint.bottom_fill_blend_m
 
