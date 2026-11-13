@@ -15,6 +15,7 @@ record and the commands that move a run and pick it up again.
    The run manifest and moving runs <manifest>
    Promoting a run to share with your group <promote>
    Attaching to a moved or shared run <attach>
+   Compressing a finished run <compress>
 
 In short:
 
@@ -27,3 +28,6 @@ In short:
   collaborators can find it.
 - :doc:`attach` registers a run that arrived by copy, so that the ``cstar
   run`` commands and other workplans can refer to it by name in your environment.
+- :doc:`compress` rewrites the data files of a finished run as chunked,
+  deflated netCDF-4, optionally in single precision, keeping the variables
+  analyses need exact.

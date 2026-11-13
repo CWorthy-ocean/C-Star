@@ -1,0 +1,59 @@
+"""Register the ``compress`` application.
+
+A compress blueprint is written by ``cstar run compress`` from its questions (or
+by hand), and runs like any blueprint: ``cstar blueprint run`` here, or as a
+step of a workplan (``cstar workplan submit``) with SLURM resources in the
+step's ``compute_overrides``. See `cstar.applications.compress.run`.
+"""
+
+import typing as t
+
+from cstar.applications.compress.blueprint import APP_NAME, CompressBlueprint
+from cstar.applications.compress.run import compress_run, login_node_warning
+from cstar.applications.core import (
+    ApplicationDefinition,
+    RunnerResult,
+    register_application,
+)
+from cstar.entrypoint.runner import BlueprintRunner
+from cstar.entrypoint.utils import ARG_BLUEPRINT, ARG_SUBMIT
+from cstar.execution.handler import ExecutionStatus
+from cstar.system.manager import get_sysmgr, outside_scheduler_job
+
+__all__ = ["APP_NAME", "CompressApplication", "CompressBlueprint", "CompressRunner"]
+
+_APP_NAME_LONG: t.Final[str] = "Compress run output"
+"""The long-form application name."""
+
+
+class CompressRunner(BlueprintRunner[CompressBlueprint]):
+    """Worker class that compresses a run's data files."""
+
+    @t.override
+    async def run(self) -> RunnerResult[CompressBlueprint]:
+        """Compress the files; the step fails when any file could not be compressed.
+
+        Returns
+        -------
+        RunnerResult
+            The result of the blueprint processing.
+        """
+        if where := outside_scheduler_job(get_sysmgr()):
+            hint = (
+                f"submit it with 'cstar run compress {self.blueprint.run} "
+                f"{ARG_BLUEPRINT} <this blueprint> {ARG_SUBMIT}'"
+            )
+            self.log.warning(login_node_warning(where, hint))
+        outcomes = compress_run(self.blueprint)
+        failed = any(o.status == "failed" for o in outcomes)
+        self.add_state(ExecutionStatus.FAILED if failed else ExecutionStatus.COMPLETED)
+        return self.result
+
+
+@register_application
+class CompressApplication(ApplicationDefinition[CompressBlueprint, CompressRunner]):
+    name = APP_NAME
+    long_name = _APP_NAME_LONG
+    runner = CompressRunner
+    blueprint = CompressBlueprint
+    applicable_transforms = ()

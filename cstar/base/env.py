@@ -235,7 +235,8 @@ ENV_CSTAR_ALLOW_LOGIN_NODE_RUN: t.Annotated[
         "has a scheduler (for example on a login node), and to launch it there "
         "without a warning on a cluster C-Star does not recognise. Use it only "
         "for a run small enough for a login node, or when C-Star wrongly "
-        "concludes it is not inside a job.",
+        "concludes it is not inside a job. It also silences the warning "
+        "`cstar run compress` gives when it compresses on a login node.",
         GROUP_SIM,
         default=FLAG_OFF,
     ),

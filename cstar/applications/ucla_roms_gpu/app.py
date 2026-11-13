@@ -3,7 +3,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from cstar.applications.core import ApplicationDefinition, register_application
-from cstar.applications.ucla_roms.app import RomsSimulationRunner, roms_artifacts
+from cstar.applications.ucla_roms.app import (
+    RomsSimulationRunner,
+    roms_artifacts,
+    roms_protected_variables,
+)
 from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
@@ -93,3 +97,15 @@ class UclaRomsGpuApplication(
             / GPU_BUILD_DIR_NAME
             / GPU_EXECUTABLE_NAME,
         )
+
+    @override
+    def protected_variables(self) -> "Sequence[str]":
+        """Name the variables compression keeps exact: the same as for CPU UCLA-ROMS
+        output, which the GPU model writes in the same streams.
+
+        Returns
+        -------
+        Sequence[str]
+            Variable names and glob patterns (`roms_protected_variables`).
+        """
+        return roms_protected_variables()

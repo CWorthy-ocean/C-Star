@@ -67,6 +67,9 @@ dependencies = [
     # >=2026.9: fixes the netCDF4 lock-order deadlock that hung forge input
     # generation mid-save (pydata/xarray#11622).
     "xarray>=2026.9",
+    # `cstar run compress` (cstar.base.netcdf_compress) reads and writes netCDF
+    # directly; >=1.6 for netCDF-C's native quantization (`significant_digits`).
+    "netCDF4>=1.6",
     # -- the wizard (cstar.wizard) -- kitchen-sink decision: the wizard ships
     # as a core dependency, not an optional extra, so `pip install cstar-ocean`
     # is enough to run it --
@@ -85,9 +88,6 @@ dev = [
     # the published blueprint schemas are checked against blueprints C-Star writes
     "jsonschema",
     "mypy>=1.16.1",
-    # forge's test suite (cstar/tests/unit_tests/applications/forge/) reads/writes
-    # NetCDF fixtures directly via netCDF4, not only through xarray/roms_tools.
-    "netCDF4",
     "pooch>=1.8.1",
     "pre-commit==3.8.0",
     "pytest>=7.0",

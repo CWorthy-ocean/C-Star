@@ -62,6 +62,29 @@ if TYPE_CHECKING:
 _APP_NAME_LONG: t.Literal["UCLA-ROMS simulation runner"] = "UCLA-ROMS simulation runner"
 log = get_logger(__name__)
 
+CARBONATE_PERTURBATION_VARIABLES: Final[tuple[str, ...]] = (
+    "*_source",
+    "*_ALT_CO2",
+    "*_ALT_CO2_*",
+    "ALK*",
+    "DIC*",
+    "hALK*",
+    "hDIC*",
+    "int_z_ALK*",
+    "int_z_DIC*",
+    "FG_CO2",
+    "pCO2SURF",
+    "pH",
+    "PH",
+    "CO3",
+    "MARBL_PH_3D",
+    "MARBL_PH_SURF",
+)
+"""The perturbed carbonate variables of a MARBL CDR run and their `_ALT_CO2`
+baselines, in every form a file holds them (`ALK`, `hALK_avg`, the boundary
+`ALK_north`, ...), and every CDR source, including the CDR-lite tracer sources
+(`*_source`)."""
+
 TRomsBlueprint = t.TypeVar("TRomsBlueprint", bound=Blueprint)
 
 
@@ -413,6 +436,50 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
                 )
             ],
         )
+
+    @override
+    def protected_variables(self) -> "Sequence[str]":
+        """Name the variables compression keeps exact in UCLA-ROMS output.
+
+        Returns
+        -------
+        Sequence[str]
+            Variable names and glob patterns (`roms_protected_variables`).
+        """
+        return roms_protected_variables()
+
+
+def roms_protected_variables() -> tuple[str, ...]:
+    """The variables compression keeps exact in UCLA-ROMS output, on CPU or GPU.
+
+    Both members of each carbonate perturbation pair (a tracer and its
+    `_ALT_CO2` baseline): an analysis takes their difference, which after
+    months is far below float32 resolution. And every variable another step
+    reads from this output: the CDR metrics inputs (`_cdr`), the carbonate
+    sensitivities a CDR-LiTE run reads as forcing (`_cdrgas`), and the
+    boundary fluxes and thicknesses the upscaler builds CDR forcing from
+    (`_uscl`).
+
+    Returns
+    -------
+    tuple[str, ...]
+        Variable names and glob patterns.
+    """
+    # deferred: application registration stays light
+    from cstar.applications.cdr_metrics import CDR_METRICS_VARIABLES
+    from cstar.applications.upscaler import UPSCALER_INPUT_VARIABLES
+    from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_VARIABLES
+
+    return tuple(
+        dict.fromkeys(
+            (
+                *CARBONATE_PERTURBATION_VARIABLES,
+                *CDR_METRICS_VARIABLES,
+                *CARBONATE_SENSITIVITY_VARIABLES,
+                *UPSCALER_INPUT_VARIABLES,
+            )
+        )
+    )
 
 
 def main() -> int:

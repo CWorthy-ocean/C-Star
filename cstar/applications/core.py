@@ -551,6 +551,22 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
         """
         return ()
 
+    def protected_variables(self) -> Sequence[str]:
+        """Name the variables of this application's data files that compression
+        must keep exact.
+
+        A protected variable is never cast to float32 or quantized by
+        `cstar run compress`; it is only chunked and deflated. Coordinates and
+        time variables are always kept exact and need not be listed.
+
+        Returns
+        -------
+        Sequence[str]
+            Variable names or glob patterns; empty when every variable may be
+            reduced, `("*",)` when none may.
+        """
+        return ()
+
 
 _TAnyApp: t.TypeAlias = ApplicationDefinition[t.Any, t.Any]
 _registry: dict[str, type[_TAnyApp]] = {}

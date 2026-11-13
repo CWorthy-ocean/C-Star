@@ -289,3 +289,17 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
                 kind=ArtifactKind.log, pattern=(logs / "forge_*.log").as_posix()
             ),
         ]
+
+    @t.override
+    def protected_variables(self) -> Sequence[str]:
+        """Keep every variable of forge's generated inputs exact.
+
+        Grids, initial conditions and forcing feed a model, so compression may
+        only chunk and deflate them.
+
+        Returns
+        -------
+        Sequence[str]
+            A pattern matching every variable.
+        """
+        return ("*",)

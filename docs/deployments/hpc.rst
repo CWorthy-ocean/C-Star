@@ -88,7 +88,8 @@ submit my_blueprint.yaml`` does the same with a single-step workplan (see
 from, so use it inside an allocation (``salloc``, or your own batch script).
 UCLA-ROMS will not start the model on a login node unless you set
 ``CSTAR_ALLOW_LOGIN_NODE_RUN=1``, which is only for runs small enough for
-one.
+one. ``cstar run compress --now`` warns there instead of refusing, and the
+same setting silences that warning.
 
 To catch start-up problems before waiting in the queue, prepare the run on
 the login node first with ``--pre-run``; see :doc:`../runs/pre_run_resume`.
