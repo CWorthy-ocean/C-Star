@@ -58,20 +58,6 @@ You need:
   C-Star installed into it (see "Install from source" on the
   :doc:`installation page <../getting_started/installation>`). The commands below run from the
   root of the checkout.
-- roms-tools from its main branch, at or after commit ``f9b07d42``, until a
-  roms-tools release carries it. The 5.2.1 release does not. roms-tools `#705
-  <https://github.com/CWorthy-ocean/roms-tools/pull/705>`__ fixed the edge
-  labels in ``compute_boundary_distance``, so that ``align_grids`` blends the
-  child's boundary with the parent's. The fix matters only when a child
-  boundary is closed. This child's east boundary is closed
-  (``open_boundaries.east: false`` in ``forge_child.yaml``). The tiny
-  tutorial's child has four open boundaries, so it does not need the fix.
-  Install it into the C-Star environment:
-
-  .. code-block:: console
-
-     pip install git+https://github.com/CWorthy-ocean/roms-tools.git
-
 - The source datasets below, some of which you stage yourself.
 
 Source datasets

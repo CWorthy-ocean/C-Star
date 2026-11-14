@@ -1098,16 +1098,13 @@ def _check_groom_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     ``roms_tools.setup.bgc_groom.resolve_groom_settings`` raises ``ValueError`` on an
     unknown key, so a typo fails when the blueprint loads rather than at generation.
-    Imported lazily and skipped when the installed roms-tools does not have it (or
-    is absent): roms-tools validates again when it builds the forcing. Empty means
-    roms-tools' defaults and is not checked.
+    Imported lazily, so importing this module stays light. Empty means roms-tools'
+    defaults and is not checked.
     """
     if not settings:
         return settings
-    try:
-        from roms_tools.setup.bgc_groom import resolve_groom_settings
-    except (ImportError, AttributeError):
-        return settings
+    from roms_tools.setup.bgc_groom import resolve_groom_settings
+
     resolve_groom_settings(settings)
     return settings
 
