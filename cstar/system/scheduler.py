@@ -713,7 +713,8 @@ class PBSScheduler(Scheduler):
     def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all PBS nodes.
 
-        Queries the PBS scheduler to determine the highest CPU capacity of any single node.
+        The system's fixed `max_cpus_per_node` when it has one; otherwise the PBS
+        scheduler is queried, once, for the highest CPU capacity of any single node.
 
         Returns
         -------
@@ -726,13 +727,14 @@ class PBSScheduler(Scheduler):
         RuntimeError
             If the command to query the PBS scheduler fails.
         """
-        if stdout := _run_cmd(
-            'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
-            msg_err="Error querying node property.",
-        ):
-            return int(stdout)
+        if self._max_cpus_per_node is None:
+            if stdout := _run_cmd(
+                'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
+                msg_err="Error querying node property.",
+            ):
+                self._max_cpus_per_node = int(stdout)
 
-        return None
+        return self._max_cpus_per_node
 
     @property
     def global_max_mem_per_node_gb(self) -> float | None:

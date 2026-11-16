@@ -74,8 +74,8 @@ class PIOExternalCodeBase(ExternalCodeBase):
         if missing:
             raise OSError(
                 f"Cannot build ParallelIO: {' and '.join(missing)} not set. "
-                "These should be defined in the environment file for your system "
-                f"({cstar_sysmgr.environment.system_env_path}). Note that ROMS "
+                "These should be defined in the env of "
+                f"{cstar_sysmgr.environment.env_origin}. Note that ROMS "
                 "requires PnetCDF whenever ParallelIO is enabled."
             )
 

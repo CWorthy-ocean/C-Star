@@ -30,14 +30,14 @@ def _fake_sysmgr(
     environment_variables: dict[str, str] | None = None,
     compiler: str = "gnu",
     uses_lmod: bool = False,
-    system_env_path: Path = Path("/fake/env/system.env"),
+    env_origin: str = "the cpu toolchain in /fake/systems/system.yaml",
 ) -> mock.MagicMock:
     """Build a fake `CStarSystemManager` for use with `get_sysmgr` patches."""
     sysmgr = mock.MagicMock()
     sysmgr.environment.environment_variables = environment_variables or {}
     sysmgr.environment.compiler = compiler
     sysmgr.environment.uses_lmod = uses_lmod
-    sysmgr.environment.system_env_path = system_env_path
+    sysmgr.environment.env_origin = env_origin
     return sysmgr
 
 

@@ -2269,16 +2269,34 @@ class ROMSSimulation(Simulation):
         -------
         dict[str, Any]
             The JSON-serializable record; it must hold `namelist_schema`, which
-            `attach()` reads back.
+            `attach()` reads back. `system_spec` names the system file the build
+            used (its path, layer, digest and schema version), when the system was
+            read from one.
         """
         codebase_copy = self.codebase.working_copy
-        return {
+        record: dict[str, Any] = {
             "namelist_schema": schema.__name__,
             "ucla_roms_ref": self.codebase.source.checkout_target,
             "ucla_roms_commit": (
                 codebase_copy.checkout_hash if codebase_copy is not None else ""
             ),
         }
+        if system_spec := self._system_spec_record():
+            record["system_spec"] = system_spec
+        return record
+
+    def _system_spec_record(self) -> dict[str, str] | None:
+        """Describe the system file the build used; `None` for a system defined in
+        code, or when it cannot be determined (warned: a record never stops a build).
+        """
+        try:
+            system_file = get_sysmgr().selection.context.system_file
+        except Exception as e:
+            self.log.warning(
+                f"Could not determine the system file to record in the build record: {e}"
+            )
+            return None
+        return system_file.record() if system_file is not None else None
 
     def _attach_namelist_schema(self, build_dir: Path) -> None:
         """Adopt the namelist schema recorded by `build()` for the executable in `build_dir`.

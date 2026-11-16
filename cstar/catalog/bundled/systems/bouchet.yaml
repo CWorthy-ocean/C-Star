@@ -1,0 +1,65 @@
+schema_version: 1.0.0
+name: bouchet
+docs: https://docs.ycrc.yale.edu/clusters/bouchet
+
+# Identified by matching values contained in environment variables: CLUSTER on
+# the login nodes, SLURM_CLUSTER_NAME on compute nodes.
+detect:
+  - {env: CLUSTER, equals: bouchet}
+  - {env: SLURM_CLUSTER_NAME, equals: bouchet}
+
+# Bouchet exports no ``SCRATCH`` variable. Each user's home instead carries one
+# symlink per project named ``scratch_pi_<pi-netid>``, and inside each the user
+# owns a directory named after their username. The first such directory in
+# sorted order (``is_dir()`` follows the symlinks) plus the username is the
+# root. A failed scan (a stale or permission-restricted mount behind a symlink)
+# logs a warning and returns ``None`` rather than raising, because this runs
+# while resolving ``CSTAR_DATA_HOME``.
+scratch:
+  match: "~/scratch_pi_*"
+  subdir: "{user}"
+
+toolchains:
+  cpu:
+    compiler: gnu
+    mpi_prefix: srun
+    modules:
+      - netCDF-Fortran/4.6.0-gompi-2022b
+      - PnetCDF/1.12.3-gompi-2022b
+      - CMake/3.31.8-GCCcore-13.3.0
+    env:
+      MPIHOME: ${EBROOTGOMPI}
+      NETCDFHOME: ${EBROOTNETCDF}
+      NETCDFFHOME: ${EBROOTNETCDFMINFORTRAN}
+      PNETCDFHOME: ${PNETCDF}
+      PATH: ${NETCDFHOME}/bin:${PATH}
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib:${NETCDFFHOME}/lib
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+
+scheduler:
+  family: slurm
+  primary_queue: day
+  queues:
+    # Partition with 24 hour max walltime (1-00:00:00).
+    - {name: day, kind: partition, max_walltime: sinfo}
+    # Partition with 7 day max walltime (7-00:00:00).
+    - {name: week, kind: partition, max_walltime: sinfo}
+    # Partition with 2 day max walltime (2-00:00:00) and GPU nodes.
+    - {name: gpu, kind: partition, max_walltime: sinfo}
+    # Partition with 1 day max walltime (1-00:00:00) and 8000G memory limit.
+    - {name: bigmem, kind: partition, max_walltime: sinfo}
+    # Partition with 2 day max walltime (2-00:00:00) and tuned for parallel MPI jobs.
+    - {name: mpi, kind: partition, max_walltime: sinfo}
+    # Partition with 6 hour max walltime (06:00:00) for interactive/development work.
+    - {name: devel, kind: partition, max_walltime: sinfo}
+    # Preemptable partition with 1 day max walltime (1-00:00:00).
+    - {name: scavenge, kind: partition, max_walltime: sinfo}
+    # Priority-tier counterpart of `day` (7 day max walltime); requires a `prio_*` SLURM account.
+    - {name: priority, kind: partition, max_walltime: sinfo}
+    # Priority-tier counterpart of `gpu` (7 day max walltime); requires a `prio_*` SLURM account.
+    - {name: priority_gpu, kind: partition, max_walltime: sinfo}
+    # Priority-tier counterpart of `mpi` (7 day max walltime); requires a `prio_*` SLURM account.
+    - {name: priority_mpi, kind: partition, max_walltime: sinfo}
+  requires_task_distribution: false
+  max_cpus_per_node: 128
+  require: [account, queue]

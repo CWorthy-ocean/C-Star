@@ -1,0 +1,40 @@
+schema_version: 1.0.0
+name: elja
+docs: https://wiki.irei.is
+
+# Identified by matching value `elja-irhpc` in the HOSTNAME env var, or `elja`
+# in SLURM_CLUSTER_NAME on compute nodes.
+detect:
+  - {env: HOSTNAME, equals: elja-irhpc}
+  - {env: SLURM_CLUSTER_NAME, equals: elja}
+
+toolchains:
+  cpu:
+    compiler: gnu
+    mpi_prefix: mpirun
+    modules:
+      - GCC/11.2.0
+      - openmpi4/4.1.6
+      - netCDF-Fortran/4.6.1
+    env:
+      MPIHOME: ${MPI_DIR}/
+      NETCDFHOME: "${EBROOTNETCDF}/"
+      PATH: "${PATH}:${NETCDFHOME}/bin"
+      LIBRARY_PATH: "${LIBRARY_PATH}:${NETCDFHOME}lib"
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      CSTAR_SLURM_DISABLE_MT: "1"
+
+scheduler:
+  family: slurm
+  primary_queue: any_cpu
+  queues:
+    - {name: 48cpu_192mem, kind: partition, max_walltime: sinfo}
+    - {name: 64cpu_256mem, kind: partition, max_walltime: sinfo}
+    - {name: 128cpu_256mem, kind: partition, max_walltime: sinfo}
+    - {name: any_cpu, kind: partition, max_walltime: sinfo}
+  requires_task_distribution: true
+  max_cpus_per_node: 128
+  # NOTE: Elja does not support SLURM account names.
+  require: []

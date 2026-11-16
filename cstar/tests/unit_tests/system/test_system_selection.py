@@ -13,21 +13,15 @@ from cstar.base.exceptions import CstarError
 from cstar.system import manager
 from cstar.system.environment import CStarEnvironment
 from cstar.system.manager import (
-    CTX_REGISTRY,
-    AnvilSystemContext,
-    BouchetSystemContext,
     CStarSystemManager,
     HostNameEvaluator,
-    LinuxSystemContext,
-    OscarEnvSettings,
-    OscarSystemContext,
-    PerlmutterSystemContext,
     SystemContext,
     SystemSelection,
     SystemSource,
     detect_system,
     get_system_context,
     registered_context,
+    registered_names,
     select_system,
     selected_system_name,
     system_label,
@@ -35,12 +29,23 @@ from cstar.system.manager import (
     warn_once,
 )
 from cstar.system.scheduler import VISIBLE_SCHEDULERS, visible_scheduler
+from cstar.system.spec import path_is_dir as real_path_is_dir
+
+ANVIL = registered_context("anvil")
+BOUCHET = registered_context("bouchet")
+LINUX = registered_context("linux_x86_64")
+OSCAR = registered_context("oscar")
+PERLMUTTER = registered_context("perlmutter")
 
 GENERIC_CONTEXT_NAMES = frozenset({"linux_x86_64", "linux_aarch64", "darwin_arm64"})
 """The platform contexts, which C-Star ships with no Lmod module list."""
 
 BUNDLED_CONTEXTS = sorted(
-    (ctx for ctx in CTX_REGISTRY.values() if ctx.__module__ == manager.__name__),
+    (
+        ctx
+        for ctx in (registered_context(name) for name in registered_names())
+        if ctx.system_file is not None
+    ),
     key=lambda ctx: ctx.name,
 )
 """The contexts C-Star ships, excluding any a test registered."""
@@ -54,8 +59,8 @@ def _unrecognisable_machine(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Strip every hint of the host's identity from the environment, and restore the
     environment (which building a system manager also writes to) afterwards.
 
-    Oscar's mount-point marker is pointed away for every unit test by the shared
-    conftest; the tests that need it point it at a real directory.
+    Oscar's mount-point rule is pointed away for every unit test by the shared
+    conftest; the tests that need it replace `cstar.system.spec.path_is_dir`.
     """
     hints = [name for name in os.environ if name.startswith("LMOD_")]
     with mock.patch.dict(os.environ):
@@ -95,7 +100,7 @@ def test_unregistered_lmod_name_falls_back_to_the_platform_generic(
 
     selection = select_system()
 
-    assert selection.context is LinuxSystemContext
+    assert selection.context is LINUX
     assert selection.source is SystemSource.FALLBACK
     assert selection.detected == "frontera"
 
@@ -114,7 +119,7 @@ def test_unregistered_lmod_name_warns_once_per_process(
 
     (message,) = fallback_messages(caplog)
     assert "'frontera'" in message
-    assert LinuxSystemContext.name in message
+    assert LINUX.name in message
     assert ENV_CSTAR_SYSTEM in message
     assert manager.DOCS_MACHINES_URL in message
 
@@ -132,7 +137,7 @@ def test_unregistered_lmod_name_does_not_call_lmod(
         sysmgr = CStarSystemManager()
 
     call_lmod.assert_not_called()
-    assert sysmgr.name == LinuxSystemContext.name
+    assert sysmgr.name == LINUX.name
     assert sysmgr.environment.uses_lmod is False
 
 
@@ -163,9 +168,7 @@ def test_lmod_without_a_system_name_falls_back_to_the_platform_generic(
     ):
         sysmgr = CStarSystemManager()
 
-    assert selection == SystemSelection(
-        LinuxSystemContext, SystemSource.FALLBACK, expected
-    )
+    assert selection == SystemSelection(LINUX, SystemSource.FALLBACK, expected)
     (message,) = fallback_messages(caplog)
     assert f"'{expected}'" in message
     call_lmod.assert_not_called()
@@ -181,24 +184,28 @@ def test_lmod_with_a_matching_context_is_detected(
     monkeypatch.setenv("LMOD_CMD", "/nonexistent/lmod")
     monkeypatch.setenv("RCAC_CLUSTER", "anvil")
 
-    assert select_system() == SystemSelection(AnvilSystemContext, SystemSource.DETECTED)
+    assert select_system() == SystemSelection(ANVIL, SystemSource.DETECTED)
 
 
 def test_oscar_is_detected_from_its_filesystem_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No environment variable identifies Oscar, so its mount point does."""
-    monkeypatch.setattr(OscarEnvSettings, "FILESYSTEM_MARKER", tmp_path)
+    monkeypatch.setattr(
+        "cstar.system.spec.path_is_dir", lambda path: path == "/oscar/home"
+    )
 
-    assert select_system() == SystemSelection(OscarSystemContext, SystemSource.DETECTED)
+    assert select_system() == SystemSelection(OSCAR, SystemSource.DETECTED)
 
 
 def test_oscar_is_not_detected_without_its_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(OscarEnvSettings, "FILESYSTEM_MARKER", tmp_path / "missing")
+    monkeypatch.setattr(
+        "cstar.system.spec.path_is_dir", lambda path: path != "/oscar/home"
+    )
 
-    assert OscarSystemContext.is_match() is False
+    assert OSCAR.is_match() is False
 
 
 def test_oscar_marker_check_failure_is_not_a_match(
@@ -211,9 +218,10 @@ def test_oscar_marker_check_failure_is_not_a_match(
     def _boom(self: Path) -> bool:
         raise OSError("stale NFS handle")
 
+    monkeypatch.setattr("cstar.system.spec.path_is_dir", real_path_is_dir)
     monkeypatch.setattr(Path, "is_dir", _boom)
 
-    assert OscarSystemContext.is_match() is False
+    assert OSCAR.is_match() is False
 
 
 def test_registered_cluster_still_loads_its_modules(
@@ -240,11 +248,14 @@ def test_only_the_platform_contexts_lack_a_module_list(
     """
     monkeypatch.setenv("LMOD_CMD", "/nonexistent/lmod")
     has_module_list = context.name not in GENERIC_CONTEXT_NAMES
+    modules = context.toolchain("cpu").modules
 
     with mock.patch.object(CStarEnvironment, "_call_lmod"):
-        env = CStarEnvironment(context.name, context.mpi_prefix, context.compiler)
+        env = CStarEnvironment(
+            context.name, context.mpi_prefix, context.compiler, modules=modules
+        )
 
-    assert env.lmod_path.is_file() is has_module_list
+    assert bool(modules) is has_module_list
     assert env.uses_lmod is has_module_list
 
 
@@ -260,7 +271,7 @@ def test_setting_selects_a_registered_context_over_detection(
 
     selection = select_system()
 
-    assert selection.context is BouchetSystemContext
+    assert selection.context is BOUCHET
     assert selection.source is SystemSource.SETTING
     assert ENV_CSTAR_SYSTEM in selection.describe()
     assert CStarSystemManager().name == "bouchet"
@@ -273,7 +284,7 @@ def test_blank_setting_is_detection(monkeypatch: pytest.MonkeyPatch) -> None:
 
     selection = select_system()
 
-    assert selection.context is PerlmutterSystemContext
+    assert selection.context is PERLMUTTER
     assert selection.source is SystemSource.DETECTED
 
 
@@ -290,7 +301,7 @@ def test_unknown_setting_is_refused_listing_the_registered_systems(
 
     message = str(excinfo.value)
     assert ENV_CSTAR_SYSTEM in message
-    for name in CTX_REGISTRY:
+    for name in registered_names():
         assert name in message
     assert system_label().startswith("not determined:")
 
@@ -386,9 +397,7 @@ def test_unregistered_lmod_name_with_a_matching_context_is_detected(
     with caplog.at_level(logging.WARNING):
         sysmgr = CStarSystemManager()
 
-    assert sysmgr.selection == SystemSelection(
-        AnvilSystemContext, SystemSource.DETECTED
-    )
+    assert sysmgr.selection == SystemSelection(ANVIL, SystemSource.DETECTED)
     assert fallback_messages(caplog) == []
 
 
@@ -401,9 +410,7 @@ def test_registered_system_is_detected_without_a_warning(
     with caplog.at_level(logging.WARNING):
         sysmgr = CStarSystemManager()
 
-    assert sysmgr.selection == SystemSelection(
-        PerlmutterSystemContext, SystemSource.DETECTED
-    )
+    assert sysmgr.selection == SystemSelection(PERLMUTTER, SystemSource.DETECTED)
     assert fallback_messages(caplog) == []
 
 
@@ -419,7 +426,7 @@ def test_platform_generic_detected_without_lmod_is_not_a_fallback(
         selection = detect_system()
         warn_fallback(selection)
 
-    assert selection == SystemSelection(LinuxSystemContext, SystemSource.DETECTED)
+    assert selection == SystemSelection(LINUX, SystemSource.DETECTED)
     assert fallback_messages(caplog) == []
 
 
@@ -434,7 +441,7 @@ def test_get_system_context_falls_back_without_a_warning(
     with caplog.at_level(logging.WARNING):
         ctx = get_system_context()
 
-    assert ctx.name == LinuxSystemContext.name
+    assert ctx.name == LINUX.name
     assert fallback_messages(caplog) == []
 
 
@@ -442,8 +449,8 @@ def test_warn_fallback_warns_once_per_unrecognised_system(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The fallback warning is logged once for each distinct unrecognised system."""
-    frontera = SystemSelection(LinuxSystemContext, SystemSource.FALLBACK, "frontera")
-    stampede = SystemSelection(LinuxSystemContext, SystemSource.FALLBACK, "stampede")
+    frontera = SystemSelection(LINUX, SystemSource.FALLBACK, "frontera")
+    stampede = SystemSelection(LINUX, SystemSource.FALLBACK, "stampede")
 
     with caplog.at_level(logging.WARNING):
         for selection in (frontera, frontera, stampede, frontera):
@@ -470,7 +477,7 @@ def test_warn_fallback_ignores_a_system_that_was_not_a_fallback(
 ) -> None:
     """Only a fallback to the generic context is warned about."""
     with caplog.at_level(logging.WARNING):
-        warn_fallback(SystemSelection(LinuxSystemContext, source, "frontera"))
+        warn_fallback(SystemSelection(LINUX, source, "frontera"))
 
     assert caplog.records == []
 
@@ -494,27 +501,21 @@ def test_selection_describes_how_the_context_was_chosen(
     source: SystemSource, detected: str, expected: list[str]
 ) -> None:
     """A selection names its context, and says how it was chosen unless detected."""
-    description = SystemSelection(LinuxSystemContext, source, detected).describe()
+    description = SystemSelection(LINUX, source, detected).describe()
 
     assert all(part in description for part in expected)
     if source is SystemSource.DETECTED:
-        assert description == LinuxSystemContext.name
+        assert description == LINUX.name
 
 
 @pytest.mark.parametrize(
     ("context", "source", "expected"),
     [
-        pytest.param(LinuxSystemContext, SystemSource.FALLBACK, "SLURM", id="fallback"),
-        pytest.param(
-            LinuxSystemContext, SystemSource.SETTING, "SLURM", id="setting-generic"
-        ),
-        pytest.param(
-            LinuxSystemContext, SystemSource.DETECTED, "", id="detected-generic"
-        ),
-        pytest.param(
-            AnvilSystemContext, SystemSource.DETECTED, "", id="detected-slurm"
-        ),
-        pytest.param(AnvilSystemContext, SystemSource.SETTING, "", id="setting-slurm"),
+        pytest.param(LINUX, SystemSource.FALLBACK, "SLURM", id="fallback"),
+        pytest.param(LINUX, SystemSource.SETTING, "SLURM", id="setting-generic"),
+        pytest.param(LINUX, SystemSource.DETECTED, "", id="detected-generic"),
+        pytest.param(ANVIL, SystemSource.DETECTED, "", id="detected-slurm"),
+        pytest.param(ANVIL, SystemSource.SETTING, "", id="setting-slurm"),
     ],
 )
 def test_unsupported_scheduler_is_asked_of_a_context_that_has_none_unless_detected(
@@ -545,7 +546,7 @@ def test_generic_context_without_a_visible_scheduler_has_no_unsupported_schedule
     tmp_path: Path, source: SystemSource
 ) -> None:
     """A generic context on a machine that shows no scheduler has nothing unsupported."""
-    selection = SystemSelection(LinuxSystemContext, source, "frontera")
+    selection = SystemSelection(LINUX, source, "frontera")
 
     assert selection.unsupported_scheduler({"PATH": str(tmp_path)}) == ""
 
@@ -553,7 +554,8 @@ def test_generic_context_without_a_visible_scheduler_has_no_unsupported_schedule
 @pytest.mark.parametrize("name", ["anvil", " Linux_X86_64\n", "PERLMUTTER"])
 def test_registered_context_ignores_case_and_whitespace(name: str) -> None:
     """A registered context is found by its name however it is cased or padded."""
-    assert registered_context(name) is CTX_REGISTRY[name.strip().casefold()]
+    assert registered_context(name).name == name.strip().casefold()
+    assert registered_context(name) is registered_context(name.strip().casefold())
 
 
 def test_registered_context_refuses_an_unknown_name() -> None:

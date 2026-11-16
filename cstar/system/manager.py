@@ -1,5 +1,4 @@
 import functools
-import getpass
 import os
 import platform as platform
 from collections.abc import Sequence
@@ -7,8 +6,6 @@ from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Final, Protocol, override
-
-from pydantic import Field
 
 from cstar.base.env import (
     ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
@@ -24,21 +21,20 @@ from cstar.system.environment import (
     CStarEnvironment,
     EnvSettingsBase,
     LmodEnvSettings,
-    SlurmSettingsBase,
 )
 from cstar.system.scheduler import (
-    PBSQueue,
-    PBSScheduler,
     Scheduler,
-    SlurmPartition,
-    SlurmQOS,
-    SlurmScheduler,
     in_scheduler_job,
-    query_max_walltime_via_sacctmgr,
-    query_max_walltime_via_sinfo,
     visible_scheduler,
 )
-from cstar.system.toolchain import GpuNodes, Toolchain, ToolchainName
+from cstar.system.spec import (
+    SystemFile,
+    read_bundled_system_files,
+)
+from cstar.system.spec import (
+    current_user as current_user,  # re-exported: its home before cstar.system.spec
+)
+from cstar.system.toolchain import Toolchain, ToolchainName
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -153,6 +149,8 @@ class SystemContext(Protocol):
     """The compiler used when building software for the system."""
     mpi_prefix: ClassVar[str]
     """The prefix used when executing mpiexec for the system."""
+    system_file: ClassVar[SystemFile | None] = None
+    """The system file the context was read from; `None` for one defined in code."""
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
@@ -202,7 +200,113 @@ class SystemContext(Protocol):
         return None
 
 
+class SpecSystemContext(SystemContext):
+    """A system context read from a system file (see `cstar.system.spec`).
+
+    `context_from_file` makes one subclass per file; each class method answers
+    from the file's spec.
+    """
+
+    system_file: ClassVar[SystemFile]
+    docs: ClassVar[str]
+    """Where the machine's documentation is."""
+    _settings: ClassVar[type[EnvSettingsBase]]
+    """The settings class built from the spec, once."""
+
+    @override
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Instantiate the scheduler the system file describes, if any."""
+        spec = cls.system_file.spec.scheduler
+        return spec.build(cls.docs) if spec is not None else None
+
+    @override
+    @classmethod
+    def toolchain(cls, name: ToolchainName) -> Toolchain:
+        """Return the toolchain the system file lists under `name`.
+
+        Raises
+        ------
+        CstarError
+            If the system file lists no toolchain under `name`.
+        """
+        if (spec := cls.system_file.spec.toolchains.get(name)) is None:
+            raise CstarError(
+                f"{cls.name} has no {name.upper()} toolchain registered with C-Star"
+            )
+        return spec.build(name)
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return cls._settings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if any of the system file's `detect` rules matches here."""
+        return any(rule.matches() for rule in cls.system_file.spec.detect)
+
+    @override
+    @classmethod
+    def scratch_root(cls) -> Path | None:
+        """Return the scratch root the system file's `scratch` rule finds, if any."""
+        rule = cls.system_file.spec.scratch
+        return rule.resolve() if rule is not None else None
+
+
+def context_from_file(system_file: SystemFile) -> type[SpecSystemContext]:
+    """Build the system context a system file describes.
+
+    Parameters
+    ----------
+    system_file : SystemFile
+        The file, as read.
+
+    Returns
+    -------
+    type[SpecSystemContext]
+    """
+    spec = system_file.spec
+    cpu = spec.toolchains["cpu"]
+    return type(
+        f"{spec.class_stem}SystemContext",
+        (SpecSystemContext,),
+        {
+            "__doc__": f"The {spec.name} system, read from {system_file.path}.",
+            "name": spec.name,
+            "compiler": cpu.compiler,
+            "mpi_prefix": cpu.mpi_prefix,
+            "docs": spec.docs,
+            "system_file": system_file,
+            "_settings": spec.settings_klass(),
+        },
+    )
+
+
+@functools.cache
+def _bundled_contexts() -> dict[str, type[SystemContext]]:
+    """Build the contexts of the system files C-Star ships, once per process.
+
+    Raises
+    ------
+    SystemFileError
+        If a bundled file is refused, which is a defect of the package.
+    """
+    return {f.spec.name: context_from_file(f) for f in read_bundled_system_files()}
+
+
 CTX_REGISTRY: dict[str, type[SystemContext]] = {}
+"""The contexts registered in code with `register_sys_context`, by name; they
+take precedence over a bundled system of the same name."""
+
+
+def _registry() -> dict[str, type[SystemContext]]:
+    """Return every registered context by name: the bundled systems, then those
+    registered in code.
+    """
+    return {**_bundled_contexts(), **CTX_REGISTRY}
 
 
 def register_sys_context(
@@ -232,12 +336,12 @@ def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
     -------
     Sequence[type[_SystemContext]]
     """
-    return list(CTX_REGISTRY.values())
+    return list(_registry().values())
 
 
 def registered_names() -> list[str]:
     """Return the names of the registered system contexts, sorted."""
-    return sorted(CTX_REGISTRY)
+    return sorted(_registry())
 
 
 class SystemSource(StrEnum):
@@ -310,7 +414,7 @@ def registered_context(name: str) -> type[SystemContext]:
         If no context is registered under the name; the message lists those that
         are.
     """
-    if klass := CTX_REGISTRY.get(name.strip().casefold()):
+    if klass := _registry().get(name.strip().casefold()):
         return klass
     raise CstarError(
         f"{name!r} is not a registered system; {ENV_CSTAR_SYSTEM} must name one of: "
@@ -339,12 +443,13 @@ def detect_system() -> SystemSelection:
     namer = HostNameEvaluator()
     detected = namer.name
     generic = namer.platform_hostname
-    if detected != generic and (klass := CTX_REGISTRY.get(detected)):
+    registry = _registry()
+    if detected != generic and (klass := registry.get(detected)):
         return SystemSelection(klass, SystemSource.DETECTED)
     # an Lmod name C-Star does not know may still be a system that matches by its own test
     if klass := next((k for k in get_registered_sys_contexts() if k.is_match()), None):
         return SystemSelection(klass, SystemSource.DETECTED)
-    if klass := CTX_REGISTRY.get(generic):
+    if klass := registry.get(generic):
         if detected != generic:
             return SystemSelection(klass, SystemSource.FALLBACK, detected)
         if namer.lmod_settings.CMD:
@@ -458,701 +563,6 @@ def warn_fallback(selection: SystemSelection) -> None:
     )
 
 
-class AnvilEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Anvil* system.
-
-    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
-    hostname matching test in `is_match`.
-    """
-
-    HOST_IDENTIFIER: ClassVar[str] = "anvil"
-    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
-    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
-    """The hostname of the machine.
-
-    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
-    """
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class AnvilSystemContext(SystemContext):
-    """The contextual dependencies for the Anvil system."""
-
-    name: ClassVar[str] = "anvil"
-    """The unique name identifying the Anvil system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Anvil."""
-    mpi_prefix: ClassVar[str] = "srun --kill-on-bad-exit=1"
-    """The MPI prefix used on Anvil."""
-    docs: ClassVar[str] = "https://www.rcac.purdue.edu/knowledge/anvil/architecture"
-    """URI for documentation of the Anvil system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        regular_q = SlurmPartition(
-            name="wholenode",
-            query_name="part-standard",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-        shared_q = SlurmPartition(
-            name="shared",
-            query_name="part-shared",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-        debug_q = SlurmPartition(
-            name="debug",
-            query_name="part-debug",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-
-        # Query names verified on Anvil 2026-11-02.
-        gpu_q = SlurmPartition(
-            name="gpu",
-            query_name="part-gpu",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-        gpu_debug_q = SlurmPartition(
-            name="gpu-debug",
-            query_name="part-gpu-debug",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-
-        return SlurmScheduler(
-            queues=[regular_q, shared_q, debug_q, gpu_q, gpu_debug_q],
-            primary_queue_name="wholenode",
-            other_scheduler_directives={},
-            requires_task_distribution=False,
-            documentation=cls.docs,
-            max_cpus_per_node=128,
-            # Verified on Anvil 2026-11-02: 16 GPU nodes of 4xA100 + 2xEPYC 7763
-            # (128 cores); `gpu` is exclusive, `gpu-debug` is 30 min and at most 2
-            # GPUs; GPUs are requested with `--gpus-per-node`. GPU allocations are
-            # `<allocation>-gpu` accounts with the `gpu` QOS (a CPU allocation is
-            # refused on the `gpu` partition). The site's GPU tree has no
-            # nvfortran-built netCDF-Fortran or CUDA-aware system OpenMPI, so no
-            # GPU build toolchain is registered yet.
-            gpu=GpuNodes(
-                gpus_per_node=4,
-                queue="gpu",
-                directives={"--gpu-bind": "none"},
-                cores_per_node=128,
-            ),
-        )
-
-    @override
-    @classmethod
-    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
-        """Return the type used to load settings required by the target system."""
-        return AnvilEnvSettings
-
-    @override
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified as *Anvil* by matching
-        value `anvil` in `RCAC_CLUSTER` env var.
-        """
-        return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
-
-
-def current_user() -> str:
-    """Best-effort current username; never raises (containers and CI may lack ``$USER``)."""
-    if user := os.environ.get("USER"):
-        return user
-    try:
-        return getpass.getuser()
-    except Exception:
-        return "unknown"
-
-
-class BouchetEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Bouchet* system."""
-
-    HOST_IDENTIFIER: ClassVar[str] = "bouchet"
-    """Fixed value in HOSTNAME env var on Bouchet that uniquely identifies the system."""
-    CLUSTER_IDENTIFIER: ClassVar[str] = "bouchet"
-    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
-
-    HOSTNAME: str = Field(default="", alias="HOSTNAME")
-    """The hostname of the machine.
-
-    May be used to identify the system as Bouchet by matching value: `???`
-    """
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class BouchetSystemContext(SystemContext):
-    """The contextual dependencies for the Bouchet system."""
-
-    name: ClassVar[str] = "bouchet"
-    """The unique name identifying the Bouchet system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Bouchet."""
-    mpi_prefix: ClassVar[str] = "srun"
-    """The MPI prefix used on Bouchet."""
-    docs: ClassVar[str] = "https://docs.ycrc.yale.edu/clusters/bouchet"
-    """URI for documentation of the Bouchet system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        day_queue = SlurmPartition(
-            name="day",
-            query_name="day",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Partition with 24 hour max walltime (1-00:00:00)."""
-        week_queue = SlurmPartition(
-            name="week",
-            query_name="week",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Partition with 7 day max walltime (7-00:00:00)."""
-        gpu_queue = SlurmPartition(
-            name="gpu",
-            query_name="gpu",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Partition with 2 day max walltime (2-00:00:00) and GPU nodes."""
-        bigmem_queue = SlurmPartition(
-            name="bigmem",
-            query_name="bigmem",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Partition with 1 day max walltime (1-00:00:00) and 8000G memory limit."""
-        mpi_queue = SlurmPartition(
-            name="mpi",
-            query_name="mpi",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Partition with 2 day max walltime (2-00:00:00) and tuned for parallel MPI jobs."""
-        devel_queue = SlurmPartition(
-            name="devel",
-            query_name="devel",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Partition with 6 hour max walltime (06:00:00) for interactive/development work."""
-        scavenge_queue = SlurmPartition(
-            name="scavenge",
-            query_name="scavenge",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Preemptable partition with 1 day max walltime (1-00:00:00)."""
-        priority_queue = SlurmPartition(
-            name="priority",
-            query_name="priority",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Priority-tier counterpart of `day` (7 day max walltime); requires a `prio_*` SLURM account."""
-        priority_gpu_queue = SlurmPartition(
-            name="priority_gpu",
-            query_name="priority_gpu",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Priority-tier counterpart of `gpu` (7 day max walltime); requires a `prio_*` SLURM account."""
-        priority_mpi_queue = SlurmPartition(
-            name="priority_mpi",
-            query_name="priority_mpi",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """Priority-tier counterpart of `mpi` (7 day max walltime); requires a `prio_*` SLURM account."""
-
-        return SlurmScheduler(
-            queues=[
-                day_queue,
-                week_queue,
-                gpu_queue,
-                bigmem_queue,
-                mpi_queue,
-                devel_queue,
-                scavenge_queue,
-                priority_queue,
-                priority_gpu_queue,
-                priority_mpi_queue,
-            ],
-            primary_queue_name="day",
-            other_scheduler_directives={},
-            requires_task_distribution=False,
-            documentation=cls.docs,
-            max_cpus_per_node=128,
-        )
-
-    @override
-    @classmethod
-    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
-        """Return the type used to load settings required by the target system."""
-        return BouchetEnvSettings
-
-    @override
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified as *Bouchet* by matching
-        values contained in environment variables.
-        """
-        if os.getenv("CLUSTER", "") == BouchetEnvSettings.HOST_IDENTIFIER:
-            return True
-
-        return (
-            os.getenv("SLURM_CLUSTER_NAME", "") == BouchetEnvSettings.CLUSTER_IDENTIFIER
-        )
-
-    @override
-    @classmethod
-    def scratch_root(cls) -> Path | None:
-        """Return the per-user ``scratch_pi_*/<user>`` directory linked from ``$HOME``.
-
-        Bouchet exports no ``SCRATCH`` variable. Each user's home instead carries one
-        symlink per project named ``scratch_pi_<pi-netid>``, and inside each the user
-        owns a directory named after their username. The first such directory in
-        sorted order (``is_dir()`` follows the symlinks) plus the username is the
-        root. A failed scan (a stale or permission-restricted mount behind a symlink)
-        logs a warning and returns ``None`` rather than raising, because this runs
-        while resolving ``CSTAR_DATA_HOME``.
-        """
-        home = Path.home()
-        try:
-            candidates = sorted(p for p in home.glob("scratch_pi_*") if p.is_dir())
-        except OSError:
-            log.warning(
-                "Failed to scan %s for scratch_pi_* directories; set SCRATCH or "
-                "CSTAR_DATA_HOME to name the scratch file system explicitly.",
-                home,
-            )
-            return None
-        if not candidates:
-            return None
-        return candidates[0] / current_user()
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class DerechoSystemContext(SystemContext):
-    """The contextual dependencies for the Derecho system."""
-
-    name: ClassVar[str] = "derecho"
-    """The unique name identifying the Derecho system."""
-    compiler: ClassVar[str] = "intel"
-    """The compiler used on Derecho."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on Derecho."""
-    docs: ClassVar[str] = (
-        "https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/"
-    )
-    """URI for documentation of the Derecho system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
-        der_main_q = PBSQueue(name="main", max_walltime="12:00:00")
-        der_preempt_q = PBSQueue(name="preempt", max_walltime="24:00:00")
-        der_develop_q = PBSQueue(name="develop", max_walltime="6:00:00")
-
-        return PBSScheduler(
-            queues=[der_main_q, der_preempt_q, der_develop_q],
-            primary_queue_name="main",
-            requires_task_distribution=True,
-            documentation=cls.docs,
-        )
-
-
-class EljaEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Elja* system.
-
-    NOTE: Elja does not support SLURM account names.
-    """
-
-    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
-    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
-    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
-    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
-
-    HOSTNAME: str = Field(default="", alias="HOSTNAME")
-    """The hostname of the machine.
-
-    Used to identify the system as Elja by matching value: `elja-irhpc`
-    """
-    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
-    """The SLURM account name.
-
-    Overridden from SlurmSettingsBase to allow empty account.
-    """
-    SLURM_QUEUE: str = Field(default="")
-    """The SLURM queue name."""
-    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
-    """The number of threads to be used by OpenMPI"""
-    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
-    """The number of threads used by MKL"""
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class EljaSystemContext(SystemContext):
-    """The contextual dependencies for the Elja system."""
-
-    name: ClassVar[str] = "elja"
-    """The unique name identifying the Elja system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Elja."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on Eja."""
-    docs: ClassVar[str] = "https://wiki.irei.is"
-    """URI for documentation of the Elja system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        large = SlurmPartition(
-            name="128cpu_256mem",
-            query_name="128cpu_256mem",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        medium = SlurmPartition(
-            name="64cpu_256mem",
-            query_name="64cpu_256mem",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        small = SlurmPartition(
-            name="48cpu_192mem",
-            query_name="48cpu_192mem",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        any_cpu = SlurmPartition(
-            name="any_cpu",
-            query_name="any_cpu",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-
-        return SlurmScheduler(
-            queues=[small, medium, large, any_cpu],
-            primary_queue_name="any_cpu",
-            other_scheduler_directives={},
-            requires_task_distribution=True,
-            documentation=cls.docs,
-            max_cpus_per_node=128,
-        )
-
-    @override
-    @classmethod
-    def settings_klass(cls) -> type[EnvSettingsBase] | None:
-        """Return the type used to load settings required by *Elja* system.
-
-        Raises
-        ------
-        ValidationError
-            If required environment variables are not set.
-        """
-        return EljaEnvSettings
-
-    @override
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified as *Elja* by matching
-        value `elja-irhpc` in `HOSTNAME` env var.
-        """
-        if host_match := os.getenv("HOSTNAME", "") == EljaEnvSettings.HOST_IDENTIFIER:
-            return host_match
-
-        return os.getenv("SLURM_CLUSTER_NAME", "") == EljaEnvSettings.CLUSTER_IDENTIFIER
-
-
-class ExpanseEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Expanse* system.
-
-    Expanse requires a project (account) on every job; an unset queue submits to
-    the primary `compute` partition.
-    """
-
-    SLURM_QUEUE: str = Field(default="", frozen=True)
-    """The SLURM queue name.
-
-    Overridden from SlurmSettingsBase to allow an empty queue.
-    """
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class ExpanseSystemContext(SystemContext):
-    """The contextual dependencies for the Expanse system."""
-
-    name: ClassVar[str] = "expanse"
-    """The unique name identifying the Expanse system."""
-    compiler: ClassVar[str] = "intel"
-    """The compiler used on Expanse."""
-    mpi_prefix: ClassVar[str] = "srun --mpi=pmi2 --kill-on-bad-exit=1"
-    """The MPI prefix used on Expanse."""
-    docs: ClassVar[str] = "https://www.sdsc.edu/support/user_guides/expanse.html"
-    """URI for documentation of the Expanse system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        exp_compute_q = SlurmPartition(name="compute")
-        exp_debug_q = SlurmPartition(name="debug")
-        return SlurmScheduler(
-            queues=[exp_compute_q, exp_debug_q],
-            primary_queue_name="compute",
-            requires_task_distribution=True,
-            documentation=cls.docs,
-        )
-
-    @override
-    @classmethod
-    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
-        """Return the type used to load settings required by the target system."""
-        return ExpanseEnvSettings
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class LinuxARM64SystemContext(SystemContext):
-    name: ClassVar[str] = "linux_aarch64"
-    """The unique name identifying the Linux system on an ARM64 platform."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on ARM64 Linux."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on Linux."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        """Return None - a scheduler on the Linux system is not supported."""
-        return None
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class LinuxSystemContext(SystemContext):
-    """The contextual dependencies for the Linux system on the x86_64 platform."""
-
-    name: ClassVar[str] = "linux_x86_64"
-    """The unique name identifying the Linux system on an X86_64 platform."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Linux."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on Linux."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        """Return None - a scheduler on the Linux system is not supported."""
-        return None
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class MacOSSystemContext(SystemContext):
-    name: ClassVar[str] = "darwin_arm64"
-    """The unique name identifying the MacOS system on an ARM64 platform."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on MacOS."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on MacOS."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        """Return None - a scheduler on the MacOS system is not supported."""
-        return None
-
-
-class OscarEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Oscar* system.
-
-    NOTE: Oscar's default association needs no account (condo and priority users
-    set one); an unset queue submits to the primary `batch` partition.
-    """
-
-    FILESYSTEM_MARKER: ClassVar[Path] = Path("/oscar/home")
-    """Mount point on Oscar's login and compute nodes that identifies the system.
-
-    No environment variable does: Oscar sets neither LMOD_SYSHOST nor
-    LMOD_SYSTEM_NAME, and its SLURM_CLUSTER_NAME is the generic ``slurmctld``
-    (both seen on the machine 2026-11-09).
-    """
-
-    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
-    """The SLURM account name.
-
-    Overridden from SlurmSettingsBase to allow an empty account.
-    """
-    SLURM_QUEUE: str = Field(default="", frozen=True)
-    """The SLURM queue name.
-
-    Overridden from SlurmSettingsBase to allow an empty queue.
-    """
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class OscarSystemContext(SystemContext):
-    """The contextual dependencies for the Oscar system (Brown University CCV).
-
-    Written from the public documentation, then corrected from a user's output on the
-    machine 2026-11-09 (the ``/oscar/home`` mount, modules, compilers, library
-    prefix variables and SLURM layout). No ROMS build has run there yet.
-    """
-
-    name: ClassVar[str] = "oscar"
-    """The unique name identifying the Oscar system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Oscar."""
-    mpi_prefix: ClassVar[str] = "srun --mpi=pmix --kill-on-bad-exit=1"
-    """The MPI prefix used on Oscar."""
-    docs: ClassVar[str] = "https://docs.ccv.brown.edu/oscar"
-    """URI for documentation of the Oscar system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        batch_queue = SlurmPartition(
-            name="batch",
-            query_name="batch",
-            max_walltime_method=query_max_walltime_via_sinfo,
-        )
-        """General purpose computing, the default partition."""
-        # The debug association defaults to the debug QOS, whose MaxWall (01:00:00
-        # on 2026-11-09) is the binding limit; the partition and the QOS share a name.
-        debug_queue = SlurmPartition(
-            name="debug",
-            query_name="debug",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-        """Short wait, short run time partition for debugging."""
-
-        # No max_cpus_per_node: batch nodes range from 32 to 192 cores.
-        return SlurmScheduler(
-            queues=[batch_queue, debug_queue],
-            primary_queue_name="batch",
-            other_scheduler_directives={},
-            requires_task_distribution=False,
-            documentation=cls.docs,
-        )
-
-    @override
-    @classmethod
-    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
-        """Return the type used to load settings required by the target system."""
-        return OscarEnvSettings
-
-    @override
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified as *Oscar*.
-
-        No environment variable identifies Oscar, so the presence of the
-        ``/oscar/home`` mount does. Detection runs on every machine, so a failed
-        filesystem check returns `False` rather than raising.
-        """
-        try:
-            return OscarEnvSettings.FILESYSTEM_MARKER.is_dir()
-        except OSError:
-            return False
-
-    @override
-    @classmethod
-    def scratch_root(cls) -> Path | None:
-        """Return the ``~/scratch`` directory, Oscar's documented scratch location.
-
-        Oscar exports no ``SCRATCH`` variable; each user's home carries a
-        ``scratch`` entry instead. A failed check (a stale mount, no home
-        directory) logs a warning and returns ``None`` rather than raising,
-        because this runs while resolving ``CSTAR_DATA_HOME``.
-        """
-        try:
-            scratch = Path.home() / "scratch"
-            return scratch if scratch.is_dir() else None
-        except (OSError, RuntimeError):
-            # Path.home() raises RuntimeError when no home directory can be found
-            log.warning(
-                "Failed to check ~/scratch; set SCRATCH or CSTAR_DATA_HOME to name "
-                "the scratch file system explicitly."
-            )
-            return None
-
-
-class PerlmutterEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Perlmutter* system.
-
-    NOTE: Perlmutter charges a job without an account to the user's default
-    project; an unset queue submits to the primary `regular` QOS.
-    """
-
-    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
-    """The SLURM account name.
-
-    Overridden from SlurmSettingsBase to allow an empty account.
-    """
-    SLURM_QUEUE: str = Field(default="", frozen=True)
-    """The SLURM queue name.
-
-    Overridden from SlurmSettingsBase to allow an empty queue.
-    """
-
-
-@register_sys_context
-@dataclass(frozen=True)
-class PerlmutterSystemContext(SystemContext):
-    """The contextual dependencies for the Perlmutter system."""
-
-    name: ClassVar[str] = "perlmutter"
-    """The unique name identifying the Perlmutter system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Perlmutter."""
-    mpi_prefix: ClassVar[str] = "srun --kill-on-bad-exit=1"
-    """The MPI prefix used on Perlmutter."""
-    docs: ClassVar[str] = "https://docs.nersc.gov/systems/perlmutter/architecture/"
-    """URI for documentation of the Perlmutter system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
-        per_shared_q = SlurmQOS(name="shared")
-        per_debug_q = SlurmQOS(name="debug")
-
-        return SlurmScheduler(
-            queues=[per_regular_q, per_shared_q, per_debug_q],
-            primary_queue_name="regular",
-            other_scheduler_directives={"-C": "cpu"},
-            requires_task_distribution=False,
-            documentation=cls.docs,
-            max_cpus_per_node=128,
-            # Verified on Perlmutter 2026-11-02: GPU nodes = 1xAMD EPYC 7763
-            # (64 cores) + 4xA100; GPU jobs need `-C gpu` and an explicit GPU
-            # request, and are submitted with `-q regular|debug|shared`. The GPU
-            # QOS limits are published under `gpu_regular`, `gpu_debug` and
-            # `gpu_shared` and match the CPU ones for walltime (2 days, 30 min,
-            # 2 days), so the walltime queries on the CPU QOS names stay valid.
-            gpu=GpuNodes(
-                gpus_per_node=4,
-                queue="regular",
-                directives={"-C": "gpu", "--gpu-bind": "none"},
-                cores_per_node=64,
-                # NERSC's policy refuses a GPU job that names no account (checked
-                # with `sbatch --test-only` 2026-11-02); the CPU project or its
-                # `_g` twin both work.
-                account_required=True,
-            ),
-        )
-
-    @override
-    @classmethod
-    def toolchain(cls, name: ToolchainName) -> Toolchain:
-        if name == "gpu":
-            return Toolchain(
-                compiler="nvfortran",
-                mpi_prefix=cls.mpi_prefix,
-                profile="gpu",
-                gpu_arch="cc80",
-                # cray-mpich sets these for the `craype-accel-nvidia80` target:
-                # the `-L` directory and `-lmpi_gtl_cuda`. With
-                # `MPICH_GPU_SUPPORT_ENABLED=1` (set by perlmutter.gpu.env) the
-                # model aborts at start-up unless libmpi_gtl_cuda is linked.
-                # Verified on Perlmutter 2026-11-06 (GPU-direct halo exchange on).
-                link_flags="${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}",
-            )
-        return super().toolchain(name)
-
-    @override
-    @classmethod
-    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
-        """Return the type used to load settings required by the target system."""
-        return PerlmutterEnvSettings
-
-
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 
@@ -1163,7 +573,7 @@ class CStarSystemManager:
     _environments: Final[dict[ToolchainName, CStarEnvironment]]
     """The environment managers built so far, by toolchain; ``cpu`` is built eagerly."""
     _active: ToolchainName | None
-    """The toolchain whose modules and env file are loaded in this process."""
+    """The toolchain whose modules and env are loaded in this process."""
     _scheduler: Final[Scheduler | None]
     """The scheduler appropriate for this system."""
 
@@ -1229,9 +639,9 @@ class CStarSystemManager:
         """Get the environment manager for one of the system's toolchains.
 
         An environment is built on first request and cached. Activating one loads
-        its profile's modules and env file into `os.environ` for the process, as the
+        its profile's modules and env into `os.environ` for the process, as the
         CPU profile always has. Only one profile is active in the process: asking
-        for another restores the active profile's env-file variables (see
+        for another restores the active profile's env variables (see
         `CStarEnvironment.unload`) and then loads the requested one, so a profile
         never inherits another's paths. Asking for the active profile changes
         nothing.
@@ -1268,12 +678,16 @@ class CStarSystemManager:
             if tc is None:
                 self._environments[name].load()
             else:
+                system_file = self._context.system_file
                 self._environments[name] = CStarEnvironment(
                     system_name=self._context.name,
                     mpi_exec_prefix=tc.mpi_prefix,
                     compiler=tc.compiler,
                     system_settings_klass=self._context.settings_klass(),
                     profile=tc.profile,
+                    modules=tc.modules,
+                    env=tc.env,
+                    source=system_file.path if system_file is not None else None,
                 )
         except Exception:
             # a profile that fails to load must not leave the process with none

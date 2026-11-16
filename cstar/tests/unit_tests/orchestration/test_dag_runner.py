@@ -127,12 +127,10 @@ from cstar.orchestration.utils import (
 )
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 from cstar.system.manager import (
-    AnvilEnvSettings,
-    AnvilSystemContext,
-    LinuxSystemContext,
     SystemContext,
     SystemSelection,
     SystemSource,
+    registered_context,
 )
 from cstar.system.scheduler import SCHEDULER_SLURM, PBSQueue, PBSScheduler
 from cstar.tests.unit_tests.orchestration.conftest import (
@@ -4382,10 +4380,15 @@ def _unsupported_scheduler_machine(
     ("context", "source", "scheduler", "job_id_var", "warns"),
     [
         pytest.param(
-            LinuxSystemContext, SystemSource.FALLBACK, "SLURM", "", True, id="fallback"
+            registered_context("linux_x86_64"),
+            SystemSource.FALLBACK,
+            "SLURM",
+            "",
+            True,
+            id="fallback",
         ),
         pytest.param(
-            LinuxSystemContext,
+            registered_context("linux_x86_64"),
             SystemSource.FALLBACK,
             "PBS",
             "",
@@ -4393,10 +4396,15 @@ def _unsupported_scheduler_machine(
             id="fallback-pbs",
         ),
         pytest.param(
-            LinuxSystemContext, SystemSource.SETTING, "SLURM", "", True, id="setting"
+            registered_context("linux_x86_64"),
+            SystemSource.SETTING,
+            "SLURM",
+            "",
+            True,
+            id="setting",
         ),
         pytest.param(
-            LinuxSystemContext,
+            registered_context("linux_x86_64"),
             SystemSource.FALLBACK,
             "",
             "",
@@ -4404,7 +4412,7 @@ def _unsupported_scheduler_machine(
             id="fallback-no-scheduler",
         ),
         pytest.param(
-            LinuxSystemContext,
+            registered_context("linux_x86_64"),
             SystemSource.FALLBACK,
             "SLURM",
             "SLURM_JOB_ID",
@@ -4412,10 +4420,15 @@ def _unsupported_scheduler_machine(
             id="fallback-in-job",
         ),
         pytest.param(
-            LinuxSystemContext, SystemSource.DETECTED, "SLURM", "", False, id="detected"
+            registered_context("linux_x86_64"),
+            SystemSource.DETECTED,
+            "SLURM",
+            "",
+            False,
+            id="detected",
         ),
         pytest.param(
-            AnvilSystemContext,
+            registered_context("anvil"),
             SystemSource.SETTING,
             "SLURM",
             "",
@@ -4467,7 +4480,9 @@ def test_get_orchestrator_hints_only_when_the_workplan_will_launch(
     """Verify a pre-run workplan, which only prepares its steps, is not told that
     every step runs on this node, on a machine where a regular run would be.
     """
-    selection = SystemSelection(LinuxSystemContext, SystemSource.FALLBACK, "frontera")
+    selection = SystemSelection(
+        registered_context("linux_x86_64"), SystemSource.FALLBACK, "frontera"
+    )
     _unsupported_scheduler_machine(monkeypatch, selection, "SLURM")
     wp = _make_workplan([_roms_step(tmp_path, "Roms")])
     if pre_run:
@@ -4489,7 +4504,9 @@ def test_get_launcher_does_not_hint_about_an_unsupported_scheduler(
     """Verify choosing a launcher, which read-only commands also do, logs nothing
     about every step running on this node; only starting a run does.
     """
-    selection = SystemSelection(LinuxSystemContext, SystemSource.FALLBACK, "frontera")
+    selection = SystemSelection(
+        registered_context("linux_x86_64"), SystemSource.FALLBACK, "frontera"
+    )
     _unsupported_scheduler_machine(monkeypatch, selection, "SLURM")
 
     with caplog.at_level("WARNING"):
@@ -4915,8 +4932,12 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     [
         (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", SlurmSettingsBase),
         (ENV_CSTAR_SLURM_QUEUE, "QUEUE", SlurmSettingsBase),
-        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", AnvilEnvSettings),
-        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", AnvilEnvSettings),
+        (
+            ENV_CSTAR_SLURM_ACCOUNT,
+            "ACCOUNT",
+            registered_context("anvil").settings_klass(),
+        ),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", registered_context("anvil").settings_klass()),
     ],
 )
 @pytest.mark.asyncio
