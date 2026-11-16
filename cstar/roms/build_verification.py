@@ -26,6 +26,7 @@ rare case where a correct but unusual environment trips a false positive.
 import os
 import shutil
 import sys
+import typing as t
 from pathlib import Path
 
 from cstar.base.env import ENV_CSTAR_DISABLE_BUILD_VERIFICATION
@@ -33,6 +34,9 @@ from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import get_sysmgr
+
+if t.TYPE_CHECKING:
+    from collections.abc import Mapping
 
 log = get_logger(__name__)
 
@@ -84,6 +88,50 @@ _LINKAGE_LIB_PATTERNS: tuple[str, ...] = (
 """Library name fragments checked by `verify_roms_linkage` on Linux."""
 
 
+def empty_prefix_vars(env_vars: "Mapping[str, str]") -> list[str]:
+    """Name the declared prefix variables that expanded to an empty string.
+
+    Parameters
+    ----------
+    env_vars : Mapping[str, str]
+        The variables a toolchain's env set.
+
+    Returns
+    -------
+    list[str]
+        Each of `_DECLARED_PREFIX_VARS` that `env_vars` holds and that is empty or
+        blank, in declaration order.
+    """
+    return [
+        var
+        for var in _DECLARED_PREFIX_VARS
+        if var in env_vars and not (env_vars[var] or "").strip()
+    ]
+
+
+def mpifort_under(compiler: str, mpi_home: str | None) -> str | None:
+    """Return the path of the MPI Fortran wrapper under an MPI prefix, when the
+    build passes one explicitly.
+
+    Parameters
+    ----------
+    compiler : str
+        The toolchain's compiler; only `gnu` is resolved (see `explicit_mpi_wrapper`).
+    mpi_home : str | None
+        The MPI prefix (`MPIHOME`).
+
+    Returns
+    -------
+    str | None
+        The absolute path of ``bin/mpifort`` under `mpi_home` if the compiler is
+        `gnu` and the file exists there, else `None`.
+    """
+    if compiler != "gnu" or not mpi_home:
+        return None
+    candidate = Path(mpi_home) / "bin/mpifort"
+    return str(candidate) if candidate.exists() else None
+
+
 def _get_dependency_root(env_var: str) -> str | None:
     """Look up a dependency location from the C-Star environment or the process
     environment.
@@ -124,19 +172,9 @@ def explicit_mpi_wrapper() -> str | None:
         which case the caller should fall back to the Makefile's own
         autodetection.
     """
-    cstar_sysmgr = get_sysmgr()
-    if cstar_sysmgr.environment.compiler != "gnu":
-        return None
-
-    mpi_home = _get_dependency_root("MPIHOME")
-    if not mpi_home:
-        return None
-
-    candidate = Path(mpi_home) / "bin/mpifort"
-    if candidate.exists():
-        return str(candidate)
-
-    return None
+    return mpifort_under(
+        get_sysmgr().environment.compiler, _get_dependency_root("MPIHOME")
+    )
 
 
 def rpath_link_flags() -> str | None:
@@ -207,15 +245,14 @@ def assert_single_toolchain_stack(mpi_wrapper: str | None) -> None:
     cstar_sysmgr = get_sysmgr()
     env_vars = cstar_sysmgr.environment.environment_variables
 
-    for var in _DECLARED_PREFIX_VARS:
-        if var in env_vars and not (env_vars[var] or "").strip():
-            raise OSError(
-                f"Cannot verify ROMS build toolchain: {var} is declared in the env "
-                f"of {cstar_sysmgr.environment.env_origin} "
-                "but expanded to an empty string. This usually means the module "
-                f"that provides it is not loaded (e.g. for NETCDFFHOME on Anvil, "
-                "the `netcdf-fortran` module sets NETCDF_FORTRAN_HOME)."
-            )
+    if empty := empty_prefix_vars(env_vars):
+        raise OSError(
+            f"Cannot verify ROMS build toolchain: {empty[0]} is declared in the env "
+            f"of {cstar_sysmgr.environment.env_origin} "
+            "but expanded to an empty string. This usually means the module "
+            f"that provides it is not loaded (e.g. for NETCDFFHOME on Anvil, "
+            "the `netcdf-fortran` module sets NETCDF_FORTRAN_HOME)."
+        )
 
     tools: dict[str, str] = {}
 

@@ -51,6 +51,10 @@ DOCS_MACHINES_URL: Final[str] = (
     "https://c-star.readthedocs.io/en/latest/deployments/machines.html"
 )
 """The documentation page on the systems C-Star knows and what to do on any other."""
+DOCS_DESCRIBE_CLUSTER_URL: Final[str] = (
+    "https://c-star.readthedocs.io/en/latest/deployments/describe_cluster.html"
+)
+"""The documentation page on describing a machine to C-Star with a system file."""
 
 
 class HostNameEvaluator:
@@ -484,6 +488,14 @@ class SystemSelection:
         return visible_scheduler(environ)
 
 
+def system_file_of(context: type[SystemContext]) -> SystemFile | None:
+    """Return the system file a context was read from; `None` for one defined in code.
+
+    A context registered in code need not declare the protocol's default.
+    """
+    return getattr(context, "system_file", None)
+
+
 def display_path(path: Path) -> str:
     """Spell a path for display, with the home directory as ``~``."""
     home = Path.home()
@@ -499,8 +511,7 @@ def file_in_use(context: type[SystemContext]) -> str:
         ``from <path>``, with ``, shadows <what>`` when the file hides one of the
         same name below it; empty for a bundled file or a context defined in code.
     """
-    # a context registered in code need not declare the protocol's default
-    system_file = getattr(context, "system_file", None)
+    system_file = system_file_of(context)
     if system_file is None or system_file.layer == BUNDLED_LAYER:
         return ""
     note = f"from {display_path(system_file.path)}"
@@ -657,7 +668,7 @@ def selected_system_file() -> SystemFile | None:
         If no system name can be determined at all.
     """
     load_user_config()
-    return getattr(select_system().context, "system_file", None)
+    return system_file_of(select_system().context)
 
 
 def get_system_context() -> SystemContext:

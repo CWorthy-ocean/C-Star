@@ -5,9 +5,10 @@ files, one ``<name>.yaml`` each, above the files C-Star ships. The first file
 found for a name wins, top first, and replaces any below it whole. A file that
 cannot be used is refused, with its reason, and skipped.
 
-This module reads files and reports what it found; it logs nothing, so the
-caller decides what to warn about and how often. Like `cstar.system.spec`, it
-imports nothing from `cstar.system.manager` or `cstar.catalog`.
+This module reads files and reports what it found, and installs a file into a
+catalog (`install_system_file`); it logs and prints nothing, so the caller
+decides what to say and how often. Like `cstar.system.spec`, it imports nothing
+from `cstar.system.manager` or `cstar.catalog`.
 """
 
 import os
@@ -16,7 +17,9 @@ import typing as t
 from dataclasses import dataclass
 from pathlib import Path
 
-from cstar.base.env import CatalogRoots
+from cstar.base.env import BUNDLED_CATALOG_ROOT, CatalogRoots
+from cstar.base.exceptions import CstarError
+from cstar.execution.file_system import write_bytes_atomic
 from cstar.system.spec import (
     BUNDLED_SYSTEMS_DIR,
     SHARED_LAYER,
@@ -37,6 +40,17 @@ REASON_DIR_WORLD_WRITABLE: t.Final = (
     "its directory {directory} is writable by every user"
 )
 """Why a system file in a world-writable directory is refused."""
+
+
+class SystemFileConflict(CstarError):
+    """A different system file of the same name is already in the catalog."""
+
+    def __init__(self, source: Path, target: Path) -> None:
+        """Name both files and the option that replaces the existing one."""
+        self.target = target
+        super().__init__(
+            f"{target} already holds a different system file than {source}"
+        )
 
 
 @dataclass(frozen=True)
@@ -184,3 +198,69 @@ def read_system_layers(
         shadowed={name: tuple(below) for name, below in shadowed.items()},
         refused=tuple(refused),
     )
+
+
+@dataclass(frozen=True)
+class InstalledSystemFile:
+    """Where a system file went, and whether it was written."""
+
+    path: Path
+    """The file in the catalog."""
+    written: bool
+    """`False` when the file there was already identical."""
+
+
+def install_system_file(
+    source: SystemFile, root: Path, replace: bool
+) -> InstalledSystemFile:
+    """Copy a validated system file into a catalog, as ``<root>/systems/<name>.yaml``.
+
+    The copy is made atomically and is never writable by every user, since C-Star
+    refuses such a file.
+
+    Parameters
+    ----------
+    source : SystemFile
+        The file to install, read with ``check_name=False`` if it is a draft; it
+        is installed under its system's name.
+    root : Path
+        The catalog root that receives it.
+    replace : bool
+        Whether a different file of that name may be replaced.
+
+    Returns
+    -------
+    InstalledSystemFile
+
+    Raises
+    ------
+    CstarError
+        If `root` is the bundled catalog, or its ``systems/`` directory is
+        writable by every user (C-Star would refuse every file in it).
+    SystemFileConflict
+        If a different file is there and `replace` is false.
+    OSError
+        If the file cannot be written.
+    """
+    if root.resolve() == BUNDLED_CATALOG_ROOT:
+        raise CstarError(
+            f"{root} is the catalog that ships with C-Star, which is read-only."
+        )
+    directory = systems_dir(root)
+    if directory.is_dir() and world_writable(directory):
+        raise CstarError(
+            f"{directory} is writable by every user, so C-Star would refuse every "
+            "file in it; restrict its permissions first."
+        )
+    target = directory / f"{source.spec.name}{SYSTEM_FILE_SUFFIX}"
+    content = source.path.read_bytes()
+    if target.is_file():
+        if target.read_bytes() == content:
+            return InstalledSystemFile(target, written=False)
+        if not replace:
+            raise SystemFileConflict(source.path, target)
+    write_bytes_atomic(target, content)
+    mode = stat.S_IMODE(target.stat().st_mode)
+    if mode & stat.S_IWOTH:
+        target.chmod(mode & ~stat.S_IWOTH)
+    return InstalledSystemFile(target, written=True)

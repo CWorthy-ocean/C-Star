@@ -26,11 +26,14 @@ from cstar.base.env import (
     ENV_CSTAR_SYSTEM,
     EnvItem,
     UserConfig,
+    catalog_roots,
+    default_catalog_root,
     get_env_item,
     hpc_data_directory,
     load_user_config_for_repair,
     parse_user_config,
     render_user_config,
+    split_catalog,
 )
 from cstar.base.exceptions import CstarError, CstarUserConfigError
 from cstar.cli.environment import NAME as NAME_ENV
@@ -42,8 +45,14 @@ from cstar.cli.environment.show import (
     value_source,
 )
 from cstar.cli.run import NAME as NAME_RUN
+from cstar.cli.system.add import looks_like_path, read_draft
 from cstar.cli.workplan.path import COMMAND_CD
-from cstar.entrypoint.utils import ARG_INSTALL, ARG_YES
+from cstar.entrypoint.utils import (
+    ARG_INSTALL,
+    ARG_SYSTEM_FILE,
+    ARG_SYSTEM_FILE_HELP,
+    ARG_YES,
+)
 from cstar.execution.file_system import DirectoryManager, write_bytes_atomic
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -53,16 +62,28 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.environment import SlurmSettingsBase
+from cstar.system.layers import SystemFileConflict, install_system_file
 from cstar.system.manager import (
+    DOCS_DESCRIBE_CLUSTER_URL,
     SystemSelection,
     SystemSource,
+    context_from_file,
     detect_system,
+    detection_would_select,
+    display_path,
     registered_context,
     registered_names,
+    reload_system_files,
     select_system,
 )
 from cstar.system.scheduler import PBSScheduler, SlurmScheduler
-from cstar.system.spec import current_user
+from cstar.system.spec import (
+    SYSTEMS_DIR_NAME,
+    SystemFile,
+    SystemFileError,
+    SystemSpec,
+    current_user,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Sequence
@@ -81,6 +102,8 @@ HELP_LONG: t.Final[str] = f"""\
 {HELP_SHORT}
 
 On a cluster, asks for the SLURM account, queue and default walltime. Shows where C-Star will put run output, the shared source-data cache and your catalog entries, asks whether to use them, and lets you change each if you answer no. Writes the answers to the configuration file, then offers to install the shell function that makes `cstar {NAME_RUN} {COMMAND_CD}` work and to register a Jupyter kernel for this environment.
+
+{ARG_SYSTEM_FILE} PATH sets the setup up for the machine that a system file describes, and settles where C-Star will find the file.
 
 Every prompt defaults to the value in effect now, so re-running the command reviews and updates the setup. {ARG_YES} accepts every default without asking, for containers and scripts.
 """
@@ -291,12 +314,17 @@ def required_slurm_settings(context: "SystemContext") -> set[str]:
     return klass.required_settings()
 
 
+def describe_file(system_file: SystemFile) -> str:
+    """Name a system and the file that describes it, for display."""
+    return f"{system_file.spec.name} (from {display_path(system_file.path)})"
+
+
 def system_section(
     selection: SystemSelection | None,
     problem: str,
     config: UserConfig,
     yes: bool,
-) -> tuple[Decision | None, SystemSelection | None]:
+) -> tuple[Decision | None, SystemSelection | None, SystemFile | None]:
     """Offer to name the system when C-Star fell back to a generic context or
     could not choose one.
 
@@ -304,7 +332,10 @@ def system_section(
     `--yes` keeps it too. A name must be a registered system; an unknown one,
     including a `CSTAR_SYSTEM` in effect that names none, is asked again, and
     `UNSET_ANSWER` removes the setting and detects the system afresh. Under
-    `--yes` such a setting is left where it is, never moved into the file.
+    `--yes` such a setting is left where it is, never moved into the file. An
+    answer that is the path of a file is read as a system file; one that is
+    refused is asked again, one that is accepted describes the system for the
+    rest of the setup and is placed once the locations are settled.
 
     Parameters
     ----------
@@ -319,9 +350,10 @@ def system_section(
 
     Returns
     -------
-    tuple[Decision | None, SystemSelection | None]
+    tuple[Decision | None, SystemSelection | None, SystemFile | None]
         The decision on `CSTAR_SYSTEM` (`None` to leave the file's line as it is),
-        and the system the rest of the setup uses.
+        the system the rest of the setup uses, and the system file the user gave
+        in place of a name, if any.
     """
     header("System")
     if selection is None:
@@ -332,6 +364,8 @@ def system_section(
             f"{selection.context.name} context, which submits no jobs."
         )
     echo(f"Registered systems: {', '.join(registered_names())}")
+    echo("To describe this machine to C-Star, write a system file (see")
+    echo(f"{DOCS_DESCRIBE_CLUSTER_URL}) and give its path here.")
     if selection is None:
         echo("Name the system to use.")
     else:
@@ -354,9 +388,9 @@ def system_section(
         decision = ask(f"System ({ENV_CSTAR_SYSTEM})", resolved, yes)
         if decision.kept:
             if selection is not None or not resolved.value:
-                return decision, final
+                return decision, final, None
             if yes:
-                return None, None
+                return None, None, None
             echo(
                 f"{ENV_CSTAR_SYSTEM}={resolved.value} names no registered system; "
                 f"name one, or type {UNSET_ANSWER} to unset it."
@@ -369,6 +403,17 @@ def system_section(
                 final = None
                 echo(str(ex))
             break
+        if looks_like_path(decision.value):
+            try:
+                system_file = read_draft(decision.value)
+            except SystemFileError as ex:
+                echo(str(ex))
+                continue
+            final = SystemSelection(
+                context_from_file(system_file), SystemSource.SETTING
+            )
+            echo(f"Using {describe_file(system_file)} for the rest of the setup.")
+            return None, final, system_file
         try:
             klass = registered_context(decision.value)
         except CstarError as ex:
@@ -380,7 +425,7 @@ def system_section(
 
     if final is not None and final != selection:
         echo(f"Using {final.describe()} for the rest of the setup.")
-    return decision, final
+    return decision, final, None
 
 
 def scheduler_section(
@@ -440,6 +485,13 @@ def scheduler_section(
     return decisions
 
 
+def pbs_section() -> None:
+    """Say that a PBS system's jobs are not submitted by C-Star."""
+    header("Scheduler (PBS)")
+    echo("Job submission through PBS is not supported yet. Run C-Star inside a PBS")
+    echo("job (`qsub -I`, or your own batch script).")
+
+
 def locations_section(
     context: "SystemContext | None",
     cluster: bool,
@@ -478,6 +530,136 @@ def locations_section(
     echo()
     echo(f"Press Enter to keep a value; type {UNSET_ANSWER} to leave a setting unset.")
     return [ask(r.item.name, r, yes) for r in resolved]
+
+
+def catalog_setting(decisions: "Sequence[Decision]") -> tuple[int, str]:
+    """Find the decision on `CSTAR_CATALOG` and the value it leaves in effect.
+
+    Returns
+    -------
+    tuple[int, str]
+        The decision's position, and its value: what the user kept or typed, else
+        the default, which is your own catalog.
+    """
+    index = next(
+        i for i, d in enumerate(decisions) if d.resolved.item.name == ENV_CSTAR_CATALOG
+    )
+    decision = decisions[index]
+    value = decision.resolved.value if decision.kept else decision.value
+    return index, value or default_catalog_root(decision.resolved.item)
+
+
+def place_system_file(
+    system_file: SystemFile, decisions: "Sequence[Decision]", yes: bool
+) -> list[Decision]:
+    """Settle where C-Star will find a system file, once the locations are chosen.
+
+    The catalog the file goes to is the one `CSTAR_CATALOG` will hold after this
+    walkthrough, from `decisions`, not the one in the environment now. A file
+    already under the ``systems/`` directory of one of its roots needs nothing. A
+    file at ``<root>/systems/<name>.yaml`` for another root can have that root
+    added as a shared catalog, which follows the maintainer's fixes. Any other
+    file is copied into your own catalog.
+
+    Returns
+    -------
+    list[Decision]
+        `decisions`, with `CSTAR_CATALOG` changed when a root was added.
+
+    Raises
+    ------
+    typer.Exit
+        Code 1 if the file cannot be copied; nothing has been written yet.
+    """
+    header("System file")
+    index, value = catalog_setting(decisions)
+    roots = catalog_roots(split_catalog(value))
+    path = system_file.path.resolve()
+    name = system_file.spec.name
+    home = (
+        path.parent.parent
+        if path.parent.name == SYSTEMS_DIR_NAME and path.stem == name
+        else None
+    )
+
+    if home is not None and home in roots.local:
+        owner = "your catalog" if home == roots.user else "the shared catalog"
+        echo(f"{display_path(path)} is already in {owner} {display_path(home)}.")
+        return list(decisions)
+
+    if home is not None and confirm(
+        f"Add {home} to {ENV_CSTAR_CATALOG} as a shared catalog? "
+        "(No copies the file into your own catalog)",
+        yes,
+    ):
+        changed = list(decisions)
+        changed[index] = Decision(
+            decisions[index].resolved,
+            kept=False,
+            value=f"{value}{os.pathsep}{home}",
+        )
+        echo(f"{home} will be a shared catalog; C-Star reads {display_path(path)}.")
+        return changed
+
+    if roots.user is None:
+        typer.echo(
+            f"Error: the first {ENV_CSTAR_CATALOG} entry is not a local directory, so "
+            f"there is no catalog of your own to copy {display_path(path)} into.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    try:
+        try:
+            installed = install_system_file(system_file, roots.user, replace=False)
+        except SystemFileConflict as ex:
+            question = f"Replace {display_path(ex.target)}?"
+            if yes or not confirm(question, yes=False, default=False):
+                echo(f"Keeping {display_path(ex.target)}; C-Star uses that file.")
+                return list(decisions)
+            installed = install_system_file(system_file, roots.user, replace=True)
+    except (CstarError, OSError) as ex:
+        typer.echo(f"Error: {ex}", err=True)
+        raise typer.Exit(1) from ex
+    reload_system_files()
+    echo(
+        f"Copied the file to {display_path(installed.path)}."
+        if installed.written
+        else f"{display_path(installed.path)} is already identical."
+    )
+    return list(decisions)
+
+
+def system_decision(spec: SystemSpec, config: UserConfig) -> Decision:
+    """Decide `CSTAR_SYSTEM` for a system a file describes.
+
+    The setting is needed only where detection does not select the system. When
+    detection does, a setting that names another system would win over it, so it
+    is removed from the file.
+    """
+    resolved = resolve(ENV_CSTAR_SYSTEM, config, None)
+    name = spec.name
+    named = resolved.value
+    if detection_would_select(spec):
+        if named and named != name:
+            echo(
+                f"C-Star detects {name!r} here, but {ENV_CSTAR_SYSTEM}={named} would "
+                "win over that: removing it from the file."
+            )
+            if resolved.source == SOURCE_ENV:
+                echo(
+                    f"{ENV_CSTAR_SYSTEM} is exported in your shell too; remove that "
+                    "export line as well."
+                )
+            return Decision(resolved, kept=False, value=None)
+        echo(
+            f"C-Star detects {name!r} on this machine; {ENV_CSTAR_SYSTEM} is not needed."
+        )
+        return Decision(resolved, kept=True)
+    if named == name:
+        echo(f"C-Star does not detect {name!r} here; {ENV_CSTAR_SYSTEM}={name} stays.")
+        return Decision(resolved, kept=True)
+    echo(f"C-Star does not detect {name!r} here: setting {ENV_CSTAR_SYSTEM}={name}.")
+    return Decision(resolved, kept=False, value=name)
 
 
 def carried_settings(
@@ -660,6 +842,10 @@ def system_context(
 
 
 def init(
+    system_file_path: t.Annotated[
+        str | None,
+        typer.Option(ARG_SYSTEM_FILE, help=ARG_SYSTEM_FILE_HELP, metavar="PATH"),
+    ] = None,
     yes: t.Annotated[
         bool,
         typer.Option(
@@ -674,17 +860,33 @@ def init(
     # empty record, and carried_settings stops below.
     config = load_user_config_for_repair()
 
+    system_file: SystemFile | None = None
     selection: SystemSelection | None
-    try:
-        selection = select_system()
-    except (CstarError, OSError) as ex:
-        selection, problem = None, str(ex)
+    if system_file_path is not None:
+        # before any question, so a file that is refused stops the walkthrough
+        try:
+            system_file = read_draft(system_file_path)
+        except SystemFileError as ex:
+            typer.echo(f"Error: {ex}", err=True)
+            raise typer.Exit(1) from ex
+        selection, problem = (
+            SystemSelection(context_from_file(system_file), SystemSource.SETTING),
+            "",
+        )
     else:
-        problem = ""
+        try:
+            selection = select_system()
+        except (CstarError, OSError) as ex:
+            selection, problem = None, str(ex)
+        else:
+            problem = ""
     context, scheduler = system_context(selection)
 
     typer.echo(f"C-Star {cstar.__version__}")
-    system = selection.describe() if selection else "unknown"
+    if system_file is not None:
+        system = describe_file(system_file)
+    else:
+        system = selection.describe() if selection else "unknown"
     typer.echo(f"System: {system}; scheduler: {scheduler_name(scheduler)}")
     state = (
         "exists; this run reviews and updates it"
@@ -696,8 +898,12 @@ def init(
     carried = carried_settings(config.path)
 
     decisions: list[Decision] = []
-    if selection is None or selection.source is SystemSource.FALLBACK:
-        decision, selection = system_section(selection, problem, config, yes)
+    if system_file is None and (
+        selection is None or selection.source is SystemSource.FALLBACK
+    ):
+        decision, selection, system_file = system_section(
+            selection, problem, config, yes
+        )
         if decision is not None:
             decisions.append(decision)
         context, scheduler = system_context(selection)
@@ -707,10 +913,15 @@ def init(
             )
     if context is not None and isinstance(scheduler, SlurmScheduler):
         decisions += scheduler_section(context, config, yes, scheduler)
+    elif isinstance(scheduler, PBSScheduler):
+        pbs_section()
     cluster = scheduler is not None or bool(
         selection and selection.unsupported_scheduler(os.environ)
     )
     decisions += locations_section(context, cluster, config, yes)
+    if system_file is not None:
+        decisions = place_system_file(system_file, decisions, yes)
+        decisions.append(system_decision(system_file.spec, config))
     written = write_section(config, carried, decisions)
     shell_outcome = shell_section(yes)
     kernel_outcome = kernel_section(yes)

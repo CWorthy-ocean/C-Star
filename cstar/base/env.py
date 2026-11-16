@@ -3,7 +3,7 @@ import sys
 import textwrap
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -386,6 +386,11 @@ CATALOG_ENTRY_BUNDLED: t.Final = "local"
 """The `CSTAR_CATALOG` entry that names the catalog C-Star ships."""
 
 
+def split_catalog(value: str) -> list[str]:
+    """Non-empty ``os.pathsep``-separated entries of a `CSTAR_CATALOG` value."""
+    return [e for e in value.split(os.pathsep) if e]
+
+
 def catalog_entries() -> list[str]:
     """Non-empty ``os.pathsep``-separated entries of ``CSTAR_CATALOG``, in order.
 
@@ -394,7 +399,7 @@ def catalog_entries() -> list[str]:
     entry is which, including when the value carries leading or doubled
     separators (e.g. ``"$UNSET:/opt/shared"`` expanding to ``":/opt/shared"``).
     """
-    return [e for e in os.environ.get(ENV_CSTAR_CATALOG, "").split(os.pathsep) if e]
+    return split_catalog(os.environ.get(ENV_CSTAR_CATALOG, ""))
 
 
 def is_github_catalog_url(entry: str) -> bool:
@@ -431,16 +436,23 @@ class CatalogRoots:
         return ((self.user,) if self.user else ()) + self.shared
 
 
-def catalog_roots() -> CatalogRoots:
+def catalog_roots(entries: Sequence[str] | None = None) -> CatalogRoots:
     """Return the local directories `CSTAR_CATALOG` stacks, resolved, top first.
 
     Remote entries (GitHub, http) and the bundled catalog are left out, as is a
     directory listed twice; an unset or empty variable means the default user
     catalog. Reads the process environment, so load the configuration file first.
+
+    Parameters
+    ----------
+    entries : Sequence[str] | None
+        The entries of a value `CSTAR_CATALOG` would hold (`cstar init` asks about
+        the value it is about to write); by default those of the process
+        environment.
     """
-    entries = catalog_entries() or [
-        default_catalog_root(get_env_item(ENV_CSTAR_CATALOG))
-    ]
+    if entries is None:
+        entries = catalog_entries()
+    entries = entries or [default_catalog_root(get_env_item(ENV_CSTAR_CATALOG))]
     bundled = BUNDLED_CATALOG_ROOT
     roots: list[Path | None] = []
     for entry in entries:
