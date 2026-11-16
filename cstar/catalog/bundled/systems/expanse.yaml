@@ -15,9 +15,9 @@ toolchains:
       - netcdf-c/4.7.4
       - netcdf-fortran/4.5.3
     env:
-      NETCDFHOME: ${NETCDF_FORTRANHOME}/
-      MPIHOME: ${MVAPICH2HOME}/
-      MPIROOT: ${MVAPICH2HOME}/
+      NETCDFHOME: ${NETCDF_FORTRANHOME}
+      MPIHOME: ${MVAPICH2HOME}
+      MPIROOT: ${MVAPICH2HOME}
       GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
 
 scheduler:

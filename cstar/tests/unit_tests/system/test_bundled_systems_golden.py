@@ -59,6 +59,7 @@ MODULE_ENVIRONMENT = {
             "EBROOTGOMPI",
             "EBROOTNETCDF",
             "EBROOTNETCDFMINFORTRAN",
+            "EBROOTOPENMPI",
             "MPI_DIR",
             "MVAPICH2HOME",
             "NETCDF",

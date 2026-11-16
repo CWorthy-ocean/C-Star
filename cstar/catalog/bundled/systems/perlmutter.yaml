@@ -21,12 +21,13 @@ toolchains:
       - cray-hdf5/1.14.3.9
       - cray-netcdf/4.9.2.3  # provides netCDF-C and netCDF-Fortran (nf-config) in one prefix
       - cray-parallel-netcdf/1.12.3.21
+      - cmake/3.30.2  # ParallelIO builds with cmake, which the HPC conda environment does not provide
     env:
-      MPIHOME: ${CRAY_MPICH_PREFIX}/
-      NETCDFHOME: ${CRAY_NETCDF_PREFIX}/
-      PNETCDFHOME: ${CRAY_PARALLEL_NETCDF_PREFIX}/
-      PATH: ${PATH}:${NETCDFHOME}bin
-      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}lib
+      MPIHOME: ${CRAY_MPICH_PREFIX}
+      NETCDFHOME: ${CRAY_NETCDF_PREFIX}
+      PNETCDFHOME: ${CRAY_PARALLEL_NETCDF_PREFIX}
+      PATH: ${PATH}:${NETCDFHOME}/bin
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
       GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
   gpu:
     compiler: nvfortran
@@ -52,11 +53,11 @@ toolchains:
       - cray-hdf5-parallel/1.14.3.9
       - cray-netcdf-hdf5parallel/4.9.0.13
     env:
-      MPIHOME: ${CRAY_MPICH_PREFIX}/
+      MPIHOME: ${CRAY_MPICH_PREFIX}
       # set by cray-netcdf-hdf5parallel (verified on Perlmutter 2026-11-02)
-      NETCDFHOME: ${CRAY_NETCDF_HDF5PARALLEL_PREFIX}/
-      PATH: ${PATH}:${NETCDFHOME}bin
-      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}lib
+      NETCDFHOME: ${CRAY_NETCDF_HDF5PARALLEL_PREFIX}
+      PATH: ${PATH}:${NETCDFHOME}/bin
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
       # CUDA-aware cray-mpich: GPU-to-GPU halo exchange
       MPICH_GPU_SUPPORT_ENABLED: 1
       GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre

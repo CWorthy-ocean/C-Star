@@ -26,8 +26,11 @@
           "reset",
           "load gcc/11.2.0",
           "load openmpi/4.0.6",
+          "load hdf5/1.10.7",
+          "load netcdf-c/4.7.4",
           "load netcdf-fortran/4.5.3",
-          "load parallel-netcdf/1.11.2"
+          "load parallel-netcdf/1.11.2",
+          "load cmake/3.20.0"
         ]
       }
     },
@@ -114,7 +117,7 @@
         "env": {
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/ebrootnetcdf/lib:/mod/ebrootnetcdfminfortran/lib",
-          "MPIHOME": "/mod/ebrootgompi",
+          "MPIHOME": "/mod/ebrootopenmpi",
           "NETCDFFHOME": "/mod/ebrootnetcdfminfortran",
           "NETCDFHOME": "/mod/ebrootnetcdf",
           "PATH": "/mod/ebrootnetcdf/bin:/usr/bin:/bin",
@@ -122,8 +125,12 @@
         },
         "lmod_calls": [
           "reset",
-          "load netCDF-Fortran/4.6.0-gompi-2022b",
-          "load PnetCDF/1.12.3-gompi-2022b",
+          "load GCC/13.3.0",
+          "load OpenMPI/5.0.3-GCC-13.3.0",
+          "load HDF5/1.14.5-gompi-2024a",
+          "load netCDF/4.9.2-gompi-2024a",
+          "load netCDF-Fortran/4.6.1-gompi-2024a",
+          "load PnetCDF/1.14.0-gompi-2024a",
           "load CMake/3.31.8-GCCcore-13.3.0"
         ]
       }
@@ -272,9 +279,9 @@
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LD_LIBRARY_PATH": "/opt/ld:/mod/netcdf/lib",
           "LIBRARY_PATH": "/usr/lib:/mod/netcdf/lib",
-          "MPIHOME": "/mod/cray_mpich_prefix/",
-          "NETCDFHOME": "/mod/netcdf/",
-          "PNETCDFHOME": "/"
+          "MPIHOME": "/mod/cray_mpich_prefix",
+          "NETCDFHOME": "/mod/netcdf",
+          "PNETCDFHOME": ""
         },
         "lmod_calls": [
           "reset",
@@ -348,16 +355,19 @@
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/ebrootnetcdf/lib",
           "MKL_NUM_THREADS": "1",
-          "MPIHOME": "/mod/mpi_dir/",
-          "NETCDFHOME": "/mod/ebrootnetcdf/",
+          "MPIHOME": "/mod/mpi_dir",
+          "NETCDFHOME": "/mod/ebrootnetcdf",
           "OMP_NUM_THREADS": "1",
-          "PATH": "/usr/bin:/bin:/mod/ebrootnetcdf//bin"
+          "PATH": "/usr/bin:/bin:/mod/ebrootnetcdf/bin"
         },
         "lmod_calls": [
           "reset",
-          "load GCC/11.2.0",
+          "load GCC/12.3.0",
+          "load netCDF-Fortran/4.6.1",
           "load openmpi4/4.1.6",
-          "load netCDF-Fortran/4.6.1"
+          "load HDF5/.1.14.0",
+          "load netCDF/.4.9.2",
+          "load CMake/3.26.3"
         ]
       }
     },
@@ -426,9 +436,9 @@
       "cpu": {
         "env": {
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
-          "MPIHOME": "/mod/mvapich2home/",
-          "MPIROOT": "/mod/mvapich2home/",
-          "NETCDFHOME": "/mod/netcdf_fortranhome/"
+          "MPIHOME": "/mod/mvapich2home",
+          "MPIROOT": "/mod/mvapich2home",
+          "NETCDFHOME": "/mod/netcdf_fortranhome"
         },
         "lmod_calls": [
           "reset",
@@ -644,10 +654,10 @@
         "env": {
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/cray_netcdf_prefix/lib",
-          "MPIHOME": "/mod/cray_mpich_prefix/",
-          "NETCDFHOME": "/mod/cray_netcdf_prefix/",
+          "MPIHOME": "/mod/cray_mpich_prefix",
+          "NETCDFHOME": "/mod/cray_netcdf_prefix",
           "PATH": "/usr/bin:/bin:/mod/cray_netcdf_prefix/bin",
-          "PNETCDFHOME": "/mod/cray_parallel_netcdf_prefix/"
+          "PNETCDFHOME": "/mod/cray_parallel_netcdf_prefix"
         },
         "lmod_calls": [
           "reset",
@@ -657,7 +667,8 @@
           "load cray-mpich/9.1.0",
           "load cray-hdf5/1.14.3.9",
           "load cray-netcdf/4.9.2.3",
-          "load cray-parallel-netcdf/1.12.3.21"
+          "load cray-parallel-netcdf/1.12.3.21",
+          "load cmake/3.30.2"
         ]
       },
       "gpu": {
@@ -665,8 +676,8 @@
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/cray_netcdf_hdf5parallel_prefix/lib",
           "MPICH_GPU_SUPPORT_ENABLED": "1",
-          "MPIHOME": "/mod/cray_mpich_prefix/",
-          "NETCDFHOME": "/mod/cray_netcdf_hdf5parallel_prefix/",
+          "MPIHOME": "/mod/cray_mpich_prefix",
+          "NETCDFHOME": "/mod/cray_netcdf_hdf5parallel_prefix",
           "PATH": "/usr/bin:/bin:/mod/cray_netcdf_hdf5parallel_prefix/bin"
         },
         "lmod_calls": [

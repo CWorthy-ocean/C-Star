@@ -31,10 +31,10 @@ PERLMUTTER_GPU_MODULES = (
     "cray-netcdf-hdf5parallel/4.9.0.13",
 )
 PERLMUTTER_GPU_ENV = {
-    "MPIHOME": "${CRAY_MPICH_PREFIX}/",
-    "NETCDFHOME": "${CRAY_NETCDF_HDF5PARALLEL_PREFIX}/",
-    "PATH": "${PATH}:${NETCDFHOME}bin",
-    "LIBRARY_PATH": "${LIBRARY_PATH}:${NETCDFHOME}lib",
+    "MPIHOME": "${CRAY_MPICH_PREFIX}",
+    "NETCDFHOME": "${CRAY_NETCDF_HDF5PARALLEL_PREFIX}",
+    "PATH": "${PATH}:${NETCDFHOME}/bin",
+    "LIBRARY_PATH": "${LIBRARY_PATH}:${NETCDFHOME}/lib",
     "MPICH_GPU_SUPPORT_ENABLED": "1",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
 }
@@ -289,7 +289,7 @@ def test_perlmutter_gpu_env_keys() -> None:
 
     assert set(gpu) == (set(cpu) - {"PNETCDFHOME"}) | {"MPICH_GPU_SUPPORT_ENABLED"}
     assert gpu["MPICH_GPU_SUPPORT_ENABLED"] == "1"
-    assert gpu["NETCDFHOME"] == "${CRAY_NETCDF_HDF5PARALLEL_PREFIX}/"
+    assert gpu["NETCDFHOME"] == "${CRAY_NETCDF_HDF5PARALLEL_PREFIX}"
 
 
 def test_lmod_modules_load_in_order_after_reset() -> None:
