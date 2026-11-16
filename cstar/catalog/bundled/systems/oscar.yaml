@@ -1,0 +1,79 @@
+schema_version: 1.0.0
+name: oscar
+docs: https://docs.ccv.brown.edu/oscar
+
+# Oscar (Brown University CCV). Written from the public documentation, then
+# corrected from a user's output on the machine 2026-11-09 (the ``/oscar/home``
+# mount, modules, compilers, library prefix variables and SLURM layout). No ROMS
+# build has run there yet.
+
+# Mount point on Oscar's login and compute nodes that identifies the system.
+# No environment variable does: Oscar sets neither LMOD_SYSHOST nor
+# LMOD_SYSTEM_NAME, and its SLURM_CLUSTER_NAME is the generic ``slurmctld``
+# (both seen on the machine 2026-11-09).
+detect:
+  - path: /oscar/home
+
+# Oscar exports no ``SCRATCH`` variable; each user's home carries a ``scratch``
+# entry instead, Oscar's documented scratch location.
+scratch:
+  match: "~/scratch"
+
+toolchains:
+  cpu:
+    compiler: gnu
+    mpi_prefix: srun --mpi=pmix --kill-on-bad-exit=1
+    # Oscar (Brown CCV): hierarchical, spack-built Lmod. The MPI module must be loaded
+    # first; the *-mpi libraries built against it only appear afterwards.
+    # Seen on Oscar 2026-11-09 (by a CCV user, after `module purge`; C-Star runs
+    # `module reset`): these three load in this order and pull in hdf5-mpi/1.14.6,
+    # netcdf-c-mpi/4.9.3 and netcdf-fortran-mpi/4.6.1 as dependencies. Version-only
+    # names resolve to the site's spack-hashed module names (hpcx-mpi/2.25.1s loads
+    # hpcx-mpi/2.25.1s-le4f).
+    modules:
+      - hpcx-mpi/2.25.1s  # site-recommended MPI (SLURM/PMIx integrated); its mpifort wraps the system gfortran 11.5
+      # The netcdf-mpi bundle loads netCDF-C and netCDF-Fortran and sets NETCDF, which
+      # oscar.env uses for both prefixes. Oscar has two netcdf-c-mpi/4.9.3 builds, and
+      # the default is not the one the bundle loads alongside netcdf-fortran-mpi, so
+      # load the bundle rather than naming the two libraries.
+      - netcdf-mpi/4.9.3
+      - parallel-netcdf-mpi/1.14.0  # for ParallelIO
+    # Oscar (Brown CCV). Variable names from `module show` on the machine 2026-11-09.
+    env:
+      # hpcx-mpi exports no prefix variable of its own, but sets Open MPI's OPAL_PREFIX
+      # (/oscar/rt/sw/external/hpcx-mpi/2.25.1/).
+      MPIHOME: ${OPAL_PREFIX}
+      # The netcdf-mpi bundle sets NETCDF to its own prefix, which holds both netCDF-C and
+      # netCDF-Fortran: nc-config, nf-config, both libraries, the headers and the Fortran
+      # modules (seen 2026-11-09).
+      NETCDFHOME: ${NETCDF}
+      NETCDFFHOME: ${NETCDF}
+      # parallel-netcdf-mpi exports no prefix variable, so this is the prefix
+      # `pnetcdf-config --prefix` reported (used only when ParallelIO is enabled). It goes
+      # stale if CCV rebuilds the module: a missing prefix fails a ParallelIO build (other
+      # builds only carry a dead RUNPATH entry), and a surviving old one would link ROMS
+      # against a different PnetCDF than ParallelIO finds on PATH.
+      # Switch to a variable here once the module sets one (as netcdf-mpi sets NETCDF).
+      PNETCDFHOME: /oscar/rt/9.6/25/spack/x86_64_v3/parallel-netcdf-1.14.0-bxuz7xw2osfunbnl46mfp3zhpq6bmnmq
+      PATH: ${NETCDFHOME}/bin:${PATH}
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
+      # Linux: embed a RUNPATH at link time so the roms binary self-locates its
+      # libraries without needing LD_LIBRARY_PATH from loaded modules at runtime
+      LD_RUN_PATH: ${NETCDFHOME}/lib:${PNETCDFHOME}/lib:${MPIHOME}/lib
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-systems
+
+scheduler:
+  family: slurm
+  primary_queue: batch
+  queues:
+    # General purpose computing, the default partition.
+    - {name: batch, kind: partition, max_walltime: sinfo}
+    # Short wait, short run time partition for debugging.
+    # The debug association defaults to the debug QOS, whose MaxWall (01:00:00
+    # on 2026-11-09) is the binding limit; the partition and the QOS share a name.
+    - {name: debug, kind: partition, max_walltime: sacctmgr}
+  requires_task_distribution: false
+  # No max_cpus_per_node: batch nodes range from 32 to 192 cores.
+  # NOTE: Oscar's default association needs no account (condo and priority users
+  # set one); an unset queue submits to the primary `batch` partition.
+  require: []

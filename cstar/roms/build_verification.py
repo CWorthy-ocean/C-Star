@@ -210,8 +210,8 @@ def assert_single_toolchain_stack(mpi_wrapper: str | None) -> None:
     for var in _DECLARED_PREFIX_VARS:
         if var in env_vars and not (env_vars[var] or "").strip():
             raise OSError(
-                f"Cannot verify ROMS build toolchain: {var} is declared in the "
-                f"system environment file ({cstar_sysmgr.environment.system_env_path}) "
+                f"Cannot verify ROMS build toolchain: {var} is declared in the env "
+                f"of {cstar_sysmgr.environment.env_origin} "
                 "but expanded to an empty string. This usually means the module "
                 f"that provides it is not loaded (e.g. for NETCDFFHOME on Anvil, "
                 "the `netcdf-fortran` module sets NETCDF_FORTRAN_HOME)."
