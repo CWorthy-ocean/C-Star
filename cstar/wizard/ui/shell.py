@@ -80,6 +80,50 @@ class AppShell:
         display(self.root)
 
 
+def queue_iopub_instead_of_dropping() -> None:
+    """Make the running kernel queue IOPub messages instead of dropping them.
+
+    Building the wizard opens about 1,350 widgets: some 6,500 IOPub messages in
+    a couple of seconds. ipykernel's IOPub socket keeps libzmq's default send
+    high-water mark of 1,000 messages and silently drops messages past it once
+    a subscriber falls behind, as voila does on a busy machine. When the cell's
+    final ``idle`` status is among them, voila waits out its IOPub timeout and
+    serves a blank page; no timeout brings a dropped message back. SNDHWM=0
+    (no limit) makes the socket queue them instead.
+
+    The option is set on ipykernel's IOPub thread, which owns the socket (zmq
+    sockets are not thread-safe), through ``IOPubThread.schedule``. That queue
+    runs in order with the queued sends, so the limit is lifted before any
+    widget message goes out. libzmq applies a changed high-water mark to
+    pipes that are already connected (checked on libzmq 4.3.5), so voila's
+    existing subscription is covered.
+
+    A no-op outside an ipykernel kernel (tests, plain Python). It never raises:
+    the wizard must still build if ipykernel's internals change.
+    """
+    try:
+        import zmq
+        from IPython import get_ipython
+
+        iopub_thread = getattr(
+            getattr(get_ipython(), "kernel", None), "iopub_thread", None
+        )
+        if iopub_thread is None:
+            return
+
+        def lift_limit() -> None:
+            # Runs on the IOPub thread; an exception here would stop it from
+            # processing the sends queued behind this call.
+            try:
+                iopub_thread.socket.setsockopt(zmq.SNDHWM, 0)
+            except Exception:
+                pass
+
+        iopub_thread.schedule(lift_limit)
+    except Exception:
+        return
+
+
 def blueprint_app(catalog_root: str | None = None) -> AppShell:
     """Build an :class:`AppShell` with a single "Blueprint" page.
 
@@ -88,6 +132,7 @@ def blueprint_app(catalog_root: str | None = None) -> AppShell:
     """
     from cstar.wizard.wizard import ForgeBlueprintWizardApp
 
+    queue_iopub_instead_of_dropping()
     app = ForgeBlueprintWizardApp(catalog_root)
     return AppShell([("Blueprint", app)])
 
@@ -101,6 +146,7 @@ def app(catalog_root: str | None = None) -> AppShell:
     from cstar.wizard.wizard import ForgeBlueprintWizardApp
     from cstar.wizard.workplan_builder import WorkplanBuilderPage
 
+    queue_iopub_instead_of_dropping()
     blueprint_page = ForgeBlueprintWizardApp(catalog_root)
     return AppShell(
         [
