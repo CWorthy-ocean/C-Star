@@ -47,8 +47,16 @@ def test_wizard_css_has_no_unresolved_braces():
 
 def test_style_widget_wraps_css_in_style_tag():
     widget = C.style_widget(W)
-    assert widget.value.startswith("<style>")
+    assert widget.value.startswith("<style ")
     assert C.WIZARD_CSS in widget.value
+
+
+def test_number_boxes_have_no_arrows_and_ignore_the_mouse_wheel():
+    assert "input[type=number]::-webkit-inner-spin-button" in C.WIZARD_CSS
+    html = C.style_widget(W).value
+    assert f'<style onload="{C._NO_WHEEL_JS}">' in html
+    assert "'wheel'" in C._NO_WHEEL_JS and "blur()" in C._NO_WHEEL_JS
+    assert '"' not in C._NO_WHEEL_JS  # it sits inside a double-quoted attribute
 
 
 def test_chip_contains_kind_class_and_text():

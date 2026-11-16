@@ -142,6 +142,10 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     border: 1px solid {branding.LINE};
     border-radius: 4px;
 }}
+/* number boxes: no up/down arrows (the mouse wheel is handled in style_widget) */
+.forge-app input[type=number] {{ -moz-appearance: textfield; appearance: textfield; }}
+.forge-app input[type=number]::-webkit-inner-spin-button,
+.forge-app input[type=number]::-webkit-outer-spin-button {{ -webkit-appearance: none; margin: 0; }}
 .forge-app .widget-text input:focus, .forge-app .widget-dropdown select:focus {{
     border-color: {branding.BLUE};
     box-shadow: 0 0 0 2px {branding.LIGHT_BLUE};
@@ -444,9 +448,23 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 """
 
 
+#: Installed once per page: a wheel event over a number box takes its focus away,
+#: which is what stops the browser from stepping its value.
+_NO_WHEEL_JS = (
+    "if(!window.forgeNoWheel){window.forgeNoWheel=1;"
+    "document.addEventListener('wheel',function(e){"
+    "if(e.target.type==='number')e.target.blur();},true);}"
+)
+
+
 def style_widget(W: Any) -> Any:
-    """A ``W.HTML`` widget carrying :data:`WIZARD_CSS` in a ``<style>`` tag."""
-    widget = W.HTML(f"<style>{WIZARD_CSS}</style>")
+    """A ``W.HTML`` widget carrying :data:`WIZARD_CSS` in a ``<style>`` tag.
+
+    The tag's ``onload`` (scripts are not executed, see
+    :func:`cstar.wizard.ui.branding._favicon_js`) stops the mouse wheel from
+    changing the number in a focused number box: the box loses focus instead.
+    """
+    widget = W.HTML(f'<style onload="{_NO_WHEEL_JS}">{WIZARD_CSS}</style>')
     widget.add_class("forge-style")
     return widget
 
