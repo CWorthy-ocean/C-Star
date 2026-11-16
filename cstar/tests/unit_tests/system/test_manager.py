@@ -18,19 +18,11 @@ from cstar.system.environment import (
     get_envfield_alias,
 )
 from cstar.system.manager import (
-    AnvilSystemContext,
-    BouchetSystemContext,
     CStarSystemManager,
-    DerechoSystemContext,
-    EljaSystemContext,
-    ExpanseSystemContext,
-    LinuxSystemContext,
-    MacOSSystemContext,
-    OscarSystemContext,
-    PerlmutterSystemContext,
     SystemContext,
     SystemSelection,
     SystemSource,
+    registered_context,
 )
 
 
@@ -67,35 +59,35 @@ class TestEnvironmentProperty:
         ("system_ctx", "expected_attributes"),
         [
             (
-                ExpanseSystemContext,
+                registered_context("expanse"),
                 {
                     "mpi_exec_prefix": "srun --mpi=pmi2 --kill-on-bad-exit=1",
                     "compiler": "intel",
                 },
             ),
             (
-                PerlmutterSystemContext,
+                registered_context("perlmutter"),
                 {
                     "mpi_exec_prefix": "srun --kill-on-bad-exit=1",
                     "compiler": "gnu",
                 },
             ),
             (
-                DerechoSystemContext,
+                registered_context("derecho"),
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "intel",
                 },
             ),
             (
-                MacOSSystemContext,
+                registered_context("darwin_arm64"),
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "gnu",
                 },
             ),
             (
-                LinuxSystemContext,
+                registered_context("linux_x86_64"),
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "gnu",
@@ -147,19 +139,21 @@ class TestSchedulerProperty:
     ("system_ctx", "required"),
     [
         pytest.param(
-            AnvilSystemContext,
+            registered_context("anvil"),
             {ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE},
             id="anvil",
         ),
         pytest.param(
-            BouchetSystemContext,
+            registered_context("bouchet"),
             {ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE},
             id="bouchet",
         ),
-        pytest.param(EljaSystemContext, set(), id="elja"),
-        pytest.param(ExpanseSystemContext, {ENV_CSTAR_SLURM_ACCOUNT}, id="expanse"),
-        pytest.param(OscarSystemContext, set(), id="oscar"),
-        pytest.param(PerlmutterSystemContext, set(), id="perlmutter"),
+        pytest.param(registered_context("elja"), set(), id="elja"),
+        pytest.param(
+            registered_context("expanse"), {ENV_CSTAR_SLURM_ACCOUNT}, id="expanse"
+        ),
+        pytest.param(registered_context("oscar"), set(), id="oscar"),
+        pytest.param(registered_context("perlmutter"), set(), id="perlmutter"),
     ],
 )
 def test_slurm_system_required_settings(

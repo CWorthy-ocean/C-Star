@@ -72,12 +72,11 @@ from cstar.roms.precheck import (
 from cstar.roms.simulation import IOLayout, ROMSSimulation, _join_workers
 from cstar.system.manager import (
     DOCS_MACHINES_URL,
-    AnvilSystemContext,
-    LinuxSystemContext,
     SystemContext,
     SystemSelection,
     SystemSource,
     get_sysmgr,
+    registered_context,
 )
 
 # A complete, forge-produced runtime namelist used to back the
@@ -3294,10 +3293,10 @@ class TestProcessingAndExecution:
             monkeypatch.delenv(name, raising=False)
 
         sysmgr = mock.Mock()
-        sysmgr.name = LinuxSystemContext.name
+        sysmgr.name = registered_context("linux_x86_64").name
         sysmgr.scheduler = None
         sysmgr.selection = SystemSelection(
-            LinuxSystemContext, SystemSource.FALLBACK, "frontera"
+            registered_context("linux_x86_64"), SystemSource.FALLBACK, "frontera"
         )
         monkeypatch.setattr("cstar.roms.simulation.get_sysmgr", lambda: sysmgr)
         monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda _: "SLURM")
@@ -3331,7 +3330,7 @@ class TestProcessingAndExecution:
             "submit to."
         )
         assert "'frontera'" in message
-        assert LinuxSystemContext.name in message
+        assert registered_context("linux_x86_64").name in message
         assert ENV_CSTAR_SYSTEM in message
         assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
         assert DOCS_MACHINES_URL in message
@@ -3412,7 +3411,7 @@ class TestProcessingAndExecution:
         warning, does not silence the login-node warning: it says the context was set.
         """
         unrecognised_cluster.selection = SystemSelection(
-            LinuxSystemContext, SystemSource.SETTING
+            registered_context("linux_x86_64"), SystemSource.SETTING
         )
 
         with caplog.at_level(logging.WARNING):
@@ -3421,14 +3420,20 @@ class TestProcessingAndExecution:
         (message,) = self.launch_warnings(caplog)
         assert "SLURM scheduler" in message
         assert f"set by {ENV_CSTAR_SYSTEM}" in message
-        assert LinuxSystemContext.name in message
+        assert registered_context("linux_x86_64").name in message
 
     @pytest.mark.parametrize(
         ("context", "source"),
         [
-            pytest.param(LinuxSystemContext, SystemSource.DETECTED, id="generic"),
-            pytest.param(AnvilSystemContext, SystemSource.DETECTED, id="slurm"),
-            pytest.param(AnvilSystemContext, SystemSource.SETTING, id="set-slurm"),
+            pytest.param(
+                registered_context("linux_x86_64"), SystemSource.DETECTED, id="generic"
+            ),
+            pytest.param(
+                registered_context("anvil"), SystemSource.DETECTED, id="slurm"
+            ),
+            pytest.param(
+                registered_context("anvil"), SystemSource.SETTING, id="set-slurm"
+            ),
         ],
     )
     def test_check_launch_location_trusts_a_detected_system_or_one_that_submits(
@@ -5801,15 +5806,50 @@ class TestOverridePoints:
         sim.codebase.source.checkout_target = "v0.13.0"
         sim.codebase.working_copy.checkout_hash = "abc123"
 
-        assert sim._build_record(RomsNamelistV0_13_0) == {
-            "namelist_schema": "RomsNamelistV0_13_0",
-            "ucla_roms_ref": "v0.13.0",
-            "ucla_roms_commit": "abc123",
-        }
+        system_file = registered_context("linux_x86_64").system_file
+        assert system_file is not None
+        with mock.patch.object(
+            ROMSSimulation, "_system_spec_record", return_value=system_file.record()
+        ):
+            assert sim._build_record(RomsNamelistV0_13_0) == {
+                "namelist_schema": "RomsNamelistV0_13_0",
+                "ucla_roms_ref": "v0.13.0",
+                "ucla_roms_commit": "abc123",
+                "system_spec": system_file.record(),
+            }
 
         sim.codebase.working_copy = None
 
         assert sim._build_record(RomsNamelistV0_13_0)["ucla_roms_commit"] == ""
+
+    def test_build_record_names_the_system_file(
+        self, stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """The build record names the system file of the selected system: its path,
+        layer, digest and schema version; a system defined in code names none.
+        """
+        sim = stub_romssimulation
+        sim.codebase = mock.MagicMock()
+        system_file = registered_context("perlmutter").system_file
+        assert system_file is not None
+        selected = mock.Mock()
+        selected.selection.context.system_file = system_file
+
+        with mock.patch("cstar.roms.simulation.get_sysmgr", return_value=selected):
+            record = sim._build_record(RomsNamelistV0_13_0)
+
+        assert set(record["system_spec"]) == {
+            "path",
+            "layer",
+            "sha256",
+            "schema_version",
+        }
+        assert record["system_spec"] == system_file.record()
+        assert record["system_spec"]["path"].endswith("systems/perlmutter.yaml")
+
+        selected.selection.context.system_file = None
+        with mock.patch("cstar.roms.simulation.get_sysmgr", return_value=selected):
+            assert "system_spec" not in sim._build_record(RomsNamelistV0_13_0)
 
     def test_write_build_record_writes_what_the_hook_returns(
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path

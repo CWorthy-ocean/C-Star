@@ -19,12 +19,7 @@ from cstar.execution.scheduler_job import (
 )
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase
-from cstar.system.manager import (
-    AnvilEnvSettings,
-    EljaEnvSettings,
-    ExpanseEnvSettings,
-    PerlmutterEnvSettings,
-)
+from cstar.system.manager import registered_context
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
@@ -33,6 +28,11 @@ from cstar.system.scheduler import (
     SlurmScheduler,
 )
 from cstar.system.toolchain import GpuNodes
+
+ANVIL_SETTINGS = registered_context("anvil").settings_klass()
+ELJA_SETTINGS = registered_context("elja").settings_klass()
+EXPANSE_SETTINGS = registered_context("expanse").settings_klass()
+PERLMUTTER_SETTINGS = registered_context("perlmutter").settings_klass()
 
 
 class MockSchedulerJob(SchedulerJob):
@@ -1162,18 +1162,18 @@ def slurm_system() -> Iterator[None]:
     ("settings_klass", "account_key", "queue_name", "missing"),
     [
         pytest.param(
-            AnvilEnvSettings, "", "test_queue", [ENV_CSTAR_SLURM_ACCOUNT], id="account"
+            ANVIL_SETTINGS, "", "test_queue", [ENV_CSTAR_SLURM_ACCOUNT], id="account"
         ),
-        pytest.param(AnvilEnvSettings, "acct", "", [ENV_CSTAR_SLURM_QUEUE], id="queue"),
+        pytest.param(ANVIL_SETTINGS, "acct", "", [ENV_CSTAR_SLURM_QUEUE], id="queue"),
         pytest.param(
-            AnvilEnvSettings,
+            ANVIL_SETTINGS,
             "",
             "",
             [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE],
             id="both",
         ),
         pytest.param(
-            ExpanseEnvSettings, "", "", [ENV_CSTAR_SLURM_ACCOUNT], id="expanse-account"
+            EXPANSE_SETTINGS, "", "", [ENV_CSTAR_SLURM_ACCOUNT], id="expanse-account"
         ),
     ],
 )
@@ -1214,11 +1214,11 @@ def test_create_scheduler_job_requires_slurm_settings(
 @pytest.mark.parametrize(
     ("settings_klass", "account_key", "queue_name"),
     [
-        pytest.param(AnvilEnvSettings, "acct", "test_queue", id="set"),
-        pytest.param(EljaEnvSettings, "", "test_queue", id="no-acct"),
-        pytest.param(EljaEnvSettings, "", "", id="elja-primary-q"),
-        pytest.param(ExpanseEnvSettings, "acct", "", id="expanse-primary-q"),
-        pytest.param(PerlmutterEnvSettings, "", "", id="perlmutter-primary-q"),
+        pytest.param(ANVIL_SETTINGS, "acct", "test_queue", id="set"),
+        pytest.param(ELJA_SETTINGS, "", "test_queue", id="no-acct"),
+        pytest.param(ELJA_SETTINGS, "", "", id="elja-primary-q"),
+        pytest.param(EXPANSE_SETTINGS, "acct", "", id="expanse-primary-q"),
+        pytest.param(PERLMUTTER_SETTINGS, "", "", id="perlmutter-primary-q"),
         pytest.param(EnvSettingsBase, "", "", id="no-rules"),
     ],
 )
@@ -1254,7 +1254,7 @@ def test_create_scheduler_job_with_required_settings(
 def test_create_scheduler_job_empty_walltime_uses_queue_maximum() -> None:
     """Verify an empty walltime requests the queue's maximum walltime."""
     with patch(
-        "cstar.system.environment.CStarEnvironment.settings_klass", EljaEnvSettings
+        "cstar.system.environment.CStarEnvironment.settings_klass", ELJA_SETTINGS
     ):
         job = create_scheduler_job(
             commands="echo Hello, World",
@@ -1295,7 +1295,7 @@ def gpu_slurm_system() -> Iterator[None]:
         ),
         patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",
-            AnvilEnvSettings,
+            ANVIL_SETTINGS,
         ),
     ):
         yield
@@ -1413,7 +1413,7 @@ def test_create_scheduler_job_gpu_job_without_gpu_nodes() -> None:
     with (
         patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",
-            AnvilEnvSettings,
+            ANVIL_SETTINGS,
         ),
         pytest.raises(CstarError, match="no GPU nodes registered"),
     ):

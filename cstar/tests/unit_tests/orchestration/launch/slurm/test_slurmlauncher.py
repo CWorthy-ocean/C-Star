@@ -39,7 +39,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.environment import EnvSettingsBase
-from cstar.system.manager import EljaSystemContext
+from cstar.system.manager import registered_context
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 from cstar.system.toolchain import GpuNodes
 
@@ -132,8 +132,8 @@ def test_slurmlauncher_adapt_step_unset_queue_on_elja(
 
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
-    mock_mgr.environment.settings_klass = EljaSystemContext.settings_klass()
-    mock_mgr.scheduler = EljaSystemContext.create_scheduler()
+    mock_mgr.environment.settings_klass = registered_context("elja").settings_klass()
+    mock_mgr.scheduler = registered_context("elja").create_scheduler()
     mock_getsysmgr = mock.Mock(return_value=mock_mgr)
 
     with (

@@ -1,10 +1,9 @@
 import os
 import subprocess
 import typing as t
-from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
-from unittest.mock import Mock, PropertyMock, call, mock_open, patch
+from unittest.mock import Mock, PropertyMock, call, patch
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -34,6 +33,7 @@ from cstar.system.environment import (
     LmodEnvSettings,
     SlurmSettingsBase,
 )
+from cstar.system.manager import registered_context
 
 if t.TYPE_CHECKING:
     from importlib.machinery import ModuleSpec
@@ -45,26 +45,26 @@ class MockEnvironment(CStarEnvironment):
         system_name="mock_system",
         mpi_exec_prefix="mock_mpi_prefix",
         compiler="mock_compiler",
+        modules: t.Sequence[str] = (),
+        env: t.Mapping[str, str] | None = None,
     ):
         super().__init__(
             system_name=system_name,
             mpi_exec_prefix=mpi_exec_prefix,
             compiler=compiler,
+            modules=modules,
+            env=env,
         )
 
 
-class TestSetupEnvironmentFromFiles:
-    """Tests related to loading environment configuration from .env and .lmod files.
+class TestSetupEnvironmentFromToolchain:
+    """Tests related to loading a toolchain's modules and env into the process.
 
     Tests
     -----
     - test_load_lmod_modules: Confirms correct module loading sequence for systems with Linux Environment Modules.
-    - test_env_file_loading: Validates environment variable loading and merging from .env files.
-    - test_env_file_updating: Tests that environment variables are updated correctly in the user .env file
-
-    Methods
-    -------
-    - get_expected_lmod_modules: Retrieves expected modules for each environment from system files.
+    - test_env_loading: Validates environment variable loading and expansion from a toolchain's env.
+    - test_env_updating: Tests that environment variables are updated correctly after loading.
     """
 
     @pytest.mark.parametrize(
@@ -94,9 +94,9 @@ class TestSetupEnvironmentFromFiles:
         """Tests that the load_lmod_modules function correctly interacts with Linux
         Envionment Modules.
 
-        This test uses the `get_expected_lmod_modules` method (below) to read the .lmod file
-        corresponding to the system being mocked, then checks that C-Star's `module load` calls
-        correspond to the modules described in the file.
+        This test reads the modules of the cpu toolchain in the system's bundled system
+        file, builds the environment from them, then checks that C-Star's `module load`
+        calls correspond to those modules.
 
         Mocks
         -----
@@ -121,10 +121,14 @@ class TestSetupEnvironmentFromFiles:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stderr = ""
 
+            # The modules the system's file lists for its cpu toolchain
+            expected_modules = list(
+                registered_context(lmod_syshost).toolchain("cpu").modules
+            )
+            assert expected_modules
+
             # Instantiate the environment, which should trigger load_lmod_modules
-            env = MockEnvironment(system_name=lmod_syshost)
-            # Retrieve the expected modules for the given environment
-            expected_modules = self.get_expected_lmod_modules(env)
+            MockEnvironment(system_name=lmod_syshost, modules=expected_modules)
 
             # Define expected subprocess calls
             modules = [
@@ -148,18 +152,6 @@ class TestSetupEnvironmentFromFiles:
 
             mock_run.assert_has_calls(expected_calls, any_order=False)
 
-    def get_expected_lmod_modules(self, env: CStarEnvironment) -> list[str]:
-        """Retrieves the expected list of Lmod modules for a given system from a .lmod
-        file.
-
-        Returns
-        -------
-        lmod_list: Module names to be loaded, based on the system's `.lmod` file.
-        """
-        with open(env.lmod_path) as file:
-            lines = (line.partition("#")[0].strip() for line in file)
-            return [line for line in lines if line]
-
     @patch("cstar.base.utils.subprocess.run", autospec=True)
     @patch.object(
         CStarEnvironment, "uses_lmod", new_callable=PropertyMock, return_value=True
@@ -167,38 +159,26 @@ class TestSetupEnvironmentFromFiles:
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    def test_load_lmod_modules_skips_comments_and_blank_lines(
-        self, mock_uses_lmod: bool, mock_run: Mock, tmp_path: Path
+    def test_load_lmod_modules_one_load_per_entry(
+        self, mock_uses_lmod: bool, mock_run: Mock
     ):
-        """A `.lmod` file may carry `#` comments and blank lines; only the module
-        names are passed to `module load`, each stripped of its trailing comment.
+        """Each entry of the module list is the argument of one `module load`, so an
+        entry naming several modules loads them in a single call, in list order.
         """
-        lmod_file = tmp_path / "commented.lmod"
-        lmod_file.write_text(
-            "# toolchain verified 2026-11-02\n"
-            "cpu/1.0  # swaps out gpu/1.0\n"
-            "\n"
-            "   \n"
-            "cray-netcdf/4.9.2.3\n"
-            "#cray-hdf5/1.14.3.9 is pulled in by cray-netcdf\n"
-        )
         mock_run.return_value.stdout = ""
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        with patch.object(
-            CStarEnvironment, "lmod_path", new_callable=PropertyMock
-        ) as mock_lmod_path:
-            mock_lmod_path.return_value = lmod_file
-            MockEnvironment(system_name="commented")
+        MockEnvironment(
+            system_name="multi",
+            modules=["cpu/1.0", "intel/19.1 mvapich2/2.3.4", "cray-netcdf/4.9.2.3"],
+        )
 
-        loads = [
-            c.args[0]
-            for c in mock_run.call_args_list
-            if c.args[0].startswith("/mock/lmod python load")
-        ]
-        assert loads == [
+        commands = [c.args[0] for c in mock_run.call_args_list]
+        assert commands == [
+            "/mock/lmod python reset",
             "/mock/lmod python load cpu/1.0",
+            "/mock/lmod python load intel/19.1 mvapich2/2.3.4",
             "/mock/lmod python load cray-netcdf/4.9.2.3",
         ]
 
@@ -212,171 +192,31 @@ class TestSetupEnvironmentFromFiles:
         },
         clear=True,
     )
-    def test_env_file_loading(
-        self,
-        tmp_path: Path,
-        system_dotenv_path: Path,
-    ):
-        """Tests that environment variables are loaded and expanded correctly from .env
-        files.
-
-        Mocks
-        -----
-        - tmp_path creates temporary, emulated system .env files
-        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
+    def test_env_loading(self):
+        """Tests that environment variables are loaded and expanded correctly from a
+        toolchain's env.
 
         Asserts
         -------
-        - Confirms merged environment variables with expected values after expansion.
+        - Confirms the loaded environment variables have the expected values after expansion.
         """
-        # Write simulated system .env content to the appropriate location
-        system_dotenv_path.write_text(
-            "NETCDFHOME=${NETCDF_FORTRANHOME}/\n"
-            "MPIHOME=${MVAPICH2HOME}/\n"
-            "MPIROOT=${MVAPICH2HOME}/\n"
-        )
-
-        # Patch the root path and expanduser to point to our temporary files
-        with patch.object(CStarEnvironment, "package_root", new=tmp_path):
-            # Instantiate the environment to trigger loading the environment variables
-            env = MockEnvironment()
-            # Define expected final environment variables after merging and expansion
-            expected_env_vars = {
-                "NETCDFHOME": "/mock/netcdf/",  # Expanded from ${NETCDF_FORTRANHOME}
-                "MPIHOME": "/mock/mpi/",  # Expanded from ${MVAPICH2HOME}
-                "MPIROOT": "/mock/mpi/",  # User-defined override
-            }
-
-            # Assert that environment variables were loaded, expanded, and merged as expected
-            assert dict(env.environment_variables) == expected_env_vars
-
-    @patch.dict(
-        "os.environ",
-        {
-            "NETCDF_FORTRANHOME": "/mock/netcdf",
-            "MVAPICH2HOME": "/mock/mpi",
-            "LMOD_SYSHOST": "perlmutter",
-            "LMOD_DIR": "/mock/lmod",  # Ensures `uses_lmod` is valid
-        },
-        clear=True,
-    )
-    def test_env_file_updating(
-        self,
-        mock_system_name: str,
-        system_dotenv_path: Path,
-        tmp_path: Path,
-    ):
-        """Tests that environment variables are updated correctly.
-
-        Mocks
-        -----
-        - tmp_path creates temporary, emulated system .env files
-        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
-
-        Asserts
-        -------
-        - Confirms merged environment variables with expected values after expansion.
-        """
-        # Write simulated system .env content to the appropriate location
-        exp_system_env = {
-            "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
-            "MPIHOME": "${MVAPICH2HOME}/",
-            "MPIROOT": "${MVAPICH2HOME}/",
-        }
-        sys_env_content = "\n".join(f"{k}={v}" for k, v in exp_system_env.items())
-        system_dotenv_path.write_text(sys_env_content)
-
-        # Patch the root path and expanduser to point to our temporary files
-        with (
-            patch(
-                "cstar.system.environment.CStarEnvironment.system_env_path",
-                new_callable=PropertyMock,
-                return_value=system_dotenv_path,
-            ),
-        ):
-            # Instantiate the environment to trigger loading the environment variables
-            env = CStarEnvironment(
-                system_name=mock_system_name,
-                mpi_exec_prefix="mpi-prefix",
-                compiler="gnu",
-            )
-
-            # Confirm variables written in system.env file are available
-            actual_env = env.environment_variables
-            for key in exp_system_env:
-                assert key in actual_env
-
-            k0, v0 = "NETCDFHOME", "updated/value"
-            k1, v1 = "TEST_VAR", "test-value"
-            k2, v2 = "OTHER_EMPTY", ""
-            updated_vars = [(k0, v0), (k1, v1), (k2, v2)]
-
-            for key, exp_value in updated_vars:
-                env.set_env_var(key, exp_value)
-
-            for key, exp_value in updated_vars:
-                # Confirm the active environment variable is updated
-                assert exp_value in os.environ.get(key, "key-not-found")
-
-    @patch.dict(
-        "os.environ",
-        {
-            "NETCDF_FORTRANHOME": "/mock/netcdf",
-            "MVAPICH2HOME": "/mock/mpi",
-            "LMOD_SYSHOST": "perlmutter",
-            "LMOD_DIR": "/mock/lmod",  # Ensures `uses_lmod` is valid
-        },
-        clear=True,
-    )
-    @pytest.mark.parametrize(
-        "system_name,profile,expected_path",
-        [
-            ["perlmutter", "", "additional_files/lmod_lists/perlmutter.lmod"],
-            ["derecho", "", "additional_files/lmod_lists/derecho.lmod"],
-            ["expanse", "", "additional_files/lmod_lists/expanse.lmod"],
-            ["perlmutter", "gpu", "additional_files/lmod_lists/perlmutter.gpu.lmod"],
-        ],
-    )
-    def test_lmod_path(
-        self,
-        tmp_path: Path,
-        system_name: str,
-        profile: str,
-        expected_path: str,
-        custom_system_env: Callable[[dict[str, str]], Generator[Mock, None, None]],
-    ):
-        """Verify that the lmod_path property returns the correct path based on the
-        system name.
-
-        Mocks
-        -----
-        - tmp_path creates temporary, emulated system and user .env files
-        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
-
-        Asserts
-        -------
-        - Confirms merged environment variables with expected values after expansion.
-        """
-        # Write simulated system .env content to the appropriate location
-        custom_system_env(
-            {
+        env = MockEnvironment(
+            env={
                 "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
                 "MPIHOME": "${MVAPICH2HOME}/",
                 "MPIROOT": "${MVAPICH2HOME}/",
             }
         )
+        # Define expected final environment variables after expansion
+        expected_env_vars = {
+            "NETCDFHOME": "/mock/netcdf/",  # Expanded from ${NETCDF_FORTRANHOME}
+            "MPIHOME": "/mock/mpi/",  # Expanded from ${MVAPICH2HOME}
+            "MPIROOT": "/mock/mpi/",  # Expanded from ${MVAPICH2HOME}
+        }
 
-        # Patch the root path and expanduser to point to our temporary files
-        with patch.object(CStarEnvironment, "package_root", new=tmp_path):
-            # Instantiate the environment to trigger loading the environment variables
-            env = CStarEnvironment(
-                system_name=system_name,
-                mpi_exec_prefix="mpi-prefix",
-                compiler="gnu",
-                profile=profile,
-            )
-
-            assert env.lmod_path == tmp_path / expected_path
+        assert dict(env.environment_variables) == expected_env_vars
+        for key, value in expected_env_vars.items():
+            assert os.environ[key] == value
 
     @patch.dict(
         "os.environ",
@@ -388,52 +228,115 @@ class TestSetupEnvironmentFromFiles:
         },
         clear=True,
     )
-    @pytest.mark.parametrize(
-        ("package_root", "system_name", "profile", "file_name"),
-        [
-            ["foo/bar", "system-name-1", "", "system-name-1.env"],
-            ["boo/far", "system-name-2", "", "system-name-2.env"],
-            ["foz/baz", "system-name-3", "", "system-name-3.env"],
-            ["foz/baz", "system-name-3", "gpu", "system-name-3.gpu.env"],
-        ],
-    )
-    def test_system_env_path(
+    def test_env_updating(
         self,
-        tmp_path: Path,
-        package_root: str,
-        system_name: str,
-        profile: str,
-        file_name: str,
+        mock_system_name: str,
     ):
-        """Verify that the system env property is based on package root and system name.
-
-        Mocks
-        -----
-        - tmp_path creates temporary, emulated system and user .env files
-        - CStarEnvironment.package_root is patched to the temporary directory to load these .env files
-        - system_name provides a test-safe system name
+        """Tests that environment variables are updated correctly.
 
         Asserts
         -------
-        - Confirms merged environment variables with expected values after expansion.
+        - Confirms the toolchain's variables are loaded and `set_env_var` updates the process.
         """
-        # Patch the root path and expanduser to point to our temporary files
-        tmp_pkg_root = tmp_path / package_root
+        exp_system_env = {
+            "NETCDFHOME": "${NETCDF_FORTRANHOME}/",
+            "MPIHOME": "${MVAPICH2HOME}/",
+            "MPIROOT": "${MVAPICH2HOME}/",
+        }
 
+        # Instantiate the environment to trigger loading the environment variables
+        env = CStarEnvironment(
+            system_name=mock_system_name,
+            mpi_exec_prefix="mpi-prefix",
+            compiler="gnu",
+            env=exp_system_env,
+        )
+
+        # Confirm variables written in the toolchain's env are available
+        actual_env = env.environment_variables
+        for key in exp_system_env:
+            assert key in actual_env
+
+        k0, v0 = "NETCDFHOME", "updated/value"
+        k1, v1 = "TEST_VAR", "test-value"
+        k2, v2 = "OTHER_EMPTY", ""
+        updated_vars = [(k0, v0), (k1, v1), (k2, v2)]
+
+        for key, exp_value in updated_vars:
+            env.set_env_var(key, exp_value)
+
+        for key, exp_value in updated_vars:
+            # Confirm the active environment variable is updated
+            assert exp_value in os.environ.get(key, "key-not-found")
+
+    @pytest.mark.parametrize(
+        ("system_name", "profile", "source", "expected"),
+        [
+            ["perlmutter", "", None, "the cpu toolchain of the perlmutter system"],
+            ["perlmutter", "gpu", None, "the gpu toolchain of the perlmutter system"],
+            [
+                "perlmutter",
+                "",
+                Path("/pkg/systems/perlmutter.yaml"),
+                "the cpu toolchain in /pkg/systems/perlmutter.yaml",
+            ],
+            [
+                "perlmutter",
+                "gpu",
+                Path("/pkg/systems/perlmutter.yaml"),
+                "the gpu toolchain in /pkg/systems/perlmutter.yaml",
+            ],
+        ],
+    )
+    def test_env_origin(
+        self, system_name: str, profile: str, source: Path | None, expected: str
+    ):
+        """Verify that env_origin names the toolchain and where its modules and env
+        were defined: the system file when there is one, else the system.
+        """
         env = CStarEnvironment(
             system_name=system_name,
             mpi_exec_prefix="mpi-prefix",
             compiler="gnu",
             profile=profile,
+            source=source,
         )
 
-        with patch.object(CStarEnvironment, "package_root", new=tmp_pkg_root):
-            # Instantiate the environment to trigger loading the environment variables
+        assert env.env_origin == expected
 
-            system_actual = env.system_env_path
-            expected = tmp_pkg_root / f"additional_files/env_files/{file_name}"
+    def test_env_expansion_order(self):
+        """A `${VAR}` sees the toolchain's earlier entries first, then the process
+        environment; a variable that is set nowhere expands to an empty string, and a
+        bare `$VAR` is expanded afterwards.
+        """
+        with patch.dict(
+            os.environ, {"SHARED": "process", "ONLY_PROCESS": "proc"}, clear=True
+        ):
+            env = CStarEnvironment(
+                system_name="mock",
+                mpi_exec_prefix="mpirun",
+                compiler="gnu",
+                env={
+                    "SHARED": "toolchain",
+                    "FIRST": "${SHARED}/a",
+                    "SECOND": "${FIRST}/b:${ONLY_PROCESS}",
+                    "LATER": "${NOT_YET}",
+                    "NOT_YET": "set-late",
+                    "UNSET": "x${NOWHERE}y",
+                    "BARE": "$ONLY_PROCESS/bin",
+                },
+            )
+            loaded = env.environment_variables
 
-            assert system_actual == expected
+            assert loaded["FIRST"] == "toolchain/a"
+            assert loaded["SECOND"] == "toolchain/a/b:proc"
+            assert loaded["LATER"] == ""
+            assert loaded["UNSET"] == "xy"
+            assert loaded["BARE"] == "proc/bin"
+            assert os.environ["SHARED"] == "toolchain"
+
+        # leaving the patched environment restores it
+        assert "FIRST" not in os.environ
 
     @patch.dict(
         "os.environ",
@@ -496,7 +399,7 @@ class TestStrAndReprMethods:
         "uses_lmod",
         new_callable=PropertyMock(return_value=False),
     )
-    def test_str_method(self, tmp_path: Path, custom_system_env):
+    def test_str_method(self, _mock_uses_lmod):
         """Tests that __str__ produces a formatted, readable summary.
 
         Mocks
@@ -650,39 +553,24 @@ class TestExceptions:
             env = MockEnvironment()
             env.load_lmod_modules()
 
-    def test_lmod_system_default_modules_is_set(
-        self,
-        tmp_path: Path,
-    ) -> None:
+    def test_lmod_system_default_modules_is_set(self) -> None:
         """Verify that LMOD_SYSTEM_DEFAULT_MODULES is set when missing and
         we attempt to load modules.
 
-        Parameters
-        ----------
-        tmp_path : Path
-            Used to create a mock modules file to be "loaded" by the mocked `_call_lmod`
-
         Asserts
         -------
-        - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
+        - The modules are reset and loaded in order, and the variable is set afterwards.
         """
         mock_module_names = ["mock-module-1", "mock-module-2"]
-        modules_file = tmp_path / "mock_modules.lmod"
-        modules_file.write_text("\n".join(mock_module_names))
         modules_var: t.Final[str] = "LMOD_SYSTEM_DEFAULT_MODULES"
         modules_exp_value: t.Final[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
 
         with (
             # ensure the variable isn't set at the outset by clearing os.environ.
             mock.patch.dict(os.environ, {}, clear=True),
-            mock.patch.object(
-                MockEnvironment,
-                "lmod_path",
-                modules_file,
-            ),
             mock.patch.object(MockEnvironment, "_call_lmod") as mock_call_lmod,
         ):
-            env = MockEnvironment()
+            env = MockEnvironment(modules=mock_module_names)
             env.load_lmod_modules()
 
             # confirm the reset and load fired
@@ -737,15 +625,12 @@ class TestExceptions:
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    @patch("builtins.open", new_callable=mock_open, read_data="module1 module2\n")
-    def test_load_lmod_modules_raises_runtime_error_on_module_load_failure(
-        self, mock_open_file
-    ):
+    def test_load_lmod_modules_raises_runtime_error_on_module_load_failure(self):
         """Tests that a RuntimeError is raised if `module load` fails.
 
         Mocks
         -----
-        - builtins.open: Simulates the .lmod file with two modules ("module1" and "module2").
+        - the toolchain lists one entry naming two modules ("module1 module2").
         - os.environ: Sets "LMOD_CMD" to a mock path ("/mock/lmod") to simulate Lmod availability.
 
         Asserts
@@ -775,9 +660,7 @@ class TestExceptions:
                 "failed. Return Code: `1`. STDERR:\nModule load error"
             ),
         ):
-            MockEnvironment()
-
-        assert mock_open_file.called
+            MockEnvironment(modules=["module1 module2"])
 
 
 @pytest.mark.parametrize(

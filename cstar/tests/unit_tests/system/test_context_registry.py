@@ -5,20 +5,13 @@ import pytest
 
 from cstar.system.manager import (
     CTX_REGISTRY,
-    AnvilSystemContext,
-    BouchetSystemContext,
-    DerechoSystemContext,
-    EljaSystemContext,
-    ExpanseSystemContext,
-    LinuxARM64SystemContext,
-    LinuxSystemContext,
-    MacOSSystemContext,
-    OscarSystemContext,
-    PerlmutterSystemContext,
     SystemContext,
     SystemSource,
+    get_registered_sys_contexts,
     get_system_context,
     register_sys_context,
+    registered_context,
+    registered_names,
     select_system,
 )
 from cstar.system.scheduler import Scheduler
@@ -26,44 +19,33 @@ from cstar.system.scheduler import Scheduler
 DEFAULT_MOCK_MACHINE_NAME = "mock_machine"
 DEFAULT_MOCK_HOST_NAME = "mock_system"
 
+BUNDLED_NAMES = (
+    "anvil",
+    "bouchet",
+    "darwin_arm64",
+    "derecho",
+    "elja",
+    "expanse",
+    "linux_aarch64",
+    "linux_x86_64",
+    "oscar",
+    "perlmutter",
+)
+
 
 def test_unique_context_names() -> None:
     """Verify that known contexts have a unique key."""
-    context_types = (
-        AnvilSystemContext,
-        BouchetSystemContext,
-        DerechoSystemContext,
-        EljaSystemContext,
-        ExpanseSystemContext,
-        LinuxARM64SystemContext,
-        LinuxSystemContext,
-        MacOSSystemContext,
-        OscarSystemContext,
-        PerlmutterSystemContext,
-    )
+    context_types = get_registered_sys_contexts()
 
-    registered_names = set(CTX_REGISTRY.keys())
-
-    assert len({ctx.name for ctx in context_types}) == len(registered_names)
+    assert len({ctx.name for ctx in context_types}) == len(context_types)
+    assert {ctx.name for ctx in context_types} == set(registered_names())
+    assert set(BUNDLED_NAMES) <= set(registered_names())
 
 
-@pytest.mark.parametrize(
-    "wrapped_class",
-    [
-        AnvilSystemContext,
-        BouchetSystemContext,
-        DerechoSystemContext,
-        EljaSystemContext,
-        ExpanseSystemContext,
-        LinuxARM64SystemContext,
-        LinuxSystemContext,
-        MacOSSystemContext,
-        OscarSystemContext,
-        PerlmutterSystemContext,
-    ],
-)
-def test_context_registry(wrapped_class: type[SystemContext]) -> None:
+@pytest.mark.parametrize("name", BUNDLED_NAMES)
+def test_context_registry(name: str) -> None:
     """Verify that all known system contexts are registered."""
+    wrapped_class = registered_context(name)
     with patch(
         "cstar.system.manager.HostNameEvaluator.name",
         new_callable=PropertyMock,
@@ -79,21 +61,21 @@ def test_context_registry(wrapped_class: type[SystemContext]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("expected_name", "wrapped_class"),
+    ("expected_name", "registered"),
     [
-        ("perlmutter", PerlmutterSystemContext),
-        ("darwin_arm64", MacOSSystemContext),
-        ("derecho", DerechoSystemContext),
-        ("elja", EljaSystemContext),
-        ("expanse", ExpanseSystemContext),
-        ("linux_x86_64", LinuxSystemContext),
+        ("perlmutter", "perlmutter"),
+        ("darwin_arm64", "darwin_arm64"),
+        ("derecho", "derecho"),
+        ("elja", "elja"),
+        ("expanse", "expanse"),
+        ("linux_x86_64", "linux_x86_64"),
     ],
 )
-def test_registry_keys(expected_name: str, wrapped_class: type[SystemContext]) -> None:
+def test_registry_keys(expected_name: str, registered: str) -> None:
     """Verify that the system contexts have the names expected from using
     HostNameEvaluator for all known systems.
     """
-    assert expected_name == wrapped_class.name
+    assert expected_name == registered_context(registered).name
 
 
 def test_new_registration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,7 +125,7 @@ def test_unknown_context_name() -> None:
         selection = select_system()
         ctx = get_system_context()
 
-    assert selection.context is LinuxSystemContext
+    assert selection.context is registered_context("linux_x86_64")
     assert selection.source is SystemSource.FALLBACK
     assert selection.detected == "invalid-name"
-    assert isinstance(ctx, LinuxSystemContext)
+    assert isinstance(ctx, registered_context("linux_x86_64"))

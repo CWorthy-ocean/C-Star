@@ -39,18 +39,23 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.environment import EnvSettingsBase
 from cstar.system.manager import (
     CTX_REGISTRY,
-    AnvilEnvSettings,
-    MacOSSystemContext,
     SystemSelection,
     SystemSource,
     get_registered_sys_contexts,
+    registered_context,
+    registered_names,
 )
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 from cstar.system.toolchain import GpuNodes
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
+MACOS_CONTEXT = registered_context("darwin_arm64")
+"""The generic macOS context, read from its bundled system file."""
+ANVIL_SETTINGS = registered_context("anvil").settings_klass()
+"""A settings class requiring an account and a queue (Anvil's)."""
 REAL_QUERY_SLURM = init_module.query_slurm
 """The SLURM lookup as written, captured before the autouse fixture stubs it."""
 REAL_SELECT_SYSTEM = init_module.select_system
@@ -94,8 +99,8 @@ class FakeSlurmContext:
         )
 
     @classmethod
-    def settings_klass(cls) -> type[AnvilEnvSettings]:
-        return AnvilEnvSettings
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        return ANVIL_SETTINGS
 
     @classmethod
     def is_match(cls) -> bool:
@@ -153,7 +158,7 @@ def safe_environment(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     for name in CLEARED_VARIABLES:
         monkeypatch.delenv(name, raising=False)
 
-    use_context(monkeypatch, MacOSSystemContext)
+    use_context(monkeypatch, MACOS_CONTEXT)
     monkeypatch.setattr("cstar.cli.init.query_slurm", lambda args: [])
     monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda environ: "")
 
@@ -208,9 +213,7 @@ def gpu_slurm(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the system a generic context that C-Star fell back to."""
-    use_context(
-        monkeypatch, MacOSSystemContext, SystemSource.FALLBACK, detected="mycluster"
-    )
+    use_context(monkeypatch, MACOS_CONTEXT, SystemSource.FALLBACK, detected="mycluster")
 
 
 @pytest.fixture
@@ -883,7 +886,7 @@ def test_fallback_asks_again_after_an_unknown_name(
     output = flatten_cli_output(result.output)
 
     assert result.exit_code == 0, result.output
-    names = ", ".join(sorted(CTX_REGISTRY))
+    names = ", ".join(registered_names())
     assert (
         f"'nope' is not a registered system; {ENV_CSTAR_SYSTEM} must name one of: "
         f"{names}."
@@ -928,7 +931,7 @@ def test_dash_unsets_a_bad_system_setting_and_detects_the_system(
     monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
     monkeypatch.setattr(
         "cstar.cli.init.detect_system",
-        lambda: SystemSelection(MacOSSystemContext, SystemSource.DETECTED),
+        lambda: SystemSelection(MACOS_CONTEXT, SystemSource.DETECTED),
     )
     path = isolate_user_config
     path.write_text(f"{ENV_CSTAR_SYSTEM}=nowhere\n")
@@ -1010,7 +1013,7 @@ def test_retyping_a_bad_system_setting_asks_again_until_it_is_unset(
     monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
     monkeypatch.setattr(
         "cstar.cli.init.detect_system",
-        lambda: SystemSelection(MacOSSystemContext, SystemSource.DETECTED),
+        lambda: SystemSelection(MACOS_CONTEXT, SystemSource.DETECTED),
     )
     path = isolate_user_config
     path.write_text(f"{ENV_CSTAR_SYSTEM}=bogus\n")
