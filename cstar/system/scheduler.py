@@ -2,7 +2,7 @@ import functools
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, ClassVar, Final
 
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import _run_cmd
@@ -51,7 +51,15 @@ def in_scheduler_job(environ: "Mapping[str, str]") -> bool:
     return bool(slurm_job_id(environ) or environ.get("PBS_JOBID"))
 
 
-VISIBLE_SCHEDULERS: Final = (("SLURM", "sbatch", "SLURM_"), ("PBS", "qsub", "PBS_"))
+SCHEDULER_SLURM: Final = "SLURM"
+"""The name of the SLURM scheduler family."""
+SCHEDULER_PBS: Final = "PBS"
+"""The name of the PBS scheduler family."""
+
+VISIBLE_SCHEDULERS: Final = (
+    (SCHEDULER_SLURM, "sbatch", "SLURM_"),
+    (SCHEDULER_PBS, "qsub", "PBS_"),
+)
 """Each scheduler family `visible_scheduler` looks for: its name, its submit command,
 and the prefix of the variables it sets."""
 
@@ -485,6 +493,9 @@ class Scheduler(ABC, LoggingMixin):
         Retrieve a queue by name.
     """
 
+    family: ClassVar[str]
+    """The scheduler family's name, as `visible_scheduler` reports it."""
+
     def __init__(
         self,
         queues: list["Queue"],
@@ -611,6 +622,8 @@ class SlurmScheduler(Scheduler):
         Retrieves the maximum memory available per node in GB.
     """
 
+    family: ClassVar[str] = SCHEDULER_SLURM
+
     @property
     def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all SLURM
@@ -693,6 +706,7 @@ class PBSScheduler(Scheduler):
       as PBS requires explicit specification of required nodes and cpus for a job.
     """
 
+    family: ClassVar[str] = SCHEDULER_PBS
     requires_task_distribution = True
 
     @property
