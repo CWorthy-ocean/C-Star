@@ -660,7 +660,8 @@
           "load cray-mpich/9.1.0",
           "load cray-hdf5/1.14.3.9",
           "load cray-netcdf/4.9.2.3",
-          "load cray-parallel-netcdf/1.12.3.21"
+          "load cray-parallel-netcdf/1.12.3.21",
+          "load cmake/3.30.2"
         ]
       },
       "gpu": {

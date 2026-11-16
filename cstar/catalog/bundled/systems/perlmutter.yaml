@@ -21,6 +21,7 @@ toolchains:
       - cray-hdf5/1.14.3.9
       - cray-netcdf/4.9.2.3  # provides netCDF-C and netCDF-Fortran (nf-config) in one prefix
       - cray-parallel-netcdf/1.12.3.21
+      - cmake/3.30.2  # ParallelIO builds with cmake, which the HPC conda environment does not provide
     env:
       MPIHOME: ${CRAY_MPICH_PREFIX}/
       NETCDFHOME: ${CRAY_NETCDF_PREFIX}/
