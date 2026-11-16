@@ -1,0 +1,499 @@
+{
+    "$defs": {
+        "DetectEnv": {
+            "additionalProperties": false,
+            "description": "Recognise the machine by an environment variable's value.",
+            "properties": {
+                "env": {
+                    "description": "The variable to read.",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "title": "Env",
+                    "type": "string"
+                },
+                "equals": {
+                    "description": "The value that identifies the machine.",
+                    "minLength": 1,
+                    "title": "Equals",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "env",
+                "equals"
+            ],
+            "title": "DetectEnv",
+            "type": "object"
+        },
+        "DetectPath": {
+            "additionalProperties": false,
+            "description": "Recognise the machine by a directory that exists only there, e.g. a site mount.",
+            "properties": {
+                "path": {
+                    "description": "The directory to look for.",
+                    "minLength": 1,
+                    "title": "Path",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "path"
+            ],
+            "title": "DetectPath",
+            "type": "object"
+        },
+        "GpuNodesSpec": {
+            "additionalProperties": false,
+            "description": "The GPU nodes a system offers, and how a job reaches them.",
+            "properties": {
+                "gpus_per_node": {
+                    "description": "The number of GPUs on each GPU node.",
+                    "exclusiveMinimum": 0,
+                    "title": "Gpus Per Node",
+                    "type": "integer"
+                },
+                "queue": {
+                    "description": "The queue GPU jobs go to by default; one of the scheduler's queues.",
+                    "minLength": 1,
+                    "title": "Queue",
+                    "type": "string"
+                },
+                "directives": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "Extra directives for GPU jobs, e.g. `{-C: gpu}`; they replace the\nscheduler's `directives` for GPU jobs.",
+                    "title": "Directives",
+                    "type": "object"
+                },
+                "cores_per_node": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The CPU cores on each GPU node.",
+                    "title": "Cores Per Node"
+                },
+                "account_required": {
+                    "default": false,
+                    "description": "Whether the scheduler refuses a GPU job that names no account.",
+                    "title": "Account Required",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "gpus_per_node",
+                "queue"
+            ],
+            "title": "GpuNodesSpec",
+            "type": "object"
+        },
+        "PBSQueueSpec": {
+            "additionalProperties": false,
+            "description": "A PBS queue jobs can be submitted to.",
+            "properties": {
+                "name": {
+                    "description": "The name a job is submitted with.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "max_walltime": {
+                    "description": "The queue's walltime limit, a quoted `HH:MM:SS` or `D-HH:MM:SS`.",
+                    "title": "Max Walltime",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "max_walltime"
+            ],
+            "title": "PBSQueueSpec",
+            "type": "object"
+        },
+        "PBSSchedulerSpec": {
+            "additionalProperties": false,
+            "description": "A PBS Professional or OpenPBS scheduler (`-l select=`); not Torque.",
+            "properties": {
+                "primary_queue": {
+                    "description": "The queue a job goes to when it names none; one of `queues`.",
+                    "minLength": 1,
+                    "title": "Primary Queue",
+                    "type": "string"
+                },
+                "directives": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "Extra directives on every CPU job, as `flag: value`, e.g. `{-C: cpu}`.",
+                    "title": "Directives",
+                    "type": "object"
+                },
+                "max_cpus_per_node": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The CPUs per node used to lay out a job; omitted, the scheduler is asked.",
+                    "title": "Max Cpus Per Node"
+                },
+                "require": {
+                    "description": "Which of `account` and `queue` a job must name.",
+                    "items": {
+                        "enum": [
+                            "account",
+                            "queue"
+                        ],
+                        "type": "string"
+                    },
+                    "title": "Require",
+                    "type": "array"
+                },
+                "gpu_nodes": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/GpuNodesSpec"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The system's GPU nodes; omitted when it has none."
+                },
+                "family": {
+                    "const": "pbs",
+                    "description": "The scheduler family.",
+                    "title": "Family",
+                    "type": "string"
+                },
+                "queues": {
+                    "description": "The queues jobs can be submitted to.",
+                    "items": {
+                        "$ref": "#/$defs/PBSQueueSpec"
+                    },
+                    "minItems": 1,
+                    "title": "Queues",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "primary_queue",
+                "family",
+                "queues"
+            ],
+            "title": "PBSSchedulerSpec",
+            "type": "object"
+        },
+        "ScratchSpec": {
+            "additionalProperties": false,
+            "description": "Where the scratch file system is, on a machine that exports no `SCRATCH`-style variable.",
+            "properties": {
+                "match": {
+                    "description": "A glob for the scratch directory, with `~` and `{user}` expanded; the first\ndirectory it matches, in sorted order, is used.",
+                    "minLength": 1,
+                    "title": "Match",
+                    "type": "string"
+                },
+                "subdir": {
+                    "default": "",
+                    "description": "A path appended to the matched directory, with `{user}` expanded; it need not exist.",
+                    "title": "Subdir",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "match"
+            ],
+            "title": "ScratchSpec",
+            "type": "object"
+        },
+        "SlurmQueueSpec": {
+            "additionalProperties": false,
+            "description": "A SLURM partition or QOS jobs can be submitted to.",
+            "properties": {
+                "name": {
+                    "description": "The name a job is submitted with.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "kind": {
+                    "description": "Whether `name` is a partition (`--partition`) or a QOS (`--qos`).",
+                    "enum": [
+                        "partition",
+                        "qos"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "query_name": {
+                    "default": "",
+                    "description": "The name the walltime query asks about; defaults to `name`.",
+                    "title": "Query Name",
+                    "type": "string"
+                },
+                "max_walltime": {
+                    "default": "",
+                    "description": "Where the queue's walltime limit comes from: `sinfo`, `sacctmgr`, or a\nfixed quoted `HH:MM:SS` or `D-HH:MM:SS`. Omitted, a partition asks `sinfo`\nand a QOS asks `sacctmgr`.",
+                    "title": "Max Walltime",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "kind"
+            ],
+            "title": "SlurmQueueSpec",
+            "type": "object"
+        },
+        "SlurmSchedulerSpec": {
+            "additionalProperties": false,
+            "description": "A SLURM scheduler.",
+            "properties": {
+                "primary_queue": {
+                    "description": "The queue a job goes to when it names none; one of `queues`.",
+                    "minLength": 1,
+                    "title": "Primary Queue",
+                    "type": "string"
+                },
+                "directives": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "Extra directives on every CPU job, as `flag: value`, e.g. `{-C: cpu}`.",
+                    "title": "Directives",
+                    "type": "object"
+                },
+                "max_cpus_per_node": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The CPUs per node used to lay out a job; omitted, the scheduler is asked.",
+                    "title": "Max Cpus Per Node"
+                },
+                "require": {
+                    "description": "Which of `account` and `queue` a job must name.",
+                    "items": {
+                        "enum": [
+                            "account",
+                            "queue"
+                        ],
+                        "type": "string"
+                    },
+                    "title": "Require",
+                    "type": "array"
+                },
+                "gpu_nodes": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/GpuNodesSpec"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The system's GPU nodes; omitted when it has none."
+                },
+                "family": {
+                    "const": "slurm",
+                    "description": "The scheduler family.",
+                    "title": "Family",
+                    "type": "string"
+                },
+                "queues": {
+                    "description": "The partitions and QOS jobs can be submitted to.",
+                    "items": {
+                        "$ref": "#/$defs/SlurmQueueSpec"
+                    },
+                    "minItems": 1,
+                    "title": "Queues",
+                    "type": "array"
+                },
+                "requires_task_distribution": {
+                    "default": false,
+                    "description": "Whether a job must state its nodes and tasks per node, not only its CPUs.",
+                    "title": "Requires Task Distribution",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "primary_queue",
+                "family",
+                "queues"
+            ],
+            "title": "SlurmSchedulerSpec",
+            "type": "object"
+        },
+        "ToolchainSpec": {
+            "additionalProperties": false,
+            "description": "A compiler, MPI and module environment the system offers for one kind of run.",
+            "properties": {
+                "compiler": {
+                    "description": "The compiler passed to the ROMS build: `gnu`, `intel` or `nvfortran`.",
+                    "minLength": 1,
+                    "title": "Compiler",
+                    "type": "string"
+                },
+                "mpi_prefix": {
+                    "description": "The command that launches the model under MPI, e.g. `srun --kill-on-bad-exit=1`.",
+                    "minLength": 1,
+                    "title": "Mpi Prefix",
+                    "type": "string"
+                },
+                "gpu_arch": {
+                    "default": "",
+                    "description": "The NVIDIA compute capability of a GPU build, e.g. `cc80`; empty for CPU.",
+                    "title": "Gpu Arch",
+                    "type": "string"
+                },
+                "link_flags": {
+                    "default": "",
+                    "description": "Extra linker flags a GPU build appends after the MPI libraries; `${VAR}`\nreferences are expanded when the build runs.",
+                    "title": "Link Flags",
+                    "type": "string"
+                },
+                "modules": {
+                    "description": "The modules to load, in order, after `module reset`; each entry is the\nargument of one `module load`. Empty leaves the user's modules alone.",
+                    "items": {
+                        "minLength": 1,
+                        "type": "string"
+                    },
+                    "title": "Modules",
+                    "type": "array"
+                },
+                "env": {
+                    "description": "The environment variables to set after the modules load, in order. A\n`${VAR}` reference sees earlier entries first, then the process environment;\nan unset variable expands to an empty string.",
+                    "patternProperties": {
+                        "^[A-Za-z_][A-Za-z0-9_]*$": {
+                            "type": "string"
+                        }
+                    },
+                    "title": "Env",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "compiler",
+                "mpi_prefix"
+            ],
+            "title": "ToolchainSpec",
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "description": "One machine C-Star can run on, as its system file describes it.",
+    "properties": {
+        "schema_version": {
+            "default": "1.0.0",
+            "description": "The version of the system file schema the file follows.",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "name": {
+            "description": "The system's name: lowercase letters, digits, `_` and `-`. It is the value\nof `CSTAR_SYSTEM` that selects it, and the file's name without `.yaml`.",
+            "pattern": "^[a-z0-9_-]+$",
+            "title": "Name",
+            "type": "string"
+        },
+        "docs": {
+            "default": "",
+            "description": "Where the machine's documentation is.",
+            "title": "Docs",
+            "type": "string"
+        },
+        "detect": {
+            "description": "How C-Star recognises the machine; any rule matching selects it. Not\nneeded when Lmod reports the system's name (`LMOD_SYSHOST` or\n`LMOD_SYSTEM_NAME`).",
+            "items": {
+                "anyOf": [
+                    {
+                        "$ref": "#/$defs/DetectEnv"
+                    },
+                    {
+                        "$ref": "#/$defs/DetectPath"
+                    }
+                ]
+            },
+            "title": "Detect",
+            "type": "array"
+        },
+        "toolchains": {
+            "additionalProperties": {
+                "$ref": "#/$defs/ToolchainSpec"
+            },
+            "description": "The toolchains the system offers, by name; `cpu` is required.",
+            "propertyNames": {
+                "enum": [
+                    "cpu",
+                    "gpu"
+                ]
+            },
+            "title": "Toolchains",
+            "type": "object"
+        },
+        "scheduler": {
+            "anyOf": [
+                {
+                    "discriminator": {
+                        "mapping": {
+                            "pbs": "#/$defs/PBSSchedulerSpec",
+                            "slurm": "#/$defs/SlurmSchedulerSpec"
+                        },
+                        "propertyName": "family"
+                    },
+                    "oneOf": [
+                        {
+                            "$ref": "#/$defs/SlurmSchedulerSpec"
+                        },
+                        {
+                            "$ref": "#/$defs/PBSSchedulerSpec"
+                        }
+                    ]
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "The batch scheduler jobs are submitted to; omitted on a workstation.",
+            "title": "Scheduler"
+        },
+        "scratch": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/ScratchSpec"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Where the scratch file system is, when no `SCRATCH`-style variable names it."
+        }
+    },
+    "required": [
+        "name",
+        "toolchains"
+    ],
+    "title": "SystemSpec",
+    "type": "object"
+}

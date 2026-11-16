@@ -56,13 +56,13 @@ from cstar.system.environment import SlurmSettingsBase
 from cstar.system.manager import (
     SystemSelection,
     SystemSource,
-    current_user,
     detect_system,
     registered_context,
     registered_names,
     select_system,
 )
 from cstar.system.scheduler import PBSScheduler, SlurmScheduler
+from cstar.system.spec import current_user
 
 if t.TYPE_CHECKING:
     from collections.abc import Sequence

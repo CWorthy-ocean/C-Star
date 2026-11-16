@@ -571,7 +571,7 @@ class CStarSystemManager:
     _environments: Final[dict[ToolchainName, CStarEnvironment]]
     """The environment managers built so far, by toolchain; ``cpu`` is built eagerly."""
     _active: ToolchainName | None
-    """The toolchain whose modules and env file are loaded in this process."""
+    """The toolchain whose modules and env are loaded in this process."""
     _scheduler: Final[Scheduler | None]
     """The scheduler appropriate for this system."""
 
@@ -637,9 +637,9 @@ class CStarSystemManager:
         """Get the environment manager for one of the system's toolchains.
 
         An environment is built on first request and cached. Activating one loads
-        its profile's modules and env file into `os.environ` for the process, as the
+        its profile's modules and env into `os.environ` for the process, as the
         CPU profile always has. Only one profile is active in the process: asking
-        for another restores the active profile's env-file variables (see
+        for another restores the active profile's env variables (see
         `CStarEnvironment.unload`) and then loads the requested one, so a profile
         never inherits another's paths. Asking for the active profile changes
         nothing.
