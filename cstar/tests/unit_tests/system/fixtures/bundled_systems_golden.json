@@ -366,7 +366,8 @@
           "load netCDF-Fortran/4.6.1",
           "load openmpi4/4.1.6",
           "load HDF5/.1.14.0",
-          "load netCDF/.4.9.2"
+          "load netCDF/.4.9.2",
+          "load CMake/3.26.3"
         ]
       }
     },

@@ -18,6 +18,7 @@ toolchains:
       - openmpi4/4.1.6  # (implicit dependency)
       - HDF5/.1.14.0  # (implicit dependency, hidden module)
       - netCDF/.4.9.2  # (implicit dependency, hidden module)
+      - CMake/3.26.3  # ParallelIO builds with cmake, which the HPC conda environment does not provide
     env:
       MPIHOME: ${MPI_DIR}/
       NETCDFHOME: "${EBROOTNETCDF}/"
