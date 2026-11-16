@@ -55,6 +55,8 @@ SCHEDULER_SLURM: Final = "SLURM"
 """The name of the SLURM scheduler family."""
 SCHEDULER_PBS: Final = "PBS"
 """The name of the PBS scheduler family."""
+SUBMITTABLE_FAMILIES: Final = frozenset({SCHEDULER_SLURM})
+"""The scheduler families C-Star has a launcher for, and so can submit jobs to."""
 
 VISIBLE_SCHEDULERS: Final = (
     (SCHEDULER_SLURM, "sbatch", "SLURM_"),

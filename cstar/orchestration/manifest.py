@@ -40,6 +40,7 @@ from cstar.base.provenance import (
     canonical_hash,
     package_versions,
     system_name,
+    system_spec_digest,
 )
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
@@ -487,6 +488,10 @@ class Attempt(ConfiguredBaseModel):
     system: str = Field(default="")
     """The C-Star system the attempt was scheduled on."""
 
+    system_spec_digest: str = Field(default="")
+    """The digest of the system file in effect, `sha256:<hex>`; empty for a system
+    defined in code, one not determined, or an attempt recorded before 1.6.0."""
+
     versions: dict[str, str] = Field(default_factory=dict)
     """The versions of the packages the attempt was scheduled with."""
 
@@ -661,7 +666,7 @@ class RunManifest(ConfiguredBaseModel, VersionedDocument):
 
     SCHEMA_LABEL: t.ClassVar[str] = "run manifest"
 
-    schema_version: str = Field(default="1.5.0")
+    schema_version: str = Field(default="1.6.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1496,6 +1501,7 @@ def new_attempt(
     return Attempt(
         start_at=carried.start_at if carried else _now(),
         system=system_name(),
+        system_spec_digest=system_spec_digest(),
         versions=package_versions(),
         workplan_content_hash=workplan_hash,
         clobbered=[step.name for step in workplan.steps if step.clobber],
@@ -2037,6 +2043,7 @@ def finalize_standalone_run(
     attempt = Attempt(
         start_at=started_at,
         system=system_name(),
+        system_spec_digest=system_spec_digest(),
         versions=package_versions(),
     )
     facts = StepFacts(

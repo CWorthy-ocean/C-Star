@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import typing as t
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -81,6 +82,37 @@ def system_name() -> str:
         return selected_system_name()
     except (CstarError, OSError):
         return ""
+
+
+def system_spec_digest() -> str:
+    """The digest of the system file this process uses, ``sha256:<hex>``, or ``""``.
+
+    The file in effect for the system `system_name` names; its digest tells a
+    user-edited or shared file apart from the bundled one of the same name. Best
+    effort, like the name: empty for a context defined in code or a host C-Star
+    cannot identify, and any other failure warns and is empty.
+
+    Returns
+    -------
+    str
+        The digest, or an empty string.
+    """
+    # Lazy: keeps importing this module light.
+    from cstar.base.digest import SHA256_SCHEME
+    from cstar.base.exceptions import CstarError
+    from cstar.system.manager import selected_system_file
+
+    try:
+        system_file = selected_system_file()
+    except (CstarError, OSError):
+        return ""
+    except Exception as ex:
+        logging.getLogger(__name__).warning(
+            f"Could not determine the system file in use; the record leaves its "
+            f"digest empty: {ex}"
+        )
+        return ""
+    return f"{SHA256_SCHEME}:{system_file.sha256}" if system_file else ""
 
 
 HASH_RECIPE_VERSION: t.Final[int] = 2

@@ -33,6 +33,7 @@ from pydantic import (
     model_validator,
 )
 
+from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
@@ -55,13 +56,20 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-BUNDLED_SYSTEMS_DIR: t.Final = (
-    Path(__file__).resolve().parents[1] / "catalog" / "bundled" / "systems"
-)
+SYSTEMS_DIR_NAME: t.Final = "systems"
+"""The directory under a catalog root that holds its system files."""
+
+BUNDLED_SYSTEMS_DIR: t.Final = BUNDLED_CATALOG_ROOT / SYSTEMS_DIR_NAME
 """The directory holding the system files C-Star ships, one ``<name>.yaml`` each."""
 
 BUNDLED_LAYER: t.Final = "bundled"
 """The layer of a system file C-Star ships."""
+USER_LAYER: t.Final = "user"
+"""The layer of a system file in your own catalog, the first `CSTAR_CATALOG` entry."""
+SHARED_LAYER: t.Final = "shared"
+"""The layer of a system file in a later `CSTAR_CATALOG` entry, a catalog a group shares."""
+DRAFT_LAYER: t.Final = "draft"
+"""The layer of a system file read from a path outside any catalog (`cstar system check`)."""
 
 SYSTEM_FILE_SUFFIX: t.Final = ".yaml"
 """The suffix of a system file; its stem is the system's name."""
@@ -521,7 +529,7 @@ class SystemFile:
         }
 
 
-def read_system_file(path: Path, layer: str) -> SystemFile:
+def read_system_file(path: Path, layer: str, *, check_name: bool = True) -> SystemFile:
     """Read and validate one system file.
 
     Parameters
@@ -530,6 +538,11 @@ def read_system_file(path: Path, layer: str) -> SystemFile:
         The file, named `<name>.yaml` after the system it describes.
     layer : str
         The catalog layer it belongs to.
+    check_name : bool, optional
+        Whether the file must be named after the system. A file in a `systems/`
+        directory must; a draft given by path (to `cstar system check`, `cstar
+        system add` or `cstar init --system-file`) need not, since it is installed
+        under its system's name.
 
     Returns
     -------
@@ -539,7 +552,8 @@ def read_system_file(path: Path, layer: str) -> SystemFile:
     ------
     SystemFileError
         If the file cannot be read, is not valid YAML, does not validate (a
-        newer schema included), or names a system other than its file name.
+        newer schema included), or, with `check_name`, names a system other
+        than its file name.
     """
     try:
         content = path.read_bytes()
@@ -547,7 +561,7 @@ def read_system_file(path: Path, layer: str) -> SystemFile:
         spec = SystemSpec.model_validate(data)
     except (OSError, yaml.YAMLError, ValidationError, CstarError) as ex:
         raise SystemFileError(path, str(ex)) from ex
-    if spec.name != path.stem:
+    if check_name and spec.name != path.stem:
         raise SystemFileError(
             path, f"it describes {spec.name!r}, but the file must be named after it"
         )

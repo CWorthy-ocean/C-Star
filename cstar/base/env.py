@@ -377,6 +377,83 @@ ENV_CSTAR_CATALOG: t.Annotated[
 ] = "CSTAR_CATALOG"
 """Catalog locations for forge blueprint authoring (first entry = writable user layer)."""
 
+BUNDLED_CATALOG_ROOT: t.Final = (
+    Path(__file__).resolve().parents[1] / "catalog" / "bundled"
+)
+"""The catalog C-Star ships, inside the package; never writable."""
+
+CATALOG_ENTRY_BUNDLED: t.Final = "local"
+"""The `CSTAR_CATALOG` entry that names the catalog C-Star ships."""
+
+
+def catalog_entries() -> list[str]:
+    """Non-empty ``os.pathsep``-separated entries of ``CSTAR_CATALOG``, in order.
+
+    The single parser for the variable: the catalog stack, its writable top layer,
+    the wizard's catalog bar and the system file layers must all agree on which
+    entry is which, including when the value carries leading or doubled
+    separators (e.g. ``"$UNSET:/opt/shared"`` expanding to ``":/opt/shared"``).
+    """
+    return [e for e in os.environ.get(ENV_CSTAR_CATALOG, "").split(os.pathsep) if e]
+
+
+def is_github_catalog_url(entry: str) -> bool:
+    """Return True if a catalog entry looks like a GitHub repository URL."""
+    s = entry.strip()
+    return s.startswith(("https://github.com/", "http://github.com/")) or s.startswith(
+        "git@github.com:"
+    )
+
+
+def is_remote_catalog_entry(entry: str) -> bool:
+    """Return True if a catalog entry names a GitHub repository or an http(s) URL."""
+    return is_github_catalog_url(entry) or entry.strip().startswith("http")
+
+
+def is_bundled_catalog_entry(entry: str) -> bool:
+    """Return True if a catalog entry is the literal that names the bundled catalog."""
+    return entry.strip().casefold() == CATALOG_ENTRY_BUNDLED
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogRoots:
+    """The local directories of the catalog stack, top first, without the bundled one."""
+
+    user: Path | None
+    """Your own catalog: the first `CSTAR_CATALOG` entry (``~/cstar/catalog`` when
+    unset), or `None` when that entry is remote or the bundled catalog."""
+    shared: tuple[Path, ...]
+    """The later local entries: catalogs a group shares."""
+
+    @property
+    def local(self) -> tuple[Path, ...]:
+        """Every local root, top first."""
+        return ((self.user,) if self.user else ()) + self.shared
+
+
+def catalog_roots() -> CatalogRoots:
+    """Return the local directories `CSTAR_CATALOG` stacks, resolved, top first.
+
+    Remote entries (GitHub, http) and the bundled catalog are left out, as is a
+    directory listed twice; an unset or empty variable means the default user
+    catalog. Reads the process environment, so load the configuration file first.
+    """
+    entries = catalog_entries() or [
+        default_catalog_root(get_env_item(ENV_CSTAR_CATALOG))
+    ]
+    bundled = BUNDLED_CATALOG_ROOT
+    roots: list[Path | None] = []
+    for entry in entries:
+        if is_remote_catalog_entry(entry) or is_bundled_catalog_entry(entry):
+            roots.append(None)
+            continue
+        root = Path(entry).expanduser().resolve()
+        roots.append(None if root == bundled or root in roots else root)
+    return CatalogRoots(
+        user=roots[0], shared=tuple(r for r in roots[1:] if r is not None)
+    )
+
+
 ENV_CSTAR_STATE_HOME: t.Annotated[
     t.Literal["CSTAR_STATE_HOME"],
     EnvVar(

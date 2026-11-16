@@ -78,6 +78,7 @@ from cstar.system.manager import (
     get_sysmgr,
     registered_context,
 )
+from cstar.system.scheduler import SCHEDULER_PBS
 
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
@@ -3226,6 +3227,30 @@ class TestProcessingAndExecution:
         assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
         mock_prepare.assert_not_called()
         mock_local_process.assert_not_called()
+
+    def test_refusal_on_pbs_does_not_suggest_submitting(
+        self,
+        login_node: None,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """On a PBS system, which C-Star cannot submit to, the refusal says to run
+        inside a PBS job instead of naming `cstar blueprint submit`.
+        """
+        with (
+            mock.patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=mock.PropertyMock,
+                return_value=mock.MagicMock(family=SCHEDULER_PBS),
+            ),
+            mock.patch.object(ROMSSimulation, "prepare_launch"),
+            pytest.raises(CstarError) as excinfo,
+        ):
+            stub_romssimulation.run()
+
+        message = str(excinfo.value)
+        assert "cstar blueprint submit" not in message
+        assert "inside a PBS job" in message
+        assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
 
     @pytest.mark.parametrize("job_id_var", ["SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"])
     def test_run_inside_scheduler_job_runs_locally(

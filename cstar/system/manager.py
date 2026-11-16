@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING, ClassVar, Final, Protocol, override
 
 from cstar.base.env import (
     ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ENV_CSTAR_CATALOG,
     ENV_CSTAR_SYSTEM,
+    CatalogRoots,
+    catalog_roots,
     get_env_item,
     load_user_config,
     load_user_config_for_repair,
@@ -22,13 +25,16 @@ from cstar.system.environment import (
     EnvSettingsBase,
     LmodEnvSettings,
 )
+from cstar.system.layers import SystemLayers, read_system_layers
 from cstar.system.scheduler import (
     Scheduler,
     in_scheduler_job,
     visible_scheduler,
 )
 from cstar.system.spec import (
+    BUNDLED_LAYER,
     SystemFile,
+    SystemSpec,
     read_bundled_system_files,
 )
 from cstar.system.spec import (
@@ -286,6 +292,18 @@ def context_from_file(system_file: SystemFile) -> type[SpecSystemContext]:
 
 
 @functools.cache
+def _bundled_files() -> tuple[SystemFile, ...]:
+    """Read the system files C-Star ships, once per process.
+
+    Raises
+    ------
+    SystemFileError
+        If a bundled file is refused, which is a defect of the package.
+    """
+    return tuple(read_bundled_system_files())
+
+
+@functools.cache
 def _bundled_contexts() -> dict[str, type[SystemContext]]:
     """Build the contexts of the system files C-Star ships, once per process.
 
@@ -294,19 +312,76 @@ def _bundled_contexts() -> dict[str, type[SystemContext]]:
     SystemFileError
         If a bundled file is refused, which is a defect of the package.
     """
-    return {f.spec.name: context_from_file(f) for f in read_bundled_system_files()}
+    return {f.spec.name: context_from_file(f) for f in _bundled_files()}
+
+
+@dataclass(frozen=True)
+class SystemStack:
+    """The system files C-Star found on one search path, and their contexts."""
+
+    layers: SystemLayers
+    """What was found, used, shadowed and refused."""
+    contexts: dict[str, type[SystemContext]]
+    """The context of each file in effect, the top layer's first."""
+
+
+@functools.lru_cache(maxsize=8)
+def _system_stack(roots: CatalogRoots) -> SystemStack:
+    """Read the system files on a search path and build their contexts.
+
+    Cached by the search path, so a changed `CSTAR_CATALOG` reads the layers
+    again. Warns, once per process, about each file that shadows another and each
+    file refused.
+    """
+    layers = read_system_layers(roots, _bundled_files())
+    bundled = _bundled_contexts()
+    contexts = {
+        name: bundled[name] if f.layer == BUNDLED_LAYER else context_from_file(f)
+        for name, f in layers.files.items()
+    }
+    for name, below in layers.shadowed.items():
+        warn_once(
+            f"The system file {layers.files[name].path} shadows "
+            f"{below[0].path}; C-Star uses the first for {name!r}."
+        )
+    for refused in layers.refused:
+        used = layers.files.get(refused.name)
+        instead = (
+            f" C-Star uses {used.path} for {refused.name!r} instead." if used else ""
+        )
+        warn_once(
+            f"Skipping the system file {refused.path}: {refused.reason}.{instead}"
+        )
+    return SystemStack(layers, contexts)
+
+
+def system_stack() -> SystemStack:
+    """Return the system files and contexts on the current search path.
+
+    The search path is the ``systems/`` directory of each local `CSTAR_CATALOG`
+    root, then the bundled one; load the configuration file first.
+    """
+    return _system_stack(catalog_roots())
+
+
+def reload_system_files() -> None:
+    """Forget the system files read so far, so the next lookup reads them again.
+
+    For a process that has just written one (`cstar system add`, `cstar init`).
+    """
+    _system_stack.cache_clear()
 
 
 CTX_REGISTRY: dict[str, type[SystemContext]] = {}
 """The contexts registered in code with `register_sys_context`, by name; they
-take precedence over a bundled system of the same name."""
+take precedence over a system file of the same name."""
 
 
 def _registry() -> dict[str, type[SystemContext]]:
-    """Return every registered context by name: the bundled systems, then those
-    registered in code.
+    """Return every registered context by name: the system files in effect, top
+    layer first, then those registered in code.
     """
-    return {**_bundled_contexts(), **CTX_REGISTRY}
+    return {**system_stack().contexts, **CTX_REGISTRY}
 
 
 def register_sys_context(
@@ -369,13 +444,18 @@ class SystemSelection:
     machine's network name), when `source` is `SystemSource.FALLBACK`."""
 
     def describe(self) -> str:
-        """Name the context for display, saying how it was chosen unless detected."""
+        """Name the context for display, saying how it was chosen unless detected,
+        and which file describes it unless C-Star ships that file.
+        """
         name = self.context.name
+        details = []
         if self.source is SystemSource.SETTING:
-            return f"{name} (set by {ENV_CSTAR_SYSTEM})"
-        if self.source is SystemSource.FALLBACK:
-            return f"{name} (generic; {self.detected!r} is not a registered system)"
-        return name
+            details.append(f"set by {ENV_CSTAR_SYSTEM}")
+        elif self.source is SystemSource.FALLBACK:
+            details.append(f"generic; {self.detected!r} is not a registered system")
+        if note := file_in_use(self.context):
+            details.append(note)
+        return f"{name} ({'; '.join(details)})" if details else name
 
     def unsupported_scheduler(self, environ: "Mapping[str, str]") -> str:
         """Name the scheduler this machine shows that the context cannot submit to.
@@ -404,6 +484,53 @@ class SystemSelection:
         return visible_scheduler(environ)
 
 
+def display_path(path: Path) -> str:
+    """Spell a path for display, with the home directory as ``~``."""
+    home = Path.home()
+    return f"~/{path.relative_to(home)}" if path.is_relative_to(home) else str(path)
+
+
+def file_in_use(context: type[SystemContext]) -> str:
+    """Say which system file describes a context, unless C-Star ships it.
+
+    Returns
+    -------
+    str
+        ``from <path>``, with ``, shadows <what>`` when the file hides one of the
+        same name below it; empty for a bundled file or a context defined in code.
+    """
+    # a context registered in code need not declare the protocol's default
+    system_file = getattr(context, "system_file", None)
+    if system_file is None or system_file.layer == BUNDLED_LAYER:
+        return ""
+    note = f"from {display_path(system_file.path)}"
+    layers = system_stack().layers
+    in_effect = layers.files.get(context.name)
+    if in_effect is not None and in_effect.path == system_file.path:
+        if below := layers.shadowed.get(context.name):
+            hidden = below[0]
+            what = (
+                BUNDLED_LAYER
+                if hidden.layer == BUNDLED_LAYER
+                else display_path(hidden.path)
+            )
+            note += f", shadows {what}"
+    return note
+
+
+def detection_would_select(spec: SystemSpec) -> bool:
+    """Tell whether detection on this machine picks the system a spec describes.
+
+    Ignores `CSTAR_SYSTEM`. The system is picked when Lmod reports its name, or,
+    when Lmod reports no registered name, when one of its `detect` rules matches.
+    Another system's own rule matching first is not considered.
+    """
+    lmod = HostNameEvaluator().lmod_hostname
+    if lmod and (lmod == spec.name or lmod in _registry()):
+        return lmod == spec.name
+    return any(rule.matches() for rule in spec.detect)
+
+
 def registered_context(name: str) -> type[SystemContext]:
     """Look up a registered system context by name, ignoring case and surrounding
     whitespace.
@@ -414,11 +541,21 @@ def registered_context(name: str) -> type[SystemContext]:
         If no context is registered under the name; the message lists those that
         are.
     """
-    if klass := _registry().get(name.strip().casefold()):
+    key = name.strip().casefold()
+    if klass := _registry().get(key):
         return klass
+    layers = system_stack().layers
+    searched = ", ".join(str(d) for d in layers.searched)
+    if refused := layers.refusals(key):
+        reasons = "; ".join(f"{r.path} is refused: {r.reason}" for r in refused)
+        raise CstarError(
+            f"{ENV_CSTAR_SYSTEM} names {name!r}, but its system file cannot be used: "
+            f"{reasons}. Directories searched: {searched}."
+        )
     raise CstarError(
         f"{name!r} is not a registered system; {ENV_CSTAR_SYSTEM} must name one of: "
-        f"{', '.join(registered_names())}."
+        f"{', '.join(registered_names())}. System files are read from {searched} "
+        f"(a systems/ directory under each local {ENV_CSTAR_CATALOG} entry)."
     )
 
 
@@ -500,6 +637,27 @@ def selected_system_name() -> str:
     """
     load_user_config()
     return select_system().context.name
+
+
+def selected_system_file() -> SystemFile | None:
+    """Return the system file of the system C-Star uses on this machine.
+
+    Loads the configuration file first, as `selected_system_name` does.
+
+    Returns
+    -------
+    SystemFile | None
+        The file, or `None` for a context defined in code.
+
+    Raises
+    ------
+    CstarError
+        As `selected_system_name` does.
+    OSError
+        If no system name can be determined at all.
+    """
+    load_user_config()
+    return getattr(select_system().context, "system_file", None)
 
 
 def get_system_context() -> SystemContext:
