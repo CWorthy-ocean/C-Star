@@ -17,6 +17,7 @@ toolchains:
       - netcdf-c/4.7.4  # (system default)
       - netcdf-fortran/4.5.3  # (system default)
       - parallel-netcdf/1.11.2
+      - cmake/3.20.0  # ParallelIO builds with cmake, which the HPC conda environment does not provide
     env:
       MPIHOME: ${OPENMPI_HOME}
       NETCDFHOME: ${NETCDF}

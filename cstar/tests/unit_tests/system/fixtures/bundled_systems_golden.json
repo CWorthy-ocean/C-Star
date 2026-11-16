@@ -29,7 +29,8 @@
           "load hdf5/1.10.7",
           "load netcdf-c/4.7.4",
           "load netcdf-fortran/4.5.3",
-          "load parallel-netcdf/1.11.2"
+          "load parallel-netcdf/1.11.2",
+          "load cmake/3.20.0"
         ]
       }
     },
