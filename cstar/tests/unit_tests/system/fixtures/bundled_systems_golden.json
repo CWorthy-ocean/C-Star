@@ -1,0 +1,745 @@
+{
+  "anvil": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": true,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LD_RUN_PATH": "/mod/netcdf_fortran_home/lib:/mod/netcdf/lib:/lib:/mod/openmpi_home/lib",
+          "LIBRARY_PATH": "/usr/lib:/mod/netcdf/lib:/mod/netcdf_fortran_home/lib",
+          "MPIHOME": "/mod/openmpi_home",
+          "NETCDFFHOME": "/mod/netcdf_fortran_home",
+          "NETCDFHOME": "/mod/netcdf",
+          "PATH": "/mod/netcdf/bin:/usr/bin:/bin",
+          "PNETCDFHOME": ""
+        },
+        "lmod_calls": [
+          "reset",
+          "load gcc/11.2.0",
+          "load openmpi/4.0.6",
+          "load netcdf-fortran/4.5.3",
+          "load parallel-netcdf/1.11.2"
+        ]
+      }
+    },
+    "mpi_prefix": "srun --kill-on-bad-exit=1",
+    "name": "anvil",
+    "required_settings": [
+      "CSTAR_SLURM_ACCOUNT",
+      "CSTAR_SLURM_QUEUE"
+    ],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://www.rcac.purdue.edu/knowledge/anvil/architecture",
+      "gpu": {
+        "account_required": false,
+        "cores_per_node": 128,
+        "directives": {
+          "--gpu-bind": "none"
+        },
+        "gpus_per_node": 4,
+        "queue": "gpu"
+      },
+      "max_cpus_per_node": 128,
+      "primary_queue": "wholenode",
+      "queues": [
+        {
+          "name": "wholenode",
+          "query_name": "part-standard",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "shared",
+          "query_name": "part-shared",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "debug",
+          "query_name": "part-debug",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "gpu",
+          "query_name": "part-gpu",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "gpu-debug",
+          "query_name": "part-gpu-debug",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        }
+      ],
+      "requires_task_distribution": false,
+      "type": "SlurmScheduler"
+    },
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "srun --kill-on-bad-exit=1",
+        "profile": ""
+      },
+      "gpu": "error: anvil has no GPU toolchain registered with C-Star"
+    }
+  },
+  "bouchet": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": true,
+      "bouchet-login": true,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LIBRARY_PATH": "/usr/lib:/mod/ebrootnetcdf/lib:/mod/ebrootnetcdfminfortran/lib",
+          "MPIHOME": "/mod/ebrootgompi",
+          "NETCDFFHOME": "/mod/ebrootnetcdfminfortran",
+          "NETCDFHOME": "/mod/ebrootnetcdf",
+          "PATH": "/mod/ebrootnetcdf/bin:/usr/bin:/bin",
+          "PNETCDFHOME": ""
+        },
+        "lmod_calls": [
+          "reset",
+          "load netCDF-Fortran/4.6.0-gompi-2022b",
+          "load PnetCDF/1.12.3-gompi-2022b",
+          "load CMake/3.31.8-GCCcore-13.3.0"
+        ]
+      }
+    },
+    "mpi_prefix": "srun",
+    "name": "bouchet",
+    "required_settings": [
+      "CSTAR_SLURM_ACCOUNT",
+      "CSTAR_SLURM_QUEUE"
+    ],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://docs.ycrc.yale.edu/clusters/bouchet",
+      "gpu": null,
+      "max_cpus_per_node": 128,
+      "primary_queue": "day",
+      "queues": [
+        {
+          "name": "day",
+          "query_name": "day",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "week",
+          "query_name": "week",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "gpu",
+          "query_name": "gpu",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "bigmem",
+          "query_name": "bigmem",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "mpi",
+          "query_name": "mpi",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "devel",
+          "query_name": "devel",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "scavenge",
+          "query_name": "scavenge",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "priority",
+          "query_name": "priority",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "priority_gpu",
+          "query_name": "priority_gpu",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "priority_mpi",
+          "query_name": "priority_mpi",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        }
+      ],
+      "requires_task_distribution": false,
+      "type": "SlurmScheduler"
+    },
+    "scratch": "scratch_pi_alpha/testuser",
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "srun",
+        "profile": ""
+      },
+      "gpu": "error: bouchet has no GPU toolchain registered with C-Star"
+    }
+  },
+  "darwin_arm64": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "MPIHOME": "/mod/conda_prefix",
+          "NETCDFFHOME": "/mod/conda_prefix",
+          "NETCDFHOME": "/mod/conda_prefix",
+          "PNETCDFHOME": "/mod/conda_prefix"
+        },
+        "lmod_calls": []
+      }
+    },
+    "mpi_prefix": "mpirun",
+    "name": "darwin_arm64",
+    "required_settings": [],
+    "scheduler": null,
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "mpirun",
+        "profile": ""
+      },
+      "gpu": "error: darwin_arm64 has no GPU toolchain registered with C-Star"
+    }
+  },
+  "derecho": {
+    "compiler": "intel",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LD_LIBRARY_PATH": "/opt/ld:/mod/netcdf/lib",
+          "LIBRARY_PATH": "/usr/lib:/mod/netcdf/lib",
+          "MPIHOME": "/mod/cray_mpich_prefix/",
+          "NETCDFHOME": "/mod/netcdf/",
+          "PNETCDFHOME": "/"
+        },
+        "lmod_calls": [
+          "reset",
+          "load ncarenv/23.09",
+          "load intel-oneapi/2024.2.1",
+          "load cray-mpich/8.1.29",
+          "load netcdf/4.9.2",
+          "load parallel-netcdf"
+        ]
+      }
+    },
+    "mpi_prefix": "mpirun",
+    "name": "derecho",
+    "required_settings": [],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/",
+      "gpu": null,
+      "max_cpus_per_node": null,
+      "primary_queue": "main",
+      "queues": [
+        {
+          "name": "main",
+          "query_name": "main",
+          "type": "PBSQueue",
+          "walltime": "fixed 12:00:00"
+        },
+        {
+          "name": "preempt",
+          "query_name": "preempt",
+          "type": "PBSQueue",
+          "walltime": "fixed 24:00:00"
+        },
+        {
+          "name": "develop",
+          "query_name": "develop",
+          "type": "PBSQueue",
+          "walltime": "fixed 6:00:00"
+        }
+      ],
+      "requires_task_distribution": true,
+      "type": "PBSScheduler"
+    },
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "intel",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "mpirun",
+        "profile": ""
+      },
+      "gpu": "error: derecho has no GPU toolchain registered with C-Star"
+    }
+  },
+  "elja": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": true,
+      "elja-login": true,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "CSTAR_SLURM_DISABLE_MT": "1",
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LIBRARY_PATH": "/usr/lib:/mod/ebrootnetcdf/lib",
+          "MKL_NUM_THREADS": "1",
+          "MPIHOME": "/mod/mpi_dir/",
+          "NETCDFHOME": "/mod/ebrootnetcdf/",
+          "OMP_NUM_THREADS": "1",
+          "PATH": "/usr/bin:/bin:/mod/ebrootnetcdf//bin"
+        },
+        "lmod_calls": [
+          "reset",
+          "load GCC/11.2.0",
+          "load openmpi4/4.1.6",
+          "load netCDF-Fortran/4.6.1"
+        ]
+      }
+    },
+    "mpi_prefix": "mpirun",
+    "name": "elja",
+    "required_settings": [],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://wiki.irei.is",
+      "gpu": null,
+      "max_cpus_per_node": 128,
+      "primary_queue": "any_cpu",
+      "queues": [
+        {
+          "name": "48cpu_192mem",
+          "query_name": "48cpu_192mem",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "64cpu_256mem",
+          "query_name": "64cpu_256mem",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "128cpu_256mem",
+          "query_name": "128cpu_256mem",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "any_cpu",
+          "query_name": "any_cpu",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        }
+      ],
+      "requires_task_distribution": true,
+      "type": "SlurmScheduler"
+    },
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "mpirun",
+        "profile": ""
+      },
+      "gpu": "error: elja has no GPU toolchain registered with C-Star"
+    }
+  },
+  "expanse": {
+    "compiler": "intel",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "MPIHOME": "/mod/mvapich2home/",
+          "MPIROOT": "/mod/mvapich2home/",
+          "NETCDFHOME": "/mod/netcdf_fortranhome/"
+        },
+        "lmod_calls": [
+          "reset",
+          "load slurm sdsc DefaultModules shared",
+          "load cpu/0.15.4 intel/19.1.1.217 mvapich2/2.3.4",
+          "load netcdf-c/4.7.4",
+          "load netcdf-fortran/4.5.3"
+        ]
+      }
+    },
+    "mpi_prefix": "srun --mpi=pmi2 --kill-on-bad-exit=1",
+    "name": "expanse",
+    "required_settings": [
+      "CSTAR_SLURM_ACCOUNT"
+    ],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://www.sdsc.edu/support/user_guides/expanse.html",
+      "gpu": null,
+      "max_cpus_per_node": null,
+      "primary_queue": "compute",
+      "queues": [
+        {
+          "name": "compute",
+          "query_name": "compute",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "debug",
+          "query_name": "debug",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        }
+      ],
+      "requires_task_distribution": true,
+      "type": "SlurmScheduler"
+    },
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "intel",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "srun --mpi=pmi2 --kill-on-bad-exit=1",
+        "profile": ""
+      },
+      "gpu": "error: expanse has no GPU toolchain registered with C-Star"
+    }
+  },
+  "linux_aarch64": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "LD_LIBRARY_PATH": "/opt/ld:/mod/conda_prefix/lib",
+          "LD_RUN_PATH": "/mod/conda_prefix/lib",
+          "MPIHOME": "/mod/conda_prefix",
+          "NETCDFFHOME": "/mod/conda_prefix",
+          "NETCDFHOME": "/mod/conda_prefix",
+          "PNETCDFHOME": "/mod/conda_prefix"
+        },
+        "lmod_calls": []
+      }
+    },
+    "mpi_prefix": "mpirun",
+    "name": "linux_aarch64",
+    "required_settings": [],
+    "scheduler": null,
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "mpirun",
+        "profile": ""
+      },
+      "gpu": "error: linux_aarch64 has no GPU toolchain registered with C-Star"
+    }
+  },
+  "linux_x86_64": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "LD_LIBRARY_PATH": "/opt/ld:/mod/conda_prefix/lib",
+          "LD_RUN_PATH": "/mod/conda_prefix/lib",
+          "MPIHOME": "/mod/conda_prefix",
+          "NETCDFFHOME": "/mod/conda_prefix",
+          "NETCDFHOME": "/mod/conda_prefix",
+          "PNETCDFHOME": "/mod/conda_prefix"
+        },
+        "lmod_calls": []
+      }
+    },
+    "mpi_prefix": "mpirun",
+    "name": "linux_x86_64",
+    "required_settings": [],
+    "scheduler": null,
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "mpirun",
+        "profile": ""
+      },
+      "gpu": "error: linux_x86_64 has no GPU toolchain registered with C-Star"
+    }
+  },
+  "oscar": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LD_RUN_PATH": "/mod/netcdf/lib:/oscar/rt/9.6/25/spack/x86_64_v3/parallel-netcdf-1.14.0-bxuz7xw2osfunbnl46mfp3zhpq6bmnmq/lib:/mod/opal_prefix/lib",
+          "LIBRARY_PATH": "/usr/lib:/mod/netcdf/lib",
+          "MPIHOME": "/mod/opal_prefix",
+          "NETCDFFHOME": "/mod/netcdf",
+          "NETCDFHOME": "/mod/netcdf",
+          "PATH": "/mod/netcdf/bin:/usr/bin:/bin",
+          "PNETCDFHOME": "/oscar/rt/9.6/25/spack/x86_64_v3/parallel-netcdf-1.14.0-bxuz7xw2osfunbnl46mfp3zhpq6bmnmq"
+        },
+        "lmod_calls": [
+          "reset",
+          "load hpcx-mpi/2.25.1s",
+          "load netcdf-mpi/4.9.3",
+          "load parallel-netcdf-mpi/1.14.0"
+        ]
+      }
+    },
+    "mpi_prefix": "srun --mpi=pmix --kill-on-bad-exit=1",
+    "name": "oscar",
+    "required_settings": [],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://docs.ccv.brown.edu/oscar",
+      "gpu": null,
+      "max_cpus_per_node": null,
+      "primary_queue": "batch",
+      "queues": [
+        {
+          "name": "batch",
+          "query_name": "batch",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sinfo"
+        },
+        {
+          "name": "debug",
+          "query_name": "debug",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        }
+      ],
+      "requires_task_distribution": false,
+      "type": "SlurmScheduler"
+    },
+    "scratch": "scratch",
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "srun --mpi=pmix --kill-on-bad-exit=1",
+        "profile": ""
+      },
+      "gpu": "error: oscar has no GPU toolchain registered with C-Star"
+    }
+  },
+  "perlmutter": {
+    "compiler": "gnu",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LIBRARY_PATH": "/usr/lib:/mod/cray_netcdf_prefix/lib",
+          "MPIHOME": "/mod/cray_mpich_prefix/",
+          "NETCDFHOME": "/mod/cray_netcdf_prefix/",
+          "PATH": "/usr/bin:/bin:/mod/cray_netcdf_prefix/bin",
+          "PNETCDFHOME": "/mod/cray_parallel_netcdf_prefix/"
+        },
+        "lmod_calls": [
+          "reset",
+          "load cpu/1.0",
+          "load PrgEnv-gnu/8.7.0",
+          "load gcc-native/14",
+          "load cray-mpich/9.1.0",
+          "load cray-hdf5/1.14.3.9",
+          "load cray-netcdf/4.9.2.3",
+          "load cray-parallel-netcdf/1.12.3.21"
+        ]
+      },
+      "gpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LIBRARY_PATH": "/usr/lib:/mod/cray_netcdf_hdf5parallel_prefix/lib",
+          "MPICH_GPU_SUPPORT_ENABLED": "1",
+          "MPIHOME": "/mod/cray_mpich_prefix/",
+          "NETCDFHOME": "/mod/cray_netcdf_hdf5parallel_prefix/",
+          "PATH": "/usr/bin:/bin:/mod/cray_netcdf_hdf5parallel_prefix/bin"
+        },
+        "lmod_calls": [
+          "reset",
+          "load gpu/1.0",
+          "load PrgEnv-nvidia/8.7.0",
+          "load nvidia/26.5",
+          "load cudatoolkit/13.2",
+          "load craype-accel-nvidia80",
+          "load cray-hdf5-parallel/1.14.3.9",
+          "load cray-netcdf-hdf5parallel/4.9.0.13"
+        ]
+      }
+    },
+    "mpi_prefix": "srun --kill-on-bad-exit=1",
+    "name": "perlmutter",
+    "required_settings": [],
+    "scheduler": {
+      "directives": {
+        "-C": "cpu"
+      },
+      "documentation": "https://docs.nersc.gov/systems/perlmutter/architecture/",
+      "gpu": {
+        "account_required": true,
+        "cores_per_node": 64,
+        "directives": {
+          "--gpu-bind": "none",
+          "-C": "gpu"
+        },
+        "gpus_per_node": 4,
+        "queue": "regular"
+      },
+      "max_cpus_per_node": 128,
+      "primary_queue": "regular",
+      "queues": [
+        {
+          "name": "regular",
+          "query_name": "regular_1",
+          "type": "SlurmQOS",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "shared",
+          "query_name": "shared",
+          "type": "SlurmQOS",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "debug",
+          "query_name": "debug",
+          "type": "SlurmQOS",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        }
+      ],
+      "requires_task_distribution": false,
+      "type": "SlurmScheduler"
+    },
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "gnu",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "srun --kill-on-bad-exit=1",
+        "profile": ""
+      },
+      "gpu": {
+        "compiler": "nvfortran",
+        "gpu_arch": "cc80",
+        "link_flags": "${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}",
+        "mpi_prefix": "srun --kill-on-bad-exit=1",
+        "profile": "gpu"
+      }
+    }
+  }
+}
