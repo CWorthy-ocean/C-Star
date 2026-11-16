@@ -44,9 +44,9 @@ not know is refused. Change these, in this order.
    docs: https://hpc.example.edu/userguide
 
 **Modules.** Under ``toolchains.cpu.modules``, list the modules the build
-needs, in load order: a compiler, MPI, HDF5, netCDF-C and netCDF-Fortran, and
-optionally parallel netCDF (which turns on parallel I/O). Each entry is the
-argument of one ``module load``:
+needs, in load order: a compiler, MPI, HDF5, netCDF-C and netCDF-Fortran,
+optionally parallel netCDF (which turns on parallel I/O), and CMake, which the
+parallel I/O build calls. Each entry is the argument of one ``module load``:
 
 .. code-block:: yaml
 
@@ -57,8 +57,11 @@ argument of one ``module load``:
        modules:
          - gcc/11.2.0
          - openmpi/4.0.6
+         - hdf5/1.10.7
+         - netcdf-c/4.7.4
          - netcdf-fortran/4.5.3
          - parallel-netcdf/1.11.2
+         - cmake/3.20.0
 
 To find them, run ``module avail`` and note the entries marked ``(d)`` or
 ``(L)``, which the site loads by default. List the ones you need explicitly
