@@ -436,9 +436,9 @@
       "cpu": {
         "env": {
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
-          "MPIHOME": "/mod/mvapich2home/",
-          "MPIROOT": "/mod/mvapich2home/",
-          "NETCDFHOME": "/mod/netcdf_fortranhome/"
+          "MPIHOME": "/mod/mvapich2home",
+          "MPIROOT": "/mod/mvapich2home",
+          "NETCDFHOME": "/mod/netcdf_fortranhome"
         },
         "lmod_calls": [
           "reset",
