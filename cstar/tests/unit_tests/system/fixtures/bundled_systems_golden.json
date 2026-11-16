@@ -279,9 +279,9 @@
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LD_LIBRARY_PATH": "/opt/ld:/mod/netcdf/lib",
           "LIBRARY_PATH": "/usr/lib:/mod/netcdf/lib",
-          "MPIHOME": "/mod/cray_mpich_prefix/",
-          "NETCDFHOME": "/mod/netcdf/",
-          "PNETCDFHOME": "/"
+          "MPIHOME": "/mod/cray_mpich_prefix",
+          "NETCDFHOME": "/mod/netcdf",
+          "PNETCDFHOME": ""
         },
         "lmod_calls": [
           "reset",
