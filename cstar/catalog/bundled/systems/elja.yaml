@@ -20,10 +20,10 @@ toolchains:
       - netCDF/.4.9.2  # (implicit dependency, hidden module)
       - CMake/3.26.3  # ParallelIO builds with cmake, which the HPC conda environment does not provide
     env:
-      MPIHOME: ${MPI_DIR}/
-      NETCDFHOME: "${EBROOTNETCDF}/"
+      MPIHOME: ${MPI_DIR}
+      NETCDFHOME: "${EBROOTNETCDF}"
       PATH: "${PATH}:${NETCDFHOME}/bin"
-      LIBRARY_PATH: "${LIBRARY_PATH}:${NETCDFHOME}lib"
+      LIBRARY_PATH: "${LIBRARY_PATH}:${NETCDFHOME}/lib"
       GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"

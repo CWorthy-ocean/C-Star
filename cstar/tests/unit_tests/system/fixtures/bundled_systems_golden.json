@@ -355,10 +355,10 @@
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/ebrootnetcdf/lib",
           "MKL_NUM_THREADS": "1",
-          "MPIHOME": "/mod/mpi_dir/",
-          "NETCDFHOME": "/mod/ebrootnetcdf/",
+          "MPIHOME": "/mod/mpi_dir",
+          "NETCDFHOME": "/mod/ebrootnetcdf",
           "OMP_NUM_THREADS": "1",
-          "PATH": "/usr/bin:/bin:/mod/ebrootnetcdf//bin"
+          "PATH": "/usr/bin:/bin:/mod/ebrootnetcdf/bin"
         },
         "lmod_calls": [
           "reset",
