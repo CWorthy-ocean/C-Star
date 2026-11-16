@@ -351,22 +351,20 @@ def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestr
     sysmgr = get_sysmgr()
     selection = sysmgr.selection
     outside_job = not planner.workplan.pre_run and not in_scheduler_job(os.environ)
-    family = selection.unsupported_scheduler(os.environ)
-    if family and outside_job:
+    unsupported = selection.unsupported_scheduler(os.environ)
+    family = sysmgr.scheduler.family if sysmgr.scheduler else ""
+    if unsupported and outside_job:
         log.warning(
             "Every step runs on this node: C-Star uses the system "
-            f"{selection.describe()}, which cannot submit to this machine's {family} "
-            "scheduler. Run the workplan inside an allocation, or register the "
-            f"system to submit its steps (see {DOCS_MACHINES_URL})."
+            f"{selection.describe()}, which cannot submit to this machine's "
+            f"{unsupported} scheduler. Run the workplan inside an allocation, or "
+            f"register the system to submit its steps (see {DOCS_MACHINES_URL})."
         )
-    elif (
-        sysmgr.scheduler and sysmgr.scheduler.family != SCHEDULER_SLURM and outside_job
-    ):
+    elif family and family != SCHEDULER_SLURM and outside_job:
         log.warning(
             "Every step runs on this node: C-Star cannot submit jobs to "
-            f"{sysmgr.name}'s {sysmgr.scheduler.family} scheduler. Run the workplan "
-            f"inside a {sysmgr.scheduler.family} job (`qsub -I`, or your own batch "
-            f"script); see {DOCS_MACHINES_URL}."
+            f"{sysmgr.name}'s {family} scheduler. Run the workplan inside a {family} "
+            f"job (`qsub -I`, or your own batch script); see {DOCS_MACHINES_URL}."
         )
 
     orchestrator = Orchestrator(planner, launcher, run_uuid=run_uuid)
