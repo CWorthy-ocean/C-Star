@@ -31,6 +31,9 @@ from cstar.system.spec import (
     SystemFile,
     read_bundled_system_files,
 )
+from cstar.system.spec import (
+    current_user as current_user,  # re-exported: its home before cstar.system.spec
+)
 from cstar.system.toolchain import Toolchain, ToolchainName
 
 if TYPE_CHECKING:
@@ -267,9 +270,8 @@ def context_from_file(system_file: SystemFile) -> type[SpecSystemContext]:
     """
     spec = system_file.spec
     cpu = spec.toolchains["cpu"]
-    title = "".join(part.title() for part in spec.name.replace("-", "_").split("_"))
     return type(
-        f"{title}SystemContext",
+        f"{spec.class_stem}SystemContext",
         (SpecSystemContext,),
         {
             "__doc__": f"The {spec.name} system, read from {system_file.path}.",

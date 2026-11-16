@@ -459,6 +459,11 @@ class SystemSpec(_SpecModel, VersionedDocument):
             raise ValueError("the cpu toolchain is required")
         return value
 
+    @property
+    def class_stem(self) -> str:
+        """The system's name in CamelCase, for the classes built from the spec."""
+        return "".join(p.title() for p in re.split(r"[_-]", self.name))
+
     def settings_klass(self) -> type[EnvSettingsBase]:
         """Build the settings class that loads what a job on this system needs.
 
@@ -476,7 +481,7 @@ class SystemSpec(_SpecModel, VersionedDocument):
             if field not in required
         }
         return create_model(
-            f"{self.name.title().replace('_', '').replace('-', '')}Settings",
+            f"{self.class_stem}Settings",
             __base__=SlurmSettingsBase,
             __doc__=f"The settings a job on {self.name} needs.",
             **optional,
