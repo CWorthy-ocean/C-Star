@@ -104,7 +104,7 @@ from cstar.orchestration.transforms import (
 )
 from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr
 from cstar.system.migration import CstarSchemaTooNewError, version_key
-from cstar.system.scheduler import in_scheduler_job
+from cstar.system.scheduler import SCHEDULER_SLURM, in_scheduler_job
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable
@@ -252,8 +252,10 @@ def get_launcher(
     """Get the appropriate launcher for the workplan and current environment.
 
     A workplan's `compute_environment.launcher` selects the launcher; when
-    unset, the launcher matching the current system is used (SLURM when the
-    system has a scheduler, otherwise local).
+    unset, the launcher matching the current system is used: SLURM when the
+    system's scheduler is SLURM, otherwise local. C-Star cannot submit to any
+    other scheduler (PBS), so there every step runs as a local process, which
+    belongs inside a job of that scheduler (see `get_orchestrator`).
     See: `cstar.system.manager.CStarSystemManager` for more information.
 
     Parameters
@@ -271,7 +273,8 @@ def get_launcher(
     Raises
     ------
     CstarExpectationFailed
-        If the workplan requests the SLURM launcher on a system with no scheduler.
+        If the workplan requests the SLURM launcher on a system whose scheduler is
+        not SLURM, or that has none.
     CstarAdaptationError
         If the workplan's `compute_environment` is invalid.
     """
@@ -281,7 +284,8 @@ def get_launcher(
         else ComputeEnvironment()
     )
     sysmgr = get_sysmgr()
-    has_scheduler = bool(sysmgr.scheduler)
+    family = sysmgr.scheduler.family if sysmgr.scheduler else ""
+    submits_to_slurm = family == SCHEDULER_SLURM
 
     if env.system and env.system.casefold() != sysmgr.name.casefold():
         log.warning(
@@ -291,17 +295,25 @@ def get_launcher(
 
     launcher: Launcher[t.Any]
     if force_local or env.launcher == LocalLauncher.name:
-        if has_scheduler and not force_local:
+        if submits_to_slurm and not force_local:
             log.warning(
                 f"Workplan requests the local launcher on {sysmgr.name!r}, "
                 "which has a scheduler"
             )
         launcher = LocalLauncher()
-    elif env.launcher == SlurmLauncher.name or (not env.launcher and has_scheduler):
-        if not has_scheduler:
+    elif env.launcher == SlurmLauncher.name or (not env.launcher and submits_to_slurm):
+        if not family:
             msg = (
                 "Workplan requests the slurm launcher but system "
                 f"{sysmgr.name!r} has no scheduler"
+            )
+            raise CstarExpectationFailed(msg)
+        if not submits_to_slurm:
+            msg = (
+                "Workplan requests the slurm launcher but system "
+                f"{sysmgr.name!r} uses {family}, which C-Star cannot submit to. "
+                "Remove `compute_environment.launcher` from the workplan and run "
+                f"it inside a {family} job."
             )
             raise CstarExpectationFailed(msg)
         launcher = SlurmLauncher()
@@ -317,9 +329,10 @@ def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestr
 
     Each launch persists the step's handle and records the submission in the
     run's manifest (see `on_launched`). On a machine whose scheduler the system
-    context cannot submit to (see `SystemSelection.unsupported_scheduler`), a run
-    started outside a job is warned that every step runs on this node; a pre-run
-    runs on this node by design and is not.
+    context cannot submit to (see `SystemSelection.unsupported_scheduler`), or a
+    system whose scheduler C-Star has no launcher for (PBS), a run started outside
+    a job is warned that every step runs on this node; a pre-run runs on this node
+    by design and is not.
 
     Parameters
     ----------
@@ -335,14 +348,25 @@ def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestr
     Orchestrator
     """
     launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
-    selection = get_sysmgr().selection
+    sysmgr = get_sysmgr()
+    selection = sysmgr.selection
+    outside_job = not planner.workplan.pre_run and not in_scheduler_job(os.environ)
     family = selection.unsupported_scheduler(os.environ)
-    if family and not planner.workplan.pre_run and not in_scheduler_job(os.environ):
+    if family and outside_job:
         log.warning(
             "Every step runs on this node: C-Star uses the system "
             f"{selection.describe()}, which cannot submit to this machine's {family} "
             "scheduler. Run the workplan inside an allocation, or register the "
             f"system to submit its steps (see {DOCS_MACHINES_URL})."
+        )
+    elif (
+        sysmgr.scheduler and sysmgr.scheduler.family != SCHEDULER_SLURM and outside_job
+    ):
+        log.warning(
+            "Every step runs on this node: C-Star cannot submit jobs to "
+            f"{sysmgr.name}'s {sysmgr.scheduler.family} scheduler. Run the workplan "
+            f"inside a {sysmgr.scheduler.family} job (`qsub -I`, or your own batch "
+            f"script); see {DOCS_MACHINES_URL}."
         )
 
     orchestrator = Orchestrator(planner, launcher, run_uuid=run_uuid)

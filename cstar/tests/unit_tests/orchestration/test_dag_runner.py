@@ -134,6 +134,7 @@ from cstar.system.manager import (
     SystemSelection,
     SystemSource,
 )
+from cstar.system.scheduler import SCHEDULER_SLURM, PBSQueue, PBSScheduler
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -4147,7 +4148,7 @@ def test_get_launcher_force_local(
     with (
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
@@ -4188,7 +4189,11 @@ def test_get_launcher_honours_compute_environment(
     with (
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock() if has_scheduler else None),
+            mock.PropertyMock(
+                return_value=mock.MagicMock(family=SCHEDULER_SLURM)
+                if has_scheduler
+                else None
+            ),
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
@@ -4216,7 +4221,7 @@ def test_get_launcher_checks_preconditions_against_the_workplan(tmp_path: Path) 
     with (
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions") as check,
     ):
@@ -4241,7 +4246,7 @@ def test_get_launcher_force_local_wins_over_slurm(tmp_path: Path) -> None:
 
     with mock.patch(
         "cstar.system.manager.CStarSystemManager.scheduler",
-        mock.PropertyMock(return_value=mock.MagicMock()),
+        mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
     ):
         assert type(get_launcher(wp, force_local=True)) is LocalLauncher
 
@@ -4256,12 +4261,97 @@ def test_get_launcher_warns_on_local_with_scheduler(
         caplog.at_level("WARNING"),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
         ),
     ):
         _ = get_launcher(wp)
 
     assert "local launcher" in caplog.text
+
+
+def _pbs_scheduler() -> PBSScheduler:
+    """Build a PBS scheduler like Derecho's."""
+    return PBSScheduler(
+        queues=[PBSQueue(name="main", max_walltime="12:00:00")],
+        primary_queue_name="main",
+    )
+
+
+@pytest.mark.parametrize(
+    "launcher", [pytest.param("", id="auto"), pytest.param("local", id="local")]
+)
+def test_get_launcher_on_pbs_is_local(
+    tmp_path: Path, launcher: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A system whose scheduler is PBS gets the local launcher, never the SLURM one,
+    and asking for local there is not called out as bypassing a scheduler.
+    """
+    wp = _env_workplan(tmp_path, {"launcher": launcher} if launcher else {})
+
+    with (
+        caplog.at_level("WARNING"),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=_pbs_scheduler()),
+        ),
+    ):
+        assert type(get_launcher(wp)) is LocalLauncher
+
+    assert "local launcher" not in caplog.text
+
+
+def test_get_launcher_slurm_on_pbs_fails(tmp_path: Path) -> None:
+    """Verify a workplan requesting slurm on a PBS system is refused."""
+    wp = _env_workplan(tmp_path, {"launcher": "slurm"})
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=_pbs_scheduler()),
+        ),
+        pytest.raises(CstarExpectationFailed, match="uses PBS, which C-Star cannot"),
+    ):
+        get_launcher(wp)
+
+
+@pytest.mark.parametrize(
+    ("job_id", "pre_run", "warns"),
+    [
+        pytest.param("", False, True, id="outside-job"),
+        pytest.param("1234.desched1", False, False, id="inside-job"),
+        pytest.param("", True, False, id="pre-run"),
+    ],
+)
+def test_get_orchestrator_on_pbs_warns_outside_a_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    job_id: str,
+    pre_run: bool,
+    warns: bool,
+) -> None:
+    """A run on a PBS system started outside a PBS job is told every step runs on
+    this node and to run inside a PBS job; inside one, or for a pre-run, it is not.
+    """
+    for name in ("SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"):
+        monkeypatch.delenv(name, raising=False)
+    if job_id:
+        monkeypatch.setenv("PBS_JOBID", job_id)
+    wp = _make_workplan([_roms_step(tmp_path, "Roms")])
+    if pre_run:
+        apply_pre_run_overrides(wp)
+
+    with (
+        caplog.at_level("WARNING"),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=_pbs_scheduler()),
+        ),
+    ):
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path, run_uuid="")
+
+    assert type(orchestrator.launcher) is LocalLauncher
+    assert ("inside a PBS job" in caplog.text) is warns
 
 
 def _unsupported_scheduler_machine(
@@ -4464,7 +4554,7 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
     with (
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
@@ -4866,7 +4956,7 @@ async def test_build_and_run_dag_env(
 
     # mock the sys manager to engage the checks for Slurm env-vars
     mock_sys_manager = mock.Mock()
-    mock_sys_manager.scheduler = mock.Mock()
+    mock_sys_manager.scheduler = mock.Mock(family=SCHEDULER_SLURM)
     mock_get_mgr = mock.Mock(return_value=mock_sys_manager)
 
     mock_env = {
