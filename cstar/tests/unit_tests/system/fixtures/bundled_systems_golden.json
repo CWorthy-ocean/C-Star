@@ -117,7 +117,7 @@
         "env": {
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/ebrootnetcdf/lib:/mod/ebrootnetcdfminfortran/lib",
-          "MPIHOME": "/mod/ebrootgompi",
+          "MPIHOME": "/mod/ebrootopenmpi",
           "NETCDFFHOME": "/mod/ebrootnetcdfminfortran",
           "NETCDFHOME": "/mod/ebrootnetcdf",
           "PATH": "/mod/ebrootnetcdf/bin:/usr/bin:/bin",
