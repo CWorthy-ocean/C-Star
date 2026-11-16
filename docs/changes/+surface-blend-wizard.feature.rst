@@ -1,0 +1,1 @@
+The wizard's surface forcing rows have blend controls (fallback source, its radiation correction, blend width and profile); choosing CONUS404 offers ERA5 as the fallback and moves the row's radiation correction to it.

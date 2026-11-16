@@ -58,6 +58,12 @@ Nothing is staged for these; ROMS-Tools reads them at generation time.
 
 ERA5
    Atmospheric surface forcing, streamed from the cloud.
+CONUS404
+   A 4 km hourly atmospheric reanalysis over North America and its coastal
+   ocean (October 1979 to September 2024), for physics surface forcing,
+   streamed from the USGS cloud store on Amazon S3. It covers only part of
+   the globe, so a domain that reaches past it fills the rest from ERA5 (see
+   :ref:`forge-regional-surface-forcing`).
 DAI
    Dai river discharge climatology.
 ETOPO5
