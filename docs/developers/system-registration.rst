@@ -135,11 +135,11 @@ Example (``perlmutter.yaml``):
 .. code-block:: yaml
 
        env:
-         MPIHOME: ${CRAY_MPICH_PREFIX}/
-         NETCDFHOME: ${CRAY_NETCDF_PREFIX}/
-         PNETCDFHOME: ${CRAY_PARALLEL_NETCDF_PREFIX}/
-         PATH: ${PATH}:${NETCDFHOME}bin
-         LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}lib
+         MPIHOME: ${CRAY_MPICH_PREFIX}
+         NETCDFHOME: ${CRAY_NETCDF_PREFIX}
+         PNETCDFHOME: ${CRAY_PARALLEL_NETCDF_PREFIX}
+         PATH: ${PATH}:${NETCDFHOME}/bin
+         LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
          GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"
 
 Step 5: Describe the scheduler and detection

@@ -654,10 +654,10 @@
         "env": {
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/cray_netcdf_prefix/lib",
-          "MPIHOME": "/mod/cray_mpich_prefix/",
-          "NETCDFHOME": "/mod/cray_netcdf_prefix/",
+          "MPIHOME": "/mod/cray_mpich_prefix",
+          "NETCDFHOME": "/mod/cray_netcdf_prefix",
           "PATH": "/usr/bin:/bin:/mod/cray_netcdf_prefix/bin",
-          "PNETCDFHOME": "/mod/cray_parallel_netcdf_prefix/"
+          "PNETCDFHOME": "/mod/cray_parallel_netcdf_prefix"
         },
         "lmod_calls": [
           "reset",
@@ -676,8 +676,8 @@
           "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
           "LIBRARY_PATH": "/usr/lib:/mod/cray_netcdf_hdf5parallel_prefix/lib",
           "MPICH_GPU_SUPPORT_ENABLED": "1",
-          "MPIHOME": "/mod/cray_mpich_prefix/",
-          "NETCDFHOME": "/mod/cray_netcdf_hdf5parallel_prefix/",
+          "MPIHOME": "/mod/cray_mpich_prefix",
+          "NETCDFHOME": "/mod/cray_netcdf_hdf5parallel_prefix",
           "PATH": "/usr/bin:/bin:/mod/cray_netcdf_hdf5parallel_prefix/bin"
         },
         "lmod_calls": [
