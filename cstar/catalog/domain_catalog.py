@@ -20,6 +20,7 @@ from cstar.base.env import (
     catalog_entries,
     default_catalog_root,
     get_env_item,
+    is_bundled_catalog_entry,
 )
 from cstar.base.env import is_github_catalog_url as _is_github_catalog_url
 from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, read_spec
@@ -102,7 +103,7 @@ def user_catalog_root() -> Path:
     entries = catalog_entries()
     if entries:
         first = entries[0]
-        if first.strip().lower() == "local":
+        if is_bundled_catalog_entry(first):
             raise ValueError(
                 f"{ENV_CSTAR_CATALOG}: the bundled catalog ('local') is read-only "
                 "and cannot be the writable top layer; list it after your own "
@@ -275,7 +276,7 @@ class DomainCatalog:
             )
             self._fs = fsspec.filesystem("file")
         elif isinstance(catalog_root, str):
-            if catalog_root.strip().lower() == "local":
+            if is_bundled_catalog_entry(catalog_root):
                 self.catalog_root = _DEFAULT_CATALOG_ROOT
                 self._fs = fsspec.filesystem("file")
             elif _is_github_catalog_url(catalog_root):

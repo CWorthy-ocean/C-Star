@@ -41,12 +41,12 @@ URL_PREFIXES: t.Final = ("http://", "https://", "git@")
 
 
 def looks_like_path(argument: str) -> bool:
-    """Tell whether an argument names a system file rather than a system."""
+    """Tell whether an argument names a system file rather than a system: it holds
+    a path separator or ends in ``.yaml`` (a file in the current directory is
+    ``./name``).
+    """
     return (
-        Path(argument).expanduser().is_file()
-        or os.sep in argument
-        or "/" in argument
-        or argument.endswith(SYSTEM_FILE_SUFFIX)
+        os.sep in argument or "/" in argument or argument.endswith(SYSTEM_FILE_SUFFIX)
     )
 
 

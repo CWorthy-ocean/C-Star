@@ -63,7 +63,7 @@ def _build_verification_disabled() -> bool:
     return True
 
 
-_DECLARED_PREFIX_VARS: tuple[str, ...] = (
+DECLARED_PREFIX_VARS: tuple[str, ...] = (
     "MPIHOME",
     "NETCDFHOME",
     "NETCDFFHOME",
@@ -99,12 +99,12 @@ def empty_prefix_vars(env_vars: "Mapping[str, str]") -> list[str]:
     Returns
     -------
     list[str]
-        Each of `_DECLARED_PREFIX_VARS` that `env_vars` holds and that is empty or
+        Each of `DECLARED_PREFIX_VARS` that `env_vars` holds and that is empty or
         blank, in declaration order.
     """
     return [
         var
-        for var in _DECLARED_PREFIX_VARS
+        for var in DECLARED_PREFIX_VARS
         if var in env_vars and not (env_vars[var] or "").strip()
     ]
 

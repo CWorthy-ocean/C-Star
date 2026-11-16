@@ -439,9 +439,11 @@ class CatalogRoots:
 def catalog_roots(entries: Sequence[str] | None = None) -> CatalogRoots:
     """Return the local directories `CSTAR_CATALOG` stacks, resolved, top first.
 
-    Remote entries (GitHub, http) and the bundled catalog are left out, as is a
-    directory listed twice; an unset or empty variable means the default user
-    catalog. Reads the process environment, so load the configuration file first.
+    Remote entries (GitHub, http), the bundled catalog, an entry that cannot be
+    resolved (``~nosuchuser``) and a directory listed twice are left out; an unset
+    or empty variable means the default user catalog. Never raises, since every
+    system lookup asks it. Reads the process environment, so load the
+    configuration file first.
 
     Parameters
     ----------
@@ -459,7 +461,11 @@ def catalog_roots(entries: Sequence[str] | None = None) -> CatalogRoots:
         if is_remote_catalog_entry(entry) or is_bundled_catalog_entry(entry):
             roots.append(None)
             continue
-        root = Path(entry).expanduser().resolve()
+        try:
+            root = Path(entry).expanduser().resolve()
+        except (OSError, RuntimeError):
+            roots.append(None)
+            continue
         roots.append(None if root == bundled or root in roots else root)
     return CatalogRoots(
         user=roots[0], shared=tuple(r for r in roots[1:] if r is not None)

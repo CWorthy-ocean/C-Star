@@ -193,6 +193,17 @@ class TestCatalogRoots:
 
         assert catalog_roots().user == (tmp_path / "mine").resolve()
 
+    def test_an_entry_that_cannot_be_resolved_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An unknown ``~user`` is left out rather than failing every system lookup."""
+        b = tmp_path / "b"
+        monkeypatch.setenv(
+            ENV_CSTAR_CATALOG, os.pathsep.join(["~nosuchuser-cstar/cat", str(b)])
+        )
+
+        assert catalog_roots() == CatalogRoots(None, (b.resolve(),))
+
 
 class TestPrecedence:
     """Which layer's file is in effect."""

@@ -9,9 +9,9 @@ import typer
 
 from cstar.base.env import ENV_CSTAR_SYSTEM, load_user_config_for_repair
 from cstar.base.exceptions import CstarError
-from cstar.cli.system.add import looks_like_path
+from cstar.cli.system.add import looks_like_path, read_draft
 from cstar.roms.build_verification import (
-    _DECLARED_PREFIX_VARS,
+    DECLARED_PREFIX_VARS,
     empty_prefix_vars,
     mpifort_under,
 )
@@ -32,7 +32,6 @@ from cstar.system.spec import (
     WALLTIME_QUERIES,
     SystemFile,
     SystemFileError,
-    read_system_file,
 )
 from cstar.system.toolchain import ToolchainName
 
@@ -140,7 +139,7 @@ def read_system_to_check(argument: str | None) -> tuple[SystemFile | None, Check
     step = "schema"
     if argument is not None and looks_like_path(argument):
         try:
-            file = read_system_file(Path(argument), DRAFT_LAYER, check_name=False)
+            file = read_draft(argument)
         except SystemFileError as ex:
             return None, CheckResult(step, STATUS_FAIL, ex.reason)
         return file, CheckResult(step, STATUS_PASS, f"{file.path} is valid")
@@ -237,7 +236,7 @@ def check_prefixes(
     problems = [f"{var} is empty" for var in empty_prefix_vars(env_vars)]
     problems += [
         f"{var}={value} has no lib/ directory"
-        for var in _DECLARED_PREFIX_VARS
+        for var in DECLARED_PREFIX_VARS
         if (value := env_vars.get(var, "").strip())
         and not (Path(value) / "lib").is_dir()
     ]

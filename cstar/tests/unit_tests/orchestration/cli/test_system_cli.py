@@ -227,6 +227,18 @@ def test_check_of_a_draft_with_another_file_name_says_how_it_installs(
     assert result.exit_code == 0
 
 
+def test_check_expands_a_tilde_in_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path given with ``~`` (quoted, so the shell left it) is read from home."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    write_system(tmp_path / "draft.yaml")
+
+    result = check_system("~/draft.yaml")
+
+    assert result[0].status == STATUS_PASS
+
+
 def test_check_of_an_unparseable_file_fails_with_the_reason(tmp_path: Path) -> None:
     """A file that does not validate fails the schema step and stops the check."""
     bad = write_system(tmp_path / "bad.yaml", "name: [")
