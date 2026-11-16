@@ -125,8 +125,12 @@
         },
         "lmod_calls": [
           "reset",
-          "load netCDF-Fortran/4.6.0-gompi-2022b",
-          "load PnetCDF/1.12.3-gompi-2022b",
+          "load GCC/13.3.0",
+          "load OpenMPI/5.0.3-GCC-13.3.0",
+          "load HDF5/1.14.5-gompi-2024a",
+          "load netCDF/4.9.2-gompi-2024a",
+          "load netCDF-Fortran/4.6.1-gompi-2024a",
+          "load PnetCDF/1.14.0-gompi-2024a",
           "load CMake/3.31.8-GCCcore-13.3.0"
         ]
       }
