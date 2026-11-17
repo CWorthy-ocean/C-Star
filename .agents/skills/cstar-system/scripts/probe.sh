@@ -15,22 +15,38 @@
 # the left of a pipeline, even one defined above it.
 # shellcheck disable=SC2218
 
-exec 2>&1
-export LC_ALL=C
-
-PROBE_VERSION=1
-SECRET_NAMES='TOKEN|KEY|SECRET|PASS|AUTH|CRED|COOKIE|PROXY|SESSION'
+PROBE_VERSION=2
+# Names that may hold a secret, matched without regard to case; such a
+# variable is never printed.
+SECRET_NAMES='TOKEN|KEY|SECRET|PASS|PWD|(^|_)PAT($|_)|AUTH|CRED|COOKIE|PROXY|SESSION|PRIVATE|CERT|NETRC|LICENSE'
+TIMEOUT_SECONDS=60
 
 section() { printf '\n=== %s ===\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Bound each slow query; `timeout` is absent on some systems (macOS).
+# Bound each slow query where `timeout` exists (not on macOS), and say so
+# when it cut the output short. The note goes to stderr, which is the
+# output file, so a filter after the pipe does not drop it.
 run() {
+    local rc
     if have timeout; then
-        timeout 60 "$@"
-    else
-        "$@"
+        timeout "$TIMEOUT_SECONDS" "$@"
+        rc=$?
+        if [ "$rc" -eq 124 ]; then
+            echo "[$1 timed out after $TIMEOUT_SECONDS s; its output above is incomplete]" >&2
+        fi
+        return "$rc"
     fi
+    "$@"
+}
+
+# Print NAME=value, or that the value is withheld because it holds a URL
+# with credentials in it.
+print_var() {
+    case "$2" in
+        *://*@*) printf '%s=<withheld: a URL with credentials>\n' "$1" ;;
+        *) printf '%s=%s\n' "$1" "$2" ;;
+    esac
 }
 
 # Print NAME=value for each exported variable named, or that it is not set.
@@ -38,7 +54,7 @@ show_vars() {
     local name value
     for name in "$@"; do
         if value=$(printenv "$name"); then
-            printf '%s=%s\n' "$name" "$value"
+            print_var "$name" "$value"
         else
             printf '%s is not set\n' "$name"
         fi
@@ -49,23 +65,145 @@ show_vars() {
 # not look like they hold a secret.
 show_matching_vars() {
     local name
-    for name in $(compgen -e | grep -E "$1" | grep -Ev "$SECRET_NAMES" | sort); do
-        printf '%s=%s\n' "$name" "$(printenv "$name")"
+    for name in $(compgen -e | grep -E "$1" | grep -Eiv "$SECRET_NAMES" | sort); do
+        print_var "$name" "$(printenv "$name")"
     done
 }
 
-# Make the `module` command available when the login shell did not.
-if ! type module >/dev/null 2>&1; then
-    if [ -n "${LMOD_PKG:-}" ] && [ -f "$LMOD_PKG/init/bash" ]; then
-        # shellcheck disable=SC1091
-        . "$LMOD_PKG/init/bash"
-    elif [ -n "${LMOD_CMD:-}" ] && [ -x "$LMOD_CMD" ]; then
-        # defined through eval: Lmod's own init defines it this way
-        eval 'module() { eval "$("$LMOD_CMD" bash "$@")"; }'
+main() {
+    # Nothing below reads standard input; under `bash -s` it holds the rest
+    # of this script, which a command reading it would swallow.
+    exec </dev/null 2>&1
+    export LC_ALL=C
+
+    local me
+    me=${USER:-$(id -un 2>/dev/null)}
+
+    # Make the `module` command available when the login shell did not.
+    if ! type module >/dev/null 2>&1; then
+        if [ -n "${LMOD_PKG:-}" ] && [ -f "$LMOD_PKG/init/bash" ]; then
+            # shellcheck disable=SC1091
+            . "$LMOD_PKG/init/bash"
+        elif [ -n "${LMOD_CMD:-}" ] && [ -x "$LMOD_CMD" ]; then
+            # defined through eval: Lmod's own init defines it this way
+            eval 'module() { eval "$("$LMOD_CMD" bash "$@")"; }'
+        fi
     fi
-fi
-HAVE_MODULE=no
-type module >/dev/null 2>&1 && HAVE_MODULE=yes
+    local have_module=no
+    type module >/dev/null 2>&1 && have_module=yes
+
+    section "probe"
+    echo "cstar-system probe version $PROBE_VERSION"
+    date -u '+%Y-%m-%d %H:%M UTC'
+    echo "bash $BASH_VERSION"
+
+    section "host"
+    uname -srm
+    hostname
+    hostname -f 2>/dev/null
+    if [ -r /etc/os-release ]; then
+        grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
+    fi
+    echo "user: ${me:-unknown}"
+    show_vars HOME SHELL
+
+    section "modules: Lmod"
+    show_vars LMOD_CMD LMOD_VERSION LMOD_PKG LMOD_SYSHOST LMOD_SYSTEM_NAME \
+        LMOD_SYSTEM_DEFAULT_MODULES MODULESHOME MODULEPATH
+    echo "module command available: $have_module"
+    if [ -n "${LMOD_CMD:-}" ]; then
+        lmod_list --version
+    elif [ "$have_module" = yes ]; then
+        echo "A module command exists but LMOD_CMD is not set: not Lmod (C-Star drives Lmod only)."
+        module --version
+    else
+        echo "No Lmod and no module command on this machine."
+    fi
+
+    if [ "$have_module" = yes ]; then
+        section "modules: loaded at login (module list)"
+        lmod_list --terse list
+
+        section "modules: available (module --terse avail, filtered)"
+        echo "Filter: compilers, MPI, HDF5, netCDF, parallel-netCDF, CMake, CUDA, programming environments"
+        lmod_list --terse avail |
+            grep -Ei '^/|:$|timed out|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda|craype'
+
+        if [ -n "${LMOD_CMD:-}" ]; then
+            section "modules: everything Lmod can load (module --terse spider, filtered)"
+            echo "Includes modules a hierarchical Lmod hides until a compiler and MPI are loaded."
+            lmod_list --terse spider |
+                grep -Ei 'timed out|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda' |
+                sort -u
+        fi
+    fi
+
+    section "compilers and tools on PATH at login"
+    local tool
+    for tool in gcc gfortran ifort ifx nvfortran ftn mpifort mpif90 mpicc srun mpirun mpiexec nc-config nf-config pnetcdf-config cmake; do
+        printf '%-15s %s\n' "$tool" "$(command -v "$tool" || echo '-')"
+    done
+    have gfortran && gfortran --version | head -1
+    have mpifort && mpifort --version | head -1
+
+    section "scheduler commands"
+    for tool in sbatch srun sinfo sacctmgr scontrol squeue qsub qstat pbsnodes bsub condor_submit; do
+        printf '%-15s %s\n' "$tool" "$(command -v "$tool" || echo '-')"
+    done
+    local family=none
+    if have sbatch; then
+        family=slurm
+        run sbatch --version
+    fi
+    if have qsub; then
+        [ "$family" = none ] && family=pbs-or-other
+        echo "qstat --version:"
+        run qstat --version
+        echo "(PBS Professional and OpenPBS print pbs_version; Torque prints Version)"
+    fi
+    have bsub && echo "bsub found: LSF, which C-Star does not support"
+    echo "scheduler family guess: $family"
+
+    if [ "$family" = slurm ]; then
+        probe_slurm "$me"
+    fi
+    if [ "$family" = pbs-or-other ]; then
+        probe_pbs
+    fi
+
+    section "scratch and work file systems"
+    show_vars SCRATCH PSCRATCH CSCRATCH WORK PROJECT TMPDIR
+    echo "other variables named like a file system:"
+    show_matching_vars 'SCRATCH|WORK|PROJECT|STORAGE' |
+        grep -Ev '^(SCRATCH|PSCRATCH|CSCRATCH|WORK|PROJECT)='
+    echo "scratch-like directories:"
+    local path
+    for path in "$HOME"/scratch* /scratch /scratch/"$me" /*/scratch; do
+        [ -e "$path" ] && ls -ld "$path"
+    done
+
+    section "detection candidates"
+    echo "variables named like a cluster, site or host:"
+    show_matching_vars 'CLUSTER|SYSHOST|SYSTEM|SITE|MACHINE|HOSTNAME|_HOST$'
+    echo "top-level directories (a site mount can identify the machine):"
+    printf '%s ' /*/
+    echo
+
+    section "python and conda"
+    for tool in conda mamba micromamba python3 cstar; do
+        printf '%-15s %s\n' "$tool" "$(command -v "$tool" || echo '-')"
+    done
+    show_vars CONDA_PREFIX CONDA_DEFAULT_ENV
+
+    section "gpus on this node"
+    if have nvidia-smi; then
+        run nvidia-smi -L
+    else
+        echo "nvidia-smi not found"
+    fi
+
+    section "end"
+}
 
 # A listing from Lmod (`module` is a shell function, which `timeout` cannot
 # run, so call Lmod itself; it writes listings to stderr).
@@ -79,77 +217,11 @@ lmod_list() {
     fi
 }
 
-section "probe"
-echo "cstar-system probe version $PROBE_VERSION"
-date -u '+%Y-%m-%d %H:%M UTC'
-echo "bash $BASH_VERSION"
+# SLURM: configuration, partitions and their limits, the user's associations
+# and QOS limits, and whether a job naming no account would be accepted.
+probe_slurm() {
+    local me=$1
 
-section "host"
-uname -srm
-hostname
-hostname -f 2>/dev/null
-if [ -r /etc/os-release ]; then
-    grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
-fi
-show_vars USER HOME SHELL
-
-section "modules: Lmod"
-show_vars LMOD_CMD LMOD_VERSION LMOD_PKG LMOD_SYSHOST LMOD_SYSTEM_NAME \
-    LMOD_SYSTEM_DEFAULT_MODULES MODULESHOME MODULEPATH
-echo "module command available: $HAVE_MODULE"
-if [ -z "${LMOD_CMD:-}" ]; then
-    if [ "$HAVE_MODULE" = yes ]; then
-        echo "A module command exists but LMOD_CMD is not set: not Lmod (C-Star drives Lmod only)."
-        module --version
-    else
-        echo "No Lmod and no module command on this machine."
-    fi
-fi
-
-if [ "$HAVE_MODULE" = yes ]; then
-    section "modules: loaded at login (module list)"
-    lmod_list --terse list
-
-    section "modules: available (module --terse avail, filtered)"
-    echo "Filter: compilers, MPI, HDF5, netCDF, parallel-netCDF, CMake, CUDA, programming environments"
-    lmod_list --terse avail |
-        grep -Ei '^/|:$|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda|craype'
-
-    if [ -n "${LMOD_CMD:-}" ]; then
-        section "modules: everything Lmod can load (module --terse spider, filtered)"
-        echo "Includes modules a hierarchical Lmod hides until a compiler and MPI are loaded."
-        lmod_list --terse spider |
-            grep -Ei 'gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda' |
-            sort -u
-    fi
-fi
-
-section "compilers and tools on PATH at login"
-for tool in gcc gfortran ifort ifx nvfortran ftn mpifort mpif90 mpicc srun mpirun mpiexec nc-config nf-config pnetcdf-config cmake; do
-    printf '%-15s %s\n' "$tool" "$(command -v "$tool" || echo '-')"
-done
-have gfortran && gfortran --version | head -1
-have mpifort && mpifort --version | head -1
-
-section "scheduler commands"
-for tool in sbatch srun sinfo sacctmgr scontrol squeue qsub qstat pbsnodes bsub condor_submit; do
-    printf '%-15s %s\n' "$tool" "$(command -v "$tool" || echo '-')"
-done
-FAMILY=none
-if have sbatch; then
-    FAMILY=slurm
-    run sbatch --version
-fi
-if have qsub; then
-    [ "$FAMILY" = none ] && FAMILY=pbs-or-other
-    echo "qstat --version:"
-    run qstat --version
-    echo "(PBS Professional and OpenPBS print pbs_version; Torque prints Version)"
-fi
-have bsub && echo "bsub found: LSF, which C-Star does not support"
-echo "scheduler family guess: $FAMILY"
-
-if [ "$FAMILY" = slurm ]; then
     section "slurm: configuration"
     run scontrol show config |
         grep -E '^(ClusterName|MpiDefault|SelectType|SelectTypeParameters|AccountingStorageEnforce|EnforcePartLimits|DefMemPerCPU|DefMemPerNode) '
@@ -173,56 +245,34 @@ if [ "$FAMILY" = slurm ]; then
         }'
 
     section "slurm: your associations (sacctmgr show assoc)"
-    run sacctmgr --noheader --parsable2 show assoc user="$USER" \
-        format=Cluster,Account,Partition,QOS,DefaultQOS,MaxWall
+    if [ -n "$me" ]; then
+        run sacctmgr --noheader --parsable2 show assoc user="$me" \
+            format=Cluster,Account,Partition,QOS,DefaultQOS,MaxWall
+    else
+        echo "the user name is unknown; skipped"
+    fi
 
     section "slurm: QOS limits (sacctmgr show qos)"
     run sacctmgr --parsable2 show qos format=Name,MaxWall,MaxTRESPU,MaxJobsPU,Flags
 
     section "slurm: would a job with no account and no partition be accepted? (sbatch --test-only, submits nothing)"
     run sbatch --test-only --nodes=1 --time=00:05:00 --job-name=cstar-probe --wrap=true
-fi
+}
 
-if [ "$FAMILY" = pbs-or-other ]; then
+# PBS: the server, each queue's limits (not its access lists, which name other
+# users), and the node types.
+probe_pbs() {
     section "pbs: server (qstat -B)"
     run qstat -B
 
-    section "pbs: queues (qstat -Qf)"
-    run qstat -Qf
+    section "pbs: queues (qstat -Qf, limits only)"
+    run qstat -Qf |
+        grep -E '^Queue:|queue_type|resources_(max|min|default|available)\.|max_|Priority|enabled|started|route_destinations|timed out'
 
     section "pbs: node types (pbsnodes -a, counted)"
     run pbsnodes -a |
-        grep -E 'resources_available\.(ncpus|ngpus|mem|Qlist)' | sort | uniq -c | head -40
-fi
+        grep -E 'resources_available\.(ncpus|ngpus|mem|Qlist)|^ *(np|gpus|properties) =|timed out' |
+        sed 's/^ *//' | sort | uniq -c | head -40
+}
 
-section "scratch and work file systems"
-show_vars SCRATCH PSCRATCH CSCRATCH WORK PROJECT TMPDIR
-echo "other variables named like a file system:"
-show_matching_vars 'SCRATCH|WORK|PROJECT|STORAGE' |
-    grep -Ev '^(SCRATCH|PSCRATCH|CSCRATCH|WORK|PROJECT)='
-echo "scratch-like directories:"
-for path in "$HOME"/scratch* /scratch /scratch/"$USER" /*/scratch; do
-    [ -e "$path" ] && ls -ld "$path"
-done
-
-section "detection candidates"
-echo "variables named like a cluster, site or host:"
-show_matching_vars 'CLUSTER|SYSHOST|SYSTEM|SITE|MACHINE|HOSTNAME|_HOST$'
-echo "top-level directories (a site mount can identify the machine):"
-printf '%s ' /*/
-echo
-
-section "python and conda"
-for tool in conda mamba micromamba python3 cstar; do
-    printf '%-15s %s\n' "$tool" "$(command -v "$tool" || echo '-')"
-done
-show_vars CONDA_PREFIX CONDA_DEFAULT_ENV
-
-section "gpus on this node"
-if have nvidia-smi; then
-    run nvidia-smi -L
-else
-    echo "nvidia-smi not found"
-fi
-
-section "end"
+main "$@"

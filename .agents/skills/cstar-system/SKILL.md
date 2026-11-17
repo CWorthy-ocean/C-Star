@@ -17,9 +17,10 @@ folder holds `probe.sh` and `try-modules.sh`.
 
 - **Probing is read-only.** Look, list and query; change nothing on the
   machine. `sbatch --test-only` submits nothing and is fine.
-- **Write only two kinds of file**: the system file, and the output of the
-  scripts (`cstar-probe.txt` and the like). Never overwrite an existing file
-  of the same name without asking.
+- **Write only the system file and the scripts' output** (`cstar-probe.txt`
+  and the like), plus what a level the user allowed writes (section 8: the
+  example blueprint, and the run directory C-Star makes). Never overwrite an
+  existing file of the same name without asking.
 - **Never delete, move or overwrite** anything under scratch, project space,
   `CSTAR_DATA_HOME`, `CSTAR_PROJECT_HOME` or another user's files. Do not run
   `--clobber`, `cstar admin clean`, `cstar admin migrate-*` or
@@ -28,7 +29,8 @@ folder holds `probe.sh` and `try-modules.sh`.
   never load modules in the user's own shell: `try-modules.sh` loads them in
   a shell of its own.
 - **Ask before anything that uses an allocation or submits a job**: `salloc`,
-  `srun`, `sbatch`, `qsub`, and `cstar blueprint submit` without `--pre-run`.
+  `srun`, `sbatch` (except `sbatch --test-only`), `qsub`, and
+  `cstar blueprint submit` without `--pre-run`.
   Say what it will run, where, and roughly for how long.
 - **Every value comes from this machine or its site's documentation**, never
   from another machine's file. Say where each came from in a comment.
@@ -146,12 +148,13 @@ C-Star accepts; it is your schema. Keep its comments where they help, and
 delete keys and commented-out blocks the machine does not need.
 
 The `name` is short and lowercase (`[a-z0-9_-]`). If the probe shows
-`LMOD_SYSHOST` or `LMOD_SYSTEM_NAME`, use exactly that value: C-Star then
-recognises the machine without a `detect` rule. The file is `<name>.yaml`.
+`LMOD_SYSHOST` (or, without it, `LMOD_SYSTEM_NAME`), use exactly that value:
+C-Star then recognises the machine without a `detect` rule. The file is
+`<name>.yaml`.
 
-`cstar system list` shows the machines C-Star knows. Their files
-(`cstar system show <name>`) show the shape of a finished file, but take no
-values from them.
+`cstar system list` shows the machines C-Star knows. `cstar system show
+<name>` prints one of their files, to see the shape of a finished file only:
+take no values from another machine.
 
 ## 6. Fill it in
 
@@ -233,14 +236,16 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
 - `primary_queue`: the default (marked `*` in `sinfo`), or the queue the
   documentation calls standard.
 - `max_walltime`, for each queue:
-  - a partition with a time limit in `sinfo` and no partition QOS: leave it
-    out (the partition default asks `sinfo`);
+  - a partition with a time limit in `sinfo`, no partition QOS, and no QOS
+    with a smaller `MaxWall` that jobs there get by default (compare with the
+    probe's `sacctmgr` sections): leave it out (the partition default asks
+    `sinfo`);
   - a partition whose `scontrol show partition` line has `QoS=<q>`: that
     QOS's `MaxWall` is the limit; `max_walltime: sacctmgr` and
     `query_name: <q>` when `<q>` differs from the partition's name;
-  - a partition whose `sinfo` limit is `infinite` while the QOS a job gets
-    there caps it (the association's default QOS): `sacctmgr`, with that QOS
-    as `query_name`;
+  - a partition whose jobs get a default QOS (the association's) with a
+    `MaxWall` below the `sinfo` limit, or where `sinfo` says `infinite`:
+    `sacctmgr`, with that QOS as `query_name`;
   - a QOS: leave it out (a QOS asks `sacctmgr`). If `sacctmgr` shows no
     `MaxWall` for the QOS a job names but the limit is carried by another QOS
     the site pairs with it, put that one in `query_name`, and say why in a
@@ -249,7 +254,11 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
     `"HH:MM:SS"` with the URL in a comment.
 
   `cstar system check` reports each queue's walltime; a queue that reports
-  none has the wrong source.
+  none usually has the wrong source. A partition with no limit at all
+  (`infinite`, and no QOS caps it) also reports none and fails the check:
+  give it the limit the documentation states, if any, as a fixed walltime;
+  otherwise leave it, and tell the user that C-Star then asks for
+  `CSTAR_SLURM_MAX_WALLTIME` (48 hours unless they set it).
 - `directives`: only what every CPU job must carry, such as a constraint the
   site requires to select CPU nodes.
 - `max_cpus_per_node`: only when every node of the primary queue has the same
@@ -258,8 +267,10 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
   state nodes and tasks per node.
 - `require`: from the probe's `sbatch --test-only`, which names no account and
   no partition. Refused for the account: `account`. Refused for the
-  partition, or no partition is marked default: `queue`. Accepted: `[]`.
-  Record the test and its date in a comment.
+  partition, or no partition is marked default: `queue`. Accepted: `[]`,
+  unless the site's documentation says every job must name an account. The
+  test runs with the user's default account, if they have one, so say in the
+  comment that `[]` relies on one, and give the test's date.
 - PBS: list the queues the documentation tells users to submit to, each with
   the `resources_max.walltime` from `qstat -Qf` as a fixed, quoted walltime.
 - `gpu_nodes` and a `gpu` toolchain: only when the user wants GPU runs; the
@@ -267,8 +278,9 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
 
 ### Detection
 
-1. Lmod reports the machine's name (`LMOD_SYSHOST` or `LMOD_SYSTEM_NAME`):
-   name the system exactly that and add no `detect` block.
+1. Lmod reports the machine's name (`LMOD_SYSHOST`, or without it
+   `LMOD_SYSTEM_NAME`): name the system exactly that and add no `detect`
+   block.
 2. Otherwise a variable with the same value on the login **and** the compute
    nodes. Avoid generic values (a SLURM cluster name like `slurm`).
    `SLURM_CLUSTER_NAME` exists only inside jobs, so pair it with a login-node
@@ -308,7 +320,8 @@ again:
   that sets it is not loaded, or it is the wrong variable.
 - `mpi wrapper`: `MPIHOME` does not hold `bin/mpifort`.
 - `nf-config`: not on `PATH`; check the `PATH` line and `NETCDFHOME`.
-- `queue <name>`: the walltime source is wrong (section 6).
+- `queue <name>`: the walltime source is wrong, or the queue has no limit
+  (section 6).
 - `permissions`: run `chmod o-w <name>.yaml`.
 
 `NOT CHECKED` for detection means C-Star will not pick the system by itself
@@ -331,9 +344,9 @@ cstar init --system-file ./<name>.yaml
 It asks for the account and queue, copies the file into their catalog and
 sets `CSTAR_SYSTEM` when C-Star does not recognise the machine.
 
-**Level 2, a ROMS build.** Ask first: it clones and compiles UCLA-ROMS, MARBL
-and ParallelIO for a few minutes and writes a run directory under
-`CSTAR_DATA_HOME`. Use the small example blueprint of the installed version
+**Level 2, a ROMS build.** Ask first: it downloads the example blueprint into
+the current directory, then clones and compiles UCLA-ROMS, MARBL and
+ParallelIO for a few minutes in a new run directory under `CSTAR_DATA_HOME`. Use the small example blueprint of the installed version
 (`<version>` is the number on the `C-Star version:` line of `cstar --version`;
 for a development install, use `main`):
 
@@ -352,7 +365,9 @@ interactive allocation instead. When it succeeds, add a dated comment:
 `# A ROMS build through C-Star succeeded on <host>, <date>.`
 
 **Level 3, a job.** Ask first: it submits a job that runs the model on 10 MPI
-ranks for a few minutes, charged to the user's account. Use a short queue:
+ranks for a few minutes, charged to the account `cstar init` recorded
+(`CSTAR_SLURM_ACCOUNT`). Name a short queue, and the walltime the job asks
+for:
 
 ```
 <activate>
@@ -366,6 +381,8 @@ with no scheduler block, level 3 is `cstar blueprint run
 wio_toy_blueprint.yaml` inside an interactive job the user starts.
 
 If a level fails, show the user the log, fix the file, and check it again.
+Try the level again under a new run ID (`<name>-check-2`, which level 3 then
+uses too): never clear or reuse the failed run's directory.
 
 ## 9. Finish
 

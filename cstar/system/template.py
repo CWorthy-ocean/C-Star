@@ -96,9 +96,10 @@ toolchains:
       # Take each from a variable the module sets (`module show <name>`).
       MPIHOME: ${OPENMPI_ROOT}
       NETCDFHOME: ${NETCDF_C_ROOT}
-      # Only when netCDF-Fortran has a prefix of its own; else delete it.
+      # Only when netCDF-Fortran has a prefix of its own; else delete it, and
+      # its /lib entries below.
       NETCDFFHOME: ${NETCDF_FORTRAN_ROOT}
-      # Only with parallel-netcdf; else delete it.
+      # Only with parallel-netcdf; else delete it, and its /lib entry below.
       PNETCDFHOME: ${PNETCDF_ROOT}
       PATH: ${NETCDFHOME}/bin:${PATH}
       LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib:${NETCDFFHOME}/lib
@@ -141,7 +142,7 @@ scheduler:
   #: SlurmSchedulerSpec.max_cpus_per_node
   max_cpus_per_node: 128
   #: SlurmSchedulerSpec.require
-  require: [account]
+  require: []
   #: SlurmSchedulerSpec.gpu_nodes
   # gpu_nodes:
   #   #: GpuNodesSpec.gpus_per_node
@@ -197,7 +198,8 @@ def spec_models() -> dict[str, type[BaseModel]]:
 
 def describe(ref: str, models: dict[str, type[BaseModel]]) -> str:
     """The text a marker stands for: a model's docstring, or a field's
-    description followed by `REQUIRED_NOTE` when the field is required.
+    description followed by `REQUIRED_NOTE` when the field is required (unless
+    the description already says so).
 
     Raises
     ------
@@ -210,7 +212,9 @@ def describe(ref: str, models: dict[str, type[BaseModel]]) -> str:
     text = " ".join((field.description if field else model.__doc__ or "").split())
     if not text:
         raise KeyError(f"{ref} has no description")
-    return f"{text} {REQUIRED_NOTE}" if field and field.is_required() else text
+    if field and field.is_required() and not text.endswith("required."):
+        return f"{text} {REQUIRED_NOTE}"
+    return text
 
 
 def wrap_comment(text: str, prefix: str) -> list[str]:

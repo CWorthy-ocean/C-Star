@@ -19,7 +19,8 @@ allocation or submits a job. In a clone of the C-Star repository the agent
 finds the skill by itself. With C-Star installed from conda, copy the skill
 of your C-Star version into your agent's personal skills directory, here
 ``~/.agents/skills`` (read by Codex, Gemini CLI and Copilot; Claude Code reads
-``~/.claude/skills``):
+``~/.claude/skills``). For a development install, use ``main`` in place of
+``$version``:
 
 .. code-block:: console
 

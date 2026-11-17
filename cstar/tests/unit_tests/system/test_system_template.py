@@ -1,6 +1,7 @@
 """Tests for the commented starting system file `cstar system template` prints."""
 
 import inspect
+import re
 import typing as t
 
 import pytest
@@ -106,6 +107,33 @@ def test_every_field_a_system_file_can_hold_has_a_marker() -> None:
     assert fields - marked == set()
 
 
+def test_each_field_marker_sits_above_its_own_key() -> None:
+    """A marker describes the key that follows it, commented out or not.
+
+    The first line after the marker, with the marker's lead and then one
+    ``# `` removed, that reads as a YAML key (``key:`` or ``- key:``) must be
+    the marked field.
+    """
+    lines = SKELETON.splitlines()
+    for i, line in enumerate(lines):
+        if not (marker := MARKER_PATTERN.match(line)):
+            continue
+        _, _, field = marker["ref"].partition(".")
+        if not field:
+            continue
+        lead = marker["lead"]
+        key = None
+        for after in lines[i + 1 :]:
+            if MARKER_PATTERN.match(after) or not after.startswith(lead):
+                continue
+            text = after[len(lead) :]
+            text = text.removeprefix("# ")
+            if found := re.match(r"^(?:- )?(\w+):", text):
+                key = found[1]
+                break
+        assert key == field, f"{marker['ref']} is above {key!r}"
+
+
 def test_every_marker_names_a_described_model_or_field() -> None:
     """A marker for a renamed field, or a field with no description, is caught."""
     models = spec_models()
@@ -158,15 +186,23 @@ def test_wrap_comment_never_breaks_a_code_span() -> None:
     ("header", "takes_effect"),
     [
         ("detect:", lambda spec: len(spec.detect) == 2),
-        ("scratch:", lambda spec: spec.scratch is not None),
-        ("gpu:", lambda spec: "gpu" in spec.toolchains),
-        ("gpu_nodes:", lambda spec: spec.scheduler.gpu_nodes is not None),
+        ("scratch:", lambda spec: spec.scratch.subdir == "{user}"),
+        ("gpu:", lambda spec: spec.toolchains["gpu"].gpu_arch == "cc80"),
+        (
+            "gpu_nodes:",
+            lambda spec: (
+                spec.scheduler.gpu_nodes.cores_per_node == 64
+                and spec.scheduler.gpu_nodes.directives == {"--gpu-bind": "none"}
+            ),
+        ),
     ],
 )
 def test_each_commented_out_block_validates_when_uncommented(
     header: str, takes_effect: "Callable[[SystemSpec], bool]"
 ) -> None:
-    """Uncommenting an optional block as it stands gives a valid file that uses it."""
+    """Uncommenting an optional block as it stands gives a valid file that uses
+    every key in it.
+    """
     spec = validate(uncomment(render_system_template(), header))
 
     assert takes_effect(spec)
