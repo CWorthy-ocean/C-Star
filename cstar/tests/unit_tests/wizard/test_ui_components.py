@@ -59,6 +59,12 @@ def test_number_boxes_have_no_arrows_and_ignore_the_mouse_wheel():
     assert '"' not in C._NO_WHEEL_JS  # it sits inside a double-quoted attribute
 
 
+def test_mouse_wheel_guard_is_scoped_to_the_wizard_root():
+    # The listener sits on `document`; without this check it would blur every
+    # number box in a JupyterLab tab, not just the wizard's.
+    assert "closest('.forge-app')" in C._NO_WHEEL_JS
+
+
 def test_chip_contains_kind_class_and_text():
     html = C.chip("Required", "req")
     assert "forge-chip req" in html

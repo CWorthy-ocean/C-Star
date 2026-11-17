@@ -449,11 +449,13 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 
 
 #: Installed once per page: a wheel event over a number box takes its focus away,
-#: which is what stops the browser from stepping its value.
+#: which is what stops the browser from stepping its value. Only boxes under the
+#: ``.forge-app`` root are touched, like the CSS, so the rest of a JupyterLab tab
+#: keeps its own wheel behavior.
 _NO_WHEEL_JS = (
     "if(!window.forgeNoWheel){window.forgeNoWheel=1;"
-    "document.addEventListener('wheel',function(e){"
-    "if(e.target.type==='number')e.target.blur();},true);}"
+    "document.addEventListener('wheel',function(e){var t=e.target;"
+    "if(t.type==='number'&&t.closest('.forge-app'))t.blur();},true);}"
 )
 
 
