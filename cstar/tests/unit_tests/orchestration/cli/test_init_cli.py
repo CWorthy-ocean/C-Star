@@ -44,6 +44,8 @@ from cstar.system.environment import EnvSettingsBase
 from cstar.system.manager import (
     CTX_REGISTRY,
     DOCS_DESCRIBE_CLUSTER_URL,
+    SYSTEM_SKILL,
+    SYSTEM_SKILL_HINT,
     SystemSelection,
     SystemSource,
     get_registered_sys_contexts,
@@ -1775,3 +1777,152 @@ def test_the_system_section_places_a_shared_file_like_the_option(
         f"{user_catalog}{os.pathsep}{shared.resolve()}"
     )
     assert not user_catalog.exists()
+
+
+def test_yes_without_an_agent_installs_no_skills(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+) -> None:
+    """With no agent folder, init names `cstar skill install`, writes nothing and
+    creates neither `.agents` nor `.claude`.
+    """
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "No coding agent found; `cstar skill install` installs" in output
+    assert "Agent skills: not installed (no agent found)" in output
+    assert not (isolate_agent_home / ".agents").exists()
+    assert not (isolate_agent_home / ".claude").exists()
+
+
+def test_yes_with_claude_installs_skills_for_both_folders(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+) -> None:
+    """With `~/.claude` present, `--yes` links the skills into `~/.agents/skills`
+    and `~/.claude/skills`.
+    """
+    (isolate_agent_home / ".claude").mkdir()
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Agent skills: 1 installed (" in output
+    for home in (".agents", ".claude"):
+        assert (isolate_agent_home / home / "skills" / SYSTEM_SKILL).is_symlink()
+
+
+def test_yes_with_only_codex_installs_into_the_agents_folder(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+) -> None:
+    """With only `~/.codex` present, only `~/.agents/skills` is written."""
+    (isolate_agent_home / ".codex").mkdir()
+
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert (isolate_agent_home / ".agents" / "skills" / SYSTEM_SKILL).is_symlink()
+    assert not (isolate_agent_home / ".claude").exists()
+
+
+def test_declining_the_skills_prompt_writes_nothing(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+    laptop_data_home: None,
+) -> None:
+    """Answering no to the skills prompt, which follows the kernel prompt, skips it."""
+    (isolate_agent_home / ".claude").mkdir()
+
+    result = run_init(input="y\nn\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Install C-Star's skills for your coding agents?" in output
+    assert "Agent skills: skipped" in output
+    assert not (isolate_agent_home / ".agents").exists()
+    assert not (isolate_agent_home / ".claude" / "skills").exists()
+
+
+def test_a_real_folder_in_the_way_is_reported_and_init_still_succeeds(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+) -> None:
+    """A real folder at the skill's place is left alone, reported, and named in the
+    summary, while the other folder is written.
+    """
+    blocker = isolate_agent_home / ".claude" / "skills" / SYSTEM_SKILL
+    blocker.mkdir(parents=True)
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Not installed:" in output
+    assert "not all in" in output
+    assert not blocker.is_symlink()
+    assert (isolate_agent_home / ".agents" / "skills" / SYSTEM_SKILL).is_symlink()
+
+
+def test_a_rerun_says_the_skills_are_already_linked(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+) -> None:
+    """A second `--yes` run reports the links as already current and succeeds."""
+    (isolate_agent_home / ".claude").mkdir()
+    run_init("--yes")
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "already linked to this C-Star" in output
+    assert "Agent skills: 1 installed (" in output
+
+
+def test_no_shipped_skill_offers_no_install(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With an agent present but no skill shipped, init asks nothing and writes
+    nothing.
+    """
+    (isolate_agent_home / ".claude").mkdir()
+    monkeypatch.setattr(init_module, "shipped_skills", list)
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Install C-Star's skills" not in output
+    assert "Agent skills: none shipped" in output
+    assert not (isolate_agent_home / ".agents").exists()
+
+
+def test_fallback_system_section_points_at_the_system_skill(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    fallback: None,
+) -> None:
+    """The System section of a fallback names the skill that writes a system file."""
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert flatten_cli_output(SYSTEM_SKILL_HINT) in flatten_cli_output(result.output)

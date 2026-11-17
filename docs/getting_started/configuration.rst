@@ -14,8 +14,9 @@ covers both cases:
 It asks for the scheduler settings (listing your SLURM associations and
 partitions when it can), shows where run output, the shared source-data
 cache and your catalog will go, writes the answers to a configuration file,
-and offers to install the shell function behind ``cstar run cd`` and to
-register a Jupyter kernel for the environment. Every prompt defaults to the
+and offers to install the shell function behind ``cstar run cd``, to
+register a Jupyter kernel for the environment, and to install C-Star's skills
+for any coding agent you use. Every prompt defaults to the
 value in effect now, so running it again later reviews and updates your
 setup. ``cstar init --yes`` accepts every default without asking.
 
