@@ -24,8 +24,9 @@ SHELL_MAX_WIDTH = "1600px"
 #: Height of the sticky status bar: where a pinned preview pane docks beneath it.
 STICKY_BAR_HEIGHT = "56px"
 
-#: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap with
-#: :func:`style_widget` or ``f"<style>{WIZARD_CSS}</style>"`` yourself).
+#: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap it with
+#: :func:`style_widget`, which also installs the number-box mouse-wheel guard that
+#: a bare ``f"<style>{WIZARD_CSS}</style>"`` would lack).
 WIZARD_CSS = f"""
 /* page background only in Voila (body[data-voila]); JupyterLab keeps its theme */
 body[data-voila] {{ background: {branding.GREY}; }}
@@ -449,11 +450,13 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 
 
 #: Installed once per page: a wheel event over a number box takes its focus away,
-#: which is what stops the browser from stepping its value.
+#: which is what stops the browser from stepping its value. Only boxes under the
+#: ``.forge-app`` root are touched, like the CSS, so the rest of a JupyterLab tab
+#: keeps its own wheel behavior.
 _NO_WHEEL_JS = (
     "if(!window.forgeNoWheel){window.forgeNoWheel=1;"
-    "document.addEventListener('wheel',function(e){"
-    "if(e.target.type==='number')e.target.blur();},true);}"
+    "document.addEventListener('wheel',function(e){var t=e.target;"
+    "if(t.type==='number'&&t.closest('.forge-app'))t.blur();},true);}"
 )
 
 
