@@ -158,6 +158,14 @@
     grdname = '<WORKDIR>/input_data/it-constants_grid.nc'
 /
 
+&implicit_fs
+    fs_mode = 'split'
+    fs_nsub = 2
+    fs_rho_inf = 0.5
+    fs_tol = 1e-08
+    fs_verbose = 0
+/
+
 &initial_conditions
     inifile = '<WORKDIR>/input_data/it-constants_initial_conditions.nc'
 /
