@@ -18,6 +18,10 @@ UNLIMITED_WALLTIMES: Final = frozenset({"infinite", "unlimited", "n/a"})
 """Values SLURM reports for a queue with no walltime limit."""
 
 
+class QueueNotFoundError(LookupError):
+    """The scheduler lists no partition or QOS of the name a walltime query asked about."""
+
+
 def slurm_job_id(environ: "Mapping[str, str]") -> str:
     """Read the id of the SLURM job a process runs in from its environment.
 
@@ -149,21 +153,17 @@ def format_walltime(walltime_str: str) -> str | None:
     -------
     str or None
         The formatted walltime string in the "HH:MM:SS" format, or `None` when
-        SLURM reports the queue has no walltime limit or the reported value
-        cannot be parsed (treated as unlimited; the scheduler enforces the
-        real limit at submission).
+        SLURM reports the queue has no walltime limit.
+
+    Raises
+    ------
+    ValueError
+        If the value is neither a walltime nor one of SLURM's no-limit values;
+        `Queue.max_walltime` then treats the limit as unknown.
     """
     if walltime_str.strip().casefold() in UNLIMITED_WALLTIMES:
         return None
-    try:
-        mw_h, mw_m, mw_s = parse_walltime(walltime_str)
-    except ValueError:
-        log.warning(
-            f"Cannot parse queue walltime {walltime_str!r}; treating the maximum "
-            "walltime as unlimited. If the requested walltime exceeds the queue's "
-            "actual limit, the job may be rejected by the scheduler."
-        )
-        return None
+    mw_h, mw_m, mw_s = parse_walltime(walltime_str)
     return f"{mw_h:02}:{mw_m:02}:{mw_s:02}"
 
 
@@ -176,16 +176,28 @@ def query_max_walltime_via_sinfo(name: str) -> str | None:
     Returns
     -------
     str or None
-        The maximum walltime in the format "HH:MM:SS", or `None` if no walltime is set.
+        The maximum walltime in the format "HH:MM:SS", or `None` if the partition
+        has no walltime limit.
 
     Raises
     ------
+    QueueNotFoundError
+        If `sinfo` lists no partition of that name (it prints nothing, and
+        exits 0).
     RuntimeError
-        If the command to query the SLURM scheduler (`sinfo`) fails.
+        If `sinfo` fails.
+    ValueError
+        If `sinfo` reports something that is not a walltime.
     """
     sp_cmd = f"sinfo --noheader --format='%l' --partition={name}"
-    mw = _run_cmd(sp_cmd)
-    return format_walltime(mw) if mw else None
+    # sinfo may print the partition's limit once per group of nodes
+    limits = sorted(
+        {line.strip() for line in _run_cmd(sp_cmd, raise_on_error=True).splitlines()}
+        - {""}
+    )
+    if not limits:
+        raise QueueNotFoundError(f"sinfo lists no partition named {name!r}")
+    return format_walltime("\n".join(limits))
 
 
 @functools.cache
@@ -245,19 +257,31 @@ def query_max_walltime_via_sacctmgr(name: str) -> str | None:
 
     Queries the SLURM accounting manager (`sacctmgr`) to fetch the maximum walltime
     associated with this QOS. The walltime is returned in the format "HH:MM:SS".
+    The QOS's name is asked for too: `sacctmgr` prints nothing for a QOS that
+    does not exist and an empty `MaxWall` for one with no limit, which only
+    the name tells apart.
 
     Returns
     -------
     str or None
-        The maximum walltime in the format "HH:MM:SS", or `None` if no walltime is set.
+        The maximum walltime in the format "HH:MM:SS", or `None` if the QOS has
+        no walltime limit.
 
     Raises
     ------
+    QueueNotFoundError
+        If `sacctmgr` lists no QOS of that name (it prints nothing, and exits 0).
     RuntimeError
-        If the command to query the SLURM accounting manager (`sacctmgr`) fails.
+        If `sacctmgr` fails.
+    ValueError
+        If `sacctmgr` reports something that is not a walltime.
     """
-    sp_cmd = f"sacctmgr show qos {name} format=MaxWall --noheader"
-    mw = _run_cmd(sp_cmd)
+    sp_cmd = f"sacctmgr show qos {name} format=Name,MaxWall --noheader --parsable2"
+    stdout = _run_cmd(sp_cmd, raise_on_error=True)
+    rows = [line for line in stdout.splitlines() if line.strip()]
+    if not rows:
+        raise QueueNotFoundError(f"sacctmgr lists no QOS named {name!r}")
+    mw = rows[0].partition("|")[2].strip()
     return format_walltime(mw) if mw else None
 
 
@@ -314,10 +338,40 @@ class Queue(ABC):
         """Return the function that answers the queue's maximum walltime."""
         return self._max_walltime_method or self._default_max_walltime_method
 
+    def query_max_walltime(self) -> str | None:
+        """Ask for the queue's maximum walltime.
+
+        Returns
+        -------
+        str or None
+            The maximum walltime, "HH:MM:SS", or `None` if the queue has no limit.
+
+        Raises
+        ------
+        QueueNotFoundError
+            If the scheduler lists no queue of this queue's `query_name`.
+        RuntimeError
+            If the scheduler's query command fails.
+        ValueError
+            If the scheduler's answer is not a walltime.
+        """
+        return self.walltime_method(self.query_name)
+
     @property
     def max_walltime(self) -> str | None:
-        """Return the maximum walltime for the queue."""
-        return self.walltime_method(self.query_name)
+        """Return the maximum walltime for the queue, or `None` when it has no
+        limit or it cannot be found out.
+
+        Never raises for a missing queue, a failed query or an answer that is
+        not a walltime: a job then asks for the walltime it was given, as for a
+        queue with no limit. `cstar system check` calls `query_max_walltime` to
+        tell these apart.
+        """
+        try:
+            return self.query_max_walltime()
+        except (QueueNotFoundError, RuntimeError, ValueError) as ex:
+            log.warning(f"The walltime limit of queue {self.name!r} is unknown: {ex}")
+            return None
 
     @property
     def max_cpus_per_node(self) -> int | None:
@@ -437,8 +491,8 @@ class PBSQueue(Queue):
         super().__init__(name, query_name)
         self._max_walltime = max_walltime
 
-    @property
-    def max_walltime(self):
+    def query_max_walltime(self) -> str | None:
+        """Return the queue's fixed maximum walltime; PBS is not asked."""
         return self._max_walltime
 
     @property

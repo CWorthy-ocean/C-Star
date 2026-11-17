@@ -259,12 +259,12 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
   - nothing reports a limit but the documentation gives one: a fixed, quoted
     `"HH:MM:SS"` with the URL in a comment.
 
-  `cstar system check` reports each queue's walltime; a queue that reports
-  none usually has the wrong source. A partition with no limit at all
-  (`infinite`, and no QOS caps it) also reports none and fails the check:
-  give it the limit the documentation states, if any, as a fixed walltime;
-  otherwise leave it, and tell the user that C-Star then asks for
-  `CSTAR_SLURM_MAX_WALLTIME` (48 hours unless they set it).
+  `cstar system check` reports each queue's walltime. It fails a queue
+  whose partition or QOS the scheduler does not list: the queue's `name` or
+  `query_name` is wrong. It passes a queue with no limit and says so; a job
+  there asks for `CSTAR_SLURM_MAX_WALLTIME` (48 hours unless the user sets
+  it). If such a queue's jobs are capped by a QOS after all, ask that QOS, as
+  above.
 - `directives`: only what every CPU job must carry, such as a constraint the
   site requires to select CPU nodes.
 - `max_cpus_per_node`: only when every node of the primary queue has the same
@@ -331,8 +331,8 @@ again:
   that sets it is not loaded, or it is the wrong variable.
 - `mpi wrapper`: `MPIHOME` does not hold `bin/mpifort`.
 - `nf-config`: not on `PATH`; check the `PATH` line and `NETCDFHOME`.
-- `queue <name>`: the walltime source is wrong, or the queue has no limit
-  (section 6).
+- `queue <name>`: the scheduler lists no partition or QOS of that name; fix
+  the queue's `name` or `query_name` (section 6).
 - `permissions`: run `chmod o-w <name>.yaml`.
 
 `NOT CHECKED` for detection means C-Star will not pick the system by itself

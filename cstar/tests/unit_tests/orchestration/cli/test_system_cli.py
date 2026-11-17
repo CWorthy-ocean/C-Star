@@ -27,6 +27,7 @@ from cstar.cli.system.check import (
 )
 from cstar.system.environment import CStarEnvironment
 from cstar.system.manager import SystemSelection, SystemSource, registered_context
+from cstar.system.scheduler import QueueNotFoundError
 from cstar.system.spec import (
     BUNDLED_SYSTEMS_DIR,
     DRAFT_LAYER,
@@ -519,31 +520,72 @@ def test_a_queue_walltime_query_passes_with_its_value(
 @pytest.mark.parametrize(
     ("answer", "expected"),
     [
-        (None, "reported no walltime limit"),
+        (
+            QueueNotFoundError("sinfo lists no partition named 'main'"),
+            "sinfo lists no partition named 'main'; check the queue's name and query_name",
+        ),
         (RuntimeError("sinfo broke"), "sinfo broke"),
+        (
+            ValueError("Unrecognized walltime format: 'garbage'"),
+            "the walltime query failed: ValueError: Unrecognized walltime format",
+        ),
     ],
 )
-def test_a_walltime_query_that_fails_or_answers_nothing_fails(
+def test_a_walltime_query_that_fails_or_finds_no_queue_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    answer: object,
+    answer: Exception,
     expected: str,
 ) -> None:
-    """A query that raises, or that finds no limit, is a failed step."""
+    """A query that raises, or names a queue the scheduler does not list, fails."""
 
     def query(_name: str) -> str | None:
-        if isinstance(answer, Exception):
-            raise answer
-        return None
+        raise answer
 
     monkeypatch.setattr(check_module.shutil, "which", which_only("sbatch", "sinfo"))
-    monkeypatch.setattr(check_module, "_walltime", lambda queue: query(queue.name))
+    monkeypatch.setattr(
+        "cstar.system.scheduler.SlurmPartition._default_max_walltime_method",
+        property(lambda self: query),
+    )
     spec = spec_of(SLURM, tmp_path)
 
     results = by_step(check_scheduler(spec))
 
     assert results["queue main"].status == STATUS_FAIL
     assert expected in results["queue main"].detail
+
+
+def test_a_queue_with_no_walltime_limit_passes_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`infinite` from sinfo is an answer: the queue has no limit."""
+    monkeypatch.setattr(check_module.shutil, "which", which_only("sbatch", "sinfo"))
+    monkeypatch.setattr(
+        "cstar.system.scheduler._run_cmd", lambda *args, **kwargs: "infinite"
+    )
+    spec = spec_of(SLURM, tmp_path)
+
+    results = by_step(check_scheduler(spec))
+
+    assert results["queue main"] == CheckResult(
+        "queue main",
+        STATUS_PASS,
+        "sinfo reports no walltime limit; a job asks for CSTAR_SLURM_MAX_WALLTIME",
+    )
+
+
+def test_a_queue_the_scheduler_does_not_list_fails_through_the_real_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty output from sinfo (no such partition) fails, though runs only warn."""
+    monkeypatch.setattr(check_module.shutil, "which", which_only("sbatch", "sinfo"))
+    monkeypatch.setattr("cstar.system.scheduler._run_cmd", lambda *args, **kwargs: "")
+    spec = spec_of(SLURM, tmp_path)
+
+    results = by_step(check_scheduler(spec))
+
+    assert results["queue main"].status == STATUS_FAIL
+    assert "sinfo lists no partition named 'main'" in results["queue main"].detail
 
 
 def test_a_walltime_query_that_never_answers_times_out(

@@ -7,6 +7,7 @@ from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
     Queue,
+    QueueNotFoundError,
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
@@ -90,13 +91,13 @@ class TestQueue:
         Simulates a successful system command to retrieve the maximum walltime.
         """
         mock_subprocess_run.return_value = MagicMock(
-            returncode=0, stdout="02:00:00", stderr=""
+            returncode=0, stdout="general|02:00:00", stderr=""
         )
         slurm_qos = SlurmQOS(name="general")
         assert slurm_qos.max_walltime == "02:00:00"
 
         mock_subprocess_run.assert_called_once_with(
-            "sacctmgr show qos general format=MaxWall --noheader",
+            "sacctmgr show qos general format=Name,MaxWall --noheader --parsable2",
             shell=True,
             text=True,
             capture_output=True,
@@ -533,42 +534,51 @@ def test_parse_walltime(value: str, expected: str | None) -> None:
         pytest.param("aa:bb:cc", id="non-numeric fields"),
     ],
 )
-def test_parse_walltime_unrecognized(
-    value: str, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Verify unrecognized walltime strings fall back to None (unlimited) with a
-    warning instead of silently parsing to zero.
+def test_parse_walltime_unrecognized(value: str) -> None:
+    """An unrecognized walltime raises rather than reading as unlimited or as
+    zero; `Queue.max_walltime` turns it into an unknown limit at run time.
     """
-    with caplog.at_level(logging.WARNING):
-        result = format_walltime(value)
-
-    assert result is None
-    assert any("Cannot parse queue walltime" in msg for msg in caplog.messages)
+    with pytest.raises(ValueError):
+        format_walltime(value)
 
 
 def test_query_max_walltime_via_sinfo() -> None:
-    """Verify the maximum walltime is correctly returned from the query method."""
+    """Verify the maximum walltime is correctly returned from the query method,
+    and that a failing sinfo raises rather than reading as an empty answer.
+    """
     with patch(
         "cstar.system.scheduler._run_cmd", MagicMock(return_value="2-00:00:00")
     ) as mock_sinfo:
         result = query_max_walltime_via_sinfo("mock-partition-name")
 
         assert result == "48:00:00"
-        mock_sinfo.assert_called_once()
+        mock_sinfo.assert_called_once_with(
+            "sinfo --noheader --format='%l' --partition=mock-partition-name",
+            raise_on_error=True,
+        )
+
+
+def test_query_max_walltime_via_sinfo_repeats_one_limit_per_node_group() -> None:
+    """Sinfo may print the limit once per group of nodes; one value is one limit."""
+    with patch(
+        "cstar.system.scheduler._run_cmd",
+        MagicMock(return_value="1-00:00:00\n1-00:00:00\n"),
+    ):
+        assert query_max_walltime_via_sinfo("mock-partition-name") == "24:00:00"
 
 
 def test_query_max_walltime_via_sinfo_partition_not_valid() -> None:
-    """Verify a null max walltime is returned from the query method when
-    the underlying query returns no result.
+    """A partition sinfo does not list is an error, not a queue with no limit.
 
-    e.g `sinfo --noheader --format='%l' --partition=garbage-name`
+    e.g `sinfo --noheader --format='%l' --partition=garbage-name` prints
+    nothing and exits 0 (seen on Perlmutter 2026-11-17).
     """
     with patch(
         "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
     ) as mock_sinfo:
-        result = query_max_walltime_via_sinfo("mock-partition-name")
+        with pytest.raises(QueueNotFoundError, match="no partition named"):
+            query_max_walltime_via_sinfo("mock-partition-name")
 
-        assert result is None
         mock_sinfo.assert_called_once()
 
 
@@ -657,27 +667,68 @@ def test_query_max_cpus_per_node_via_sinfo_caches_successes_only() -> None:
 def test_query_max_walltime_via_sacctmgr() -> None:
     """Verify the maximum walltime is correctly returned from the query method."""
     with patch(
-        "cstar.system.scheduler._run_cmd", MagicMock(return_value="2-00:00:00")
+        "cstar.system.scheduler._run_cmd",
+        MagicMock(return_value="mock-qos-name|2-00:00:00"),
     ) as mock_sinfo:
-        result = query_max_walltime_via_sacctmgr("mock-partition-name")
+        result = query_max_walltime_via_sacctmgr("mock-qos-name")
 
         assert result == "48:00:00"
-        mock_sinfo.assert_called_once()
+        mock_sinfo.assert_called_once_with(
+            "sacctmgr show qos mock-qos-name format=Name,MaxWall --noheader --parsable2",
+            raise_on_error=True,
+        )
 
 
-def test_query_max_walltime_via_sacctmgr_partition_not_valid() -> None:
-    """Verify a null max walltime is returned from the query method when
-    the underlying query returns no result.
+def test_query_max_walltime_via_sacctmgr_unlimited() -> None:
+    """A QOS that exists with an empty MaxWall has no limit.
 
-    e.g `sinfo --noheader --format='%l' --partition=garbage-name`
+    e.g. `sacctmgr show qos normal format=Name,MaxWall --noheader --parsable2`
+    prints `normal|` on Perlmutter (2026-11-17).
+    """
+    with patch("cstar.system.scheduler._run_cmd", MagicMock(return_value="normal|")):
+        assert query_max_walltime_via_sacctmgr("normal") is None
+
+
+def test_query_max_walltime_via_sacctmgr_qos_not_valid() -> None:
+    """A QOS sacctmgr does not list is an error, not a queue with no limit.
+
+    e.g. `sacctmgr show qos garbage-name ...` prints nothing and exits 0.
     """
     with patch(
         "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
     ) as mock_sinfo:
-        result = query_max_walltime_via_sacctmgr("mock-partition-name")
+        with pytest.raises(QueueNotFoundError, match="no QOS named"):
+            query_max_walltime_via_sacctmgr("mock-qos-name")
 
-        assert result is None
         mock_sinfo.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("run_cmd", "said"),
+    [
+        (MagicMock(return_value=""), "lists no"),
+        (MagicMock(side_effect=RuntimeError("sinfo failed")), "failed"),
+        (MagicMock(return_value="nope|garbage"), "Unrecognized walltime format"),
+    ],
+)
+@pytest.mark.parametrize("klass", [SlurmQOS, SlurmPartition])
+def test_max_walltime_of_a_queue_that_cannot_be_asked_is_none(
+    run_cmd: MagicMock,
+    said: str,
+    klass: type[SlurmQOS] | type[SlurmPartition],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At run time a missing queue or a failed query reads as an unknown limit,
+    with a warning, as before; only `query_max_walltime` raises.
+    """
+    queue = klass(name="nope")
+    with patch("cstar.system.scheduler._run_cmd", run_cmd):
+        with caplog.at_level(logging.WARNING):
+            assert queue.max_walltime is None
+        with pytest.raises((QueueNotFoundError, RuntimeError, ValueError)):
+            queue.query_max_walltime()
+
+    assert any(said in m and "'nope'" in m for m in caplog.messages)
 
 
 @pytest.mark.parametrize(
