@@ -1099,8 +1099,7 @@ class SchedulerJob(ExecutionHandler, ABC):
                 + "parameters, but your system requires an explicitly specified task distribution."
                 + "\n C-Star will attempt "
                 + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
-                + f"\nbased on the {max_cpus} CPUs per node of queue "
-                + f"{self._queue_name!r} "
+                + f"\nbased on {max_cpus} CPUs per node "
                 + f"\nand your job requirement of {cpus} CPUS."
             ),
         )

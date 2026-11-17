@@ -273,8 +273,8 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
   counts hardware threads too (it is twice the cores when threads is 2), and
   ranks on both threads of a core slow the model. A partition queue asks
   `sinfo` for its own CPUs per node by its `name` (never its `query_name`),
-  so this value only lays out jobs on QOS queues and on partitions `sinfo`
-  cannot answer for.
+  so this value is used for QOS queues and for partitions `sinfo` cannot
+  answer for.
 - `requires_task_distribution`: `true` only when the site requires jobs to
   state nodes and tasks per node.
 - `require`: from the probe's `sbatch --test-only`, which names no account and
