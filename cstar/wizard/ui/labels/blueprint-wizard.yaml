@@ -139,6 +139,9 @@ sections:
   settings.lin_rho_eos:
     title: Linear equation of state
     required: false
+  settings.implicit_fs:
+    title: Implicit free surface
+    required: false
   settings.pio_settings:
     title: Parallel I/O
     required: false
@@ -743,6 +746,21 @@ fields:
     label: Reference salinity
     symbol: s0
     unit: PSU
+  settings.implicit_fs.fs_mode:
+    label: Barotropic time stepping
+    symbol: fs_mode
+  settings.implicit_fs.fs_nsub:
+    label: Implicit sub-steps per time step
+    symbol: fs_nsub
+  settings.implicit_fs.fs_rho_inf:
+    label: Damping of fast modes (spectral radius)
+    symbol: fs_rho_inf
+  settings.implicit_fs.fs_tol:
+    label: Free-surface solver tolerance
+    symbol: fs_tol
+  settings.implicit_fs.fs_verbose:
+    label: Free-surface log detail
+    symbol: fs_verbose
   settings.pio_settings.pio_stride:
     label: PIO stride
     symbol: pio_stride

@@ -78,6 +78,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.namelist_model import (
     CDR_OUTPUT_SECTIONS,
+    FS_MODE_SPLIT,
     MARBL_ONLY_OUTPUT_FLAGS,
     BgcMode,
     RunTimeSettings,
@@ -720,6 +721,18 @@ def _unwrap_type(ann):
     return ann
 
 
+def _literal_choices(ann) -> tuple[str, ...] | None:
+    """The options of a ``Literal`` of strings annotation (through ``Optional`` /
+    ``Annotated``), else ``None``: the one source for a dropdown's choices.
+    """
+    base = _unwrap_type(ann)
+    if get_origin(base) is typing.Literal:
+        choices = get_args(base)
+        if all(isinstance(c, str) for c in choices):
+            return choices
+    return None
+
+
 def _base_type(ann, value):
     """The widget type to use for a field: from the annotation if known, else
     inferred from the current value.
@@ -759,6 +772,7 @@ def _make_field_widget(
     value: Any,
     tooltip: str = "",
     bool_dropdown: tuple[str, str] | None = None,
+    choices: tuple[str, ...] | None = None,
 ):
     style = {"description_width": "260px"}
     wide = W.Layout(width="560px")
@@ -769,6 +783,17 @@ def _make_field_widget(
         return W.Dropdown(
             options=(true_label, false_label),
             value=true_label if value else false_label,
+            description=name,
+            style=style,
+            layout=num,
+            **kw,
+        )
+    # A value outside the choices (a hand-edited blueprint) gets a Text box instead,
+    # which can show it; the live validation reports it.
+    if choices is not None and value in choices:
+        return W.Dropdown(
+            options=choices,
+            value=value,
             description=name,
             style=style,
             layout=num,
@@ -1153,7 +1178,7 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # advection fields only render for ModelSpecs that declare them
 # (``roms-marbl-0.8-default``, ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``,
 # ``roms-marbl-0.11-default``, ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``,
-# ``roms-marbl-0.14-default``, ``pio-dev``) -- the editor type-infers a checkbox from
+# ``roms-marbl-0.14-default``, ``roms-marbl-0.15-default``, ``pio-dev``) -- the editor type-infers a checkbox from
 # the composed bool, so a spec that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
@@ -1177,6 +1202,9 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "gamma2",
             "ubind",
             "lin_rho_eos",
+            # ucla-roms >= 0.15.0, the barotropic scheme; renders only for ModelSpecs
+            # that declare it.
+            "implicit_fs",
             # pio_settings is ModelSpec-owned (like the rest of this pane), NOT an
             # output section: edits here must land in composition.model / "Save
             # Model spec", so keep it out of the Output card.
@@ -1291,6 +1319,9 @@ _FieldKey = str | tuple[str, str]
 # once for the table row below and for ``_apply_field_rules``.
 _DIAGNOSTICS_SWITCH = ("cppdefs", "diagnostics")
 _TS_DIAGNOSTICS_FLAGS = (("ts_output", "wrt_temp_dia"), ("ts_output", "wrt_salt_dia"))
+# The ``implicit_fs`` settings read only with ``fs_mode`` other than split (``fs_verbose``
+# also matters in split mode); named for ``_apply_field_rules``.
+_IMPLICIT_FS_SOLVER_FIELDS = ("fs_nsub", "fs_rho_inf", "fs_tol")
 
 # Output-stream tables for the settings editor: each namelist section
 # that models one-or-more "write this stream / how often / how many records
@@ -2045,7 +2076,11 @@ class _SettingsEditor:
                         if _read_field_widget(widget, list) != list(value or []):
                             widget.value = ", ".join(str(x) for x in (value or []))
                     elif value is not None:
-                        widget.value = base(value)
+                        # A Dropdown refuses a value outside its options (a
+                        # hand-edited blueprint); the validation reports it.
+                        options = getattr(widget, "options", None)
+                        if options is None or value in options:
+                            widget.value = base(value)
                 except (ValueError, TypeError):
                     pass
         finally:
@@ -2070,6 +2105,7 @@ class _SettingsEditor:
             ("ocean_vars", "wrt_file_rst"),
             ("ocean_vars", "monthly_restarts"),
             ("marbl_bgc", "use_constant_fe"),
+            ("implicit_fs", "fs_mode"),
             _DIAGNOSTICS_SWITCH,
             ("diagnostics", "diag_trc"),
         ]
@@ -2102,7 +2138,8 @@ class _SettingsEditor:
 
     def _apply_field_rules(self) -> None:
         """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets (and
-        ``marbl_bgc.constant_fe_value``) from their CURRENT values -- never mutates
+        ``marbl_bgc.constant_fe_value``, the ``implicit_fs`` solver settings) from
+        their CURRENT values -- never mutates
         a value, only visibility/``disabled``.
 
         Rationale: the dependent fields are meaningless (and ignored by the
@@ -2145,6 +2182,14 @@ class _SettingsEditor:
                 self._widgets.get(("marbl_bgc", "constant_fe_value")),
                 bool(use_fe[0].value),
             )
+
+        if (fs_mode := self._widgets.get(("implicit_fs", "fs_mode"))) is not None:
+            # fs_verbose also matters in split mode, so it stays.
+            for solver_field in _IMPLICIT_FS_SOLVER_FIELDS:
+                _show(
+                    self._widgets.get(("implicit_fs", solver_field)),
+                    fs_mode[0].value != FS_MODE_SPLIT,
+                )
 
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             master = self._widgets.get((section, master_flag))
@@ -2209,7 +2254,13 @@ class _SettingsEditor:
         label, tip = _namelist_description_and_tooltip(section, key, tip)
         bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
         w = _make_field_widget(
-            self.W, label, base, val, tooltip=tip, bool_dropdown=bool_dropdown
+            self.W,
+            label,
+            base,
+            val,
+            tooltip=tip,
+            bool_dropdown=bool_dropdown,
+            choices=_literal_choices(ann),
         )
         self._widgets[(section, key)] = (w, base)
         return w

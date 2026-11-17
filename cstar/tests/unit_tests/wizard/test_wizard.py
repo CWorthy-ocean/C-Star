@@ -4375,6 +4375,10 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
             "roms-marbl-0.14-default",
             {"cdr_carbonate_sensitivity_time_interpolation": True},
         ),
+        (
+            "roms-marbl-0.15-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
@@ -4757,6 +4761,117 @@ def test_constant_fe_value_hidden_until_use_constant_fe_is_on():
     use_fe.value = False
     assert fe_value.layout.display == "none"
     assert fe_value.value == pytest.approx(3.0e-3)
+
+
+_IMPLICIT_FS_FIELDS = ("fs_mode", "fs_nsub", "fs_rho_inf", "fs_tol", "fs_verbose")
+
+
+def _implicit_fs_wizard(model: str) -> ForgeBlueprintWizard:
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = model
+    wiz._rebuild()
+    return wiz
+
+
+def test_implicit_fs_widgets_built_for_the_0_15_model():
+    """``implicit_fs`` (ucla-roms >= 0.15.0) gets five widgets in the Physics pane
+    for ``roms-marbl-0.15-default``; ``fs_mode`` is a dropdown of the schema's
+    choices, defaulting to the older split-explicit behavior.
+    """
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    assert wiz.config is not None
+    assert wiz.config.model_settings["implicit_fs"]["fs_mode"] == "split"
+    for field in _IMPLICIT_FS_FIELDS:
+        assert ("implicit_fs", field) in wiz.editor._widgets
+    assert "implicit_fs" in wiz.editor._pane_sections["Physics & subgrid tuning"]
+
+    mode, base = wiz.editor._widgets[("implicit_fs", "fs_mode")]
+    assert base is str
+    assert mode.options == ("split", "implicit")
+    assert mode.value == "split"
+    assert mode.description == "Barotropic time stepping"
+
+
+def test_implicit_fs_widgets_absent_for_the_0_14_model():
+    """``roms-marbl-0.14-default`` pins a ucla-roms without the group: no widget."""
+    wiz = _implicit_fs_wizard("roms-marbl-0.14-default")
+    assert wiz.config is not None
+    assert "implicit_fs" not in wiz.config.model_settings
+    for field in _IMPLICIT_FS_FIELDS:
+        assert ("implicit_fs", field) not in wiz.editor._widgets
+
+
+def test_implicit_fs_solver_settings_hidden_until_implicit_is_chosen():
+    """The solver settings read only in implicit mode, so they hide in split mode;
+    ``fs_verbose`` also matters in split mode and stays. Display only: no value
+    changes.
+    """
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    widgets = {
+        f: wiz.editor._widgets[("implicit_fs", f)][0] for f in _IMPLICIT_FS_FIELDS
+    }
+    solver = ("fs_nsub", "fs_rho_inf", "fs_tol")
+    for field in solver:
+        assert widgets[field].layout.display == "none"
+    assert widgets["fs_mode"].layout.display != "none"
+    assert widgets["fs_verbose"].layout.display != "none"
+
+    widgets["fs_mode"].value = "implicit"
+    for field in solver:
+        assert widgets[field].layout.display == ""
+    assert widgets["fs_nsub"].value == 2
+
+    widgets["fs_mode"].value = "split"
+    for field in solver:
+        assert widgets[field].layout.display == "none"
+    assert widgets["fs_verbose"].layout.display != "none"
+
+
+def test_choosing_implicit_reaches_the_blueprint_and_split_is_the_default():
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    assert wiz.config.model_settings["implicit_fs"]["fs_mode"] == "split"
+    assert ("implicit_fs", "fs_mode") not in wiz._overrides
+
+    wiz.editor._widgets[("implicit_fs", "fs_mode")][0].value = "implicit"
+    assert wiz._overrides[("implicit_fs", "fs_mode")] == "implicit"
+    assert wiz.config is not None
+    assert wiz.config.model_settings["implicit_fs"]["fs_mode"] == "implicit"
+
+
+def test_implicit_choice_does_not_survive_a_switch_to_the_0_14_model():
+    """A model switch clears the overrides, so the implicit choice leaves no error
+    on a model that does not know the group.
+    """
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    wiz.editor._widgets[("implicit_fs", "fs_mode")][0].value = "implicit"
+    assert wiz.config.model_settings["implicit_fs"]["fs_mode"] == "implicit"
+
+    wiz.model_dd.value = "roms-marbl-0.14-default"
+    assert ("implicit_fs", "fs_mode") not in wiz._overrides
+    assert wiz.config is not None
+    assert "implicit_fs" not in wiz.config.model_settings
+    assert ("implicit_fs", "fs_mode") not in wiz.editor._widgets
+
+
+def test_off_list_fs_mode_neither_crashes_the_build_nor_the_sync():
+    """A hand-edited value outside the choices gets a text box when the editor is
+    built, and a sync with it leaves the dropdown alone; the validation reports it.
+    """
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    editor = wiz.editor
+    settings = copy.deepcopy(wiz.config.model_settings)
+    settings["implicit_fs"]["fs_mode"] = "Implicit"
+    editor.sync(settings)  # the dropdown keeps "split"
+    assert editor._widgets[("implicit_fs", "fs_mode")][0].value == "split"
+
+    wiz._overrides[("implicit_fs", "fs_mode")] = "Implicit"
+    wiz._rebuild()  # must not raise
+    assert (
+        wiz.config is None
+        or wiz.config.model_settings["implicit_fs"]["fs_mode"] == "Implicit"
+    )
 
 
 def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
