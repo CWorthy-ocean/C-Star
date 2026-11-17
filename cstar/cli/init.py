@@ -844,6 +844,9 @@ def skills_section(yes: bool) -> str:
     except SkillError as ex:
         echo(f"Error: {ex}")
         return "not installed (see above)"
+    if not skills:
+        echo("This C-Star ships no skills.")
+        return "none shipped"
     found = ", ".join(display_path(home) for home in homes)
     echo(f"C-Star ships skills that coding agents can use ({found} found):")
     for skill in skills:

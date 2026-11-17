@@ -417,6 +417,7 @@ def test_install_state_of_each_kind(
     places = {
         "linked": skill.path,
         "other": old_install_target,
+        "stale": tmp_path / "removed-env" / OTHER_INSTALL_TARGET,
         "dangling": tmp_path / "gone",
         "foreign": foreign,
     }
@@ -431,10 +432,33 @@ def test_install_state_of_each_kind(
 
     assert states["linked"] == (InstallState.LINKED, str(skill.path))
     assert states["other"] == (InstallState.OTHER_CSTAR, str(old_install_target))
+    assert states["stale"] == (
+        InstallState.STALE,
+        str(tmp_path / "removed-env" / OTHER_INSTALL_TARGET),
+    )
     assert states["dangling"] == (InstallState.DANGLING, str(tmp_path / "gone"))
     assert states["foreign"] == (InstallState.FOREIGN, str(foreign))
     assert install_state(skill, skills_dir / "real") == (InstallState.NOT_A_LINK, "")
     assert install_state(skill, skills_dir) == (InstallState.MISSING, "")
+
+
+@pytest.mark.parametrize("copy", [False, True], ids=["link", "copy"])
+def test_an_interrupted_install_leaves_no_scratch(
+    skills_dir: Path, skill: Skill, copy: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An interrupt during the final rename removes the half-made link or copy, so
+    nothing but the place itself is ever left in the skills folder.
+    """
+
+    def interrupt(self: Path, target: Path) -> Path:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Path, "replace", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        install_skill(skill, skills_dir, copy=copy)
+
+    assert list(skills_dir.iterdir()) == []
 
 
 def test_default_install_dirs_follow_the_agent_home(isolate_agent_home: Path) -> None:

@@ -1,11 +1,11 @@
 import typer
 
 from cstar.base.skills import (
+    INSTALL_ADDS,
     InstallState,
     SkillError,
     default_install_dirs,
     install_state,
-    is_cstar_skill_target,
     shipped_skills,
 )
 from cstar.cli.skill.verbs import COMMAND_INSTALL, COMMAND_LIST, NAME
@@ -21,6 +21,8 @@ def describe_state(state: InstallState, target: str) -> str:
             return "linked to this C-Star"
         case InstallState.OTHER_CSTAR:
             return f"linked to another C-Star installation ({target})"
+        case InstallState.STALE:
+            return f"broken link to {target}, a C-Star installation that is gone"
         case InstallState.DANGLING:
             return f"broken link to {target}"
         case InstallState.FOREIGN:
@@ -61,10 +63,7 @@ def list_skills() -> None:
             state, target = install_state(skill, folder)
             place = display_path(folder / skill.name)
             typer.echo(f"  {place}: {describe_state(state, target)}")
-            outdated |= state in (InstallState.MISSING, InstallState.OTHER_CSTAR) or (
-                state is InstallState.DANGLING
-                and is_cstar_skill_target(target, skill.name)
-            )
+            outdated |= state in INSTALL_ADDS
     if outdated:
         typer.echo(
             f"Run `cstar {NAME} {COMMAND_INSTALL}` to install the missing "

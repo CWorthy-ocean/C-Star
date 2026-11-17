@@ -28,12 +28,6 @@ SKILL_FILE_NAME: t.Final[str] = "SKILL.md"
 """The file that makes a folder a skill."""
 _FRONT_MATTER_FENCE: t.Final[str] = "---"
 """The line that opens and closes a skill's front matter."""
-_PACKAGE_PARTS: t.Final[tuple[str, ...]] = (
-    "cstar",
-    "additional_files",
-    SKILLS_DIR_NAME,
-)
-"""Where any C-Star's shipped skills sit, as the last parts of their folder's path."""
 
 AGENTS_HOME: t.Final[str] = ".agents"
 """The home folder whose ``skills`` Codex, Gemini CLI and GitHub Copilot read."""
@@ -103,14 +97,28 @@ class InstallState(StrEnum):
     """A link to this C-Star's copy of the skill."""
     OTHER_CSTAR = auto()
     """A link to the skill in another C-Star installation, which install updates."""
+    STALE = auto()
+    """A link to the skill in a C-Star installation that is gone, which install
+    updates.
+    """
     DANGLING = auto()
-    """A link whose target is gone."""
+    """A link to something other than a C-Star skill, whose target is gone."""
     FOREIGN = auto()
     """A link to something other than a C-Star skill."""
     NOT_A_LINK = auto()
     """A real folder or file: a copy, or something C-Star did not put there."""
     MISSING = auto()
     """Nothing."""
+
+
+INSTALL_ADDS: t.Final[frozenset[InstallState]] = frozenset(
+    {InstallState.MISSING, InstallState.OTHER_CSTAR, InstallState.STALE}
+)
+"""The states that `install`, run with no option, changes into a current link."""
+NEEDS_FORCE: t.Final[frozenset[InstallState]] = frozenset(
+    {InstallState.FOREIGN, InstallState.DANGLING}
+)
+"""The states that `install` replaces only when forced."""
 
 
 def home_dir() -> Path:
@@ -233,7 +241,8 @@ def is_cstar_skill_target(target: str, name: str) -> bool:
     `install` made in an environment since removed or replaced is still C-Star's
     own, and `install` updates it.
     """
-    return Path(target).parts[-4:] == (*_PACKAGE_PARTS, name)
+    package_parts = shipped_skills_dir().parts[-3:]
+    return Path(target).parts[-4:] == (*package_parts, name)
 
 
 def install_state(skill: Skill, folder: Path) -> tuple[InstallState, str]:
@@ -249,13 +258,12 @@ def install_state(skill: Skill, folder: Path) -> tuple[InstallState, str]:
     # before exists(): a dangling link does not exist, and a link to a folder is_dir
     if place.is_symlink():
         target = os.readlink(place)
+        ours = is_cstar_skill_target(target, skill.name)
         if not place.exists():
-            return InstallState.DANGLING, target
+            return (InstallState.STALE if ours else InstallState.DANGLING), target
         if place.resolve() == skill.path.resolve():
             return InstallState.LINKED, target
-        if is_cstar_skill_target(target, skill.name):
-            return InstallState.OTHER_CSTAR, target
-        return InstallState.FOREIGN, target
+        return (InstallState.OTHER_CSTAR if ours else InstallState.FOREIGN), target
     if place.exists():
         return InstallState.NOT_A_LINK, ""
     return InstallState.MISSING, ""
@@ -302,11 +310,7 @@ def install_skill(
             "remove it to install the skill there.",
             place,
         )
-    if (
-        state in (InstallState.FOREIGN, InstallState.DANGLING)
-        and not is_cstar_skill_target(target, skill.name)
-        and not force
-    ):
+    if state in NEEDS_FORCE and not force:
         raise SkillInstallError(
             f"{place} is a link to {target}, which is not a C-Star skill.",
             place,
@@ -325,12 +329,15 @@ def install_skill(
         else:
             scratch.symlink_to(source, target_is_directory=True)
         scratch.replace(place)
-    except OSError as ex:
+    except BaseException as ex:
+        # an interrupt too, so no half-made copy is left for an agent to read
         if scratch.is_symlink() or scratch.is_file():
             scratch.unlink(missing_ok=True)
         elif scratch.is_dir():
             shutil.rmtree(scratch, ignore_errors=True)
-        raise SkillInstallError(
-            f"Cannot install {skill.name} at {place}: {ex}", place
-        ) from ex
+        if isinstance(ex, OSError):
+            raise SkillInstallError(
+                f"Cannot install {skill.name} at {place}: {ex}", place
+            ) from ex
+        raise
     return True

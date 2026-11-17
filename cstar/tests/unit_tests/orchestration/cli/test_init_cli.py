@@ -1893,6 +1893,28 @@ def test_a_rerun_says_the_skills_are_already_linked(
     assert "Agent skills: 1 installed (" in output
 
 
+def test_no_shipped_skill_offers_no_install(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    isolate_agent_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With an agent present but no skill shipped, init asks nothing and writes
+    nothing.
+    """
+    (isolate_agent_home / ".claude").mkdir()
+    monkeypatch.setattr(init_module, "shipped_skills", list)
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Install C-Star's skills" not in output
+    assert "Agent skills: none shipped" in output
+    assert not (isolate_agent_home / ".agents").exists()
+
+
 def test_fallback_system_section_points_at_the_system_skill(
     run_init: Callable[..., Result],
     flatten_cli_output: Callable[[str], str],
