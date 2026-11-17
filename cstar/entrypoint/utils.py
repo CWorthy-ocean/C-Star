@@ -95,6 +95,13 @@ ARG_REPLACE_HELP: t.Final[str] = (
 )
 """Option that allows an added system file to replace a different one."""
 
+ARG_FORCE: t.Final[str] = "--force"
+"""Option that lets an install replace a link that points somewhere else."""
+ARG_COPY: t.Final[str] = "--copy"
+"""Option that installs a copy of the files instead of a link to them."""
+ARG_DIR: t.Final[str] = "--dir"
+"""Option that names the one folder an install writes to."""
+
 ARG_BLUEPRINT: t.Final[str] = "--blueprint"
 ARG_BLUEPRINT_HELP: t.Final[str] = (
     "Reuse the file-type settings of this compress blueprint; only file types "

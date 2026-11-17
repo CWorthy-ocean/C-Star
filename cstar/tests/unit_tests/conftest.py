@@ -2660,6 +2660,22 @@ def isolate_user_config(
 
 
 @pytest.fixture(autouse=True)
+def isolate_agent_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Point the agent-skill code at an empty home directory of its own.
+
+    `cstar init` installs skills when an agent's home folder exists, which on a
+    developer's machine it does; without this, a test would link skills into the
+    real ``~/.claude/skills``. Tests create ``.claude`` and the like under the
+    returned path to stand for an agent.
+    """
+    home = tmp_path_factory.mktemp("agent-home")
+    monkeypatch.setattr("cstar.base.skills.home_dir", lambda: home)
+    return home
+
+
+@pytest.fixture(autouse=True)
 def mock_local_delay(monkeypatch: pytest.MonkeyPatch) -> float:
     """Set a tiny delay between status queries made by the local launcher during unit tests.
 

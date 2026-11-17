@@ -73,8 +73,9 @@ Run ``cstar init``
    run output, the shared source-data cache and your catalog entries, asks
    whether to use them, and lets you change each if you answer no. It writes
    those answers to the configuration file, offers to install the shell function behind ``cstar run cd``, offers to
-   register a Jupyter kernel for the environment, and ends with the two
-   dataset registrations below:
+   register a Jupyter kernel for the environment, offers to install C-Star's
+   skills for any coding agent you use, and ends with the two dataset
+   registrations below:
 
    .. code-block:: console
 
@@ -111,6 +112,14 @@ Run ``cstar init``
       ``cstar run cd <run-id>`` can only change your shell's directory
       through a small shell function. ``cstar env shell-init --install``
       installs it for zsh or bash; see :ref:`workplan_run_cd`.
+
+   Install the skills for coding agents
+      C-Star ships skills that coding agents (Claude Code, Codex, Gemini CLI,
+      GitHub Copilot and others) can use, such as ``cstar-system``, which
+      describes a new cluster to C-Star (see
+      :doc:`../deployments/describe_cluster`). ``cstar skill install`` links
+      them where those agents look, and ``cstar skill list`` shows where each
+      is installed. Run it again after upgrading C-Star to add new skills.
 
 Register for dataset access
    Generating a new domain downloads forcing data from public archives. Most

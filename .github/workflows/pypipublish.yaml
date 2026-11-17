@@ -104,12 +104,27 @@ jobs:
               root / "wizard" / "ui" / "labels" / "blueprint-wizard.yaml",
               root / "wizard" / "forge-blueprint-wizard.ipynb",
               root / "wizard" / "_voila_app.ipynb",
+              root / "additional_files" / "skills" / "cstar-system" / "SKILL.md",
+              root / "additional_files" / "skills" / "cstar-system" / "scripts" / "probe.sh",
+              root / "additional_files" / "skills" / "cstar-system" / "scripts" / "try-modules.sh",
           ]
           missing_files = [str(p) for p in required_files if not p.is_file()]
           assert not missing_files, f"missing bundled files: {missing_files}"
 
-          print(f"OK: {len(found_specs)} ModelSpecs, {len(required_files)} template/wizard files present")
+          print(f"OK: {len(found_specs)} ModelSpecs, {len(required_files)} template/wizard/skill files present")
           PY
+          # The checkout's agent-skill folders hold links to the shipped skills;
+          # the skills ship once, as package data, never through .agents/ or .claude/.
+          python - dist/cstar*.whl <<'PY'
+          import sys
+          import zipfile
+
+          names = zipfile.ZipFile(sys.argv[1]).namelist()
+          stray = [n for n in names if {".agents", ".claude"} & set(n.split("/"))]
+          assert not stray, f"agent-skill folders in the wheel: {stray}"
+          print(f"OK: no .agents/ or .claude/ path among {len(names)} wheel entries")
+          PY
+          cstar skill path cstar-system
           cstar forge --help
 
   upload-to-pypi:
