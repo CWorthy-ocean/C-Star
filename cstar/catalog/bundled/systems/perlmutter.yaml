@@ -35,7 +35,7 @@ toolchains:
     gpu_arch: cc80
     # cray-mpich sets these for the `craype-accel-nvidia80` target:
     # the `-L` directory and `-lmpi_gtl_cuda`. With
-    # `MPICH_GPU_SUPPORT_ENABLED=1` (set by perlmutter.gpu.env) the
+    # `MPICH_GPU_SUPPORT_ENABLED=1` (set in this toolchain's `env`) the
     # model aborts at start-up unless libmpi_gtl_cuda is linked.
     # Verified on Perlmutter 2026-11-06 (GPU-direct halo exchange on).
     link_flags: ${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}
