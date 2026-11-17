@@ -664,6 +664,38 @@ def test_query_max_cpus_per_node_via_sinfo_caches_successes_only() -> None:
         assert mock_sinfo.call_count == 1
 
 
+@pytest.mark.usefixtures("clear_cpus_per_node_cache")
+def test_partition_cpus_per_node_asks_sinfo_by_partition_name() -> None:
+    """A partition whose walltime query names its QOS (TACC Stampede3's `icx`,
+    capped by QOS `qicx`) asks sinfo about the partition itself: sinfo lists no
+    partition named after the QOS.
+    """
+    queue = SlurmPartition(
+        name="icx",
+        query_name="qicx",
+        max_walltime_method=query_max_walltime_via_sacctmgr,
+    )
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="80")
+    ) as mock_sinfo:
+        assert queue.max_cpus_per_node == 80
+
+    cmd = mock_sinfo.call_args.args[0]
+    assert "--partition=icx" in cmd
+    assert "qicx" not in cmd
+
+
+def test_qos_cpus_per_node_is_unknown() -> None:
+    """A QOS has no CPUs per node of its own, so nothing is queried and a job
+    falls back to the scheduler-wide value.
+    """
+    queue = SlurmQOS(name="regular", query_name="regular_1")
+    with patch("cstar.system.scheduler._run_cmd") as mock_run:
+        assert queue.max_cpus_per_node is None
+
+    mock_run.assert_not_called()
+
+
 def test_query_max_walltime_via_sacctmgr() -> None:
     """Verify the maximum walltime is correctly returned from the query method."""
     with patch(

@@ -1,0 +1,3 @@
+A SLURM partition queue whose walltime comes from a QOS (``max_walltime: sacctmgr`` with ``query_name`` naming the partition's QOS) now lays out jobs with its own CPUs per node, instead of the system file's ``max_cpus_per_node`` or the largest node on the machine.
+- C-Star asks ``sinfo`` about the partition's ``name``; ``query_name`` is used only for the walltime query.
+- On a system with ``requires_task_distribution: true``, a job that gives neither a node count nor CPUs per node is now spread by the queue's CPUs per node, falling back to ``max_cpus_per_node`` only when the queue's is unknown.

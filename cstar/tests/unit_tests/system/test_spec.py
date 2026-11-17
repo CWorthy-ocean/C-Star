@@ -19,6 +19,7 @@ from cstar.system.scheduler import (
     PBSScheduler,
     SlurmPartition,
     SlurmQOS,
+    _cpus_per_node_via_sinfo,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
 )
@@ -361,6 +362,41 @@ def test_fixed_slurm_walltime_needs_no_query() -> None:
 
     with mock.patch("cstar.system.scheduler._run_cmd", side_effect=AssertionError):
         assert spec.scheduler.queues[0].build().max_walltime == "2-00:00:00"
+
+
+def test_partition_capped_by_qos_asks_sinfo_by_partition_name() -> None:
+    """A partition capped by its QOS (`max_walltime: sacctmgr`, `query_name` the
+    QOS) asks sacctmgr about the QOS for its walltime and sinfo about the
+    partition for its CPUs per node.
+    """
+    queue = {
+        "name": "icx",
+        "kind": "partition",
+        "max_walltime": "sacctmgr",
+        "query_name": "qicx",
+    }
+    spec = SystemSpec.model_validate(_slurm(queues=[queue], primary_queue="icx"))
+    assert spec.scheduler is not None
+    built = spec.scheduler.queues[0].build()
+
+    commands: list[str] = []
+
+    def answer(cmd: str, **_: object) -> str:
+        commands.append(cmd)
+        return "qicx|2-00:00:00" if cmd.startswith("sacctmgr") else "80"
+
+    _cpus_per_node_via_sinfo.cache_clear()
+    try:
+        with mock.patch("cstar.system.scheduler._run_cmd", side_effect=answer):
+            assert built.max_walltime == "48:00:00"
+            assert built.max_cpus_per_node == 80
+    finally:
+        _cpus_per_node_via_sinfo.cache_clear()
+
+    sacctmgr, sinfo = commands
+    assert "show qos qicx " in sacctmgr
+    assert "--partition=icx" in sinfo
+    assert "qicx" not in sinfo
 
 
 def test_pbs_scheduler_builds() -> None:

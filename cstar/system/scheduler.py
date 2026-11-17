@@ -291,7 +291,8 @@ class Queue(ABC):
     name: Final[str]
     """The name of the queue used to submit jobs, e.g. `regular`."""
     query_name: Final[str]
-    """The name of the queue used for system accounting, e.g. `regular_0`.
+    """The name the walltime query asks about, e.g. `regular_0`, or a
+    partition's QOS.
 
     Defaults to the value of `name` (as the two are usually the same).
     """
@@ -313,7 +314,7 @@ class Queue(ABC):
         name : str
             The name of the queue.
         query_name : str, optional
-            An alternative name used for querying the queue. If not provided, it defaults
+            The name the walltime query asks about. If not provided, it defaults
             to the value of `name`.
         max_walltime_method : Callable[[str], str | None] | None, optional
             An alternative method for determining the maximum walltime. If not provided,
@@ -394,7 +395,7 @@ class SlurmQueue(Queue, ABC):
     name : str
         The name of the SLURM queue.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime: str
         The maximum walltime allowed for the queue.
@@ -421,7 +422,7 @@ class SlurmQOS(SlurmQueue):
     name : str
         The name of the SLURM QOS queue.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime : str
         The maximum walltime allowed for jobs in this QOS, formatted as "HH:MM:SS".
@@ -443,7 +444,7 @@ class SlurmPartition(SlurmQueue):
     name : str
         The name of the SLURM partition.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime : str
         The maximum walltime allowed for jobs in this partition, formatted as "HH:MM:SS".
@@ -455,8 +456,12 @@ class SlurmPartition(SlurmQueue):
 
     @property
     def max_cpus_per_node(self) -> int | None:
-        """CPUs per node on this partition's smallest node type, from sinfo."""
-        return query_max_cpus_per_node_via_sinfo(self.query_name)
+        """CPUs per node on this partition's smallest node type, from sinfo.
+
+        Asks about the partition's `name`, never its `query_name`: the walltime
+        query may name the partition's QOS, which sinfo does not list.
+        """
+        return query_max_cpus_per_node_via_sinfo(self.name)
 
 
 class PBSQueue(Queue):
@@ -470,7 +475,7 @@ class PBSQueue(Queue):
     name : str
         The name of the PBS queue.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime : str
         The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
@@ -486,7 +491,7 @@ class PBSQueue(Queue):
         max_walltime : str
             The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
         query_name : str, optional
-            An alternative name used for querying the queue. Defaults to the value of `name`.
+            The name the walltime query asks about. Defaults to the value of `name`.
         """
         super().__init__(name, query_name)
         self._max_walltime = max_walltime
