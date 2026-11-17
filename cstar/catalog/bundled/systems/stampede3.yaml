@@ -72,10 +72,9 @@ scheduler:
   # TACC's submit filter refuses a job without -N ("please define total node
   # count with the "-N" option"; sbatch --test-only, 2026-11-17).
   requires_task_distribution: true
-  # skx nodes: 2 sockets x 24 cores, 1 thread per core (sinfo). C-Star asks
-  # sinfo for a partition's CPUs under its query_name, a QOS here, finds none,
-  # and falls back to this value for every queue: icx (80 cores) and spr (112
-  # cores) jobs get 48 per node unless the job sets its CPUs per node.
+  # skx nodes: 2 sockets x 24 cores, 1 thread per core (sinfo). Each
+  # partition's own cores per node come from sinfo (icx 80, spr 112); this
+  # value is used only when sinfo cannot answer.
   max_cpus_per_node: 48
   # TACC's submit filter refuses a job with no partition ("all jobs must have
   # a queue name specified with "-p""). With a partition and no account, a job
