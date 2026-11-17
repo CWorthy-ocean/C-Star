@@ -131,7 +131,8 @@ build-backend = "setuptools.build_meta"
 # are reported missing unless MANIFEST.in covers them too. These are dev-only
 # files intentionally not shipped in the sdist/wheel: docs (with the release-note
 # fragments in docs/changes/), CI/release tooling, lint/coverage config, conda
-# env pins, agent skills (.agents/, and the .claude/ link to them), and non-.py
+# env pins, the checkout's agent-skill folders (.agents/ and .claude/; the shipped
+# skills are package data under cstar/additional_files/skills/), and non-.py
 # test fixtures (test .py files are still picked up via normal package
 # discovery).
 [tool.check-manifest]

@@ -15,20 +15,22 @@ If you work with a coding agent that reads Agent Skills (Claude Code, Codex,
 Gemini CLI, GitHub Copilot and others), the ``cstar-system`` skill takes it
 through the steps on this page: it probes the cluster, picks the modules,
 writes the file, runs ``cstar system check``, and asks before it uses an
-allocation or submits a job. In a clone of the C-Star repository the agent
-finds the skill by itself. With C-Star installed from conda, copy the skill
-of your C-Star version into your agent's personal skills directory, here
-``~/.agents/skills`` (read by Codex, Gemini CLI and Copilot; Claude Code reads
-``~/.claude/skills``). For a development install, use ``main`` in place of
-``$version``:
+allocation or submits a job. The skill comes with C-Star. ``cstar init``
+offers to install it when it finds an agent's folder in your home directory,
+or install it yourself:
 
 .. code-block:: console
 
-   $ version=$(cstar --version | awk '/^C-Star version/ {print $3}')
-   $ dir=~/.agents/skills/cstar-system
-   $ url=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/$version/.agents/skills/cstar-system
-   $ mkdir -p $dir/scripts
-   $ for f in SKILL.md scripts/probe.sh scripts/try-modules.sh; do curl -fsSL -o $dir/$f $url/$f; done
+   $ cstar skill install
+   Linked ~/.agents/skills/cstar-system -> <cstar>/additional_files/skills/cstar-system
+   Linked ~/.claude/skills/cstar-system -> <cstar>/additional_files/skills/cstar-system
+
+``~/.agents/skills`` is read by Codex, Gemini CLI and Copilot, and
+``~/.claude/skills``, written when ``~/.claude`` exists, by Claude Code. Each
+skill is a link into your C-Star environment, so it follows upgrades;
+``--copy`` copies the files instead, and ``--dir`` installs into another skills
+folder. ``cstar skill list`` shows where each skill is installed. In a clone of
+the C-Star repository the agent finds the skill without an install.
 
 Then ask the agent to describe your cluster to C-Star. The rest of this page
 is what the skill does, for doing it by hand.
