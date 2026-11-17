@@ -383,7 +383,7 @@ def test_partition_capped_by_qos_asks_sinfo_by_partition_name() -> None:
 
     def answer(cmd: str, **_: object) -> str:
         commands.append(cmd)
-        return "qicx|2-00:00:00" if cmd.startswith("sacctmgr") else "80"
+        return "qicx|2-00:00:00" if cmd.startswith("sacctmgr") else "80 1"
 
     _cpus_per_node_via_sinfo.cache_clear()
     try:

@@ -454,7 +454,7 @@ class TestSchedulerJobBase:
             "cpus_per_node": None,
             "cpus": 160,
         }
-        sinfo = {"--partition=icx": "80"}  # sinfo lists no partition "qicx"
+        sinfo = {"--partition=icx": "80 1"}  # sinfo lists no partition "qicx"
 
         def answer(cmd: str, **_: object) -> str:
             return next((out for key, out in sinfo.items() if key in cmd), "")
