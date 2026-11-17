@@ -122,6 +122,7 @@ def test_unregistered_lmod_name_warns_once_per_process(
     assert LINUX.name in message
     assert ENV_CSTAR_SYSTEM in message
     assert manager.DOCS_MACHINES_URL in message
+    assert manager.SYSTEM_SKILL_HINT in message
 
 
 def test_unregistered_lmod_name_does_not_call_lmod(

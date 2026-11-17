@@ -3,9 +3,10 @@
 One command walks through everything the installation page lists: the
 scheduler settings on a cluster, where C-Star puts its data, the
 configuration file that records those choices, the shell function behind
-`cstar run cd`, a Jupyter kernel for the environment, and the datasets that
-need a registration. Every prompt defaults to the value already in effect, so
-a re-run reviews the setup rather than redoing it.
+`cstar run cd`, a Jupyter kernel for the environment, C-Star's skills for any
+coding agent, and the datasets that need a registration. Every prompt
+defaults to the value already in effect, so a re-run reviews the setup rather
+than redoing it.
 """
 
 import os
@@ -107,12 +108,13 @@ COMMAND_INIT: t.Final[str] = "init"
 """Name of the root command that runs the guided setup (reserved against plugins)."""
 
 HELP_SHORT: t.Final[str] = (
-    "Set C-Star up after installing it: scheduler, locations, shell, kernel."
+    "Set C-Star up after installing it: scheduler, locations, shell, kernel, "
+    "agent skills."
 )
 HELP_LONG: t.Final[str] = f"""\
 {HELP_SHORT}
 
-On a cluster, asks for the SLURM account, queue and default walltime. Shows where C-Star will put run output, the shared source-data cache and your catalog entries, asks whether to use them, and lets you change each if you answer no. Writes the answers to the configuration file, then offers to install the shell function that makes `cstar {NAME_RUN} {COMMAND_CD}` work and to register a Jupyter kernel for this environment.
+On a cluster, asks for the SLURM account, queue and default walltime. Shows where C-Star will put run output, the shared source-data cache and your catalog entries, asks whether to use them, and lets you change each if you answer no. Writes the answers to the configuration file, then offers to install the shell function that makes `cstar {NAME_RUN} {COMMAND_CD}` work, to register a Jupyter kernel for this environment, and, when it finds a coding agent's folder in your home directory, to install C-Star's skills for it (`cstar {NAME_SKILL} {COMMAND_INSTALL_SKILL}`).
 
 {ARG_SYSTEM_FILE} PATH sets the setup up for the machine that a system file describes, and settles where C-Star will find the file.
 
