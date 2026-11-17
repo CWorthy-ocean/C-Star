@@ -121,7 +121,7 @@ main() {
     section "modules available now (module --terse avail, filtered)"
     echo "In a hierarchical Lmod, libraries built with this compiler and MPI appear here."
     module --terse avail 2>&1 |
-        grep -Ei '^/|:$|mpi|mpich|hdf5|netcdf|pnetcdf|cmake|cuda'
+        grep -Ei '^/|:$|(^|/)(cpu|gpu)(/|$)|mpi|mpich|hdf5|netcdf|pnetcdf|cmake|cuda'
 
     section "tools on PATH"
     local tool

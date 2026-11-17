@@ -125,15 +125,15 @@ main() {
         lmod_list --terse list
 
         section "modules: available (module --terse avail, filtered)"
-        echo "Filter: compilers, MPI, HDF5, netCDF, parallel-netCDF, CMake, CUDA, programming environments"
+        echo "Filter: compilers, MPI, HDF5, netCDF, parallel-netCDF, CMake, CUDA, programming environments, cpu/gpu targets"
         lmod_list --terse avail |
-            grep -Ei '^/|:$|timed out|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda|craype'
+            grep -Ei '^/|:$|timed out|(^|/)(cpu|gpu)(/|$)|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda|craype'
 
         if [ -n "${LMOD_CMD:-}" ]; then
             section "modules: everything Lmod can load (module --terse spider, filtered)"
             echo "Includes modules a hierarchical Lmod hides until a compiler and MPI are loaded."
             lmod_list --terse spider |
-                grep -Ei 'timed out|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda' |
+                grep -Ei 'timed out|(^|/)(cpu|gpu)(/|$)|gcc|gnu|intel|oneapi|nvhpc|nvidia|aocc|cce|prgenv|mpi|mpich|mvapich|hdf5|netcdf|pnetcdf|cmake|cuda' |
                 sort -u
         fi
     fi
