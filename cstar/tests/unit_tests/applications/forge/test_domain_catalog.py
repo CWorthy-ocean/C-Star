@@ -55,6 +55,10 @@ from cstar.catalog.domain_catalog import (
             "git@github.com:CWorthy-ocean/cstar-forge.git",
             ("CWorthy-ocean", "cstar-forge", "main", Path(".")),
         ),
+        (
+            "HTTPS://GitHub.com/CWorthy-ocean/cstar-forge/tree/main/Catalog",
+            ("CWorthy-ocean", "cstar-forge", "main", Path("Catalog")),
+        ),
     ],
 )
 def test_parse_github_catalog_url(url, expected):

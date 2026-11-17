@@ -34,3 +34,10 @@ class CstarExpectationFailed(Exception):
 
 class CstarUserConfigError(CstarError):
     """The user's configuration file names settings it may not set."""
+
+
+class CatalogLocationError(CstarError, ValueError):
+    """A catalog location (a `CSTAR_CATALOG` entry or a catalog URL) that C-Star
+    cannot use as given; a `ValueError` too, as callers caught before it had a
+    type of its own.
+    """

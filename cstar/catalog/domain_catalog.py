@@ -25,6 +25,7 @@ from cstar.base.env import (
     is_remote_catalog_entry,
 )
 from cstar.base.env import is_github_catalog_url as _is_github_catalog_url
+from cstar.base.exceptions import CatalogLocationError
 from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, read_spec
 from cstar.system.migration import KEY_SV
 
@@ -109,13 +110,13 @@ def user_catalog_root() -> Path:
     if entries:
         first = entries[0]
         if is_bundled_catalog_entry(first):
-            raise ValueError(
+            raise CatalogLocationError(
                 f"{ENV_CSTAR_CATALOG}: the bundled catalog ('local') is read-only "
                 "and cannot be the writable top layer; list it after your own "
                 "catalog root instead (e.g. '/path/to/mine:local')."
             )
         if is_remote_catalog_entry(first):
-            raise ValueError(
+            raise CatalogLocationError(
                 f"{ENV_CSTAR_CATALOG}: the first entry, {first.strip()}, is a URL; "
                 "a remote catalog is read-only and cannot be the writable top "
                 "layer. List it after your own catalog root instead (e.g. "
@@ -172,18 +173,20 @@ def _extract_model_and_grid(
 def _parse_github_catalog_url(url: str) -> tuple[str, str, str, Path]:
     """Parse a GitHub URL into ``(org, repo, branch, path_within_repo)``."""
     raw = url.strip().rstrip("/")
-    if raw.startswith("git@github.com:"):
+    # the scheme and host in any case, as `is_github_catalog_url` accepts them
+    lowered = raw.casefold()
+    if lowered.startswith("git@github.com:"):
         path = raw[len("git@github.com:") :]
-    elif "github.com/" in raw:
-        path = raw.split("github.com/", 1)[1]
+    elif (host := lowered.find("github.com/")) >= 0:
+        path = raw[host + len("github.com/") :]
     else:
-        raise ValueError(f"Not a GitHub catalog URL: {url!r}")
+        raise CatalogLocationError(f"Not a GitHub catalog URL: {url!r}")
 
     path = path.removesuffix(".git")
 
     parts = [p for p in path.split("/") if p]
     if len(parts) < 2:
-        raise ValueError(
+        raise CatalogLocationError(
             f"Could not parse GitHub org/repo from catalog_root {url!r}. "
             "Expected https://github.com/<org>/<repo>[/path/...]."
         )
@@ -212,9 +215,9 @@ def _parse_http_catalog_url(url: str) -> tuple[str, Path]:
     """
     parts = urlsplit(url.strip())
     if not parts.hostname:
-        raise ValueError(f"The catalog URL {url.strip()!r} names no host.")
+        raise CatalogLocationError(f"The catalog URL {url.strip()!r} names no host.")
     if parts.query or parts.fragment:
-        raise ValueError(
+        raise CatalogLocationError(
             f"The catalog URL {url.strip()!r} has a query or fragment; a catalog "
             "URL is the address of the catalog's directory, without '?' or '#'."
         )
@@ -2060,7 +2063,7 @@ def build_catalog_stack(entries: list[str]) -> LayeredCatalog:
 
     top = stores[0]
     if top._is_local and top.catalog_root.resolve() == bundled_root:
-        raise ValueError(
+        raise CatalogLocationError(
             "The bundled catalog ('local') is read-only and cannot be the writable "
             "top layer of a catalog stack; list it after your own catalog root "
             "instead (e.g. '/path/to/mine:local')."

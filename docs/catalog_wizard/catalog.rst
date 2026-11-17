@@ -65,13 +65,6 @@ bottom and cannot be made the writable layer.
 
    export CSTAR_CATALOG=~/cstar/catalog:/project/shared/cstar-catalog
 
-A later entry can also be a GitHub repository or an http(s) URL, which C-Star
-reads over the network. The first entry must be a local directory.
-
-.. code-block:: console
-
-   export CSTAR_CATALOG=~/cstar/catalog:https://github.com/my-group/cstar-catalog/tree/main/catalog
-
 Sharing a catalog
 -----------------
 

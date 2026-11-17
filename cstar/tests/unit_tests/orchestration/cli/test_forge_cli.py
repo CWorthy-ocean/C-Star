@@ -1,5 +1,6 @@
 """Tests for the `cstar forge` CLI sub-app (cstar/cli/forge/__init__.py)."""
 
+import os
 import re
 from unittest.mock import patch
 
@@ -66,6 +67,21 @@ class TestRun:
         assert result.exit_code == 1
         assert isinstance(result.exception, SystemExit)
         assert "'not-a-system' is not a registered system" in result.output
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize("first", ["https://github.com/o/r", "local"])
+    def test_catalog_without_a_writable_first_entry_is_refused_before_any_work(
+        self, monkeypatch, tmp_path, first
+    ):
+        """A URL or ``local`` first in CSTAR_CATALOG stops the run in one line."""
+        monkeypatch.setenv("CSTAR_CATALOG", os.pathsep.join([first, str(tmp_path)]))
+        with patch("cstar.applications.forge.runtime.run_blueprint") as mock_run:
+            result = runner.invoke(cli.app, ["run", "bp.yaml"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "Error: CSTAR_CATALOG:" in result.output
+        assert "Traceback" not in result.output
         mock_run.assert_not_called()
 
     def test_options_map_to_run_blueprint_kwargs(self):
@@ -312,6 +328,22 @@ class TestShowPaths:
         assert "'not-a-system' is not a registered system" in result.output
         assert "linux_x86_64" in result.output
         assert "System tag" not in result.output
+
+    def test_url_first_in_the_catalog_is_refused_in_one_line(
+        self, monkeypatch, tmp_path
+    ):
+        """A URL as the first CSTAR_CATALOG entry is an error, not a traceback."""
+        monkeypatch.setenv(
+            "CSTAR_CATALOG", os.pathsep.join(["https://github.com/o/r", str(tmp_path)])
+        )
+
+        result = runner.invoke(cli.app, ["show-paths"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "Error: CSTAR_CATALOG: the first entry, https://github.com/o/r" in (
+            result.output
+        )
 
     def test_names_the_system_the_setting_selects(self, monkeypatch):
         monkeypatch.setenv("CSTAR_SYSTEM", "linux_x86_64")
