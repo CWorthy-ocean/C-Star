@@ -78,6 +78,8 @@ Under `cstar/`: `base/` (shared primitives), `roms/` (`ROMSSimulation`,
 models, DAG runner, launchers, tracking), `applications/` (registry,
 `ucla_roms/`, `forge/`, and others), `catalog/`, `wizard/`, `system/`
 (per-machine contexts), and `cli/`. `cstar/externals/` is filled at run time.
+The `cstar-system` skill in `.agents/skills/cstar-system/` writes and tests a
+system file for a cluster C-Star does not know.
 
 ## Conventions
 

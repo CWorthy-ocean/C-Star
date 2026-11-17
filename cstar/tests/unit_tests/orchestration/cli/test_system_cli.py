@@ -23,6 +23,7 @@ from cstar.cli.system.check import (
     check_scheduler,
     check_system,
     check_toolchain,
+    read_system_to_check,
 )
 from cstar.system.environment import CStarEnvironment
 from cstar.system.manager import SystemSelection, SystemSource, registered_context
@@ -32,6 +33,7 @@ from cstar.system.spec import (
     SystemSpec,
     read_system_file,
 )
+from cstar.system.template import render_system_template
 
 BUNDLED_ANVIL = BUNDLED_SYSTEMS_DIR / "anvil.yaml"
 """The bundled Anvil system file."""
@@ -690,3 +692,25 @@ def test_a_name_with_a_separator_or_suffix_is_a_path(tmp_path: Path) -> None:
     assert check_module.looks_like_path("dir/anvil")
     assert check_module.looks_like_path(str(write_system(tmp_path / "anvil")))
     assert not check_module.looks_like_path("anvil")
+
+
+# template
+
+
+def test_template_prints_the_rendered_file_and_nothing_else() -> None:
+    """Standard output is exactly the template, so it can be redirected and edited."""
+    result = run("template")
+
+    assert result.exit_code == 0
+    assert result.stdout == render_system_template()
+
+
+def test_template_saved_to_a_file_passes_the_schema_step(tmp_path: Path) -> None:
+    """`cstar system template > x.yaml` gives a draft `cstar system check` reads."""
+    path = write_system(tmp_path / "mycluster.yaml", run("template").stdout)
+
+    file, schema = read_system_to_check(str(path))
+
+    assert schema.status == STATUS_PASS
+    assert file is not None
+    assert file.spec.name == "mycluster"

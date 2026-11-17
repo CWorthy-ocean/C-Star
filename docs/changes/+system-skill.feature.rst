@@ -1,0 +1,2 @@
+An agent skill, ``cstar-system``, helps a coding agent write and test a system file for a cluster C-Star does not know: it probes the machine read-only, picks the modules, prefixes, queues and detection rule, runs ``cstar system check``, and asks before it uses an allocation or submits a job. See "With a coding agent" in "Describe your cluster".
+- ``cstar system template`` prints a commented system file to start from, every key described by the installed C-Star's own schema.
