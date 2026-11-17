@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,13 @@ from cstar.base.env import (
     ENV_CSTAR_SYSTEM,
     GROUP_INTERNAL,
     REMOVED_SETTINGS,
+    catalog_entries,
     discover_env_vars,
     find_scratch_dir,
     get_env_item,
     hpc_data_directory,
+    is_remote_catalog_entry,
+    split_catalog,
 )
 
 
@@ -232,3 +236,104 @@ class TestHpcDataDirectorySystemFallback:
 
         monkeypatch.setattr("cstar.system.manager.get_system_context", _nameless)
         assert hpc_data_directory() is None
+
+
+_GITHUB = "https://github.com/o/r/tree/main/cat"
+
+# Entries that survive a ``":".join`` / ``split_catalog`` round trip.
+_ROUND_TRIP_ENTRIES = [
+    "/abs/one",
+    "~/home/cat",
+    "relative/cat",
+    "local",
+    _GITHUB,
+    "https://github.com/o/r",
+    "http://host:8080/some/cat",
+    "http://host:8080",
+    "git@github.com:o/r.git",
+    "/abs/two",
+]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("/a:/b", ["/a", "/b"]),
+        ("/a:", ["/a"]),
+        (":/a", ["/a"]),
+        ("/a::/b", ["/a", "/b"]),
+        ("", []),
+        ("~/cat:~other/cat", ["~/cat", "~other/cat"]),
+        ("local:/a", ["local", "/a"]),
+        ("https://github.com/o/r", ["https://github.com/o/r"]),
+        (
+            f"/a:{_GITHUB}:/b",
+            ["/a", _GITHUB, "/b"],
+        ),
+        ("https://github.com/o/r:", ["https://github.com/o/r"]),
+        ("http://host:8080/cat:/b", ["http://host:8080/cat", "/b"]),
+        ("http://host:8080:/b", ["http://host:8080", "/b"]),
+        ("http://host:/b", ["http://host", "/b"]),
+        ("git@github.com:o/r.git:/b", ["git@github.com:o/r.git", "/b"]),
+        ("HTTPS://github.com/o/r:/b", ["HTTPS://github.com/o/r", "/b"]),
+        ("http:/b", ["http", "/b"]),
+        ("httpdocs:/b", ["httpdocs", "/b"]),
+    ],
+)
+def test_split_catalog_on_colon(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: list[str]
+) -> None:
+    """A ``:``-separated value splits into entries, with URLs kept whole."""
+    monkeypatch.setattr(os, "pathsep", ":")
+
+    assert split_catalog(value) == expected
+
+
+def test_split_catalog_round_trips_a_joined_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Joining entries with ``:`` and splitting gives them back (``cstar init``)."""
+    monkeypatch.setattr(os, "pathsep", ":")
+
+    assert split_catalog(":".join(_ROUND_TRIP_ENTRIES)) == _ROUND_TRIP_ENTRIES
+
+
+def test_split_catalog_on_semicolon_keeps_drive_letters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Where the separator is ``;`` (Windows), the value is split plainly."""
+    monkeypatch.setattr(os, "pathsep", ";")
+
+    assert split_catalog("C:\\cat;https://github.com/o/r;D:\\x") == [
+        "C:\\cat",
+        "https://github.com/o/r",
+        "D:\\x",
+    ]
+
+
+def test_catalog_entries_keeps_a_url_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A URL in the environment variable is one entry, not ``https`` and a path."""
+    monkeypatch.setattr(os, "pathsep", ":")
+    monkeypatch.setenv(ENV_CSTAR_CATALOG, "https://github.com/o/r/tree/main/cat")
+
+    assert catalog_entries() == ["https://github.com/o/r/tree/main/cat"]
+
+
+@pytest.mark.parametrize(
+    ("entry", "remote"),
+    [
+        ("https://x", True),
+        (" https://x", True),
+        ("HTTP://x", True),
+        ("git@github.com:o/r", True),
+        ("http://h:8080", True),
+        ("httpdocs", False),
+        ("http", False),
+        ("local", False),
+        ("/a", False),
+        ("~/cat", False),
+    ],
+)
+def test_is_remote_catalog_entry(entry: str, remote: bool) -> None:
+    """Only a URL or ``git@github.com:`` entry is remote."""
+    assert is_remote_catalog_entry(entry) is remote

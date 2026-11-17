@@ -160,6 +160,44 @@ class TestCatalogRoots:
         assert roots.user is None
         assert roots.shared == (b.resolve(),)
 
+    def test_url_in_the_variable_is_one_skipped_entry(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A URL read from the variable is not split at its ``:``."""
+        a, b = tmp_path / "a", tmp_path / "b"
+        monkeypatch.setenv(
+            ENV_CSTAR_CATALOG,
+            os.pathsep.join(
+                [str(a), "https://github.com/org/repo/tree/main/cat", str(b)]
+            ),
+        )
+
+        assert catalog_roots() == CatalogRoots(a.resolve(), (b.resolve(),))
+
+    def test_url_first_leaves_no_user_layer(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A URL as the first entry leaves the user layer empty."""
+        b = tmp_path / "b"
+        monkeypatch.setenv(
+            ENV_CSTAR_CATALOG,
+            os.pathsep.join(["https://github.com/org/repo/tree/main/cat", str(b)]),
+        )
+
+        assert catalog_roots() == CatalogRoots(None, (b.resolve(),))
+
+    def test_http_url_with_a_port_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The ``:`` before an http port does not start a local entry."""
+        a, b = tmp_path / "a", tmp_path / "b"
+        monkeypatch.setenv(
+            ENV_CSTAR_CATALOG,
+            os.pathsep.join([str(a), "http://host:8080/cat", str(b)]),
+        )
+
+        assert catalog_roots() == CatalogRoots(a.resolve(), (b.resolve(),))
+
     def test_local_literal_and_bundled_root_are_skipped(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

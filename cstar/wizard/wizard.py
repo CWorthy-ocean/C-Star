@@ -102,6 +102,11 @@ from cstar.applications.forge.resolve import (
     with_cdr_lite_tracer_set,
 )
 from cstar.base.digest import hash_netcdf_contents, short_digest
+from cstar.base.env import (
+    is_bundled_catalog_entry,
+    is_remote_catalog_entry,
+    split_catalog,
+)
 from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
@@ -10050,12 +10055,9 @@ class ForgeBlueprintWizardApp:
         return self._outer
 
     def _load(self, catalog_root_value: str | None) -> None:
-        import os
-
         from cstar.catalog.domain_catalog import (
             DomainCatalog,
             LayeredCatalog,
-            _is_github_catalog_url,
             build_catalog_stack,
             default_catalog_stack,
         )
@@ -10068,11 +10070,10 @@ class ForgeBlueprintWizardApp:
                 # the read-only bundled catalog), not the bundled catalog alone.
                 cat = default_catalog_stack()
             else:
-                entries = [e for e in val.split(os.pathsep) if e]
+                entries = split_catalog(val)
                 if len(entries) == 1 and (
-                    _is_github_catalog_url(entries[0])
-                    or entries[0].startswith("http")
-                    or entries[0].strip().lower() == "local"
+                    is_remote_catalog_entry(entries[0])
+                    or is_bundled_catalog_entry(entries[0])
                 ):
                     # A remote URL or the literal "local" (bundled catalog)
                     # can never be a writable top layer, so load it as exactly

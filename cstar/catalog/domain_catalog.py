@@ -8,6 +8,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlsplit
 
 import fsspec
 import yaml
@@ -21,6 +22,7 @@ from cstar.base.env import (
     default_catalog_root,
     get_env_item,
     is_bundled_catalog_entry,
+    is_remote_catalog_entry,
 )
 from cstar.base.env import is_github_catalog_url as _is_github_catalog_url
 from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, read_spec
@@ -97,8 +99,11 @@ def user_catalog_root() -> Path:
     survive HPC scratch purges.
 
     If ``CSTAR_CATALOG`` (C-Star's registered env var, see ``cstar.base.env``)
-    is set and non-empty, the first ``os.pathsep``-separated entry is used
-    instead (expanded and resolved). Does not create the directory.
+    is set and non-empty, its first entry is used instead (expanded and
+    resolved). Does not create the directory.
+
+    Raises ``ValueError`` when that entry is the bundled catalog (``local``) or a
+    URL: neither is a directory you can write to.
     """
     entries = catalog_entries()
     if entries:
@@ -108,6 +113,13 @@ def user_catalog_root() -> Path:
                 f"{ENV_CSTAR_CATALOG}: the bundled catalog ('local') is read-only "
                 "and cannot be the writable top layer; list it after your own "
                 "catalog root instead (e.g. '/path/to/mine:local')."
+            )
+        if is_remote_catalog_entry(first):
+            raise ValueError(
+                f"{ENV_CSTAR_CATALOG}: the first entry, {first.strip()}, is a URL; "
+                "a remote catalog is read-only and cannot be the writable top "
+                "layer. List it after your own catalog root instead (e.g. "
+                f"'/path/to/mine{os.pathsep}{first.strip()}')."
             )
         return Path(first).expanduser().resolve()
 
@@ -188,6 +200,27 @@ def _parse_github_catalog_url(url: str) -> tuple[str, str, str, Path]:
     return org_name, repo_name, branch, repo_path
 
 
+def _parse_http_catalog_url(url: str) -> tuple[str, Path]:
+    """Parse an http(s) URL into ``(origin, path_on_server)``.
+
+    The origin is ``scheme://host[:port]``, which the store's file system is rooted
+    at, as a GitHub store's is rooted at the repository; the catalog root is the
+    path below it. A whole URL cannot be a `Path`, which would collapse its ``//``.
+
+    Raises ``ValueError`` for a URL with no host, or with a query or fragment,
+    which the store could not send with each file it downloads.
+    """
+    parts = urlsplit(url.strip())
+    if not parts.hostname:
+        raise ValueError(f"The catalog URL {url.strip()!r} names no host.")
+    if parts.query or parts.fragment:
+        raise ValueError(
+            f"The catalog URL {url.strip()!r} has a query or fragment; a catalog "
+            "URL is the address of the catalog's directory, without '?' or '#'."
+        )
+    return f"{parts.scheme}://{parts.netloc}", Path(parts.path.strip("/"))
+
+
 def _yaml_files(files: Iterable[Path]) -> list[Path]:
     """Return the ``.yaml``/``.yml`` *files*, ``.yaml`` winning when a stem has both
     (as ``DomainCatalog._fs_glob_dual`` does).
@@ -243,14 +276,14 @@ class DomainCatalog:
     catalog_root : str or Path or None
         Root of the catalog (inner directory containing specs/, blueprints/, etc.).
         Defaults to the package-bundled catalog at ``cstar/catalog/bundled``.
-        Pass a github URL string for remote catalogs.
+        Pass a GitHub or http(s) URL string for a remote, read-only catalog.
     read_only : bool
         Mark this store non-writable. Non-local stores (remote/github/http)
         are always treated as read-only regardless of this flag.
     label : str or None
         Human-readable name for this store, used in error messages and by
         ``LayeredCatalog``. Defaults to ``"bundled"`` for the packaged catalog
-        root, else ``str(catalog_root)``.
+        root, the URL for a remote store, else ``str(catalog_root)``.
     """
 
     def __init__(
@@ -265,6 +298,8 @@ class DomainCatalog:
         label: str | None = None,
     ) -> None:
         _using_default = catalog_root is None
+        # Where a remote store's files are downloaded from (`_remote_file_url`).
+        self._url_base = ""
 
         if catalog_root is None:
             self.catalog_root: Path = _DEFAULT_CATALOG_ROOT
@@ -293,11 +328,17 @@ class DomainCatalog:
                     gh_kwargs["username"] = "x-access-token"
                     gh_kwargs["token"] = token
                 self._fs = fsspec.filesystem("github", **gh_kwargs)
-                self._github_ref = branch  # fsspec GithubFileSystem stores no ref attr
+                self._url_base = (
+                    f"https://raw.githubusercontent.com/{org_name}/{repo_name}/{branch}"
+                )
                 self.catalog_root = repo_path
-            elif catalog_root.startswith("http"):
-                self._fs = fsspec.filesystem("http")
-                self.catalog_root = Path(catalog_root)
+            elif is_remote_catalog_entry(catalog_root):
+                origin, server_path = _parse_http_catalog_url(catalog_root)
+                self._fs = fsspec.filesystem(
+                    "dir", path=origin, fs=fsspec.filesystem("http")
+                )
+                self._url_base = origin
+                self.catalog_root = server_path
             else:
                 self.catalog_root = Path(catalog_root).expanduser().resolve()
                 self._fs = fsspec.filesystem("file")
@@ -315,11 +356,14 @@ class DomainCatalog:
         # on a real install): never writable through the API, no matter what the
         # caller asked for -- user work must not land somewhere an upgrade wipes.
         self.read_only = bool(read_only) or not self._is_local or _root_is_bundled
-        self.label = (
-            label
-            if label is not None
-            else ("bundled" if _root_is_bundled else str(self.catalog_root))
-        )
+        if label is not None:
+            self.label = label
+        elif _root_is_bundled:
+            self.label = "bundled"
+        elif self._is_local:
+            self.label = str(self.catalog_root)
+        else:  # a remote store is known by its URL, not by its path on the server
+            self.label = str(catalog_root).strip()
 
         # Merge catalog skeleton from a source catalog before scanning.
         if initialize_catalog_from is not None:
@@ -443,12 +487,13 @@ class DomainCatalog:
             return yml_path
         return yaml_path
 
-    def _to_raw_github_url(self, path: Path) -> str:
-        """Return the raw.githubusercontent.com URL for a path in the GitHub repo."""
-        org = self._fs.org
-        repo = self._fs.repo
-        ref = getattr(self, "_github_ref", None) or "HEAD"
-        return f"https://raw.githubusercontent.com/{org}/{repo}/{ref}/{path}"
+    def _remote_file_url(self, path: Path) -> str:
+        """Return the URL a file of a remote store is downloaded from.
+
+        A GitHub file's is on raw.githubusercontent.com; an http store's is the
+        server's own.
+        """
+        return f"{self._url_base}/{path.as_posix()}"
 
     # ------------------------------------------------------------------
     # Scanning
@@ -1439,17 +1484,17 @@ class DomainCatalog:
                         ucla_roms_blueprint_name,
                     )
                     continue
-                is_github = hasattr(self._fs, "org")
+                remote = not self._is_local
                 grid_yaml = self._resolve_stem_file(bp_file.parent, "_grid")
                 grid_yaml_exists = self._fs_exists(grid_yaml)
-                if grid_yaml_exists and is_github:
-                    grid_yaml_result: Path | str | None = self._to_raw_github_url(
+                if grid_yaml_exists and remote:
+                    grid_yaml_result: Path | str | None = self._remote_file_url(
                         grid_yaml
                     )
                 else:
                     grid_yaml_result = grid_yaml if grid_yaml_exists else None
                 ucla_roms_blueprint_path_result: Path | str = (
-                    self._to_raw_github_url(bp_file) if is_github else bp_file
+                    self._remote_file_url(bp_file) if remote else bp_file
                 )
                 records.append(
                     {

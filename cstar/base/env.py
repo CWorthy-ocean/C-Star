@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import textwrap
 import typing as t
@@ -385,10 +386,36 @@ BUNDLED_CATALOG_ROOT: t.Final = (
 CATALOG_ENTRY_BUNDLED: t.Final = "local"
 """The `CSTAR_CATALOG` entry that names the catalog C-Star ships."""
 
+_CATALOG_URL: t.Final = re.compile(
+    r"\s*(?:https?://[^/:]*(?::\d+(?=[/:]|$))?(?:/[^:]*)?|git@github\.com:[^:]*)",
+    re.IGNORECASE,
+)
+"""A remote catalog entry: ``http(s)://host[:port][/path]`` (GitHub's included) or
+``git@github.com:<org>/<repo>``. A match ends where the next entry of a
+``:``-separated value begins: a ``:`` after the host followed by digits is the
+port, and any other ``:`` ends the entry."""
+
 
 def split_catalog(value: str) -> list[str]:
-    """Non-empty ``os.pathsep``-separated entries of a `CSTAR_CATALOG` value."""
-    return [e for e in value.split(os.pathsep) if e]
+    """Non-empty ``os.pathsep``-separated entries of a `CSTAR_CATALOG` value.
+
+    Where the separator is ``:`` (Linux, macOS), a remote entry (see
+    `is_remote_catalog_entry`) is read whole, so ``https://github.com/...`` and
+    ``http://host:8080/...`` are one entry each.
+    """
+    if os.pathsep != ":":
+        return [e for e in value.split(os.pathsep) if e]
+    entries: list[str] = []
+    start = 0
+    while start < len(value):
+        url = _CATALOG_URL.match(value, start)
+        end = url.end() if url else value.find(":", start)
+        if end < 0:
+            end = len(value)
+        if end > start:
+            entries.append(value[start:end])
+        start = end + 1
+    return entries
 
 
 def catalog_entries() -> list[str]:
@@ -404,15 +431,16 @@ def catalog_entries() -> list[str]:
 
 def is_github_catalog_url(entry: str) -> bool:
     """Return True if a catalog entry looks like a GitHub repository URL."""
-    s = entry.strip()
-    return s.startswith(("https://github.com/", "http://github.com/")) or s.startswith(
-        "git@github.com:"
+    return (
+        entry.strip()
+        .casefold()
+        .startswith(("https://github.com/", "http://github.com/", "git@github.com:"))
     )
 
 
 def is_remote_catalog_entry(entry: str) -> bool:
     """Return True if a catalog entry names a GitHub repository or an http(s) URL."""
-    return is_github_catalog_url(entry) or entry.strip().startswith("http")
+    return _CATALOG_URL.match(entry) is not None
 
 
 def is_bundled_catalog_entry(entry: str) -> bool:

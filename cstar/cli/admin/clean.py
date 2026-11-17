@@ -262,7 +262,7 @@ def _data_keep_paths() -> list[Path]:
     keeps = [DirectoryManager.source_data_home()]
     try:
         keeps.append(user_catalog_root())
-    except ValueError:  # CSTAR_CATALOG=local: no writable layer on disk
+    except ValueError:  # first CSTAR_CATALOG entry is `local` or a URL
         pass
     return keeps
 

@@ -7507,6 +7507,43 @@ def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
     assert "forge-catalog-bar" in app._bar.widget._dom_classes
 
 
+def test_catalog_bar_loads_a_single_url_as_one_read_only_store(monkeypatch):
+    """A URL typed in the catalog bar is one store, not split at its ``:``."""
+    import ipywidgets as w
+
+    from cstar.wizard import wizard as wizard_module
+    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+
+    app = ForgeBlueprintWizardApp()
+    store_calls = []
+    stack_calls = []
+    store = object()
+
+    def fake_store(**kwargs):
+        store_calls.append(kwargs)
+        return store
+
+    def fake_stack(entries):
+        stack_calls.append(entries)
+        return object()
+
+    class FakeWizard:
+        def __init__(self, catalog):
+            self.catalog = catalog
+            self.widget = w.Label("inner")
+
+    monkeypatch.setattr("cstar.catalog.domain_catalog.DomainCatalog", fake_store)
+    monkeypatch.setattr("cstar.catalog.domain_catalog.build_catalog_stack", fake_stack)
+    monkeypatch.setattr(wizard_module, "ForgeBlueprintWizard", FakeWizard)
+    monkeypatch.setattr(app._bar, "set_status_for", lambda cat: None)
+
+    app._load("https://github.com/o/r")
+
+    assert store_calls == [{"catalog_root": "https://github.com/o/r"}]
+    assert stack_calls == []
+    assert app.inner.catalog is store
+
+
 def test_blueprint_app_from_shell_builds():
     from cstar.wizard.ui.shell import blueprint_app
 
