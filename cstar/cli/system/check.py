@@ -10,6 +10,7 @@ import typer
 from cstar.base.env import ENV_CSTAR_SYSTEM, load_user_config_for_repair
 from cstar.base.exceptions import CstarError
 from cstar.cli.system.add import looks_like_path, read_draft
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_MAX_WALLTIME
 from cstar.roms.build_verification import (
     DECLARED_PREFIX_VARS,
     empty_prefix_vars,
@@ -25,7 +26,7 @@ from cstar.system.manager import (
     system_file_of,
     system_stack,
 )
-from cstar.system.scheduler import VISIBLE_SCHEDULERS, SlurmQueue
+from cstar.system.scheduler import VISIBLE_SCHEDULERS, QueueNotFoundError, SlurmQueue
 from cstar.system.spec import (
     DRAFT_LAYER,
     SYSTEM_FILE_SUFFIX,
@@ -90,8 +91,12 @@ _QUERY_COMMANDS: t.Final = {
 
 
 def _walltime(queue: "Queue") -> str | None:
-    """Ask a queue for its maximum walltime."""
-    return queue.max_walltime
+    """Ask a queue for its maximum walltime; `None` means it has no limit.
+
+    Raises `QueueNotFoundError` when the scheduler lists no queue of the
+    queue's `query_name`, which `Queue.max_walltime` would hide.
+    """
+    return queue.query_max_walltime()
 
 
 def _call_with_timeout(run: "Callable[[], str | None]", timeout: float) -> str | None:
@@ -384,13 +389,22 @@ def check_scheduler(
             continue
         try:
             walltime = _call_with_timeout(partial(_walltime, queue), timeout)
+        except QueueNotFoundError as ex:
+            detail = f"{ex}; check the queue's name and query_name"
+            results.append(CheckResult(step, STATUS_FAIL, detail))
+            continue
         except Exception as ex:
             detail = f"the walltime query failed: {type(ex).__name__}: {ex}"
             results.append(CheckResult(step, STATUS_FAIL, detail))
             continue
-        if walltime is None and command:
-            detail = f"{command} reported no walltime limit"
-            results.append(CheckResult(step, STATUS_FAIL, detail))
+        if walltime is None:
+            said = (
+                f"{command} reports no walltime limit"
+                if command
+                else "no walltime limit reported"
+            )
+            detail = f"{said}; a job asks for {ENV_CSTAR_SLURM_MAX_WALLTIME}"
+            results.append(CheckResult(step, STATUS_PASS, detail))
         else:
             results.append(
                 CheckResult(step, STATUS_PASS, f"maximum walltime {walltime}")

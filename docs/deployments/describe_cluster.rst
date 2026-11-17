@@ -8,6 +8,31 @@ file* tells C-Star how to load the site's modules and submit jobs. It is one
 YAML file that you write once, test on the login node, and keep in your own
 catalog or share with your group.
 
+With a coding agent
+-------------------
+
+If you work with a coding agent that reads Agent Skills (Claude Code, Codex,
+Gemini CLI, GitHub Copilot and others), the ``cstar-system`` skill takes it
+through the steps on this page: it probes the cluster, picks the modules,
+writes the file, runs ``cstar system check``, and asks before it uses an
+allocation or submits a job. In a clone of the C-Star repository the agent
+finds the skill by itself. With C-Star installed from conda, copy the skill
+of your C-Star version into your agent's personal skills directory, here
+``~/.agents/skills`` (read by Codex, Gemini CLI and Copilot; Claude Code reads
+``~/.claude/skills``). For a development install, use ``main`` in place of
+``$version``:
+
+.. code-block:: console
+
+   $ version=$(cstar --version | awk '/^C-Star version/ {print $3}')
+   $ dir=~/.agents/skills/cstar-system
+   $ url=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/$version/.agents/skills/cstar-system
+   $ mkdir -p $dir/scripts
+   $ for f in SKILL.md scripts/probe.sh scripts/try-modules.sh; do curl -fsSL -o $dir/$f $url/$f; done
+
+Then ask the agent to describe your cluster to C-Star. The rest of this page
+is what the skill does, for doing it by hand.
+
 Start from the nearest machine
 ------------------------------
 
@@ -26,7 +51,8 @@ cluster:
 
 Use ``anvil`` for a SLURM cluster whose queues are partitions, and
 ``perlmutter`` for a Cray system whose queues are QOS. ``cstar system show
-derecho`` is the example for PBS.
+derecho`` is the example for PBS. To start from a blank file instead, run
+``cstar system template > mycluster.yaml``: its comments describe every key.
 
 Edit the file
 -------------

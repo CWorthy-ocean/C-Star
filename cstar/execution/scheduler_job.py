@@ -674,13 +674,15 @@ class SchedulerJob(ExecutionHandler, ABC):
 
         self.depends_on = depends_on
 
-        if not walltime and (self.queue.max_walltime is None):
+        # read once: each read asks the scheduler, and warns if it cannot answer
+        max_walltime = self.queue.max_walltime
+        if not walltime and max_walltime is None:
             raise ValueError(
                 "Cannot create scheduler job: walltime parameter not provided "
                 + "and C-Star cannot default to the max walltime for the queue "
                 + f"{self.queue_name!r} as it cannot be determined"
             )
-        elif self.queue.max_walltime is None:
+        elif max_walltime is None:
             self.log.warning(
                 f"Unable to determine the maximum allowed walltime for chosen queue {self.queue_name!r}. "
                 f"If your chosen walltime {walltime!r} exceeds the (unknown) limit, this job may be "
@@ -689,13 +691,13 @@ class SchedulerJob(ExecutionHandler, ABC):
         elif not walltime:
             self.log.warning(
                 "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
-                + f"for queue {self.queue_name!r}, {self.queue.max_walltime!r}"
+                + f"for queue {self.queue_name!r}, {max_walltime!r}"
             )
-            self._walltime = self.queue.max_walltime
+            self._walltime = max_walltime
         else:
             # Check walltimes
             wt_h, wt_m, wt_s = parse_walltime(walltime)
-            mw_h, mw_m, mw_s = parse_walltime(self.queue.max_walltime)
+            mw_h, mw_m, mw_s = parse_walltime(max_walltime)
 
             walltime_delta = timedelta(hours=wt_h, minutes=wt_m, seconds=wt_s)
             max_walltime_delta = timedelta(hours=mw_h, minutes=mw_m, seconds=mw_s)
@@ -704,7 +706,7 @@ class SchedulerJob(ExecutionHandler, ABC):
                 raise ValueError(
                     f"Selected walltime {walltime} exceeds maximum "
                     + f"walltime for selected queue {self.queue_name}: "
-                    + f"{self.queue.max_walltime}"
+                    + f"{max_walltime}"
                 )
 
         self._cpus, self._nodes, self._cpus_per_node = self._resolve_distribution(
