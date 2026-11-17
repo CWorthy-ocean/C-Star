@@ -24,8 +24,9 @@ SHELL_MAX_WIDTH = "1600px"
 #: Height of the sticky status bar: where a pinned preview pane docks beneath it.
 STICKY_BAR_HEIGHT = "56px"
 
-#: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap with
-#: :func:`style_widget` or ``f"<style>{WIZARD_CSS}</style>"`` yourself).
+#: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap it with
+#: :func:`style_widget`, which also installs the number-box mouse-wheel guard that
+#: a bare ``f"<style>{WIZARD_CSS}</style>"`` would lack).
 WIZARD_CSS = f"""
 /* page background only in Voila (body[data-voila]); JupyterLab keeps its theme */
 body[data-voila] {{ background: {branding.GREY}; }}
