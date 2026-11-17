@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
+import zmq
 
-from cstar.wizard.ui.shell import AppShell, app, blueprint_app
+from cstar.wizard.ui import shell as shell_module
+from cstar.wizard.ui.shell import (
+    AppShell,
+    app,
+    blueprint_app,
+    queue_iopub_instead_of_dropping,
+)
 
 
 class _DummyPage:
@@ -104,3 +114,57 @@ def test_app_builds_blueprint_and_workplan_pages():
     assert list(shell.nav.options) == ["Blueprint", "Workplan"]
     assert len(shell.stack.children) == 2
     assert shell.pages[1][1].blueprint_app is shell.pages[0][1]
+
+
+def _fake_kernel_shell() -> SimpleNamespace:
+    """A stand-in for ``get_ipython()`` in a kernel, down to the IOPub socket."""
+    iopub_thread = SimpleNamespace(schedule=MagicMock(), socket=MagicMock())
+    return SimpleNamespace(kernel=SimpleNamespace(iopub_thread=iopub_thread))
+
+
+def test_iopub_limit_lifted_on_the_iopub_thread():
+    # The wizard's ~6,500 widget messages overrun libzmq's default 1,000-message
+    # send limit and the kernel drops some, including the final idle that voila
+    # waits for (blank page). The limit must be lifted from the IOPub thread,
+    # which owns the socket, not set directly from the calling thread.
+    ip = _fake_kernel_shell()
+    iopub_thread = ip.kernel.iopub_thread
+    with patch("IPython.get_ipython", return_value=ip):
+        queue_iopub_instead_of_dropping()
+    iopub_thread.socket.setsockopt.assert_not_called()
+    iopub_thread.schedule.assert_called_once()
+    scheduled = iopub_thread.schedule.call_args.args[0]
+    scheduled()
+    iopub_thread.socket.setsockopt.assert_called_once_with(zmq.SNDHWM, 0)
+
+
+def test_iopub_limit_is_a_noop_outside_a_kernel():
+    with patch("IPython.get_ipython", return_value=None):
+        queue_iopub_instead_of_dropping()
+    with patch("IPython.get_ipython", return_value=SimpleNamespace()):
+        queue_iopub_instead_of_dropping()
+
+
+def test_iopub_limit_never_raises():
+    # The wizard must still build if ipykernel's internals change; and the
+    # scheduled call must not raise on the IOPub thread, where it would stop
+    # the sends queued behind it.
+    ip = _fake_kernel_shell()
+    iopub_thread = ip.kernel.iopub_thread
+    iopub_thread.schedule.side_effect = RuntimeError("no thread")
+    with patch("IPython.get_ipython", return_value=ip):
+        queue_iopub_instead_of_dropping()
+
+    ip = _fake_kernel_shell()
+    iopub_thread = ip.kernel.iopub_thread
+    iopub_thread.socket.setsockopt.side_effect = zmq.ZMQError()
+    with patch("IPython.get_ipython", return_value=ip):
+        queue_iopub_instead_of_dropping()
+    iopub_thread.schedule.call_args.args[0]()
+
+
+@pytest.mark.parametrize("build", [app, blueprint_app])
+def test_app_lifts_iopub_limit(build):
+    with patch.object(shell_module, "queue_iopub_instead_of_dropping") as lift:
+        build()
+    lift.assert_called_once_with()
