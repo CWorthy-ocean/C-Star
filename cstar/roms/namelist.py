@@ -36,9 +36,12 @@ subclasses:
 - :class:`RomsNamelistV0_13_0` — the schema for ucla-roms **>= 0.13.0, < 0.14.0**.
   Adds ``v_sponge_trc`` to ``&V_SPONGE_SETTINGS`` (the sponge's tracer diffusivity),
   on top of 0.12.0.
-- :class:`RomsNamelistV0_14_0` — the schema for ucla-roms **>= 0.14.0**. Adds
-  ``wrt_avg_temp``/``wrt_avg_salt`` to ``&TS_OUTPUT_SETTINGS`` (write ``temp`` and
+- :class:`RomsNamelistV0_14_0` — the schema for ucla-roms **>= 0.14.0, < 0.15.0**.
+  Adds ``wrt_avg_temp``/``wrt_avg_salt`` to ``&TS_OUTPUT_SETTINGS`` (write ``temp`` and
   ``salt`` to the averages file; ucla-roms PR #413), on top of 0.13.0.
+- :class:`RomsNamelistV0_15_0` — the schema for ucla-roms **>= 0.15.0**. Adds the
+  optional ``&IMPLICIT_FS`` group (the barotropic scheme: split-explicit or
+  implicit free surface), on top of 0.14.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -74,7 +77,7 @@ from __future__ import annotations
 import functools
 import re
 import warnings
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, Self, cast
 
 import f90nml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -224,6 +227,34 @@ class PioSettings(_NmlGroup):
 
     pio_stride: int = Field(default=1, ge=1)
     """Stride between MPI ranks assigned as PIO I/O tasks (requires PARALLEL_IO)"""
+
+
+FsMode = Literal["split", "implicit"]
+"""The barotropic schemes `&IMPLICIT_FS` offers (ucla-roms `fs_mode`), named once."""
+
+FS_MODE_SPLIT: Final[FsMode] = "split"
+"""The split-explicit fast loop: the scheme in use when `&IMPLICIT_FS` is absent."""
+
+
+class ImplicitFsSettings(_NmlGroup):
+    """Barotropic-mode scheme (ucla-roms `&IMPLICIT_FS`, ucla-roms >= 0.15.0).
+
+    Optional in ucla-roms: an absent group means ``fs_mode = 'split'``. Only the
+    five keys of the namelist template are modeled; the solver and development
+    keys (``fs_maxit``, ``fs_precond``, ``fs_mg_*``, ...) keep their Fortran
+    defaults and are deliberately not exposed.
+    """
+
+    fs_mode: FsMode = Field(default=FS_MODE_SPLIT)
+    """'split' (step2d fast loop) | 'implicit'"""
+    fs_nsub: int = Field(default=2, ge=1, le=4)
+    """Implicit sub-steps of dt/fs_nsub per baroclinic step (1..4): more accurate tides (phase error / ~4 with 2), one solve per sub-step"""
+    fs_rho_inf: float = Field(default=0.5, ge=0.0, lt=1.0)
+    """Spectral radius at infinite omega dt, 0 <= fs_rho_inf < 1: 0 damps the fastest modes most (L-stable); 1 (Crank-Nicolson) is rejected"""
+    fs_tol: float = Field(default=1.0e-8, gt=0.0)
+    """Relative residual of the elliptic solve (volume is exact regardless)"""
+    fs_verbose: int = Field(default=0, ge=0)
+    """1 FS_SOLVE line per step, FS_COST cost table at the end; 2 + FS_VOL volume budget and FS_SRC source volumes (FS_SRC also with fs_mode = 'split')"""
 
 
 class InitialConditions(_NmlGroup):
@@ -1032,9 +1063,11 @@ class RomsNamelistBase(BaseModel):
     time-interpolation key and per-child extraction keys, or
     :class:`RomsNamelistV0_13_0` for ucla-roms >= 0.13.0, < 0.14.0, which adds
     the sponge tracer diffusivity ``v_sponge_trc``, or
-    :class:`RomsNamelistV0_14_0` for ucla-roms >= 0.14.0, which adds the
-    averages-file switches ``wrt_avg_temp`` and ``wrt_avg_salt``) or select one
-    automatically with :func:`namelist_schema_for_ref`.
+    :class:`RomsNamelistV0_14_0` for ucla-roms >= 0.14.0, < 0.15.0, which adds
+    the averages-file switches ``wrt_avg_temp`` and ``wrt_avg_salt``, or
+    :class:`RomsNamelistV0_15_0` for ucla-roms >= 0.15.0, which adds
+    ``&IMPLICIT_FS``) or select one automatically with
+    :func:`namelist_schema_for_ref`.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -1332,7 +1365,7 @@ class RomsNamelistV0_13_0(RomsNamelistV0_12_0):
 
 
 class RomsNamelistV0_14_0(RomsNamelistV0_13_0):
-    """The ROMS namelist schema for ucla-roms >= 0.14.0.
+    """The ROMS namelist schema for ucla-roms >= 0.14.0, < 0.15.0.
 
     Adds `wrt_avg_temp` and `wrt_avg_salt` to `&TS_OUTPUT_SETTINGS` (see
     :class:`TsOutputSettingsV0_14_0`) on top of the 0.13.0 schema. They are
@@ -1341,6 +1374,17 @@ class RomsNamelistV0_14_0(RomsNamelistV0_13_0):
     """
 
     ts_output_settings: TsOutputSettingsV0_14_0
+
+
+class RomsNamelistV0_15_0(RomsNamelistV0_14_0):
+    """The ROMS namelist schema for ucla-roms >= 0.15.0.
+
+    Adds `&IMPLICIT_FS` (see :class:`ImplicitFsSettings`) on top of the 0.14.0
+    schema. It is always written, which is why earlier releases (which stop on
+    unknown namelist groups) keep the 0.14.0 schema.
+    """
+
+    implicit_fs: ImplicitFsSettings = Field(default_factory=ImplicitFsSettings)
 
 
 # ---- Schema version selection ----
@@ -1356,19 +1400,20 @@ UCLA_ROMS_0_11_0: Final[tuple[int, int, int]] = (0, 11, 0)
 UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
 UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
 UCLA_ROMS_0_14_0: Final[tuple[int, int, int]] = (0, 14, 0)
+UCLA_ROMS_0_15_0: Final[tuple[int, int, int]] = (0, 15, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.15.0):
+# Recipe for the next breaking namelist release (e.g. 0.16.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_15_0: Final[tuple[int, int, int]] = (0, 15, 0)
+#        UCLA_ROMS_0_16_0: Final[tuple[int, int, int]] = (0, 16, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_14_0, UCLA_ROMS_0_15_0, RomsNamelistV0_14_0),
+#        (UCLA_ROMS_0_15_0, UCLA_ROMS_0_16_0, RomsNamelistV0_15_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_15_0, None, RomsNamelistV0_15_0),
+#        (UCLA_ROMS_0_16_0, None, RomsNamelistV0_16_0),
 #   4. Bump NEWEST_KNOWN_UCLA_ROMS (below) to the new release.
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
@@ -1385,7 +1430,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
     (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
     (UCLA_ROMS_0_13_0, UCLA_ROMS_0_14_0, RomsNamelistV0_13_0),
-    (UCLA_ROMS_0_14_0, None, RomsNamelistV0_14_0),
+    (UCLA_ROMS_0_14_0, UCLA_ROMS_0_15_0, RomsNamelistV0_14_0),
+    (UCLA_ROMS_0_15_0, None, RomsNamelistV0_15_0),
 )
 
 # The newest ucla-roms release whose namelist C-Star has been checked against.
@@ -1394,7 +1440,7 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
 # with every new tier (recipe step 4 above) and also for a release that changes
 # no namelist key (a patch release such as 0.12.1), once checked. Never below the last entry's
 # lower bound.
-NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_14_0
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_15_0
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:

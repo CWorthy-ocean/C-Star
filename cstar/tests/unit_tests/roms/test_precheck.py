@@ -32,6 +32,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
+    RomsNamelistV0_15_0,
 )
 from cstar.roms.precheck import (
     _STREAM_CHECKS,
@@ -56,6 +57,7 @@ V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.
 V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
 V0_13_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 V0_14_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_14_0.nml"
+V0_15_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_15_0.nml"
 
 
 def _base_settings(**overrides):
@@ -545,6 +547,7 @@ def test_every_guarded_row_skipped_when_cppdef_inactive(row):
         (RomsNamelistV0_12_0, False),
         (RomsNamelistV0_13_0, True),
         (RomsNamelistV0_14_0, True),
+        (RomsNamelistV0_15_0, True),
         (None, True),
     ],
 )
@@ -574,6 +577,7 @@ def test_sflx_gate_counts_every_switch_from_0_13_0(switch, schema, checked):
         (RomsNamelistV0_12_0, V0_12_0_NAMELIST, False),
         (RomsNamelistV0_13_0, V0_13_0_NAMELIST, True),
         (RomsNamelistV0_14_0, V0_14_0_NAMELIST, True),
+        (RomsNamelistV0_15_0, V0_15_0_NAMELIST, True),
     ],
 )
 def test_live_namelist_sflx_gate_follows_its_schema(schema, fixture, checked):
@@ -720,6 +724,7 @@ def test_applies_to_v0_4_0_schema_is_false():
         RomsNamelistV0_12_0,
         RomsNamelistV0_13_0,
         RomsNamelistV0_14_0,
+        RomsNamelistV0_15_0,
     ],
 )
 def test_applies_to_versioned_schemas_is_true(schema):
@@ -875,6 +880,7 @@ def test_averages_check_applies_from_0_13_0(roms_ref, applies):
         (RomsNamelistV0_12_0, False),
         (RomsNamelistV0_13_0, True),
         (RomsNamelistV0_14_0, True),
+        (RomsNamelistV0_15_0, True),
     ],
 )
 def test_averages_check_schema_gate_applies_from_0_13_0(schema, applies):
@@ -1015,6 +1021,7 @@ def test_forcing_file_count_checks_a_live_namelist():
         (RomsNamelistV0_12_0, MAX_FORCING_FILES_BEFORE_0_13_0),
         (RomsNamelistV0_13_0, MAX_FORCING_FILES),
         (RomsNamelistV0_14_0, MAX_FORCING_FILES),
+        (RomsNamelistV0_15_0, MAX_FORCING_FILES),
     ],
 )
 def test_max_forcing_files_follows_the_schema(schema, expected):
