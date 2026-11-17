@@ -168,21 +168,25 @@ C-Star build ParallelIO.
 1. Start from what is loaded at login (the probe's `module list`, or the
    modules marked `(L)` and `(D)`). List each one you need explicitly, with
    its version, and mark it `# (system default)`, so a change of site
-   defaults does not change the build.
-2. Prefer the MPI the site recommends, the one integrated with the scheduler.
-3. In a hierarchical Lmod, the MPI-built libraries (netCDF with MPI, parallel
+   defaults does not change the build. On a Cray programming environment
+   that includes the `PrgEnv-*` module that selects the compiler.
+2. If `module reset` loads modules for another kind of node than the
+   toolchain's (CUDA or a GPU target in a CPU toolchain) and the site has a
+   module that switches the target, load it first, so they are swapped out.
+3. Prefer the MPI the site recommends, the one integrated with the scheduler.
+4. In a hierarchical Lmod, the MPI-built libraries (netCDF with MPI, parallel
    HDF5, parallel-netCDF) appear only once a compiler and an MPI are loaded.
    Load those two first with `try-modules.sh` and read its "modules available
    now" section.
-4. Take a netCDF-Fortran built with that compiler and MPI. `module spider
+5. Take a netCDF-Fortran built with that compiler and MPI. `module spider
    <name>/<version>` shows what must be loaded before it.
-5. Pick versions in this order: the defaults; else a version whose
+6. Pick versions in this order: the defaults; else a version whose
    dependencies are the defaults; else the newest compiler, then repeat.
-6. If the site has two builds of one library at the same version, check
+7. If the site has two builds of one library at the same version, check
    which one the netCDF-Fortran module pulls in, and load the module that
    brings the matching pair, not the library whose default is the other
    build.
-7. Where module names carry build hashes (`name/1.2.3-abcd`), use the
+8. Where module names carry build hashes (`name/1.2.3-abcd`), use the
    version-only name (`name/1.2.3`) if it loads, and say so in a comment.
 
 Test each candidate set from `module reset`, as C-Star loads it:
@@ -233,8 +237,9 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
   partition's `AllowAccounts` or `AllowQos` that excludes the user).
 - `kind`: `partition` if the site's documentation picks a queue with
   `--partition`, `qos` if with `--qos`.
-- `primary_queue`: the default (marked `*` in `sinfo`), or the queue the
-  documentation calls standard.
+- `primary_queue`: the queue production runs go to: the default (marked `*`
+  in `sinfo`), or the one the documentation calls standard or regular. Not a
+  short debug queue, even when the site makes it the default.
 - `max_walltime`, for each queue:
   - a partition with a time limit in `sinfo`, no partition QOS, and no QOS
     with a smaller `MaxWall` that jobs there get by default (compare with the
@@ -249,7 +254,8 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
   - a QOS: leave it out (a QOS asks `sacctmgr`). If `sacctmgr` shows no
     `MaxWall` for the QOS a job names but the limit is carried by another QOS
     the site pairs with it, put that one in `query_name`, and say why in a
-    comment;
+    comment (when several candidates carry the same `MaxWall`, any one gives
+    the same answer);
   - nothing reports a limit but the documentation gives one: a fixed, quoted
     `"HH:MM:SS"` with the URL in a comment.
 
@@ -262,15 +268,20 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
 - `directives`: only what every CPU job must carry, such as a constraint the
   site requires to select CPU nodes.
 - `max_cpus_per_node`: only when every node of the primary queue has the same
-  core count (the `cpus/node` column of `sinfo`); leave it out otherwise.
+  core count; leave it out otherwise. Count physical cores: sockets times
+  cores from `sinfo`'s `sockets:cores:threads` column. The `cpus/node` column
+  counts hardware threads too (it is twice the cores when threads is 2), and
+  ranks on both threads of a core slow the model.
 - `requires_task_distribution`: `true` only when the site requires jobs to
   state nodes and tasks per node.
 - `require`: from the probe's `sbatch --test-only`, which names no account and
   no partition. Refused for the account: `account`. Refused for the
-  partition, or no partition is marked default: `queue`. Accepted: `[]`,
-  unless the site's documentation says every job must name an account. The
-  test runs with the user's default account, if they have one, so say in the
-  comment that `[]` relies on one, and give the test's date.
+  partition, or no partition is marked default: `queue`. Accepted: `[]`; the
+  job is charged to the user's default account, so say in the comment that
+  `[]` relies on one, and give the test's date. Refused for another reason,
+  such as a missing node constraint: run `sbatch --test-only` again with the
+  `directives` you chose (as `--key value`), and judge the account and the
+  queue from that answer.
 - PBS: list the queues the documentation tells users to submit to, each with
   the `resources_max.walltime` from `qstat -Qf` as a fixed, quoted walltime.
 - `gpu_nodes` and a `gpu` toolchain: only when the user wants GPU runs; the
@@ -348,7 +359,8 @@ sets `CSTAR_SYSTEM` when C-Star does not recognise the machine.
 the current directory, then clones and compiles UCLA-ROMS, MARBL and
 ParallelIO for a few minutes in a new run directory under `CSTAR_DATA_HOME`. Use the small example blueprint of the installed version
 (`<version>` is the number on the `C-Star version:` line of `cstar --version`;
-for a development install, use `main`):
+for a development install, whose version holds `dev` or is `0.0.0`, use
+`main`):
 
 ```
 <activate>
@@ -358,7 +370,8 @@ cstar run status <name>-check
 ```
 
 The pre-run runs on the login node, and the command can return before it
-finishes: repeat `cstar run status <name>-check` until the step is done, and read
+finishes: repeat `COLUMNS=200 cstar run status <name>-check` (wide, so the
+table is not cut) until the step is done, and read
 `cstar run log <name>-check ucla_roms` if it failed. If the site forbids
 compiling on login nodes, ask the user to run the same commands inside an
 interactive allocation instead. When it succeeds, add a dated comment:

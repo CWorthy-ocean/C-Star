@@ -230,8 +230,8 @@ probe_slurm() {
     run srun --mpi=list
 
     section "slurm: partitions (sinfo)"
-    echo "partition avail timelimit nodes cpus/node memory/node gres features"
-    run sinfo --noheader -o '%P %a %l %D %c %m %G %f' | sort -u
+    echo "partition avail timelimit nodes cpus/node sockets:cores:threads memory/node gres features"
+    run sinfo --noheader -o '%P %a %l %D %c %z %m %G %f' | sort -u
 
     section "slurm: partition limits (scontrol show partition)"
     echo "QoS= is a partition QOS whose MaxWall may cap the partition"
