@@ -47,6 +47,14 @@ model_settings:
     rdrg: 0.0
     rdrg2: 0.001
     zob: 0.01
+  implicit_fs:
+    # Barotropic scheme (ucla-roms >= 0.15.0 &IMPLICIT_FS group): split = the split-explicit
+    # fast loop (what earlier releases always did); implicit = an implicit free surface.
+    fs_mode: split
+    fs_nsub: 2
+    fs_rho_inf: 0.5
+    fs_tol: 1.0e-08
+    fs_verbose: 0
   v_sponge:
     # Maximum tracer diffusivity in the sponge layer (ucla-roms >= 0.13.0, on main): 0 for
     # a sponge on currents only, negative for the same as v_sponge (what earlier releases

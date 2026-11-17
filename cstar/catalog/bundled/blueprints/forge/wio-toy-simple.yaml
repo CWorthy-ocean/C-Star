@@ -180,6 +180,12 @@ model_settings:
     rdrg: 0.0
     rdrg2: 0.001
     zob: 0.01
+  implicit_fs:
+    fs_mode: split
+    fs_nsub: 2
+    fs_rho_inf: 0.5
+    fs_tol: 1.0e-08
+    fs_verbose: 0
   v_sponge:
     v_sponge_trc: -1.0
     v_sponge: 40000.0
@@ -458,7 +464,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.14.0
+    commit: 0.15.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -488,7 +494,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.14-default
+    name: roms-marbl-0.15-default
     origin: catalog
     modified: false
   domain:
@@ -509,19 +515,19 @@ composition:
     modified: false
   overrides: {}
 provenance:
-  generated_at: '2026-11-13T18:48:47.771552Z'
+  generated_at: '2026-11-17T18:58:28.882869Z'
   generated_by:
     tool: wizard
-    id: b8ad9918-7b54-40a2-a7ac-64cc35877df0
+    id: b53279cf-8c1e-4d88-b150-6de6b7f21bde
     system: darwin_arm64
     versions:
-      cstar-ocean: 0.18.1.dev27+gc35923669.d20261113
-      roms-tools: 5.3.0
+      cstar-ocean: 0.18.1.dev37+g212282369.d20261117
+      roms-tools: 5.4.0
     run_id: ''
     working_dir: ''
   forge_version: null
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:3577e91488f01d770700fe88e8594ef0e5b752688edd2b01b9d76ddaf75b31a3
+  content_hash: bp-v2:eb32777d5297c59cd5c066174aa45c662630e3230263b1fd48b64da7ec2dfa09
   notes: null

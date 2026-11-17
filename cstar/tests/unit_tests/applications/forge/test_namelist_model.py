@@ -40,6 +40,7 @@ from cstar.applications.forge.namelist_model import (
     CdrLiteOutputCfgV0_9_0,
     CdrOutputCfg,
     CdrTracerCounts,
+    ImplicitFsCfg,
     MarblBgcCfg,
     MarblBgcCfgV0_11_0,
     RunTimeSettings,
@@ -52,6 +53,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_12_0,
     RunTimeSettingsV0_13_0,
     RunTimeSettingsV0_14_0,
+    RunTimeSettingsV0_15_0,
     TsOutputCfg,
     TsOutputCfgV0_14_0,
     VSpongeCfg,
@@ -91,6 +93,7 @@ from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
     NEWEST_KNOWN_UCLA_ROMS,
     UCLA_ROMS_0_14_0,
+    ImplicitFsSettings,
     RomsNamelist,
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
@@ -99,6 +102,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
+    RomsNamelistV0_15_0,
     format_roms_version,
     release_ref_for_remote,
 )
@@ -115,6 +119,7 @@ _ALL_SETTINGS_TIERS = (
     RunTimeSettingsV0_12_0,
     RunTimeSettingsV0_13_0,
     RunTimeSettingsV0_14_0,
+    RunTimeSettingsV0_15_0,
 )
 
 
@@ -445,6 +450,7 @@ def test_prune_rejects_a_misspelled_switch_in_a_section_it_would_drop():
         "mean do_cdr_lite_output?)"
     ) in message
     assert "cdr_lite.cdr_online_carbonate_sensitivity enabled" in message
+    assert "cdr_lite needs ucla-roms >= 0.9.0" in message
     assert set(settings) == {"cdr_lite", "cdr_lite_output", "cdr_gas_exch_output"}
 
 
@@ -1191,9 +1197,15 @@ def test_run_time_settings_for_ref_0_13_0_up_to_0_14_0_selects_v0_13_0(recwarn):
     assert len(recwarn) == 0
 
 
-def test_run_time_settings_for_ref_0_14_0_and_later_selects_v0_14_0(recwarn):
-    for ref in ("0.14.0", "v0.14.0"):
+def test_run_time_settings_for_ref_0_14_0_up_to_0_15_0_selects_v0_14_0(recwarn):
+    for ref in ("0.14.0", "v0.14.0", "0.14.3"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_14_0
+    assert len(recwarn) == 0
+
+
+def test_run_time_settings_for_ref_0_15_0_and_later_selects_v0_15_0(recwarn):
+    for ref in ("0.15.0", "v0.15.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_15_0
     assert len(recwarn) == 0
 
 
@@ -1216,12 +1228,12 @@ def test_run_time_settings_for_ref_newer_than_known_release_warns(ref):
     """
     with pytest.warns(UserWarning) as record:
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_14_0
+    assert cls is RunTimeSettingsV0_15_0
     assert len(record) == 1
     message = str(record[0].message)
     assert f"ucla-roms release {ref} is {_NEWER_THAN_KNOWN}" in message
     assert f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)})" in message
-    assert RomsNamelistV0_14_0.__name__ in message
+    assert RomsNamelistV0_15_0.__name__ in message
 
 
 def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
@@ -1237,7 +1249,7 @@ def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
         UserWarning, match=f"release {_NEWER_TAG} is {_NEWER_THAN_KNOWN}"
     ):
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_14_0
+    assert cls is RunTimeSettingsV0_15_0
 
 
 def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
@@ -1249,13 +1261,13 @@ def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
         write_roms_namelist(
             _populated_rt_dict(), tmp_path, n_tracers=34, roms_ref=_NEWER_TAG
         )
-    RomsNamelistV0_14_0.read(tmp_path / "namelist.nml")
+    RomsNamelistV0_15_0.read(tmp_path / "namelist.nml")
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_14_0
+    assert cls is RunTimeSettingsV0_15_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -1264,7 +1276,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_14_0
+    assert cls is RunTimeSettingsV0_15_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -1419,6 +1431,7 @@ def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
         RunTimeSettingsV0_12_0,
         RunTimeSettingsV0_13_0,
         RunTimeSettingsV0_14_0,
+        RunTimeSettingsV0_15_0,
     ],
 )
 def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
@@ -1706,7 +1719,7 @@ def test_forge_writes_time_interpolation_cstar_reads_it(tmp_path):
 # ---------------------------------------------------------------------------
 # ucla-roms >= 0.13.0: RunTimeSettingsV0_13_0 (tracer diffusivity of the sponge)
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
 @pytest.mark.parametrize("requested", [0.0, 400.0, "0", "not-a-number", float("nan")])
 def test_pre_0_13_0_tiers_reject_a_requested_v_sponge_trc(settings_cls, requested):
     """ucla-roms < 0.13.0 gives tracers ``v_sponge``: ``extra="ignore"`` would
@@ -1825,7 +1838,7 @@ def _ts_output(**switches):
     return {**default_catalog.output_data("standard")["ts_output"], **switches}
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
 @pytest.mark.parametrize("key", _AVG_TS_KEYS)
 @pytest.mark.parametrize("requested", [True, "true", 1, "not-a-bool"])
 def test_pre_0_14_0_tiers_reject_a_requested_avg_ts_key(settings_cls, key, requested):
@@ -1841,7 +1854,7 @@ def test_pre_0_14_0_tiers_reject_a_requested_avg_ts_key(settings_cls, key, reque
         TypeAdapter(annotation).validate_python(_ts_output(**{key: requested}))
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
 def test_pre_0_14_0_tiers_name_every_requested_avg_ts_key_in_one_error(settings_cls):
     annotation = settings_cls.model_fields["ts_output"].annotation
     with pytest.raises(ValidationError) as excinfo:
@@ -1863,7 +1876,7 @@ def test_avg_ts_rejection_names_the_version_from_the_constant():
         TsOutputCfg.model_validate(_ts_output(wrt_avg_temp=True))
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
 @pytest.mark.parametrize("off", [False, "false", 0, None])
 def test_pre_0_14_0_tiers_drop_a_switched_off_avg_ts_key(settings_cls, off):
     """A shared spec may carry the keys switched off: they pass and are dropped."""
@@ -1953,6 +1966,120 @@ def test_forge_writes_avg_ts_cstar_reads_it(tmp_path):
     back = RomsNamelistV0_14_0.read(tmp_path / "namelist.nml")
     assert back.ts_output_settings.wrt_avg_temp is True
     assert back.ts_output_settings.wrt_avg_salt is True
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.15.0: RunTimeSettingsV0_15_0 (the &IMPLICIT_FS group)
+# ---------------------------------------------------------------------------
+_IMPLICIT_FS_DEFAULTS = {
+    "fs_mode": "split",
+    "fs_nsub": 2,
+    "fs_rho_inf": 0.5,
+    "fs_tol": 1.0e-8,
+    "fs_verbose": 0,
+}
+_PRE_0_15_0_TIERS = _ALL_SETTINGS_TIERS[
+    : _ALL_SETTINGS_TIERS.index(RunTimeSettingsV0_15_0)
+]
+
+
+def test_build_namelist_v0_15_0_writes_implicit_fs(tmp_path):
+    """RunTimeSettingsV0_15_0 builds ``RomsNamelistV0_15_0`` and writes the group,
+    ``implicit`` mode and its keys included.
+    """
+    d = _populated_rt_dict()
+    d["implicit_fs"] = {**_IMPLICIT_FS_DEFAULTS, "fs_mode": "implicit", "fs_nsub": 3}
+    rt = RunTimeSettingsV0_15_0.model_validate(d)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_15_0
+    assert nml.implicit_fs.fs_mode == "implicit"
+    assert nml.implicit_fs.fs_nsub == 3
+
+    nml.write(tmp_path / "namelist.nml")
+    back = RomsNamelistV0_15_0.read(tmp_path / "namelist.nml")
+    assert back.implicit_fs == nml.implicit_fs
+
+
+def test_run_time_settings_v0_15_0_defaults_implicit_fs_when_omitted(tmp_path):
+    """A settings dict without the section (a blueprint saved before it existed)
+    validates to the ucla-roms initializers, and the namelist carries the group.
+    """
+    d = _populated_rt_dict()
+    d.pop("implicit_fs", None)
+    rt = RunTimeSettingsV0_15_0.model_validate(d)
+    assert rt.implicit_fs.model_dump() == _IMPLICIT_FS_DEFAULTS
+    nml = build_namelist(rt, n_tracers=34)
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "&implicit_fs" in text
+    assert "fs_mode = 'split'" in text
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"fs_nsub": 0},
+        {"fs_nsub": 5},
+        {"fs_rho_inf": 1.0},
+        {"fs_rho_inf": -0.1},
+        {"fs_tol": 0.0},
+        {"fs_verbose": -1},
+        {"fs_mode": "Implicit"},
+        {"fs_mode": "foo"},
+    ],
+)
+def test_implicit_fs_cfg_rejects_values_ucla_roms_stops_on(bad):
+    with pytest.raises(ValidationError):
+        ImplicitFsCfg(**bad)
+
+
+def test_implicit_fs_cfg_defaults_equal_the_namelist_group_defaults():
+    """The Forge section and the C-Star group each carry the Fortran initializers;
+    they must agree.
+    """
+    assert ImplicitFsCfg().model_dump() == ImplicitFsSettings().model_dump()
+
+
+@pytest.mark.parametrize("settings_cls", _PRE_0_15_0_TIERS)
+@pytest.mark.parametrize("section", [{"fs_mode": "implicit"}, {"fs_mode": "Split"}])
+def test_pre_0_15_0_tiers_reject_a_requested_implicit_fs(settings_cls, section):
+    """A release before 0.15.0 stops on the group, so a request for anything but
+    ``split`` is refused, naming the release that adds it; a mis-cased ``Split``
+    is no ``split`` either.
+    """
+    settings = {"implicit_fs": dict(section)}
+    with pytest.raises(ValueError, match=r"implicit_fs\.fs_mode") as exc:
+        prune_version_gated_sections(settings, settings_cls)
+    assert "implicit_fs needs ucla-roms >= 0.15.0" in str(exc.value)
+    assert settings == {"implicit_fs": section}  # nothing was mutated
+
+
+@pytest.mark.parametrize("settings_cls", _PRE_0_15_0_TIERS)
+@pytest.mark.parametrize("section", [{"fs_mode": "split"}, {}])
+def test_pre_0_15_0_tiers_drop_a_default_implicit_fs(settings_cls, section):
+    """A shared spec may carry the default section: ``split`` (or no ``fs_mode``)
+    is what every release does, so it is dropped silently.
+    """
+    settings = {"implicit_fs": dict(section), "ocean_vars": {}}
+    assert prune_version_gated_sections(settings, settings_cls) == ["implicit_fs"]
+    assert list(settings) == ["ocean_vars"]
+
+
+def test_prune_keeps_implicit_fs_on_the_0_15_0_tier():
+    settings = {"implicit_fs": {"fs_mode": "implicit"}}
+    assert prune_version_gated_sections(settings, RunTimeSettingsV0_15_0) == []
+    assert settings == {"implicit_fs": {"fs_mode": "implicit"}}
+
+
+def test_forge_writes_implicit_fs_cstar_reads_it(tmp_path):
+    """``write_roms_namelist`` for a 0.15.0 pin writes a namelist the C-Star schema
+    for that release reads back, mode included.
+    """
+    d = _populated_rt_dict()
+    d["implicit_fs"] = {**_IMPLICIT_FS_DEFAULTS, "fs_mode": "implicit"}
+    write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.15.0")
+    back = RomsNamelistV0_15_0.read(tmp_path / "namelist.nml")
+    assert back.implicit_fs.fs_mode == "implicit"
 
 
 # ---------------------------------------------------------------------------
@@ -2504,6 +2631,7 @@ def test_prune_rejects_an_enabled_section_the_tier_lacks(section, values):
     with pytest.raises(ValueError, match=rf"{section}\.{next(iter(values))}") as exc:
         prune_version_gated_sections(settings, RunTimeSettingsV0_6_0)
     assert "RunTimeSettingsV0_6_0" in str(exc.value)
+    assert f"{section} needs ucla-roms >= 0.7.0" in str(exc.value)
     assert section in settings  # nothing was mutated
 
 
@@ -2528,8 +2656,8 @@ def test_prune_stays_silent_for_switched_off_sections():
     assert list(settings) == ["ocean_vars"]
 
 
-def test_gated_section_switches_are_fields_of_their_0_9_0_sections():
-    cls = RunTimeSettingsV0_9_0
+def test_gated_section_switches_are_fields_of_their_sections():
+    cls = RunTimeSettingsV0_15_0
     for section, flag in _GATED_SECTION_SWITCHES.items():
         assert flag in cls.model_fields[section].annotation.model_fields
 
@@ -2710,7 +2838,7 @@ def _surf_flux(**switches):
     return {**default_catalog.output_data("daily-restarts")["surf_flux"], **switches}
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
 def test_pre_0_13_0_tiers_reject_wrt_rstflx(settings_cls):
     """ucla-roms < 0.13.0 reads ``wrt_rstflx`` but writes no restoring flux."""
     annotation = settings_cls.model_fields["surf_flux"].annotation
