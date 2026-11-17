@@ -24,8 +24,9 @@ SHELL_MAX_WIDTH = "1600px"
 #: Height of the sticky status bar: where a pinned preview pane docks beneath it.
 STICKY_BAR_HEIGHT = "56px"
 
-#: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap with
-#: :func:`style_widget` or ``f"<style>{WIZARD_CSS}</style>"`` yourself).
+#: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap it with
+#: :func:`style_widget`, which also installs the number-box mouse-wheel guard that
+#: a bare ``f"<style>{WIZARD_CSS}</style>"`` would lack).
 WIZARD_CSS = f"""
 /* page background only in Voila (body[data-voila]); JupyterLab keeps its theme */
 body[data-voila] {{ background: {branding.GREY}; }}
@@ -142,6 +143,10 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     border: 1px solid {branding.LINE};
     border-radius: 4px;
 }}
+/* number boxes: no up/down arrows (the mouse wheel is handled in style_widget) */
+.forge-app input[type=number] {{ -moz-appearance: textfield; appearance: textfield; }}
+.forge-app input[type=number]::-webkit-inner-spin-button,
+.forge-app input[type=number]::-webkit-outer-spin-button {{ -webkit-appearance: none; margin: 0; }}
 .forge-app .widget-text input:focus, .forge-app .widget-dropdown select:focus {{
     border-color: {branding.BLUE};
     box-shadow: 0 0 0 2px {branding.LIGHT_BLUE};
@@ -444,9 +449,25 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 """
 
 
+#: Installed once per page: a wheel event over a number box takes its focus away,
+#: which is what stops the browser from stepping its value. Only boxes under the
+#: ``.forge-app`` root are touched, like the CSS, so the rest of a JupyterLab tab
+#: keeps its own wheel behavior.
+_NO_WHEEL_JS = (
+    "if(!window.forgeNoWheel){window.forgeNoWheel=1;"
+    "document.addEventListener('wheel',function(e){var t=e.target;"
+    "if(t.type==='number'&&t.closest('.forge-app'))t.blur();},true);}"
+)
+
+
 def style_widget(W: Any) -> Any:
-    """A ``W.HTML`` widget carrying :data:`WIZARD_CSS` in a ``<style>`` tag."""
-    widget = W.HTML(f"<style>{WIZARD_CSS}</style>")
+    """A ``W.HTML`` widget carrying :data:`WIZARD_CSS` in a ``<style>`` tag.
+
+    The tag's ``onload`` (scripts are not executed, see
+    :func:`cstar.wizard.ui.branding._favicon_js`) stops the mouse wheel from
+    changing the number in a focused number box: the box loses focus instead.
+    """
+    widget = W.HTML(f'<style onload="{_NO_WHEEL_JS}">{WIZARD_CSS}</style>')
     widget.add_class("forge-style")
     return widget
 

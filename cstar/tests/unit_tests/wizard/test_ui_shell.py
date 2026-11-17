@@ -71,7 +71,7 @@ def test_root_contains_style_header_nav_and_stack():
     style, header, nav, stack = shell.root.children
     assert nav is shell.nav
     assert stack is shell.stack
-    assert "<style>" in style.value
+    assert "<style " in style.value  # the tag carries an onload attribute
     assert "<style>" in header.value  # header carries header_css
 
 
