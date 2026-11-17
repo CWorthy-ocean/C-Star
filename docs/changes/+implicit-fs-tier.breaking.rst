@@ -1,2 +1,0 @@
-New namelist tier for ucla-roms >= 0.15.0 that adds the ``&IMPLICIT_FS`` group (``implicit_fs`` in Forge); earlier releases do not read the group, so they keep the 0.14 tier and Forge rejects ``implicit_fs.fs_mode: implicit`` there with an error naming 0.15.0.
-- Branch pins select the newest tier in both Forge and ``ucla_roms``, so a run pinned to a ucla-roms branch without ucla-roms #420 gets the group in its namelist but ignores it and keeps the split-explicit scheme; a commit-hash pin resolves to its nearest release tag and keeps that release's tier.
