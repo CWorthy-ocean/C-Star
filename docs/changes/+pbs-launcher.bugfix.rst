@@ -1,0 +1,1 @@
+On Derecho and any other PBS system, a workplan runs its steps on the current node instead of handing them to the SLURM launcher, and warns when started outside a PBS job; a workplan that sets ``compute_environment.launcher: slurm`` there is refused before anything runs.

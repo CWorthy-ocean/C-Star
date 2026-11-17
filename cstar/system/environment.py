@@ -1,10 +1,11 @@
 import importlib.util
 import os
 import platform
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar, Final
 
-from dotenv import dotenv_values
+from dotenv.main import resolve_variables
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -142,7 +143,13 @@ class CStarEnvironment:
     _compiler: Final[str]
     """The compiler to be used in the environment (e.g., "intel", "gnu")."""
     _profile: Final[str]
-    """Infix of the module and env file names; empty selects the system's CPU files."""
+    """The toolchain's name when it is not the CPU one; empty for the CPU toolchain."""
+    _modules: Final[tuple[str, ...]]
+    """The modules the toolchain loads, in order, after `module reset`."""
+    _env: Final[dict[str, str]]
+    """The environment variables the toolchain sets, in order, before expansion."""
+    _source: Final[Path | None]
+    """The system file the toolchain was read from; `None` for one defined in code."""
     _package_root: Path | None = None
     """The root directory of the installation of the C-Star package."""
     _lmod_settings: Final[LmodEnvSettings]
@@ -150,8 +157,8 @@ class CStarEnvironment:
     _system_settings_klass: Final[type[EnvSettingsBase] | None]
     """Environment variables used to configure jobs on the system."""
     _prior_env: Final[dict[str, str | None]]
-    """What the variables the env file sets held before it was loaded (``None`` when
-    unset); empty when the env file is not loaded."""
+    """What the variables the toolchain sets held before it was loaded (``None``
+    when unset); empty when its env is not loaded."""
 
     def __init__(
         self,
@@ -160,6 +167,9 @@ class CStarEnvironment:
         compiler: str,
         system_settings_klass: type[EnvSettingsBase] | None = None,
         profile: str = "",
+        modules: Sequence[str] = (),
+        env: Mapping[str, str] | None = None,
+        source: Path | None = None,
     ):
         """Initialize the instance.
 
@@ -174,15 +184,25 @@ class CStarEnvironment:
         system_settings_klass : type[EnvSettingsBase], optional
             The type that loads and validates the system's settings
         profile : str, optional
-            Infix of the system's module and env file names. The default loads
-            ``<system>.lmod`` and ``<system>.env``; ``"gpu"`` loads
-            ``<system>.gpu.lmod`` and ``<system>.gpu.env``. Building the environment
-            loads that profile's modules into this process.
+            The toolchain's name when it is not the CPU one (``"gpu"``).
+        modules : Sequence[str], optional
+            The modules to load, in order, after ``module reset``. Empty leaves the
+            user's modules alone.
+        env : Mapping[str, str], optional
+            The environment variables to set after the modules load, in order;
+            ``${VAR}`` sees earlier entries first, then the process environment.
+        source : Path, optional
+            The system file the toolchain was read from, named in messages.
+
+        Building the environment loads the modules and env into this process.
         """
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
         self._profile = profile
+        self._modules = tuple(modules)
+        self._env = dict(env or {})
+        self._source = source
         self._lmod_settings = LmodEnvSettings()
         self._system_settings_klass = system_settings_klass
         self._prior_env = {}
@@ -191,11 +211,11 @@ class CStarEnvironment:
         self.load()
 
     def load(self) -> None:
-        """Load this profile's modules and env file into the process.
+        """Load this toolchain's modules and env into the process.
 
-        Modules load FIRST (when the system uses Lmod), then the env file, so that
+        Modules load FIRST (when the system uses Lmod), then the env, so that
         variables the modules set (e.g., ``CRAY_NETCDF_PREFIX``) are available when
-        the env file's variables are expanded. A profile that is already loaded is
+        the env's variables are expanded. A profile that is already loaded is
         `unload`-ed first, so loading twice never records its own values as the ones
         to restore.
         """
@@ -205,10 +225,10 @@ class CStarEnvironment:
         self._env_vars = self._load_env()
 
     def unload(self) -> None:
-        """Restore the variables the env file set to what they held before it loaded.
+        """Restore the variables the env set to what they held before it loaded.
 
         The module side is handled by the next profile's ``module reset``; this undoes
-        the env file, so the next profile does not inherit this one's paths (a
+        the env, so the next profile does not inherit this one's paths (a
         ``PATH`` or ``LIBRARY_PATH`` extended with this profile's netCDF directories,
         or a variable only this profile sets). Calling it again, or on a profile
         that is not loaded, does nothing.
@@ -232,15 +252,16 @@ class CStarEnvironment:
 
     @property
     def profile(self) -> str:
-        """Get the profile infix of the module and env files; empty for the CPU files."""
+        """Get the toolchain's name when it is not the CPU one; empty for the CPU one."""
         return self._profile
 
     @property
-    def _file_stem(self) -> str:
-        """The system's module and env file name without its extension."""
-        if self._profile:
-            return f"{self._system_name}.{self._profile}"
-        return self._system_name
+    def env_origin(self) -> str:
+        """Name where the toolchain's modules and env are defined, for messages."""
+        toolchain = self._profile or "cpu"
+        if self._source is None:
+            return f"the {toolchain} toolchain of the {self._system_name} system"
+        return f"the {toolchain} toolchain in {self._source}"
 
     def __str__(self) -> str:
         """Provides a structured, readable summary of the environment's configuration.
@@ -281,19 +302,22 @@ class CStarEnvironment:
         )
 
     def _load_env(self) -> dict[str, str]:
-        """Load environment variables from system and user .env files into memory.
+        """Set the toolchain's environment variables in the process.
+
+        A ``${VAR}`` reference resolves against the toolchain's earlier entries,
+        then the process environment (an unset variable becomes empty), as a
+        dotenv file would; a bare ``$VAR`` left over is expanded afterwards.
 
         Returns
         -------
         dict[str, str]
             The variables that were loaded
         """
-        env_vars = dotenv_values(self.system_env_path)
-
-        env_vars = {k: v for k, v in env_vars.items() if v is not None}
+        resolved = resolve_variables(self._env.items(), override=True)
+        env_vars = {k: v for k, v in resolved.items() if v is not None}
 
         # Expand shell variables (e.g., ${CRAY_NETCDF_PREFIX}) using os.path.expandvars
-        # This allows env file to reference variables set by modules (which are loaded first)
+        # This allows the env to reference variables set by modules (which are loaded first)
         expanded_vars: dict[str, str] = {}
         for key, value in env_vars.items():
             # Use os.path.expandvars to expand ${VAR} and $VAR syntax
@@ -307,7 +331,7 @@ class CStarEnvironment:
 
     @property
     def environment_variables(self) -> dict[str, str]:
-        """Return the environment variables that were loaded from .env files.
+        """Return the environment variables the toolchain set.
 
         Returns
         -------
@@ -366,34 +390,23 @@ class CStarEnvironment:
     @property
     def uses_lmod(self) -> bool:
         """Checks if the system uses Linux Environment Modules (Lmod): the OS is Linux,
-        `LMOD_CMD` is set, and C-Star has a module list for the system.
+        `LMOD_CMD` is set, and the toolchain lists modules to load.
 
-        A generic context (`linux_x86_64`, say) has no module list: on a cluster C-Star
+        A generic context (`linux_x86_64`, say) lists none: on a cluster C-Star
         does not recognise it keeps the modules the user loaded and builds with the
         conda environment's toolchain, as on a laptop.
 
         Returns
         -------
         bool
-            True if the OS is Linux, `LMOD_CMD` is set, and `lmod_path` exists.
+            True if the OS is Linux, `LMOD_CMD` is set, and the module list is not
+            empty.
         """
         return (
             platform.system() == "Linux"
             and bool(self._lmod_settings.CMD)
-            and self.lmod_path.is_file()
+            and bool(self._modules)
         )
-
-    @property
-    def system_env_path(self) -> Path:
-        """Identify the expected path to a .env file for the current system.
-
-        Returns
-        -------
-        Path
-            The path to the `.env` file.
-        """
-        pkg_relative_path = f"additional_files/env_files/{self._file_stem}.env"
-        return self.package_root / pkg_relative_path
 
     @property
     def template_root(self) -> Path:
@@ -404,18 +417,6 @@ class CStarEnvironment:
         Path
         """
         pkg_relative_path = "additional_files/templates"
-        return self.package_root / pkg_relative_path
-
-    @property
-    def lmod_path(self) -> Path:
-        """Identify the expected path to a .lmod file for the current system.
-
-        Returns
-        -------
-        Path
-            The complete path to the `.lmod` file.
-        """
-        pkg_relative_path = f"additional_files/lmod_lists/{self._file_stem}.lmod"
         return self.package_root / pkg_relative_path
 
     def _call_lmod(self, *args: str) -> None:
@@ -472,10 +473,7 @@ class CStarEnvironment:
         This function:
 
         - Resets the current module environment by executing `module reset`.
-        - Loads each module listed in the `.lmod` file for the system, located at
-            `<root>/additional_files/lmod_lists/<system_name>.lmod` (or
-            `<system_name>.<profile>.lmod` for a profile). Blank lines and ``#``
-            comments in the file are skipped.
+        - Loads each of the toolchain's modules, in order.
 
         Raises
         ------
@@ -495,12 +493,8 @@ class CStarEnvironment:
 
         self._call_lmod("reset")
 
-        with open(self.lmod_path) as fp:
-            lmod_list = fp.readlines()
-
-        for module in (x.partition("#")[0].strip() for x in lmod_list):
-            if module:
-                self._call_lmod(f"load {module}")
+        for module in self._modules:
+            self._call_lmod(f"load {module}")
 
     @staticmethod
     def set_env_var(key: str, value: str) -> None:

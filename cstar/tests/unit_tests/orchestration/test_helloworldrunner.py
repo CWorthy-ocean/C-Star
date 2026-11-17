@@ -38,7 +38,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from cstar.system.manager import AnvilEnvSettings
+from cstar.system.manager import registered_context
 from cstar.system.scheduler import SlurmQOS, SlurmScheduler
 
 
@@ -459,7 +459,7 @@ def test_hello_world_blueprint_runs_without_slurm_settings(
     with (
         mock.patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",
-            AnvilEnvSettings,
+            registered_context("anvil").settings_klass(),
         ),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",

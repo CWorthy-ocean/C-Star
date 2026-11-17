@@ -23,7 +23,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from cstar.system.manager import MacOSSystemContext, SystemSelection, SystemSource
+from cstar.system.manager import SystemSelection, SystemSource, registered_context
 
 
 @pytest.mark.usefixtures("mock_env")
@@ -219,9 +219,14 @@ def test_cli_env_show_names_the_system_set_in_the_file(
 @pytest.mark.parametrize(
     ("selection", "label"),
     [
-        (SystemSelection(MacOSSystemContext, SystemSource.DETECTED), "darwin_arm64"),
         (
-            SystemSelection(MacOSSystemContext, SystemSource.FALLBACK, "mycluster"),
+            SystemSelection(registered_context("darwin_arm64"), SystemSource.DETECTED),
+            "darwin_arm64",
+        ),
+        (
+            SystemSelection(
+                registered_context("darwin_arm64"), SystemSource.FALLBACK, "mycluster"
+            ),
             "darwin_arm64 (generic; 'mycluster' is not a registered system)",
         ),
     ],

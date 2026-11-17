@@ -14,7 +14,15 @@ import yaml
 
 from cstar.base.application_names import canonical_application
 from cstar.base.deprecation import deprecated
-from cstar.base.env import ENV_CSTAR_CATALOG, default_catalog_root, get_env_item
+from cstar.base.env import (
+    BUNDLED_CATALOG_ROOT,
+    ENV_CSTAR_CATALOG,
+    catalog_entries,
+    default_catalog_root,
+    get_env_item,
+    is_bundled_catalog_entry,
+)
+from cstar.base.env import is_github_catalog_url as _is_github_catalog_url
 from cstar.catalog.spec_schema import SPEC_SCHEMA_VERSIONS, read_spec
 from cstar.system.migration import KEY_SV
 
@@ -29,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CATALOG_ROOT = Path(__file__).parent / "bundled"
+_DEFAULT_CATALOG_ROOT = BUNDLED_CATALOG_ROOT
 
 # Pre-move (cstar-forge repo) catalog location. Never written to or read from
 # automatically -- only checked for a one-time hint, see ``user_catalog_root``.
@@ -92,10 +100,10 @@ def user_catalog_root() -> Path:
     is set and non-empty, the first ``os.pathsep``-separated entry is used
     instead (expanded and resolved). Does not create the directory.
     """
-    entries = _env_catalog_entries()
+    entries = catalog_entries()
     if entries:
         first = entries[0]
-        if first.strip().lower() == "local":
+        if is_bundled_catalog_entry(first):
             raise ValueError(
                 f"{ENV_CSTAR_CATALOG}: the bundled catalog ('local') is read-only "
                 "and cannot be the writable top layer; list it after your own "
@@ -128,18 +136,6 @@ def user_catalog_root() -> Path:
     return root
 
 
-def _env_catalog_entries() -> list[str]:
-    """Non-empty ``os.pathsep``-separated entries of ``CSTAR_CATALOG``, in order.
-
-    The single parser for the env var: ``user_catalog_root``,
-    ``default_catalog_stack``, and the wizard's catalog bar must all agree on
-    which entry is the writable top, including when the value carries leading
-    or doubled separators (e.g. ``"$UNSET:/opt/shared"`` expanding to
-    ``":/opt/shared"``).
-    """
-    return [e for e in os.environ.get(ENV_CSTAR_CATALOG, "").split(os.pathsep) if e]
-
-
 def _extract_model_and_grid(
     ucla_roms_blueprint_name: str, model_names: list[str]
 ) -> tuple[str | None, str | None]:
@@ -159,14 +155,6 @@ def _extract_model_and_grid(
     if len(parts) == 2:
         return parts[0], parts[1]
     return None, None
-
-
-def _is_github_catalog_url(catalog_root: str) -> bool:
-    """Return True if *catalog_root* looks like a GitHub repository URL."""
-    s = catalog_root.strip()
-    return s.startswith(("https://github.com/", "http://github.com/")) or s.startswith(
-        "git@github.com:"
-    )
 
 
 def _parse_github_catalog_url(url: str) -> tuple[str, str, str, Path]:
@@ -288,7 +276,7 @@ class DomainCatalog:
             )
             self._fs = fsspec.filesystem("file")
         elif isinstance(catalog_root, str):
-            if catalog_root.strip().lower() == "local":
+            if is_bundled_catalog_entry(catalog_root):
                 self.catalog_root = _DEFAULT_CATALOG_ROOT
                 self._fs = fsspec.filesystem("file")
             elif _is_github_catalog_url(catalog_root):
@@ -1995,7 +1983,7 @@ def default_catalog_stack() -> LayeredCatalog:
     ``"bundled"``), unless a store with the same resolved root is already in
     the stack.
     """
-    entries = _env_catalog_entries() or [str(user_catalog_root())]
+    entries = catalog_entries() or [str(user_catalog_root())]
     return build_catalog_stack(entries)
 
 

@@ -2,7 +2,7 @@ import functools
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, ClassVar, Final
 
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import _run_cmd
@@ -51,7 +51,17 @@ def in_scheduler_job(environ: "Mapping[str, str]") -> bool:
     return bool(slurm_job_id(environ) or environ.get("PBS_JOBID"))
 
 
-VISIBLE_SCHEDULERS: Final = (("SLURM", "sbatch", "SLURM_"), ("PBS", "qsub", "PBS_"))
+SCHEDULER_SLURM: Final = "SLURM"
+"""The name of the SLURM scheduler family."""
+SCHEDULER_PBS: Final = "PBS"
+"""The name of the PBS scheduler family."""
+SUBMITTABLE_FAMILIES: Final = frozenset({SCHEDULER_SLURM})
+"""The scheduler families C-Star has a launcher for, and so can submit jobs to."""
+
+VISIBLE_SCHEDULERS: Final = (
+    (SCHEDULER_SLURM, "sbatch", "SLURM_"),
+    (SCHEDULER_PBS, "qsub", "PBS_"),
+)
 """Each scheduler family `visible_scheduler` looks for: its name, its submit command,
 and the prefix of the variables it sets."""
 
@@ -300,10 +310,14 @@ class Queue(ABC):
         pass
 
     @property
+    def walltime_method(self) -> Callable[[str], str | None]:
+        """Return the function that answers the queue's maximum walltime."""
+        return self._max_walltime_method or self._default_max_walltime_method
+
+    @property
     def max_walltime(self) -> str | None:
         """Return the maximum walltime for the queue."""
-        fn = self._max_walltime_method or self._default_max_walltime_method
-        return fn(self.query_name)
+        return self.walltime_method(self.query_name)
 
     @property
     def max_cpus_per_node(self) -> int | None:
@@ -485,6 +499,9 @@ class Scheduler(ABC, LoggingMixin):
         Retrieve a queue by name.
     """
 
+    family: ClassVar[str]
+    """The scheduler family's name, as `visible_scheduler` reports it."""
+
     def __init__(
         self,
         queues: list["Queue"],
@@ -611,6 +628,8 @@ class SlurmScheduler(Scheduler):
         Retrieves the maximum memory available per node in GB.
     """
 
+    family: ClassVar[str] = SCHEDULER_SLURM
+
     @property
     def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all SLURM
@@ -693,13 +712,15 @@ class PBSScheduler(Scheduler):
       as PBS requires explicit specification of required nodes and cpus for a job.
     """
 
+    family: ClassVar[str] = SCHEDULER_PBS
     requires_task_distribution = True
 
     @property
     def global_max_cpus_per_node(self) -> int | None:
         """Retrieve the maximum number of CPUs available per node across all PBS nodes.
 
-        Queries the PBS scheduler to determine the highest CPU capacity of any single node.
+        The system's fixed `max_cpus_per_node` when it has one; otherwise the PBS
+        scheduler is queried, once, for the highest CPU capacity of any single node.
 
         Returns
         -------
@@ -712,13 +733,14 @@ class PBSScheduler(Scheduler):
         RuntimeError
             If the command to query the PBS scheduler fails.
         """
-        if stdout := _run_cmd(
-            'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
-            msg_err="Error querying node property.",
-        ):
-            return int(stdout)
+        if self._max_cpus_per_node is None:
+            if stdout := _run_cmd(
+                'pbsnodes -a | grep "resources_available.ncpus" | cut -d= -f2 | sort -nr | head -1',
+                msg_err="Error querying node property.",
+            ):
+                self._max_cpus_per_node = int(stdout)
 
-        return None
+        return self._max_cpus_per_node
 
     @property
     def global_max_mem_per_node_gb(self) -> float | None:

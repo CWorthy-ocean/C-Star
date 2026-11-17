@@ -23,15 +23,20 @@ class Toolchain:
     mpi_prefix: str
     """The prefix of the MPI launcher used to run the model."""
     profile: str = ""
-    """The infix in the system's module and env file names: ``""`` selects
-    ``<system>.lmod`` and ``<system>.env``, ``"gpu"`` selects
-    ``<system>.gpu.lmod`` and ``<system>.gpu.env``."""
+    """The toolchain's name when it is not the CPU one (``"gpu"``); empty for
+    the CPU toolchain."""
     gpu_arch: str = ""
     """The NVIDIA compute capability flag value, e.g. ``cc80``; empty for CPU."""
     link_flags: str = ""
     """Extra linker flags a GPU build appends after the MPI libraries, e.g. Cray
     MPICH's GPU transport layer. ``$VAR`` references are expanded when the build
     runs, so they may name variables the profile's modules set."""
+    modules: tuple[str, ...] = ()
+    """The modules to load, in order, after ``module reset``; each entry is the
+    argument of one ``module load``. Empty leaves the user's modules alone."""
+    env: Mapping[str, str] = field(default_factory=dict)
+    """The environment variables to set after the modules load, in order;
+    ``${VAR}`` references are expanded when they are set."""
 
 
 @dataclass(frozen=True)

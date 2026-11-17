@@ -1,0 +1,92 @@
+schema_version: 1.0.0
+name: perlmutter
+docs: https://docs.nersc.gov/systems/perlmutter/architecture/
+
+# No `detect` block: Lmod names this machine, and a system whose name Lmod
+# reports needs none.
+
+toolchains:
+  cpu:
+    compiler: gnu
+    mpi_prefix: srun --kill-on-bad-exit=1
+    # CPU toolchain: PrgEnv-gnu + Cray MPICH + serial-HDF5 netCDF + parallel-netCDF (for PIO).
+    # Verified on Perlmutter 2026-11-02: each module loads from `module reset`, and
+    # CRAY_MPICH_PREFIX, CRAY_HDF5_PREFIX, CRAY_NETCDF_PREFIX and
+    # CRAY_PARALLEL_NETCDF_PREFIX all resolve (gnu/12.3 builds).
+    modules:
+      - cpu/1.0  # swaps out the login default gpu/1.0
+      - PrgEnv-gnu/8.7.0  # login default, pinned so a change of site defaults does not change the build
+      - gcc-native/14  # login default
+      - cray-mpich/9.1.0  # login default
+      - cray-hdf5/1.14.3.9
+      - cray-netcdf/4.9.2.3  # provides netCDF-C and netCDF-Fortran (nf-config) in one prefix
+      - cray-parallel-netcdf/1.12.3.21
+      - cmake/3.30.2  # ParallelIO builds with cmake, which the HPC conda environment does not provide
+    env:
+      MPIHOME: ${CRAY_MPICH_PREFIX}
+      NETCDFHOME: ${CRAY_NETCDF_PREFIX}
+      PNETCDFHOME: ${CRAY_PARALLEL_NETCDF_PREFIX}
+      PATH: ${PATH}:${NETCDFHOME}/bin
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+  gpu:
+    compiler: nvfortran
+    mpi_prefix: srun --kill-on-bad-exit=1
+    gpu_arch: cc80
+    # cray-mpich sets these for the `craype-accel-nvidia80` target:
+    # the `-L` directory and `-lmpi_gtl_cuda`. With
+    # `MPICH_GPU_SUPPORT_ENABLED=1` (set by perlmutter.gpu.env) the
+    # model aborts at start-up unless libmpi_gtl_cuda is linked.
+    # Verified on Perlmutter 2026-11-06 (GPU-direct halo exchange on).
+    link_flags: ${PE_MPICH_GTL_DIR_nvidia80} ${PE_MPICH_GTL_LIBS_nvidia80}
+    # GPU toolchain: NVIDIA HPC SDK + CUDA-aware Cray MPICH + parallel-HDF5 netCDF.
+    # Verified on Perlmutter 2026-11-02 (nvidia/26.5, cudatoolkit/13.2, cray-mpich/9.1.0);
+    # roms-marbl-gpu v0.1.2-beta built and linked with this set on 2026-11-06,
+    # v0.1.3-beta built and ran with it on one and two nodes on 2026-11-12.
+    modules:
+      - gpu/1.0  # NERSC's GPU meta-module; keep loaded for CUDA-aware cray-mpich
+      - PrgEnv-nvidia/8.7.0
+      - nvidia/26.5  # PrgEnv-nvidia/8.7.0 loads nvidia/25.9 (CUDA 13.0), whose link misses
+                     # cudatoolkit/13.2's math libraries (-lcublas); 26.5 ships CUDA 13.2
+      - cudatoolkit/13.2
+      - craype-accel-nvidia80
+      - cray-hdf5-parallel/1.14.3.9
+      - cray-netcdf-hdf5parallel/4.9.0.13
+    env:
+      MPIHOME: ${CRAY_MPICH_PREFIX}
+      # set by cray-netcdf-hdf5parallel (verified on Perlmutter 2026-11-02)
+      NETCDFHOME: ${CRAY_NETCDF_HDF5PARALLEL_PREFIX}
+      PATH: ${PATH}:${NETCDFHOME}/bin
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
+      # CUDA-aware cray-mpich: GPU-to-GPU halo exchange
+      MPICH_GPU_SUPPORT_ENABLED: 1
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+
+scheduler:
+  family: slurm
+  primary_queue: regular
+  queues:
+    - {name: regular, kind: qos, query_name: regular_1}
+    - {name: shared, kind: qos}
+    - {name: debug, kind: qos}
+  directives: {-C: cpu}
+  requires_task_distribution: false
+  max_cpus_per_node: 128
+  # NOTE: Perlmutter charges a job without an account to the user's default
+  # project; an unset queue submits to the primary `regular` QOS.
+  require: []
+  # Verified on Perlmutter 2026-11-02: GPU nodes = 1xAMD EPYC 7763
+  # (64 cores) + 4xA100; GPU jobs need `-C gpu` and an explicit GPU
+  # request, and are submitted with `-q regular|debug|shared`. The GPU
+  # QOS limits are published under `gpu_regular`, `gpu_debug` and
+  # `gpu_shared` and match the CPU ones for walltime (2 days, 30 min,
+  # 2 days), so the walltime queries on the CPU QOS names stay valid.
+  gpu_nodes:
+    gpus_per_node: 4
+    queue: regular
+    directives: {-C: gpu, --gpu-bind: none}
+    cores_per_node: 64
+    # NERSC's policy refuses a GPU job that names no account (checked
+    # with `sbatch --test-only` 2026-11-02); the CPU project or its
+    # `_g` twin both work.
+    account_required: true

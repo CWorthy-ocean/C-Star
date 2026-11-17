@@ -29,6 +29,7 @@ from threadpoolctl import threadpool_limits
 import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import (
+    BLEND_FALLBACK_INHERITED_FIELDS,
     CarbonateSensitivitySpec,
     OpenBoundaries,
     UserProvidedFile,
@@ -1113,6 +1114,7 @@ class RomsInputGenerator(InputGenerator):
         source_name: str | None,
         use_vars: list[str] | None = None,
         shorten: bool = True,
+        blend_fallback_name: str | None = None,
     ) -> str:
         """The part of a surface/boundary forcing item's output filename after
         ``"{category}-"``: the plain ``forcing_type`` for physics/restoring, or
@@ -1121,9 +1123,15 @@ class RomsInputGenerator(InputGenerator):
         ``_planned_netcdf_outputs`` so planned and actual output names always
         agree. Replaces the old ad hoc ``surface-bgc-co2`` special case (which
         left every other bgc source, and boundary bgc entirely, undisambiguated).
+        A blended item (``blend_fallback_name`` set) is named
+        ``"{type}-{primary}-{fallback}"``; unblended names are unchanged.
         """
         if forcing_type is None:
             return ""
+        if blend_fallback_name:
+            primary = RomsInputGenerator._bgc_output_suffix(source_name)
+            fallback = RomsInputGenerator._bgc_output_suffix(blend_fallback_name)
+            return f"{forcing_type}-{primary}-{fallback}"
         if forcing_type == "bgc":
             suffix = RomsInputGenerator._bgc_output_suffix(
                 source_name, use_vars, shorten=shorten
@@ -1139,6 +1147,7 @@ class RomsInputGenerator(InputGenerator):
         forcing_type: str | None,
         source_name: str | None,
         use_vars: list[str] | None = None,
+        blend_fallback_name: str | None = None,
     ) -> str:
         """``_forcing_detail_suffix``, but keeping a pre-existing legacy file name.
 
@@ -1153,10 +1162,14 @@ class RomsInputGenerator(InputGenerator):
         name.
         """
         detail = RomsInputGenerator._forcing_detail_suffix(
-            forcing_type, source_name, use_vars
+            forcing_type, source_name, use_vars, blend_fallback_name=blend_fallback_name
         )
         legacy = RomsInputGenerator._forcing_detail_suffix(
-            forcing_type, source_name, use_vars, shorten=False
+            forcing_type,
+            source_name,
+            use_vars,
+            shorten=False,
+            blend_fallback_name=blend_fallback_name,
         )
         if legacy == detail:
             return detail
@@ -1179,18 +1192,41 @@ class RomsInputGenerator(InputGenerator):
         return detail
 
     @staticmethod
-    def item_source_name(kwargs: dict[str, Any] | None) -> str | None:
+    def item_source_name(kwargs: Any) -> str | None:
         """Best-effort ``source.name`` lookup from a raw (unresolved) input_list
-        item's kwargs dict, for planning purposes -- ``source`` may be a plain
-        dict (the normal case) or, in some direct-call/test contexts, a
-        ``SourceSpec``-like object exposing ``.name``.
+        item's kwargs dict (or model entry), for planning purposes -- ``source``
+        may be a plain dict (the normal case) or, in some direct-call/test
+        contexts, a ``SourceSpec``-like object exposing ``.name``.
         """
-        if not isinstance(kwargs, dict):
+        if kwargs is None:
             return None
-        src = kwargs.get("source")
+        src = (
+            kwargs.get("source")
+            if isinstance(kwargs, dict)
+            else getattr(kwargs, "source", None)
+        )
         if isinstance(src, dict):
             return src.get("name")
         return getattr(src, "name", None)
+
+    @staticmethod
+    def item_blend_fallback_name(kwargs: Any) -> str | None:
+        """The blend fallback's ``source.name`` for a surface item, or None when it
+        is unblended; accepts a raw kwargs dict or a ``SurfaceForcingItem``-like
+        model, like ``item_source_name``.
+        """
+        blend: Any = (
+            kwargs.get("blend")
+            if isinstance(kwargs, dict)
+            else getattr(kwargs, "blend", None)
+        )
+        if blend is None:
+            return None
+        fallback: Any = (
+            blend.get("fallback") if isinstance(blend, dict) else blend.fallback
+        )
+        src = fallback.get("source") if isinstance(fallback, dict) else fallback.source
+        return src.get("name") if isinstance(src, dict) else getattr(src, "name", None)
 
     @staticmethod
     def item_use_vars(kwargs: dict[str, Any] | None) -> list[str] | None:
@@ -1237,6 +1273,7 @@ class RomsInputGenerator(InputGenerator):
                     forcing_type,
                     self.item_source_name(kwargs),
                     self.item_use_vars(kwargs),
+                    blend_fallback_name=self.item_blend_fallback_name(kwargs),
                 )
                 suffix = f"surface-{detail}" if detail else "surface"
                 planned.append(self._forcing_filename(suffix))
@@ -1963,6 +2000,102 @@ class RomsInputGenerator(InputGenerator):
 
         self._settings_run_time.setdefault("initial", {})["initial_file"] = paths[0]
 
+    def _generate_blended_surface_forcing(
+        self,
+        key: str,
+        extra: dict[str, Any],
+        item_kwargs: dict[str, Any],
+        input_args: dict[str, Any],
+        blend: dict[str, Any],
+        output_path: Path,
+        yaml_path: Path,
+    ) -> tuple[Any, Any]:
+        """Build the primary and fallback products, blend them and write the
+        monthly files and the blend's YAML recipe. Returns ``(primary, paths)``.
+        """
+        fallback = blend["fallback"]
+        fallback_kwargs = {
+            name: item_kwargs[name]
+            for name in BLEND_FALLBACK_INHERITED_FIELDS
+            if name in item_kwargs
+        }
+        fallback_kwargs["source"] = fallback["source"]
+        fallback_kwargs["correct_radiation"] = fallback["correct_radiation"]
+        fallback_kwargs["options"] = fallback["options"]
+        fallback_args = self._build_input_args(
+            key, extra=extra, base_kwargs=fallback_kwargs
+        )
+        with mem_log("SurfaceForcing() [blend primary]", enabled=self.verbose):
+            primary = rt.SurfaceForcing(grid=self.grid, **input_args)
+        with mem_log("SurfaceForcing() [blend fallback]", enabled=self.verbose):
+            fallback_frc = rt.SurfaceForcing(grid=self.grid, **fallback_args)
+        with mem_log("blend_surface_forcing", enabled=self.verbose):
+            blended = rt.blend_surface_forcing(
+                primary,
+                fallback_frc,
+                grid=self.grid,
+                blend_width_km=blend["width_km"],
+                blend_profile=blend["profile"],
+            )
+        try:
+            rt.blend_to_yaml(blended, yaml_path)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to save surface forcing YAML to {yaml_path}: {e}",
+                UserWarning,
+                stacklevel=2,
+            )
+        with mem_log("save_blended_surface_forcing", enabled=self.verbose):
+            paths = self._pio_finalize(
+                rt.save_blended_surface_forcing(blended, self._pio_mangle(output_path))
+            )
+        return primary, paths
+
+    @staticmethod
+    def _write_blend_yaml_from_file(nc_path: Path, yaml_path: Path) -> None:
+        """Write a reused blended file's YAML sidecar from the recipe attribute in
+        its header, without rebuilding either product.
+        """
+        try:
+            with xr.open_dataset(nc_path, decode_times=False) as ds:
+                rt.blend_to_yaml(ds, yaml_path)
+        except Exception as e:
+            warnings.warn(
+                f"Blended surface forcing exists but its YAML sidecar could not be "
+                f"written to {yaml_path}: {e}",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    @staticmethod
+    def _check_no_nan_outside_footprint(frc: Any, source_name: str | None) -> None:
+        """Refuse a regional product that is NaN at some grid points (roms-tools
+        marks it ``nan_outside_source_footprint``): ROMS cannot run on NaN forcing.
+        Reads only the first time record of each time-dependent variable.
+        """
+        ds = frc.ds
+        if ds.attrs.get("nan_outside_source_footprint") != "True":
+            return
+        masks = xr.Dataset(
+            {
+                name: da.isel({dim: 0}).isnull().reset_coords(drop=True)
+                for name, da in ds.data_vars.items()
+                for dim in ("time", "rad_time")
+                if dim in da.dims
+            }
+        ).compute()
+        missing = None
+        for name in masks.data_vars:
+            missing = masks[name] if missing is None else missing | masks[name]
+        if missing is None or not bool(missing.any()):
+            return
+        raise ValueError(
+            f"The {source_name} surface forcing is NaN at {int(missing.sum())} of "
+            f"{missing.size} grid points outside its footprint, and ROMS cannot "
+            "run on NaN forcing. Add a `blend:` with a global fallback such as "
+            "ERA5 to this surface item."
+        )
+
     @register_input(
         name="forcing.surface", order=30, label="Generating surface forcing"
     )
@@ -1977,6 +2110,8 @@ class RomsInputGenerator(InputGenerator):
             use_dask=self.use_dask,
             **self._mrd_extra(),
         )
+        kwargs = dict(kwargs)
+        blend = kwargs.pop("blend", None)
         input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
         type = input_args.get("type")
         if type is None:
@@ -2008,6 +2143,7 @@ class RomsInputGenerator(InputGenerator):
             type,
             source_name,
             input_args.get("use_vars"),
+            blend_fallback_name=self.item_blend_fallback_name({"blend": blend}),
         )
         yaml_path = self._yaml_filename(f"{key}-{detail}")
         output_path = self._forcing_filename(input_name=f"surface-{detail}")
@@ -2017,7 +2153,9 @@ class RomsInputGenerator(InputGenerator):
         if existing_paths:
             print(f"   ↪ Reusing existing file(s): {', '.join(existing_paths)}")
             paths = existing_paths
-            if not yaml_path.exists():
+            if not yaml_path.exists() and blend is not None:
+                self._write_blend_yaml_from_file(Path(existing_paths[0]), yaml_path)
+            elif not yaml_path.exists():
                 warnings.warn(
                     f"Surface forcing NetCDF exists but YAML sidecar is missing ({yaml_path}); "
                     "constructing SurfaceForcing once to write YAML (this may be slow).",
@@ -2036,9 +2174,14 @@ class RomsInputGenerator(InputGenerator):
                         UserWarning,
                         stacklevel=2,
                     )
+        elif blend is not None:
+            frc, paths = self._generate_blended_surface_forcing(
+                key, extra, kwargs, input_args, blend, output_path, yaml_path
+            )
         else:
             with mem_log("SurfaceForcing()", enabled=self.verbose):
                 frc = rt.SurfaceForcing(grid=self.grid, **input_args)
+            self._check_no_nan_outside_footprint(frc, source_name)
             try:
                 frc.to_yaml(yaml_path)
             except Exception as e:
@@ -2072,7 +2215,7 @@ class RomsInputGenerator(InputGenerator):
                 resource
             )
 
-        if frc is not None and hasattr(frc, "use_coarse_grid"):
+        if frc is not None and hasattr(frc, "use_coarse_grid"):  # blend: the primary
             interp_frc = 1 if frc.use_coarse_grid else 0
         else:
             interp_frc = self._interp_frc_surface_reuse(input_args, Path(paths[0]))

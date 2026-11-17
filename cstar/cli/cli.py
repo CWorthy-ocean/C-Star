@@ -16,6 +16,8 @@ from cstar.cli.forge import app as app_forge
 from cstar.cli.init import COMMAND_INIT, HELP_LONG, HELP_SHORT, init
 from cstar.cli.run import NAME as NAME_RUN
 from cstar.cli.run import app as app_run
+from cstar.cli.system import NAME as NAME_SYSTEM
+from cstar.cli.system import app as app_system
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import NAME as NAME_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
@@ -58,6 +60,7 @@ def attach_subcommands(app: typer.Typer) -> None:
         (app_workplan, NAME_WORKPLAN, (ALIAS_WORKPLAN,)),
         (app_run, NAME_RUN, ()),
         (app_admin, "admin", ()),
+        (app_system, NAME_SYSTEM, ()),
     ]
 
     try:

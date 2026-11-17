@@ -316,7 +316,7 @@ def _expand_link_flags(link_flags: str) -> str:
         raise CstarError(
             f"The GPU link flags {link_flags!r} name variables that are not set: "
             f"{', '.join(unset)}. The GPU toolchain's modules set them; check that "
-            "they are loaded (the system's .gpu.lmod file) and that "
+            "they are loaded (the gpu toolchain's modules in the system file) and that "
             "the system's GPU toolchain in C-Star names the right variables."
         )
     return expanded
@@ -801,7 +801,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         if not mpi_home:
             raise CstarError(
                 "MPIHOME is not set: the GPU toolchain profile of "
-                f"{get_sysmgr().name} (its .gpu.env file) must set MPIHOME to "
+                f"{get_sysmgr().name} (the env of its gpu toolchain) must set MPIHOME to "
                 "the MPI installation, whose include and lib directories the GPU "
                 "build uses."
             )
@@ -837,7 +837,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         if not netcdff_home:
             raise CstarError(
                 "NETCDFHOME is not set: the GPU toolchain profile of "
-                f"{get_sysmgr().name} (its .gpu.env file) must set NETCDFHOME to "
+                f"{get_sysmgr().name} (the env of its gpu toolchain) must set NETCDFHOME to "
                 "the NetCDF installation (and NETCDFFHOME to NetCDF-Fortran's, if "
                 "it is installed apart), whose include and lib directories the GPU "
                 "build uses."

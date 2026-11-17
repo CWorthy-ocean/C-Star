@@ -118,6 +118,7 @@ from cstar.system.manager import (
     outside_scheduler_job,
     warn_once,
 )
+from cstar.system.scheduler import SUBMITTABLE_FAMILIES
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
@@ -2269,16 +2270,34 @@ class ROMSSimulation(Simulation):
         -------
         dict[str, Any]
             The JSON-serializable record; it must hold `namelist_schema`, which
-            `attach()` reads back.
+            `attach()` reads back. `system_spec` names the system file the build
+            used (its path, layer, digest and schema version), when the system was
+            read from one.
         """
         codebase_copy = self.codebase.working_copy
-        return {
+        record: dict[str, Any] = {
             "namelist_schema": schema.__name__,
             "ucla_roms_ref": self.codebase.source.checkout_target,
             "ucla_roms_commit": (
                 codebase_copy.checkout_hash if codebase_copy is not None else ""
             ),
         }
+        if system_spec := self._system_spec_record():
+            record["system_spec"] = system_spec
+        return record
+
+    def _system_spec_record(self) -> dict[str, str] | None:
+        """Describe the system file the build used; `None` for a system defined in
+        code, or when it cannot be determined (warned: a record never stops a build).
+        """
+        try:
+            system_file = get_sysmgr().selection.context.system_file
+        except Exception as e:
+            self.log.warning(
+                f"Could not determine the system file to record in the build record: {e}"
+            )
+            return None
+        return system_file.record() if system_file is not None else None
 
     def _attach_namelist_schema(self, build_dir: Path) -> None:
         """Adopt the namelist schema recorded by `build()` for the executable in `build_dir`.
@@ -2928,14 +2947,22 @@ class ROMSSimulation(Simulation):
             If the system has a scheduler, the process is not inside a scheduler
             job, and `CSTAR_ALLOW_LOGIN_NODE_RUN` is not set to `1`.
         """
-        where = outside_scheduler_job(get_sysmgr())
+        sysmgr = get_sysmgr()
+        where = outside_scheduler_job(sysmgr)
         if where is None:
             return
         if where.certain:
+            family = sysmgr.scheduler.family if sysmgr.scheduler else ""
+            how = (
+                "Submit it with 'cstar blueprint submit <blueprint>', run it inside "
+                "an allocation"
+                if family in SUBMITTABLE_FAMILIES
+                else f"C-Star cannot submit jobs to its {family} scheduler: run it "
+                f"inside a {family} job (`qsub -I`, or your own batch script)"
+            )
             raise CstarError(
                 f"Refusing to launch ROMS outside a scheduler job on {where.system}, "
-                "which has a scheduler. Submit it with 'cstar blueprint submit "
-                "<blueprint>', run it inside an allocation, or set "
+                f"which has a scheduler. {how}, or set "
                 f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run it here anyway."
             )
         warn_once(

@@ -1,6 +1,7 @@
 import os
 from collections.abc import Generator
-from pathlib import Path
+from dataclasses import replace
+from typing import ClassVar
 from unittest import mock
 from unittest.mock import patch
 
@@ -10,36 +11,66 @@ from cstar.base.exceptions import CstarError
 from cstar.system.environment import CStarEnvironment, LmodEnvSettings
 from cstar.system.manager import (
     CStarSystemManager,
-    LinuxSystemContext,
-    PerlmutterSystemContext,
+    SystemContext,
     SystemSelection,
     SystemSource,
+    registered_context,
 )
+from cstar.system.scheduler import Scheduler
+from cstar.system.toolchain import Toolchain, ToolchainName
 
-CPU_ENV = (
-    "NETCDFHOME=/cpu/netcdf/\n"
-    "PNETCDFHOME=/cpu/pnetcdf/\n"
-    "PATH=${PATH}:/cpu/netcdf/bin\n"
-    "LIBRARY_PATH=/cpu/netcdf/lib\n"
-)
-GPU_ENV = (
-    "NETCDFHOME=/gpu/netcdf/\n"
-    "PATH=${PATH}:/gpu/netcdf/bin\n"
-    "LIBRARY_PATH=/gpu/netcdf/lib\n"
-    "MPICH_GPU_SUPPORT_ENABLED=1\n"
-)
+CPU_ENV = {
+    "NETCDFHOME": "/cpu/netcdf/",
+    "PNETCDFHOME": "/cpu/pnetcdf/",
+    "PATH": "${PATH}:/cpu/netcdf/bin",
+    "LIBRARY_PATH": "/cpu/netcdf/lib",
+}
+GPU_ENV = {
+    "NETCDFHOME": "/gpu/netcdf/",
+    "PATH": "${PATH}:/gpu/netcdf/bin",
+    "LIBRARY_PATH": "/gpu/netcdf/lib",
+    "MPICH_GPU_SUPPORT_ENABLED": "1",
+}
 BASE_PATH = "/usr/bin:/bin"
 
 
 @pytest.fixture
-def package_root(tmp_path: Path) -> Path:
-    """A package root holding CPU and GPU module lists and env files."""
-    (tmp_path / "additional_files/env_files").mkdir(parents=True)
-    (tmp_path / "additional_files/lmod_lists").mkdir(parents=True)
-    for stem, text in (("perlmutter", CPU_ENV), ("perlmutter.gpu", GPU_ENV)):
-        (tmp_path / f"additional_files/env_files/{stem}.env").write_text(text)
-        (tmp_path / f"additional_files/lmod_lists/{stem}.lmod").write_text("gcc\n")
-    return tmp_path
+def toolchains() -> dict[ToolchainName, Toolchain]:
+    """The CPU and GPU toolchains of the fake system, each loading one module."""
+    return {
+        "cpu": Toolchain(
+            compiler="gnu", mpi_prefix="mpirun", modules=("gcc",), env=CPU_ENV
+        ),
+        "gpu": Toolchain(
+            compiler="gnu",
+            mpi_prefix="mpirun",
+            profile="gpu",
+            modules=("gcc",),
+            env=GPU_ENV,
+        ),
+    }
+
+
+@pytest.fixture
+def fake_context(
+    toolchains: dict[ToolchainName, Toolchain],
+) -> type[SystemContext]:
+    """A system context with CPU and GPU toolchains read from `toolchains` when asked."""
+
+    class FakeContext(SystemContext):
+        name: ClassVar[str] = "perlmutter"
+        compiler: ClassVar[str] = "gnu"
+        mpi_prefix: ClassVar[str] = "mpirun"
+
+        @classmethod
+        def create_scheduler(cls) -> Scheduler | None:
+            return None
+
+        @classmethod
+        def toolchain(cls, name: ToolchainName) -> Toolchain:
+            return toolchains[name]
+
+    return FakeContext
 
 
 @pytest.fixture
@@ -60,32 +91,30 @@ def lmod_calls() -> Generator[mock.Mock, None, None]:
 
 @pytest.fixture
 def manager(
-    package_root: Path, lmod_calls: mock.Mock
+    fake_context: type[SystemContext], lmod_calls: mock.Mock
 ) -> Generator[CStarSystemManager, None, None]:
-    """A Perlmutter manager over the temporary files, with the CPU profile active."""
-    selection = SystemSelection(PerlmutterSystemContext, SystemSource.DETECTED)
-    with (
-        mock.patch("cstar.system.manager.select_system", return_value=selection),
-        patch.object(CStarEnvironment, "package_root", new=package_root),
-    ):
+    """A manager over the fake system, with the CPU profile active."""
+    selection = SystemSelection(fake_context, SystemSource.DETECTED)
+    with mock.patch("cstar.system.manager.select_system", return_value=selection):
         yield CStarSystemManager()
 
 
 def make_environment(profile: str = "") -> CStarEnvironment:
-    """Build an environment that reads the files of the patched package root."""
-    return CStarEnvironment("perlmutter", "mpirun", "gnu", profile=profile)
+    """Build an environment from the modules and env of the CPU toolchain."""
+    return CStarEnvironment(
+        "perlmutter", "mpirun", "gnu", profile=profile, modules=["gcc"], env=CPU_ENV
+    )
 
 
 class TestUnload:
     """Tests for `CStarEnvironment.unload`."""
 
     def test_restores_prior_value_and_removes_new_keys(
-        self, package_root: Path, lmod_calls: mock.Mock
+        self, lmod_calls: mock.Mock
     ) -> None:
-        """Verify unload restores what existed and removes what the env file added."""
+        """Verify unload restores what existed and removes what the env added."""
         os.environ["NETCDFHOME"] = "/before/"
-        with patch.object(CStarEnvironment, "package_root", new=package_root):
-            env = make_environment()
+        env = make_environment()
 
         assert os.environ["NETCDFHOME"] == "/cpu/netcdf/"
         assert "PNETCDFHOME" in os.environ
@@ -97,12 +126,9 @@ class TestUnload:
         assert os.environ["LIBRARY_PATH"] == "/base/lib"
         assert "PNETCDFHOME" not in os.environ
 
-    def test_is_safe_to_call_twice(
-        self, package_root: Path, lmod_calls: mock.Mock
-    ) -> None:
+    def test_is_safe_to_call_twice(self, lmod_calls: mock.Mock) -> None:
         """Verify a second unload neither fails nor undoes later changes."""
-        with patch.object(CStarEnvironment, "package_root", new=package_root):
-            env = make_environment()
+        env = make_environment()
         env.unload()
 
         os.environ["PNETCDFHOME"] = "/set/later/"
@@ -111,25 +137,19 @@ class TestUnload:
         assert os.environ["PNETCDFHOME"] == "/set/later/"
         assert os.environ["PATH"] == BASE_PATH
 
-    def test_keeps_loaded_variables_after_unload(
-        self, package_root: Path, lmod_calls: mock.Mock
-    ) -> None:
+    def test_keeps_loaded_variables_after_unload(self, lmod_calls: mock.Mock) -> None:
         """Verify the record of what was loaded outlives the unload."""
-        with patch.object(CStarEnvironment, "package_root", new=package_root):
-            env = make_environment()
+        env = make_environment()
         env.unload()
 
         assert env.environment_variables["NETCDFHOME"] == "/cpu/netcdf/"
 
-    def test_load_after_unload_reapplies_the_env_file(
-        self, package_root: Path, lmod_calls: mock.Mock
-    ) -> None:
+    def test_load_after_unload_reapplies_the_env(self, lmod_calls: mock.Mock) -> None:
         """Verify a cached profile can be loaded again, modules included."""
-        with patch.object(CStarEnvironment, "package_root", new=package_root):
-            env = make_environment()
-            env.unload()
-            lmod_calls.reset_mock()
-            env.load()
+        env = make_environment()
+        env.unload()
+        lmod_calls.reset_mock()
+        env.load()
 
         assert lmod_calls.call_args_list == [
             mock.call("reset"),
@@ -138,13 +158,10 @@ class TestUnload:
         assert os.environ["NETCDFHOME"] == "/cpu/netcdf/"
         assert os.environ["PATH"] == f"{BASE_PATH}:/cpu/netcdf/bin"
 
-    def test_load_twice_restores_the_original(
-        self, package_root: Path, lmod_calls: mock.Mock
-    ) -> None:
+    def test_load_twice_restores_the_original(self, lmod_calls: mock.Mock) -> None:
         """Verify loading an already loaded profile does not record its own values."""
-        with patch.object(CStarEnvironment, "package_root", new=package_root):
-            env = make_environment()
-            env.load()
+        env = make_environment()
+        env.load()
         env.unload()
 
         assert os.environ["PATH"] == BASE_PATH
@@ -217,13 +234,11 @@ class TestProfileSwitching:
     def test_a_failed_switch_reloads_the_previous_profile(
         self,
         manager: CStarSystemManager,
-        package_root: Path,
+        toolchains: dict[ToolchainName, Toolchain],
         lmod_calls: mock.Mock,
     ) -> None:
         """Verify a profile that fails to load leaves the previous one loaded."""
-        (package_root / "additional_files/lmod_lists/perlmutter.gpu.lmod").write_text(
-            "nvhpc\n"
-        )
+        toolchains["gpu"] = replace(toolchains["gpu"], modules=("nvhpc",))
         cpu = manager.environment
 
         def lmod(command: str) -> None:
@@ -244,13 +259,11 @@ class TestProfileSwitching:
     def test_a_failed_reload_keeps_the_original_error(
         self,
         manager: CStarSystemManager,
-        package_root: Path,
+        toolchains: dict[ToolchainName, Toolchain],
         lmod_calls: mock.Mock,
     ) -> None:
         """Verify the profile's own failure, not the reload's, reaches the caller."""
-        (package_root / "additional_files/lmod_lists/perlmutter.gpu.lmod").write_text(
-            "nvhpc\n"
-        )
+        toolchains["gpu"] = replace(toolchains["gpu"], modules=("nvhpc",))
 
         def lmod(command: str) -> None:
             if command == "load nvhpc":
@@ -264,13 +277,14 @@ class TestProfileSwitching:
             manager.environment_for("gpu")
 
     def test_unregistered_toolchain_leaves_the_active_profile(
-        self, package_root: Path, lmod_calls: mock.Mock
+        self, lmod_calls: mock.Mock
     ) -> None:
         """Verify a refused request does not unload the profile in use."""
-        selection = SystemSelection(LinuxSystemContext, SystemSource.DETECTED)
+        selection = SystemSelection(
+            registered_context("linux_x86_64"), SystemSource.DETECTED
+        )
         with (
             mock.patch("cstar.system.manager.select_system", return_value=selection),
-            patch.object(CStarEnvironment, "package_root", new=package_root),
             mock.patch.object(CStarEnvironment, "_load_env", return_value={}),
             mock.patch.object(CStarEnvironment, "uses_lmod", False),
         ):

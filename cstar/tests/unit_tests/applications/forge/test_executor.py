@@ -48,6 +48,7 @@ from cstar.applications.forge import runtime as forge_run
 from cstar.applications.forge.app import ForgeApplication, ForgeRunner, input_products
 from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
+    SurfaceForcingItem,
     emitted_blueprint_description,
     producer_ref,
 )
@@ -88,6 +89,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
 )
+from cstar.system.scheduler import SCHEDULER_PBS, SCHEDULER_SLURM
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -517,6 +519,41 @@ class TestForgeExecutorProperties:
         detail = RomsInputGenerator._forcing_detail_suffix("bgc", source_name, use_vars)
         if expected_detail is not None:
             assert detail == expected_detail
+
+        planned = builder._planned_netcdf_outputs()
+
+        expected = builder.input_data_dir / netcdf_basename(
+            builder.name, f"surface-{detail}"
+        )
+        assert expected.resolve() in planned
+
+    @pytest.mark.parametrize("as_model", [False, True])
+    def test_planned_blended_surface_name_matches_the_generator(
+        self, minimal_cstar_spec_builder_args, as_model
+    ):
+        """A blended surface item is planned as ``surface-physics-{primary}-
+        {fallback}``, whether the entry is a kwargs dict or a model.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        entry: Any = {
+            "type": "physics",
+            "source": {"name": "CONUS404"},
+            "blend": {"fallback": {"source": {"name": "ERA5"}}},
+        }
+        if as_model:
+            entry = SurfaceForcingItem.model_validate(
+                {
+                    "type": "physics",
+                    "source": {"name": "CONUS404"},
+                    "coarse_grid_mode": "never",
+                    "blend": {"fallback": {"source": {"name": "ERA5"}}},
+                }
+            )
+        builder.forcing_override = {"forcing": {"surface": [entry]}}
+        detail = RomsInputGenerator._forcing_detail_suffix(
+            "physics", "CONUS404", blend_fallback_name="ERA5"
+        )
+        assert detail == "physics-conus404-era5"
 
         planned = builder._planned_netcdf_outputs()
 
@@ -3375,12 +3412,21 @@ class TestRunBlueprintPublishes:
         """A system with a scheduler is also told how to submit the blueprint, the
         two commands lined up under their labels.
         """
-        assert run(scheduler=object()) == 0
+        assert run(scheduler=SimpleNamespace(family=SCHEDULER_SLURM)) == 0
 
         published = list((wd.resolve() / "output").glob("B_*.yaml"))
         out = capsys.readouterr().out
         assert f"\nRun it with:      cstar blueprint run {published[0]}\n" in out
         assert f"\nOn this cluster:  cstar blueprint submit {published[0]}\n" in out
+
+    def test_a_pbs_cluster_is_not_told_to_submit(self, run, wd, capsys):
+        """C-Star cannot submit to PBS, so a PBS system gets only the run command."""
+        assert run(scheduler=SimpleNamespace(family=SCHEDULER_PBS)) == 0
+
+        published = list((wd.resolve() / "output").glob("B_*.yaml"))
+        out = capsys.readouterr().out
+        assert f"Run it with:  cstar blueprint run {published[0]}\n" in out
+        assert "cstar blueprint submit" not in out
 
     def test_an_unrecognized_host_is_not_told_about_a_scheduler(self, run, wd, capsys):
         """A host C-Star cannot identify has no scheduler to name, and the run that

@@ -28,6 +28,7 @@ from cstar.roms.namelist import (
     namelist_schema_for_ref,
 )
 from cstar.roms.simulation import ROMSSimulation
+from cstar.system.manager import registered_context
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -173,13 +174,20 @@ def test_branch_pinned_build_records_newest_schema(
     checkout_target = sim.codebase.source.checkout_target
     assert checkout_target == "roms_branch"
 
-    build()
+    # the system file the build records is that of the selected system, so pin it
+    system_file = registered_context("linux_x86_64").system_file
+    assert system_file is not None
+    with mock.patch.object(
+        ROMSSimulation, "_system_spec_record", return_value=system_file.record()
+    ):
+        build()
 
     record_path = sim.fs_manager.compile_time_code_dir / BUILD_RECORD_NAME
     assert json.loads(record_path.read_text()) == {
         "namelist_schema": NAMELIST_SCHEMA_REGISTRY[-1][2].__name__,
         "ucla_roms_ref": checkout_target,
         "ucla_roms_commit": "abc123",
+        "system_spec": system_file.record(),
     }
     assert sim._namelist_schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
 

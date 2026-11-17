@@ -1,0 +1,20 @@
+schema_version: 1.0.0
+name: darwin_arm64
+
+# The generic context for macOS on an ARM64 platform. No modules and no
+# scheduler: it builds with the compilers, MPI and netCDF of the conda
+# environment.
+
+toolchains:
+  cpu:
+    compiler: gnu
+    mpi_prefix: mpirun
+    modules: []
+    env:
+      MPIHOME: ${CONDA_PREFIX}
+      NETCDFHOME: ${CONDA_PREFIX}
+      # conda provides a combined prefix: netcdf-fortran lives alongside netcdf-c
+      NETCDFFHOME: ${CONDA_PREFIX}
+      PNETCDFHOME: ${CONDA_PREFIX}
+      # No LD_LIBRARY_PATH here: dyld ignores it on macOS (and SIP strips DYLD_*);
+      # macOS binaries self-locate via rpaths embedded by the conda toolchain

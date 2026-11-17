@@ -1,0 +1,59 @@
+schema_version: 1.0.0
+name: anvil
+docs: https://www.rcac.purdue.edu/knowledge/anvil/architecture
+
+# Identified by matching value `anvil` in the RCAC_CLUSTER env var.
+detect:
+  - {env: RCAC_CLUSTER, equals: anvil}
+
+toolchains:
+  cpu:
+    compiler: gnu
+    mpi_prefix: srun --kill-on-bad-exit=1
+    modules:
+      - gcc/11.2.0  # (system default)
+      - openmpi/4.0.6  # (system default)
+      - hdf5/1.10.7  # (system default)
+      - netcdf-c/4.7.4  # (system default)
+      - netcdf-fortran/4.5.3  # (system default)
+      - parallel-netcdf/1.11.2
+      - cmake/3.20.0  # ParallelIO builds with cmake, which the HPC conda environment does not provide
+    env:
+      MPIHOME: ${OPENMPI_HOME}
+      NETCDFHOME: ${NETCDF}
+      # netcdf-fortran lives in its own spack prefix on Anvil (separate from netcdf-c);
+      # NETCDF_FORTRAN_HOME is set by the netcdf-fortran module
+      NETCDFFHOME: ${NETCDF_FORTRAN_HOME}
+      PNETCDFHOME: ${PNETCDF}
+      PATH: ${NETCDFHOME}/bin:${PATH}
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib:${NETCDFFHOME}/lib
+      # Linux: embed a RUNPATH at link time so the roms binary self-locates its
+      # libraries without needing LD_LIBRARY_PATH from loaded modules at runtime
+      LD_RUN_PATH: ${NETCDFFHOME}/lib:${NETCDFHOME}/lib:${PNETCDFHOME}/lib:${MPIHOME}/lib
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+
+scheduler:
+  family: slurm
+  primary_queue: wholenode
+  queues:
+    - {name: wholenode, kind: partition, query_name: part-standard, max_walltime: sacctmgr}
+    - {name: shared, kind: partition, query_name: part-shared, max_walltime: sacctmgr}
+    - {name: debug, kind: partition, query_name: part-debug, max_walltime: sacctmgr}
+    # Query names verified on Anvil 2026-11-02.
+    - {name: gpu, kind: partition, query_name: part-gpu, max_walltime: sacctmgr}
+    - {name: gpu-debug, kind: partition, query_name: part-gpu-debug, max_walltime: sacctmgr}
+  requires_task_distribution: false
+  max_cpus_per_node: 128
+  require: [account, queue]
+  # Verified on Anvil 2026-11-02: 16 GPU nodes of 4xA100 + 2xEPYC 7763
+  # (128 cores); `gpu` is exclusive, `gpu-debug` is 30 min and at most 2
+  # GPUs; GPUs are requested with `--gpus-per-node`. GPU allocations are
+  # `<allocation>-gpu` accounts with the `gpu` QOS (a CPU allocation is
+  # refused on the `gpu` partition). The site's GPU tree has no
+  # nvfortran-built netCDF-Fortran or CUDA-aware system OpenMPI, so no
+  # GPU build toolchain is registered yet.
+  gpu_nodes:
+    gpus_per_node: 4
+    queue: gpu
+    directives: {--gpu-bind: none}
+    cores_per_node: 128

@@ -75,6 +75,26 @@ ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
 ARG_YES: t.Final[str] = "--yes"
 """Option that accepts every prompt without user interaction."""
 
+ARG_SYSTEM_FILE: t.Final[str] = "--system-file"
+ARG_SYSTEM_FILE_HELP: t.Final[str] = (
+    "A system file (YAML) that describes this machine. The setup uses it, and "
+    "places it in a catalog C-Star reads unless it is in one already."
+)
+"""Option that names a system file for the setup to use."""
+
+ARG_CATALOG: t.Final[str] = "--catalog"
+ARG_CATALOG_HELP: t.Final[str] = (
+    "The catalog root whose systems/ directory receives the file. Defaults to "
+    "your own catalog, the first CSTAR_CATALOG entry."
+)
+"""Option that names the catalog root a system file is added to."""
+
+ARG_REPLACE: t.Final[str] = "--replace"
+ARG_REPLACE_HELP: t.Final[str] = (
+    "Replace a different system file of the same name that is already there."
+)
+"""Option that allows an added system file to replace a different one."""
+
 ARG_BLUEPRINT: t.Final[str] = "--blueprint"
 ARG_BLUEPRINT_HELP: t.Final[str] = (
     "Reuse the file-type settings of this compress blueprint; only file types "

@@ -1,4 +1,3 @@
-import functools
 import logging
 import os
 import shutil
@@ -14,7 +13,6 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from unittest import mock
 
-import dotenv
 import pytest
 
 from cstar.base.additional_code import AdditionalCode
@@ -32,6 +30,8 @@ from cstar.base.env import (
     ENV_CSTAR_SYSTEM,
     FLAG_ON,
     USER_CONFIG_FILENAME,
+    CatalogRoots,
+    catalog_roots,
     load_user_config,
 )
 from cstar.base.external_codebase import ExternalCodeBase
@@ -59,7 +59,8 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import _LOGGED_NEWER_THAN_KNOWN, release_ref_for_remote
-from cstar.system.manager import _WARNED_SYSTEM, OscarEnvSettings
+from cstar.system.manager import _WARNED_SYSTEM
+from cstar.system.scheduler import SCHEDULER_SLURM
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -264,17 +265,34 @@ def _no_system_setting(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_oscar_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point Oscar's detection mount at a path that does not exist, for each unit test.
+def _no_detection_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every `detect` path rule miss, for each unit test.
 
     Oscar is recognised by its `/oscar/home` mount, not an environment variable, so
     clearing the environment cannot hide it: run on Oscar, every test that detects
-    the system would find Oscar. A test of that detection points the marker at a
-    real directory itself.
+    the system would find Oscar. A test of that detection replaces
+    `cstar.system.spec.path_is_dir` itself.
+    """
+    monkeypatch.setattr("cstar.system.spec.path_is_dir", lambda _path: False)
+
+
+@pytest.fixture(autouse=True)
+def _no_user_system_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide every system file but the bundled ones, for each unit test.
+
+    With `CSTAR_CATALOG` unset, C-Star reads ``~/cstar/catalog/systems/``: a
+    developer's own system file there would change which context a test builds. A
+    test of the layers uses `system_file_layers`, which reads `CSTAR_CATALOG` again.
     """
     monkeypatch.setattr(
-        OscarEnvSettings, "FILESYSTEM_MARKER", Path("/nonexistent-oscar-home")
+        "cstar.system.manager.catalog_roots", lambda: CatalogRoots(None, ())
     )
+
+
+@pytest.fixture
+def system_file_layers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read system files from the `CSTAR_CATALOG` the test sets, as C-Star does."""
+    monkeypatch.setattr("cstar.system.manager.catalog_roots", catalog_roots)
 
 
 @pytest.fixture(autouse=True)
@@ -290,7 +308,7 @@ def _allow_login_node_run(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Put the process outside any scheduler job on a system with a scheduler."""
+    """Put the process outside any scheduler job on a system with a SLURM scheduler."""
     for name in (
         "SLURM_JOB_ID",
         "SLURM_JOBID",
@@ -303,7 +321,7 @@ def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
             new_callable=mock.PropertyMock,
-            return_value=mock.MagicMock(),
+            return_value=mock.MagicMock(family=SCHEDULER_SLURM),
         ),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.name",
@@ -1283,26 +1301,10 @@ def roms_path(tmp_path: Path) -> Path:
     return tmp_path / "roms"
 
 
-@pytest.fixture
-def system_dotenv_dir(tmp_path: Path) -> Path:
-    # A path to a temporary directory for writing system-level
-    # environment configuration file
-    return tmp_path / "additional_files" / "env_files"
-
-
 @pytest.fixture(scope="session")
 def mock_system_name() -> str:
     # A name for the mock system/platform executing the tests.
     return "mock_system"
-
-
-@pytest.fixture
-def system_dotenv_path(system_dotenv_dir: Path, mock_system_name: str) -> Path:
-    # A path to a temporary, system-level environment configuration file
-    if not system_dotenv_dir.exists():
-        system_dotenv_dir.mkdir(parents=True)
-
-    return system_dotenv_dir / f"{mock_system_name}.env"
 
 
 @pytest.fixture
@@ -1316,44 +1318,6 @@ def mock_path_resolve():
         Path, "resolve", side_effect=fake_resolve, autospec=True
     ) as mock_resolve:
         yield mock_resolve
-
-
-def _write_custom_env(path: Path, variables: dict[str, str]) -> None:
-    """Populate a .env configuration file.
-
-    NOTE: repeated calls will update the file
-
-    Parameters
-    ----------
-    path: Path
-        The complete file path to write to
-    variables : dict[str, str]
-        The key-value pairs to be written to the env file
-    """
-    if not path.parent.exists():
-        path.parent.mkdir(parents=True)
-
-    for k, v in variables.items():
-        dotenv.set_key(path, k, v)
-
-
-@pytest.fixture
-def custom_system_env(
-    system_dotenv_path: Path,
-) -> Callable[[dict[str, str]], None]:
-    """Return a function to populate a mocked system environment config file.
-
-    Parameters
-    ----------
-    system_dotenv_path: Path
-        The path to a temporary location to write the env file
-
-    Returns
-    -------
-    Callable[[dict[str, str]], None]
-        A function that will write a new env config file.
-    """
-    return functools.partial(_write_custom_env, system_dotenv_path)
 
 
 ################################################################################

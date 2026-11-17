@@ -83,6 +83,7 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.scheduler import SCHEDULER_SLURM
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 if t.TYPE_CHECKING:
@@ -722,8 +723,9 @@ def test_launcher_preconditions_slurm(
     var_name : str
         Known, required env vars that should cause the run to fail if not present.
     """
-    mock_launcher = mock.MagicMock()
-    mock_scheduler = mock.PropertyMock(return_value=mock_launcher)
+    mock_scheduler = mock.PropertyMock(
+        return_value=mock.MagicMock(family=SCHEDULER_SLURM)
+    )
 
     with (
         mock.patch.dict(os.environ, mock_env, clear=True),
@@ -821,7 +823,7 @@ def test_launcher_preconditions_satisfied_by_workplan(
         mock.patch.dict(os.environ, {}, clear=True),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
         ),
         mock.patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",
@@ -849,7 +851,7 @@ def test_launcher_preconditions_ignore_invalid_overrides_when_env_is_set(
         ),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
         ),
         mock.patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",

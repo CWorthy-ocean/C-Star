@@ -1,0 +1,32 @@
+schema_version: 1.0.0
+name: expanse
+docs: https://www.sdsc.edu/support/user_guides/expanse.html
+
+# No `detect` block: Lmod names this machine, and a system whose name Lmod
+# reports needs none.
+
+toolchains:
+  cpu:
+    compiler: intel
+    mpi_prefix: srun --mpi=pmi2 --kill-on-bad-exit=1
+    modules:
+      - slurm sdsc DefaultModules shared
+      - cpu/0.15.4 intel/19.1.1.217 mvapich2/2.3.4
+      - netcdf-c/4.7.4
+      - netcdf-fortran/4.5.3
+    env:
+      NETCDFHOME: ${NETCDF_FORTRANHOME}
+      MPIHOME: ${MVAPICH2HOME}
+      MPIROOT: ${MVAPICH2HOME}
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+
+scheduler:
+  family: slurm
+  primary_queue: compute
+  queues:
+    - {name: compute, kind: partition}
+    - {name: debug, kind: partition}
+  requires_task_distribution: true
+  # Expanse requires a project (account) on every job; an unset queue submits to
+  # the primary `compute` partition.
+  require: [account]

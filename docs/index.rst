@@ -161,6 +161,7 @@ C-Star is built with these principles in mind:
 
     deployments/hpc
     deployments/machines
+    deployments/describe_cluster
 
 .. toctree::
     :maxdepth: 1

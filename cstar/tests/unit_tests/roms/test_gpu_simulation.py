@@ -49,6 +49,7 @@ from cstar.roms.precheck import (
     check_output_streams_divide_rst,
 )
 from cstar.roms.simulation import IOLayout, ROMSSimulation
+from cstar.system.manager import registered_context
 from cstar.system.toolchain import Toolchain
 
 V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
@@ -1054,8 +1055,14 @@ class TestBuild:
     ) -> None:
         clone = rho0_sim.fs_manager.codebase_subdir(rho0_sim.codebase.key)
         executable = clone / "build_gpu" / "roms_gpu_cuda"
+        # the system file the build records is that of the selected system, so pin it
+        system_file = registered_context("perlmutter").system_file
+        assert system_file is not None
+        selected = mock.Mock()
+        selected.selection.context.system_file = system_file
 
-        rho0_sim.build()
+        with mock.patch("cstar.roms.simulation.get_sysmgr", return_value=selected):
+            rho0_sim.build()
 
         assert rho0_sim.exe_path == executable
         assert rho0_sim._exe_hash is not None
@@ -1072,7 +1079,16 @@ class TestBuild:
                 "rho0": 1025.3,
                 "passive_fp64": True,
             },
+            "system_spec": system_file.record(),
         }
+        assert set(record["system_spec"]) == {
+            "path",
+            "layer",
+            "sha256",
+            "schema_version",
+        }
+        assert record["system_spec"]["path"].endswith("systems/perlmutter.yaml")
+        assert record["system_spec"]["layer"] == "bundled"
 
     @pytest.mark.parametrize(
         ("nt_bgc", "passive_fp64"), [(32, True), (0, False)], ids=["marbl", "no-marbl"]

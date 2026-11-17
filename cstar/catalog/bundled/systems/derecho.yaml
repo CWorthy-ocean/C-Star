@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+name: derecho
+docs: https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/
+
+# No `detect` block: Lmod names this machine, and a system whose name Lmod
+# reports needs none.
+
+toolchains:
+  cpu:
+    compiler: intel
+    mpi_prefix: mpirun
+    modules:
+      - ncarenv/23.09
+      - intel-oneapi/2024.2.1
+      - cray-mpich/8.1.29
+      - netcdf/4.9.2
+      - parallel-netcdf
+    env:
+      MPIHOME: ${CRAY_MPICH_PREFIX}
+      NETCDFHOME: ${NETCDF}
+      PNETCDFHOME: ${PNETCDF}
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
+      LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}:${NETCDFHOME}/lib
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+
+scheduler:
+  family: pbs
+  primary_queue: main
+  queues:
+    # https://ncar-hpc-docs.readthedocs.io/en/latest/pbs/charging/
+    - {name: main, max_walltime: "12:00:00"}
+    - {name: preempt, max_walltime: "24:00:00"}
+    - {name: develop, max_walltime: "6:00:00"}

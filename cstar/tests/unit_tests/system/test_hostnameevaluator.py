@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from cstar.system.environment import LmodEnvSettings
-from cstar.system.manager import HostNameEvaluator
+from cstar.system.manager import HostNameEvaluator, registered_context
 
 DEFAULT_MOCK_MACHINE_NAME = "mock_machine"
 DEFAULT_MOCK_HOST_NAME = "mock_system"
@@ -147,12 +147,14 @@ def test_partial_platform_fallback(
     with (
         patch("platform.system", return_value=system_name),
         patch("platform.machine", return_value=machine_name),
-        patch(
-            "cstar.system.manager.EljaSystemContext.is_match",
+        patch.object(
+            registered_context("elja"),
+            "is_match",
             mock.MagicMock(return_value=False),
         ),
-        patch(
-            "cstar.system.manager.AnvilSystemContext.is_match",
+        patch.object(
+            registered_context("anvil"),
+            "is_match",
             mock.MagicMock(return_value=False),
         ),
     ):

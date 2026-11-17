@@ -13,6 +13,7 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from cstar.base.env import (
+    BUNDLED_CATALOG_ROOT,
     ENV_CSTAR_CATALOG,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
@@ -39,18 +40,27 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.environment import EnvSettingsBase
 from cstar.system.manager import (
     CTX_REGISTRY,
-    AnvilEnvSettings,
-    MacOSSystemContext,
+    DOCS_DESCRIBE_CLUSTER_URL,
     SystemSelection,
     SystemSource,
     get_registered_sys_contexts,
+    registered_context,
+    registered_names,
+    reload_system_files,
+    system_stack,
 )
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
+from cstar.system.spec import SYSTEMS_DIR_NAME
 from cstar.system.toolchain import GpuNodes
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
+MACOS_CONTEXT = registered_context("darwin_arm64")
+"""The generic macOS context, read from its bundled system file."""
+ANVIL_SETTINGS = registered_context("anvil").settings_klass()
+"""A settings class requiring an account and a queue (Anvil's)."""
 REAL_QUERY_SLURM = init_module.query_slurm
 """The SLURM lookup as written, captured before the autouse fixture stubs it."""
 REAL_SELECT_SYSTEM = init_module.select_system
@@ -94,8 +104,8 @@ class FakeSlurmContext:
         )
 
     @classmethod
-    def settings_klass(cls) -> type[AnvilEnvSettings]:
-        return AnvilEnvSettings
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        return ANVIL_SETTINGS
 
     @classmethod
     def is_match(cls) -> bool:
@@ -153,7 +163,7 @@ def safe_environment(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     for name in CLEARED_VARIABLES:
         monkeypatch.delenv(name, raising=False)
 
-    use_context(monkeypatch, MacOSSystemContext)
+    use_context(monkeypatch, MACOS_CONTEXT)
     monkeypatch.setattr("cstar.cli.init.query_slurm", lambda args: [])
     monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda environ: "")
 
@@ -208,9 +218,7 @@ def gpu_slurm(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the system a generic context that C-Star fell back to."""
-    use_context(
-        monkeypatch, MacOSSystemContext, SystemSource.FALLBACK, detected="mycluster"
-    )
+    use_context(monkeypatch, MACOS_CONTEXT, SystemSource.FALLBACK, detected="mycluster")
 
 
 @pytest.fixture
@@ -883,7 +891,7 @@ def test_fallback_asks_again_after_an_unknown_name(
     output = flatten_cli_output(result.output)
 
     assert result.exit_code == 0, result.output
-    names = ", ".join(sorted(CTX_REGISTRY))
+    names = ", ".join(registered_names())
     assert (
         f"'nope' is not a registered system; {ENV_CSTAR_SYSTEM} must name one of: "
         f"{names}."
@@ -928,7 +936,7 @@ def test_dash_unsets_a_bad_system_setting_and_detects_the_system(
     monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
     monkeypatch.setattr(
         "cstar.cli.init.detect_system",
-        lambda: SystemSelection(MacOSSystemContext, SystemSource.DETECTED),
+        lambda: SystemSelection(MACOS_CONTEXT, SystemSource.DETECTED),
     )
     path = isolate_user_config
     path.write_text(f"{ENV_CSTAR_SYSTEM}=nowhere\n")
@@ -1010,7 +1018,7 @@ def test_retyping_a_bad_system_setting_asks_again_until_it_is_unset(
     monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
     monkeypatch.setattr(
         "cstar.cli.init.detect_system",
-        lambda: SystemSelection(MacOSSystemContext, SystemSource.DETECTED),
+        lambda: SystemSelection(MACOS_CONTEXT, SystemSource.DETECTED),
     )
     path = isolate_user_config
     path.write_text(f"{ENV_CSTAR_SYSTEM}=bogus\n")
@@ -1293,3 +1301,477 @@ def test_unreadable_file_stops_before_any_question(
     assert "cannot read" in result.stderr
     assert "Use C-Star's default locations?" not in result.output
     assert path.read_bytes() == content
+
+
+# --- `--system-file` and a path given to the System prompt ---------------------
+
+BUNDLED_SYSTEMS = BUNDLED_CATALOG_ROOT / SYSTEMS_DIR_NAME
+SHELL_AND_KERNEL = "n\nn\n"
+"""Answers to the shell function and Jupyter kernel questions."""
+
+
+def write_system_file(
+    directory: Path, name: str = "mycluster", bundled: str = "linux_x86_64"
+) -> Path:
+    """Write a valid system file named `name` (as `<name>.yaml`) from a bundled one."""
+    text = (BUNDLED_SYSTEMS / f"{bundled}.yaml").read_text()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.yaml"
+    path.write_text(text.replace(f"name: {bundled}", f"name: {name}"))
+    return path
+
+
+@pytest.fixture
+def home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system_file_layers: None
+) -> Path:
+    """A home directory under the temporary one, so your own catalog is under it.
+
+    Reads system files from the `CSTAR_CATALOG` the test sets, as C-Star does.
+    """
+    reload_system_files()
+    path = tmp_path / "home"
+    path.mkdir()
+    monkeypatch.setenv("HOME", str(path))
+    return path
+
+
+@pytest.fixture
+def user_catalog(home: Path) -> Path:
+    """The default location of your own catalog."""
+    return (home / "cstar" / "catalog").resolve()
+
+
+@pytest.fixture
+def detected(home: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[bool], None]:
+    """Decide whether detection selects the system a file describes (it does not)."""
+
+    def decide(value: bool) -> None:
+        monkeypatch.setattr(init_module, "detection_would_select", lambda spec: value)
+
+    decide(False)
+    return decide
+
+
+def test_a_file_already_in_your_catalog_is_not_copied(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    home: Path,
+    detected: Callable[[bool], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = home / "mine"
+    path = write_system_file(root / SYSTEMS_DIR_NAME)
+    monkeypatch.setenv(ENV_CSTAR_CATALOG, str(root))
+    detected(True)
+
+    result = run_init("--yes", "--system-file", str(path))
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "System: mycluster (from " in output
+    assert "scheduler: none" in output
+    assert "is already in your catalog" in output
+    assert sorted(p.name for p in (root / SYSTEMS_DIR_NAME).iterdir()) == [
+        "mycluster.yaml"
+    ]
+    assert ENV_CSTAR_SYSTEM not in read_user_config(isolate_user_config)
+
+
+def test_a_file_in_a_shared_layer_is_not_copied(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    home: Path,
+    tmp_path: Path,
+    detected: Callable[[bool], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = tmp_path / "group"
+    path = write_system_file(shared / SYSTEMS_DIR_NAME)
+    monkeypatch.setenv(ENV_CSTAR_CATALOG, f"{home / 'mine'}{os.pathsep}{shared}")
+
+    result = run_init("--yes", "--system-file", str(path))
+
+    assert result.exit_code == 0, result.output
+    assert "is already in the shared catalog" in flatten_cli_output(result.output)
+    assert not (home / "mine").exists()
+
+
+def test_a_shared_catalog_outside_the_stack_is_added_with_yes(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    """The root joins `CSTAR_CATALOG` after your own catalog, which stays first
+    (a bare shared root would become the writable top layer).
+    """
+    shared = tmp_path / "group"
+    path = write_system_file(shared / SYSTEMS_DIR_NAME)
+
+    result = run_init("--yes", "--system-file", str(path))
+
+    assert result.exit_code == 0, result.output
+    config = read_user_config(isolate_user_config)
+    assert config[ENV_CSTAR_CATALOG] == (
+        f"{user_catalog}{os.pathsep}{shared.resolve()}"
+    )
+    assert not user_catalog.exists()
+
+
+def test_declining_the_shared_catalog_copies_the_file(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "group" / SYSTEMS_DIR_NAME)
+
+    result = run_init("--system-file", str(path), input="y\nn\n" + SHELL_AND_KERNEL)
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "as a shared catalog? (No copies the file into your own catalog)" in output
+    copy = user_catalog / SYSTEMS_DIR_NAME / "mycluster.yaml"
+    assert copy.read_bytes() == path.read_bytes()
+    assert ENV_CSTAR_CATALOG not in read_user_config(isolate_user_config)
+
+
+def test_a_file_from_elsewhere_is_copied_into_your_catalog(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads")
+
+    result = run_init("--yes", "--system-file", str(path))
+
+    assert result.exit_code == 0, result.output
+    assert "Copied the file to " in flatten_cli_output(result.output)
+    target = user_catalog / SYSTEMS_DIR_NAME / "mycluster.yaml"
+    assert target.read_bytes() == path.read_bytes()
+    assert "mycluster" in system_stack().layers.files
+
+
+def test_a_draft_named_otherwise_is_installed_under_its_system_name(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads")
+    draft = path.with_name("draft.yaml")
+    path.rename(draft)
+
+    result = run_init("--yes", "--system-file", str(draft))
+
+    assert result.exit_code == 0, result.output
+    assert (user_catalog / SYSTEMS_DIR_NAME / "mycluster.yaml").is_file()
+
+
+def test_the_catalog_changed_in_the_walkthrough_receives_the_file(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    """The placement follows the answer to the Locations section, not the
+    environment as it was when the command started.
+    """
+    path = write_system_file(tmp_path / "downloads")
+    chosen = tmp_path / "chosen"
+
+    result = run_init(
+        "--system-file", str(path), input=f"n\n\n\n{chosen}\n" + SHELL_AND_KERNEL
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (chosen / SYSTEMS_DIR_NAME / "mycluster.yaml").is_file()
+    assert not user_catalog.exists()
+    assert read_user_config(isolate_user_config)[ENV_CSTAR_CATALOG] == str(chosen)
+
+
+def test_a_shared_root_is_added_to_the_catalog_typed_in_the_walkthrough(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    shared = tmp_path / "group"
+    path = write_system_file(shared / SYSTEMS_DIR_NAME)
+    mine = tmp_path / "mine"
+
+    result = run_init(
+        "--system-file",
+        str(path),
+        input=f"n\n\n\n{mine}\ny\n" + SHELL_AND_KERNEL,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert read_user_config(isolate_user_config)[ENV_CSTAR_CATALOG] == (
+        f"{mine}{os.pathsep}{shared.resolve()}"
+    )
+
+
+def test_an_existing_different_file_is_kept_under_yes(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads")
+    existing = write_system_file(user_catalog / SYSTEMS_DIR_NAME)
+    existing.write_text(existing.read_text() + "\n# mine\n")
+
+    result = run_init("--yes", "--system-file", str(path))
+
+    assert result.exit_code == 0, result.output
+    assert "Keeping " in flatten_cli_output(result.output)
+    assert existing.read_text().endswith("# mine\n")
+
+
+@pytest.mark.parametrize(("answer", "replaced"), [("y", True), ("n", False)])
+def test_an_existing_different_file_is_replaced_only_when_asked(
+    answer: str,
+    replaced: bool,
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads")
+    existing = write_system_file(user_catalog / SYSTEMS_DIR_NAME)
+    existing.write_text(existing.read_text() + "\n# mine\n")
+
+    result = run_init(
+        "--system-file", str(path), input=f"y\n{answer}\n" + SHELL_AND_KERNEL
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (existing.read_bytes() == path.read_bytes()) is replaced
+
+
+@pytest.mark.parametrize("selects", [True, False])
+def test_the_system_is_set_only_where_detection_misses_it(
+    selects: bool,
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+    detected: Callable[[bool], None],
+) -> None:
+    detected(selects)
+    path = write_system_file(tmp_path / "downloads")
+
+    result = run_init("--yes", "--system-file", str(path))
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    config = read_user_config(isolate_user_config)
+    if selects:
+        assert ENV_CSTAR_SYSTEM not in config
+        assert "C-Star detects 'mycluster' on this machine" in output
+    else:
+        assert config[ENV_CSTAR_SYSTEM] == "mycluster"
+        assert "C-Star does not detect 'mycluster' here" in output
+
+
+def test_a_setting_that_names_another_system_is_removed_when_detection_selects(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+    detected: Callable[[bool], None],
+) -> None:
+    """A `CSTAR_SYSTEM` for another system would win over detection."""
+    detected(True)
+    isolate_user_config.write_text(f"{ENV_CSTAR_SYSTEM}=anvil\n")
+    path = write_system_file(tmp_path / "downloads")
+
+    result = run_init("--yes", "--system-file", str(path))
+
+    assert result.exit_code == 0, result.output
+    assert "would win over that: removing it from the file" in flatten_cli_output(
+        result.output
+    )
+    assert ENV_CSTAR_SYSTEM not in read_user_config(isolate_user_config)
+
+
+def test_an_exported_setting_for_another_system_is_reported(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+    detected: Callable[[bool], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detected(True)
+    monkeypatch.setenv(ENV_CSTAR_SYSTEM, "anvil")
+    path = write_system_file(tmp_path / "downloads")
+
+    result = run_init("--yes", "--system-file", str(path))
+
+    assert result.exit_code == 0, result.output
+    assert "exported in your shell too; remove that export line" in (
+        flatten_cli_output(result.output)
+    )
+
+
+def test_a_slurm_file_drives_the_scheduler_prompts(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    """The file's requirements decide which settings are marked required, and its
+    GPU nodes add the optional GPU prompts.
+    """
+    path = write_system_file(tmp_path / "downloads", bundled="anvil")
+
+    result = run_init(
+        "--system-file",
+        str(path),
+        input="m1234\n\n\n\n\nn\n\n\n\n" + SHELL_AND_KERNEL,
+    )
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "scheduler: SLURM" in output
+    assert "SLURM account (required on this system)" in output
+    assert "SLURM queue or partition (required on this system)" in output
+    assert "Queue for GPU jobs (optional; defaults to gpu)" in output
+    assert read_user_config(isolate_user_config)[ENV_CSTAR_SLURM_ACCOUNT] == "m1234"
+
+
+def test_a_pbs_file_says_jobs_are_not_submitted(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads", bundled="derecho")
+
+    result = run_init("--yes", "--system-file", str(path))
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "scheduler: PBS" in output
+    assert "Scheduler (PBS)" in output
+    assert "Job submission through PBS is not supported yet" in output
+    assert "qsub -I" in output
+    assert "SLURM account" not in output
+
+
+def test_a_pbs_system_without_a_file_says_it_too(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_context(monkeypatch, registered_context("derecho"))
+
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert "Job submission through PBS is not supported yet" in (
+        flatten_cli_output(result.output)
+    )
+
+
+@pytest.mark.parametrize("kind", ["bad", "url", "missing"])
+def test_a_refused_file_stops_before_any_question(
+    kind: str,
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("name: [unterminated\n")
+    argument = {
+        "bad": str(bad),
+        "url": "https://example.org/mycluster.yaml",
+        "missing": str(tmp_path / "nope.yaml"),
+    }[kind]
+
+    result = run_init("--system-file", argument, input="y\n")
+
+    assert result.exit_code == 1
+    assert "is refused" in " ".join(result.output.split())
+    assert "Locations" not in result.output
+    assert not isolate_user_config.exists()
+    assert not user_catalog.exists()
+
+
+def test_the_system_section_accepts_the_path_of_a_system_file(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads")
+
+    result = run_init(input=f"{path}\ny\n" + SHELL_AND_KERNEL)
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert f"write a system file (see {DOCS_DESCRIBE_CLUSTER_URL}) and give its" in (
+        output
+    )
+    assert "Using mycluster (from " in output
+    assert (user_catalog / SYSTEMS_DIR_NAME / "mycluster.yaml").is_file()
+    assert read_user_config(isolate_user_config) == {ENV_CSTAR_SYSTEM: "mycluster"}
+
+
+def test_the_system_section_asks_again_after_a_refused_file(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    path = write_system_file(tmp_path / "downloads")
+
+    result = run_init(input=f"{tmp_path / 'nope.yaml'}\n{path}\ny\n" + SHELL_AND_KERNEL)
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "nope.yaml is refused" in output
+    assert output.count(f"System ({ENV_CSTAR_SYSTEM}):") == 2
+    assert (user_catalog / SYSTEMS_DIR_NAME / "mycluster.yaml").is_file()
+
+
+def test_the_system_section_places_a_shared_file_like_the_option(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+    user_catalog: Path,
+    tmp_path: Path,
+) -> None:
+    shared = tmp_path / "group"
+    path = write_system_file(shared / SYSTEMS_DIR_NAME)
+
+    result = run_init(input=f"{path}\ny\ny\n" + SHELL_AND_KERNEL)
+
+    assert result.exit_code == 0, result.output
+    assert read_user_config(isolate_user_config)[ENV_CSTAR_CATALOG] == (
+        f"{user_catalog}{os.pathsep}{shared.resolve()}"
+    )
+    assert not user_catalog.exists()
