@@ -11,6 +11,7 @@ a re-run reviews the setup rather than redoing it.
 import os
 import shutil
 import subprocess
+import textwrap
 import typing as t
 from dataclasses import dataclass
 
@@ -36,6 +37,12 @@ from cstar.base.env import (
     split_catalog,
 )
 from cstar.base.exceptions import CstarError, CstarUserConfigError
+from cstar.base.skills import (
+    SkillError,
+    agent_homes,
+    default_install_dirs,
+    shipped_skills,
+)
 from cstar.cli.environment import NAME as NAME_ENV
 from cstar.cli.environment import register_kernel, shell_init
 from cstar.cli.environment.show import (
@@ -45,6 +52,9 @@ from cstar.cli.environment.show import (
     value_source,
 )
 from cstar.cli.run import NAME as NAME_RUN
+from cstar.cli.skill.install import describe_failure, install_skills
+from cstar.cli.skill.verbs import COMMAND_INSTALL as COMMAND_INSTALL_SKILL
+from cstar.cli.skill.verbs import NAME as NAME_SKILL
 from cstar.cli.system.add import looks_like_path, read_draft
 from cstar.cli.workplan.path import COMMAND_CD
 from cstar.entrypoint.utils import (
@@ -65,6 +75,7 @@ from cstar.system.environment import SlurmSettingsBase
 from cstar.system.layers import SystemFileConflict, install_system_file
 from cstar.system.manager import (
     DOCS_DESCRIBE_CLUSTER_URL,
+    SYSTEM_SKILL_HINT,
     SystemSelection,
     SystemSource,
     context_from_file,
@@ -115,6 +126,8 @@ PROMPT_HINT: t.Final[str] = (
     "setting unset."
 )
 """The line that explains how to answer the prompts that follow it."""
+SKILL_WIDTH: t.Final[int] = 76
+"""Columns a shipped skill's description is wrapped to in the Agent skills section."""
 HINT_TIMEOUT: t.Final[float] = 5.0
 """Seconds to wait for a SLURM lookup made only to show a hint."""
 DOCS_PRECEDENCE_URL: t.Final[str] = (
@@ -366,6 +379,7 @@ def system_section(
     echo(f"Registered systems: {', '.join(registered_names())}")
     echo("To describe this machine to C-Star, write a system file (see")
     echo(f"{DOCS_DESCRIBE_CLUSTER_URL}) and give its path here.")
+    echo(SYSTEM_SKILL_HINT)
     if selection is None:
         echo("Name the system to use.")
     else:
@@ -810,6 +824,47 @@ def kernel_section(yes: bool) -> str:
     return f"registered ({prefix.name})"
 
 
+def skills_section(yes: bool) -> str:
+    """Offer to install C-Star's agent skills; the outcome for the summary.
+
+    Offered only when one of the agents' home folders exists, so the setup never
+    creates ``~/.agents`` or ``~/.claude`` for someone who uses no coding agent.
+    A re-run updates the links and adds skills new in this version.
+    """
+    header("Agent skills")
+    command = f"cstar {NAME_SKILL} {COMMAND_INSTALL_SKILL}"
+    homes = agent_homes()
+    if not homes:
+        echo(f"No coding agent found; `{command}` installs C-Star's skills for one.")
+        return "not installed (no agent found)"
+    try:
+        skills = shipped_skills()
+    except SkillError as ex:
+        echo(f"Error: {ex}")
+        return "not installed (see above)"
+    found = ", ".join(display_path(home) for home in homes)
+    echo(f"C-Star ships skills that coding agents can use ({found} found):")
+    for skill in skills:
+        for line in textwrap.wrap(f"- {skill.name}: {skill.summary}", SKILL_WIDTH):
+            echo(line if line.startswith("- ") else f"  {line}")
+    if not confirm("Install C-Star's skills for your coding agents?", yes):
+        return "skipped"
+
+    folders = default_install_dirs()
+    failed = install_skills(skills, folders, log=echo)
+    for error in failed:
+        echo(f"Not installed: {describe_failure(error)}")
+    if failed:
+        echo(f"`{command}` retries once that is fixed.")
+    refused = {error.place.parent for error in failed}
+    done = ", ".join(display_path(f) for f in folders if f not in refused)
+    outcome = f"{len(skills)} installed ({done})" if done else ""
+    if not refused:
+        return outcome
+    missing = ", ".join(display_path(f) for f in folders if f in refused)
+    return "; ".join(filter(None, [outcome, f"not all in {missing} (see above)"]))
+
+
 def data_access_section() -> None:
     """Point at the two datasets that need a one-time registration."""
     header("Data access")
@@ -925,10 +980,12 @@ def init(
     written = write_section(config, carried, decisions)
     shell_outcome = shell_section(yes)
     kernel_outcome = kernel_section(yes)
+    skills_outcome = skills_section(yes)
     data_access_section()
 
     header("Summary")
     echo(f"Configuration file: {config.path} ({len(written)} setting(s) set)")
     echo(f"Shell function: {shell_outcome}")
     echo(f"Jupyter kernel: {kernel_outcome}")
+    echo(f"Agent skills: {skills_outcome}")
     echo("Open a new shell so that the shell function and the file take effect.")

@@ -55,6 +55,13 @@ DOCS_DESCRIBE_CLUSTER_URL: Final[str] = (
     "https://c-star.readthedocs.io/en/latest/deployments/describe_cluster.html"
 )
 """The documentation page on describing a machine to C-Star with a system file."""
+SYSTEM_SKILL: Final[str] = "cstar-system"
+"""The agent skill C-Star ships that writes a system file for a machine it does not know."""
+SYSTEM_SKILL_HINT: Final[str] = (
+    f"A coding agent can write the system file with C-Star's `{SYSTEM_SKILL}` skill "
+    "(`cstar skill install` installs it)."
+)
+"""The line that points at the skill wherever C-Star says it does not know the machine."""
 
 
 class HostNameEvaluator:
@@ -728,7 +735,7 @@ def warn_fallback(selection: SystemSelection) -> None:
         f"and MPI of your conda environment. Set {ENV_CSTAR_SYSTEM} to the system's "
         f"name if C-Star lists it, or run `cstar env set {ENV_CSTAR_SYSTEM} {name}` "
         "to keep the generic context without this warning; to submit jobs here, "
-        f"register the system (see {DOCS_MACHINES_URL})."
+        f"register the system (see {DOCS_MACHINES_URL}). {SYSTEM_SKILL_HINT}"
     )
 
 
