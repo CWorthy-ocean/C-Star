@@ -1380,8 +1380,10 @@ class RomsNamelistV0_15_0(RomsNamelistV0_14_0):
     """The ROMS namelist schema for ucla-roms >= 0.15.0.
 
     Adds `&IMPLICIT_FS` (see :class:`ImplicitFsSettings`) on top of the 0.14.0
-    schema. It is always written, which is why earlier releases (which stop on
-    unknown namelist groups) keep the 0.14.0 schema.
+    schema. It is always written. Earlier releases never read the group (ROMS
+    reads each group by name and skips the others), so a request for the
+    implicit scheme would be silently ignored there: they keep the 0.14.0
+    schema, which rejects the group.
     """
 
     implicit_fs: ImplicitFsSettings = Field(default_factory=ImplicitFsSettings)

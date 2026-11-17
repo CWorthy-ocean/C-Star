@@ -1,0 +1,3 @@
+The default ModelSpec, the wizard default and the integration pin move to ``roms-marbl-0.15-default`` (ucla-roms 0.15.0).
+- ucla-roms 0.15.0 changes the results of nested child runs: the boundary data a parent extracts now hold ``u``, ``v`` and the tracers at the time of the record, one parent time step later than before (ucla-roms #435); ``roms-marbl-0.14-default`` stays for reproducing 0.14.0 answers.
+- Its MARBL diagnostics are written in double precision (changes of up to 6e-8 relative, ucla-roms #443), and with ``wrt_bgc_his`` off and ``wrt_bgc_avg`` on its ``_bgc_dia`` files hold ``nrpf_bgc_his_dia`` records each instead of one (ucla-roms #437).
