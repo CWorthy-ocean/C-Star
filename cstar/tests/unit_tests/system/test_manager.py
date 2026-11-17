@@ -154,6 +154,9 @@ class TestSchedulerProperty:
         ),
         pytest.param(registered_context("oscar"), set(), id="oscar"),
         pytest.param(registered_context("perlmutter"), set(), id="perlmutter"),
+        pytest.param(
+            registered_context("stampede3"), {ENV_CSTAR_SLURM_QUEUE}, id="stampede3"
+        ),
     ],
 )
 def test_slurm_system_required_settings(

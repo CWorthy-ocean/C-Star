@@ -44,6 +44,7 @@ BUNDLED_SYSTEMS = (
     "linux_x86_64",
     "oscar",
     "perlmutter",
+    "stampede3",
 )
 
 MODULE_ENVIRONMENT = {
@@ -67,6 +68,9 @@ MODULE_ENVIRONMENT = {
             "NETCDF_FORTRAN_HOME",
             "OPAL_PREFIX",
             "OPENMPI_HOME",
+            "TACC_IMPI_DIR",
+            "TACC_NETCDF_DIR",
+            "TACC_PNETCDF_DIR",
         )
     },
     # PNETCDF is deliberately unset: a reference to it must expand to ""
@@ -87,6 +91,7 @@ DETECTION_ENVIRONMENTS = {
     "bouchet-job": {"SLURM_CLUSTER_NAME": "bouchet"},
     "elja-login": {"HOSTNAME": "elja-irhpc"},
     "elja-job": {"SLURM_CLUSTER_NAME": "elja"},
+    "stampede3": {"TACC_SYSTEM": "stampede3"},
     "other-cluster": {"SLURM_CLUSTER_NAME": "slurmctld", "CLUSTER": "x"},
 }
 """Environments each system's `is_match` is asked about."""

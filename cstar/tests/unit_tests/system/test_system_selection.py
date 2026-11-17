@@ -50,7 +50,13 @@ BUNDLED_CONTEXTS = sorted(
 )
 """The contexts C-Star ships, excluding any a test registered."""
 
-DETECTION_VARIABLES = ("RCAC_CLUSTER", "CLUSTER", "SLURM_CLUSTER_NAME", "HOSTNAME")
+DETECTION_VARIABLES = (
+    "RCAC_CLUSTER",
+    "CLUSTER",
+    "SLURM_CLUSTER_NAME",
+    "HOSTNAME",
+    "TACC_SYSTEM",
+)
 """Variables the shipped contexts read to recognise their machine."""
 
 

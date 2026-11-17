@@ -176,6 +176,7 @@ def test_partial_platform_fallback(
     [
         ({"RCAC_CLUSTER": "anvil"}, "anvil"),
         ({"HOSTNAME": "elja-irhpc"}, "elja"),
+        ({"TACC_SYSTEM": "stampede3"}, "stampede3"),
     ],
 )
 @pytest.mark.usefixtures("env_clear_lmod")

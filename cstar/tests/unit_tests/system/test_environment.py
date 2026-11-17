@@ -68,7 +68,8 @@ class TestSetupEnvironmentFromToolchain:
     """
 
     @pytest.mark.parametrize(
-        "lmod_syshost", ["perlmutter", "derecho", "expanse", "anvil", "oscar"]
+        "lmod_syshost",
+        ["perlmutter", "derecho", "expanse", "anvil", "oscar", "stampede3"],
     )
     @patch(
         "cstar.base.utils.subprocess.run",
@@ -88,7 +89,7 @@ class TestSetupEnvironmentFromToolchain:
         mock_uses_lmod: bool,
         mock_run: Mock,
         lmod_syshost: t.Literal[
-            "anvil", "derecho", "elja", "expanse", "oscar", "perlmutter"
+            "anvil", "derecho", "elja", "expanse", "oscar", "perlmutter", "stampede3"
         ],
     ):
         """Tests that the load_lmod_modules function correctly interacts with Linux
