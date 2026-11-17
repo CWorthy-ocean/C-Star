@@ -1,1 +1,0 @@
-A URL as the first ``CSTAR_CATALOG`` entry is refused with an error, as ``local`` is: the first entry is the catalog you write to, so it must be a local directory. ``cstar forge run`` used to accept it and create a directory named ``https`` in the current directory; put your own catalog first (``CSTAR_CATALOG=~/cstar/catalog:https://...``).
