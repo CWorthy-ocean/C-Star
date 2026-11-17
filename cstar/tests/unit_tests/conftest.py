@@ -30,6 +30,8 @@ from cstar.base.env import (
     ENV_CSTAR_SYSTEM,
     FLAG_ON,
     USER_CONFIG_FILENAME,
+    CatalogRoots,
+    catalog_roots,
     load_user_config,
 )
 from cstar.base.external_codebase import ExternalCodeBase
@@ -58,6 +60,7 @@ from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import _LOGGED_NEWER_THAN_KNOWN, release_ref_for_remote
 from cstar.system.manager import _WARNED_SYSTEM
+from cstar.system.scheduler import SCHEDULER_SLURM
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -274,6 +277,25 @@ def _no_detection_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_user_system_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide every system file but the bundled ones, for each unit test.
+
+    With `CSTAR_CATALOG` unset, C-Star reads ``~/cstar/catalog/systems/``: a
+    developer's own system file there would change which context a test builds. A
+    test of the layers uses `system_file_layers`, which reads `CSTAR_CATALOG` again.
+    """
+    monkeypatch.setattr(
+        "cstar.system.manager.catalog_roots", lambda: CatalogRoots(None, ())
+    )
+
+
+@pytest.fixture
+def system_file_layers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read system files from the `CSTAR_CATALOG` the test sets, as C-Star does."""
+    monkeypatch.setattr("cstar.system.manager.catalog_roots", catalog_roots)
+
+
+@pytest.fixture(autouse=True)
 def _allow_login_node_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Let ROMS launch in each unit test, whatever the host.
 
@@ -286,7 +308,7 @@ def _allow_login_node_run(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Put the process outside any scheduler job on a system with a scheduler."""
+    """Put the process outside any scheduler job on a system with a SLURM scheduler."""
     for name in (
         "SLURM_JOB_ID",
         "SLURM_JOBID",
@@ -299,7 +321,7 @@ def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
             new_callable=mock.PropertyMock,
-            return_value=mock.MagicMock(),
+            return_value=mock.MagicMock(family=SCHEDULER_SLURM),
         ),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.name",

@@ -38,6 +38,8 @@ Schemas for the files a run leaves behind are listed here. See
   adds the content digest of each product (``digest``).
 - :download:`Run Manifest Schema v1.5.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.5.0.json>`:
   adds the schema version of the blueprint each step's definition was hashed from (``blueprint_schema_version``), and tags each step's ``definition_hash`` with the recipe that computed it (``def-v2:<hex>``: current application names, fields at their defaults left out). A hash with another tag or none, such as every hash an older manifest recorded, is not compared when its run is re-entered, nor is one whose blueprint has since moved to another schema major.
+- :download:`Run Manifest Schema v1.6.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.6.0.json>`:
+  adds the digest of the system file each attempt used (``system_spec_digest``).
 
 Systems
 -------

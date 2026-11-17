@@ -55,6 +55,8 @@ SCHEDULER_SLURM: Final = "SLURM"
 """The name of the SLURM scheduler family."""
 SCHEDULER_PBS: Final = "PBS"
 """The name of the PBS scheduler family."""
+SUBMITTABLE_FAMILIES: Final = frozenset({SCHEDULER_SLURM})
+"""The scheduler families C-Star has a launcher for, and so can submit jobs to."""
 
 VISIBLE_SCHEDULERS: Final = (
     (SCHEDULER_SLURM, "sbatch", "SLURM_"),
@@ -308,10 +310,14 @@ class Queue(ABC):
         pass
 
     @property
+    def walltime_method(self) -> Callable[[str], str | None]:
+        """Return the function that answers the queue's maximum walltime."""
+        return self._max_walltime_method or self._default_max_walltime_method
+
+    @property
     def max_walltime(self) -> str | None:
         """Return the maximum walltime for the queue."""
-        fn = self._max_walltime_method or self._default_max_walltime_method
-        return fn(self.query_name)
+        return self.walltime_method(self.query_name)
 
     @property
     def max_cpus_per_node(self) -> int | None:

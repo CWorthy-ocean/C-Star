@@ -80,6 +80,6 @@ stop the warning, give the generic name the warning shows instead:
 ``cstar env show`` prints the system in use.
 
 To submit jobs from the login node and have C-Star load your site's modules,
-the system needs to be added to C-Star (see
-:doc:`../developers/system-registration`). Reach out to the repo maintainers and
-we will help you set it up.
+describe the cluster in a system file: see :doc:`describe_cluster`. It takes
+an existing machine's file as a starting point, and you can share it with your
+group or contribute it.

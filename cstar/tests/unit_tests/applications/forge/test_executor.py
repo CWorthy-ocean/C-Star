@@ -89,6 +89,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
 )
+from cstar.system.scheduler import SCHEDULER_PBS, SCHEDULER_SLURM
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -3411,12 +3412,21 @@ class TestRunBlueprintPublishes:
         """A system with a scheduler is also told how to submit the blueprint, the
         two commands lined up under their labels.
         """
-        assert run(scheduler=object()) == 0
+        assert run(scheduler=SimpleNamespace(family=SCHEDULER_SLURM)) == 0
 
         published = list((wd.resolve() / "output").glob("B_*.yaml"))
         out = capsys.readouterr().out
         assert f"\nRun it with:      cstar blueprint run {published[0]}\n" in out
         assert f"\nOn this cluster:  cstar blueprint submit {published[0]}\n" in out
+
+    def test_a_pbs_cluster_is_not_told_to_submit(self, run, wd, capsys):
+        """C-Star cannot submit to PBS, so a PBS system gets only the run command."""
+        assert run(scheduler=SimpleNamespace(family=SCHEDULER_PBS)) == 0
+
+        published = list((wd.resolve() / "output").glob("B_*.yaml"))
+        out = capsys.readouterr().out
+        assert f"Run it with:  cstar blueprint run {published[0]}\n" in out
+        assert "cstar blueprint submit" not in out
 
     def test_an_unrecognized_host_is_not_told_about_a_scheduler(self, run, wd, capsys):
         """A host C-Star cannot identify has no scheduler to name, and the run that

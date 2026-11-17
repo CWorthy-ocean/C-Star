@@ -1448,6 +1448,20 @@ def test_new_attempt(hello_world_bp_path: Path) -> None:
     assert (attempt.directory, attempt.carried) == ("", {})
 
 
+def test_new_attempt_records_the_system_spec_digest(
+    hello_world_bp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An attempt carries the digest of the system file in use."""
+    monkeypatch.setattr(
+        "cstar.orchestration.manifest.system_spec_digest", lambda: "sha256:abc"
+    )
+    plan = _workplan(_step(hello_world_bp_path.as_posix()))
+
+    attempt = new_attempt(plan, workplan_hash="wh")
+
+    assert attempt.system_spec_digest == "sha256:abc"
+
+
 def test_new_attempt_with_carried_inputs(hello_world_bp_path: Path) -> None:
     plan = _workplan(_step(hello_world_bp_path.as_posix()))
     carried = CarriedInputs(

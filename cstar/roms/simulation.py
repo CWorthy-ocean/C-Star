@@ -118,6 +118,7 @@ from cstar.system.manager import (
     outside_scheduler_job,
     warn_once,
 )
+from cstar.system.scheduler import SUBMITTABLE_FAMILIES
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
@@ -2946,14 +2947,22 @@ class ROMSSimulation(Simulation):
             If the system has a scheduler, the process is not inside a scheduler
             job, and `CSTAR_ALLOW_LOGIN_NODE_RUN` is not set to `1`.
         """
-        where = outside_scheduler_job(get_sysmgr())
+        sysmgr = get_sysmgr()
+        where = outside_scheduler_job(sysmgr)
         if where is None:
             return
         if where.certain:
+            family = sysmgr.scheduler.family if sysmgr.scheduler else ""
+            how = (
+                "Submit it with 'cstar blueprint submit <blueprint>', run it inside "
+                "an allocation"
+                if family in SUBMITTABLE_FAMILIES
+                else f"C-Star cannot submit jobs to its {family} scheduler: run it "
+                f"inside a {family} job (`qsub -I`, or your own batch script)"
+            )
             raise CstarError(
                 f"Refusing to launch ROMS outside a scheduler job on {where.system}, "
-                "which has a scheduler. Submit it with 'cstar blueprint submit "
-                "<blueprint>', run it inside an allocation, or set "
+                f"which has a scheduler. {how}, or set "
                 f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run it here anyway."
             )
         warn_once(

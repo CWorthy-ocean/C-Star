@@ -74,6 +74,29 @@ clone of the shared repository and open a pull request. Because blueprints
 record the values they were built from rather than references to the
 catalog, moving or relayering catalogs never breaks an existing blueprint.
 
+.. _catalog-systems:
+
+System files
+------------
+
+A catalog root may also hold ``systems/<name>.yaml``, files that describe the
+HPC machines C-Star runs on:
+
+.. code-block:: text
+
+   ~/cstar/catalog/
+   ├── specs/
+   ├── blueprints/
+   └── systems/
+       └── mycluster.yaml
+
+C-Star reads them with the same layering as the rest of the catalog: your
+catalog over the shared catalogs over the systems that ship with C-Star, and
+the top one wins. A file named like a bundled system replaces it, with a
+warning. They are not catalog entries, so the wizard does not list them. See
+:doc:`../deployments/describe_cluster` to write one and ``cstar system list``
+to see which files are in effect.
+
 Adding your own entries
 -----------------------
 
