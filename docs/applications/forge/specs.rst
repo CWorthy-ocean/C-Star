@@ -152,7 +152,9 @@ The bundled model specs
 
 ``roms-marbl-0.14-default`` (ucla-roms 0.14.0) is the wizard's default. It can also
 write temperature and salinity to the averages file (``ts_output.wrt_avg_temp`` and
-``wrt_avg_salt``). Older
+``wrt_avg_salt``). ``roms-marbl-0.15-default`` pins ucla-roms 0.15.0, which adds
+``implicit_fs`` to choose the barotropic scheme, ``fs_mode`` ``split`` (the
+default) or ``implicit``. Older
 ``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.13-default``
 stays for ucla-roms 0.13.1, which reproduces earlier results where water flows in
 through an open boundary (0.14.0 changed the tracer inflow there);

@@ -43,11 +43,14 @@ from pydantic import (
 )
 
 from cstar.roms.namelist import (
+    FS_MODE_SPLIT,
+    NAMELIST_SCHEMA_REGISTRY,
     UCLA_ROMS_0_11_0,
     UCLA_ROMS_0_12_0,
     UCLA_ROMS_0_13_0,
     UCLA_ROMS_0_14_0,
     ForcingFiles,
+    FsMode,
     Gamma2Settings,
     LateralViscSettings,
     Rho0Settings,
@@ -62,11 +65,13 @@ from cstar.roms.namelist import (
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
+    RomsNamelistV0_15_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
     UbindSettings,
     VerticalMixingSettings,
+    format_roms_version,
     is_commit_hash,
     namelist_schema_for_ref,
     roms_version_from_ref,
@@ -87,7 +92,7 @@ from cstar.roms.precheck import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Container, Iterable, Mapping, Sequence
 
     from cstar.applications.forge.blueprint import Forcing
 
@@ -467,6 +472,17 @@ class PioSettingsCfg(_SettingsSection):
     # saved before &PIO_SETTINGS existed bypass the resolver and hit
     # model_validate directly, so the Pydantic default is what keeps them valid.
     pio_stride: int = Field(default=1, ge=1)
+
+
+class ImplicitFsCfg(_SettingsSection):
+    # Deliberate defaults, equal to the &IMPLICIT_FS ones (ImplicitFsSettings): a
+    # blueprint saved before the group existed bypasses the resolver and hits
+    # model_validate directly, and an absent group means ``split`` in ucla-roms.
+    fs_mode: FsMode = Field(default=FS_MODE_SPLIT)
+    fs_nsub: int = Field(default=2, ge=1, le=4)
+    fs_rho_inf: float = Field(default=0.5, ge=0.0, lt=1.0)
+    fs_tol: float = Field(default=1.0e-8, gt=0.0)
+    fs_verbose: int = Field(default=0, ge=0)
 
 
 class InitialCfg(_SettingsSection):
@@ -1385,16 +1401,35 @@ class CdrGasExchOutputCfg(_SettingsSection):
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_gas")
 
 
-# Enable switch of each version-gated section a user can turn on (forge
-# vocabulary: ``cdr_lite_output.do_cdr_lite_output`` serializes to
-# ``do_cdr_tracer_output`` on ucla-roms 0.7/0.8, see :class:`CdrLiteOutputCfg`).
-# Read by :data:`CDR_OUTPUT_SECTIONS` and :func:`check_cdr_lite_sections` (what
-# the switch requires) and :func:`prune_version_gated_sections` (a section with
-# its switch on cannot be silently dropped).
+# The switch of each version-gated section: the key whose value says whether the
+# user asks for the section's feature (forge vocabulary:
+# ``cdr_lite_output.do_cdr_lite_output`` serializes to ``do_cdr_tracer_output`` on
+# ucla-roms 0.7/0.8, see :class:`CdrLiteOutputCfg`). Whether a value counts as a
+# request is :data:`_SWITCH_REQUESTED`'s call. Read by :data:`CDR_OUTPUT_SECTIONS`
+# and :func:`check_cdr_lite_sections` (what the switch requires) and
+# :func:`prune_version_gated_sections` (a section whose switch asks for the
+# feature cannot be silently dropped).
 _GATED_SECTION_SWITCHES: dict[str, str] = {
     "cdr_lite_output": "do_cdr_lite_output",
     "cdr_gas_exch_output": "do_cdr_gas_exch_output",
     "cdr_lite": "cdr_online_carbonate_sensitivity",
+    "implicit_fs": "fs_mode",
+}
+
+
+def _fs_mode_requested(value: Any) -> bool:
+    """``implicit_fs.fs_mode`` asks for a feature unless unset or ``split`` (the
+    scheme every release has): any other value, a mis-cased ``Split`` or a
+    non-string included, counts as requested, like an unparseable flag.
+    """
+    return value is not None and value != FS_MODE_SPLIT
+
+
+# Whether a gated section's switch value is a request, for the sections whose
+# switch is not a plain flag; every other section's is its truthiness (``bool``).
+# Read only by :func:`prune_version_gated_sections`.
+_SWITCH_REQUESTED: dict[str, Callable[[Any], bool]] = {
+    "implicit_fs": _fs_mode_requested,
 }
 
 
@@ -1965,7 +2000,8 @@ class _RunTimeSettingsCommon(_SettingsSection):
     version-varying sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
-    :class:`RunTimeSettingsV0_9_0` and retyped by :class:`RunTimeSettingsV0_12_0`)
+    :class:`RunTimeSettingsV0_9_0` and retyped by :class:`RunTimeSettingsV0_12_0`;
+    ``implicit_fs``, added by :class:`RunTimeSettingsV0_15_0`)
     are simply absent here; use
     :class:`RunTimeSettings` (ucla-roms < 0.4.0), :class:`RunTimeSettingsV0_4_0`
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
@@ -1975,8 +2011,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.9.0 <= ucla-roms < 0.11.0), :class:`RunTimeSettingsV0_11_0`
     (0.11.0 <= ucla-roms < 0.12.0), :class:`RunTimeSettingsV0_12_0`
     (0.12.0 <= ucla-roms < 0.13.0), :class:`RunTimeSettingsV0_13_0`
-    (0.13.0 <= ucla-roms < 0.14.0), or :class:`RunTimeSettingsV0_14_0`
-    (>= 0.14.0), or select one with :func:`run_time_settings_for_ref`.
+    (0.13.0 <= ucla-roms < 0.14.0), :class:`RunTimeSettingsV0_14_0`
+    (0.14.0 <= ucla-roms < 0.15.0), or :class:`RunTimeSettingsV0_15_0`
+    (>= 0.15.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -2166,7 +2203,8 @@ class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):
 
 
 class RunTimeSettingsV0_14_0(RunTimeSettingsV0_13_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.14.0, typed + validated.
+    """Forge's run-time settings dict for 0.14.0 <= ucla-roms < 0.15.0, typed +
+    validated.
 
     Mirrors C-Star's ``RomsNamelistV0_14_0(RomsNamelistV0_13_0)``. Types
     ``ts_output`` as :class:`TsOutputCfgV0_14_0`, which adds ``wrt_avg_temp`` and
@@ -2175,6 +2213,17 @@ class RunTimeSettingsV0_14_0(RunTimeSettingsV0_13_0):
     """
 
     ts_output: TsOutputCfgV0_14_0
+
+
+class RunTimeSettingsV0_15_0(RunTimeSettingsV0_14_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.15.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_15_0(RomsNamelistV0_14_0)``. Adds
+    ``implicit_fs`` (:class:`ImplicitFsCfg`, ``&IMPLICIT_FS``) with its defaults
+    (``fs_mode='split'``), so a blueprint saved before it existed still validates.
+    """
+
+    implicit_fs: ImplicitFsCfg = Field(default_factory=ImplicitFsCfg)
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -2192,6 +2241,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_12_0: RunTimeSettingsV0_12_0,
     RomsNamelistV0_13_0: RunTimeSettingsV0_13_0,
     RomsNamelistV0_14_0: RunTimeSettingsV0_14_0,
+    RomsNamelistV0_15_0: RunTimeSettingsV0_15_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -2248,6 +2298,17 @@ def version_gated_section_names() -> frozenset[str]:
     )
 
 
+def _first_release_modeling(section: str) -> str:
+    """The ucla-roms release (``0.15.0``) whose tier first models ``section``,
+    walking :data:`NAMELIST_SCHEMA_REGISTRY` oldest-first.
+    """
+    for lower, _upper, schema in NAMELIST_SCHEMA_REGISTRY:
+        tier = _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA[schema]
+        if section in tier.model_fields and lower is not None:
+            return format_roms_version(lower)
+    raise KeyError(f"no registered tier models section {section!r}")
+
+
 def prune_version_gated_sections(
     run_time_settings: dict[str, Any], settings_cls: type[_RunTimeSettingsCommon]
 ) -> list[str]:
@@ -2269,8 +2330,9 @@ def prune_version_gated_sections(
     rule stays in one place; each caller decides whether to report what was
     dropped.
 
-    A section whose enable switch (:data:`_GATED_SECTION_SWITCHES`) is on is
-    not dropped but rejected -- the pinned release cannot honor the request.
+    A section whose switch (:data:`_GATED_SECTION_SWITCHES`) asks for its feature
+    (:data:`_SWITCH_REQUESTED`) is not dropped but rejected, naming the release
+    that first models the section -- the pinned release cannot honor the request.
     So is a section spelling its switch in another case: no tier reads that key
     (see :meth:`_SettingsSection._reject_misspelled_keys`), and pruning would
     drop the request unseen. Switched-off sections (the normal shared-OutputSpec
@@ -2282,14 +2344,16 @@ def prune_version_gated_sections(
         & set(run_time_settings)
     )
     requested: list[str] = []
+    first_release: dict[str, str] = {}
     misspelled: list[str] = []
     for name in pruned:
         section = run_time_settings[name]
         if name not in _GATED_SECTION_SWITCHES or not isinstance(section, dict):
             continue
         switch = _GATED_SECTION_SWITCHES[name]
-        if section.get(switch):
+        if _SWITCH_REQUESTED.get(name, bool)(section.get(switch)):
             requested.append(f"{name}.{switch}")
+            first_release[name] = _first_release_modeling(name)
         misspelled += [
             f"{name}.{key}"
             for key in _misspelled_keys(section, {switch.casefold(): switch}, {switch})
@@ -2298,7 +2362,9 @@ def prune_version_gated_sections(
     if requested:
         problems.append(
             f"{', '.join(requested)} enabled, but the pinned ucla-roms release "
-            f"(run-time settings {settings_cls.__name__}) has no such section."
+            f"(run-time settings {settings_cls.__name__}) has no such section; "
+            + ", ".join(f"{n} needs ucla-roms >= {v}" for n, v in first_release.items())
+            + "."
         )
     if problems:
         raise ValueError(" ".join(problems))
@@ -2388,7 +2454,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_11_0` for 0.11.0 <= ucla-roms < 0.12.0;
         :class:`RunTimeSettingsV0_12_0` for 0.12.0 <= ucla-roms < 0.13.0;
         :class:`RunTimeSettingsV0_13_0` for 0.13.0 <= ucla-roms < 0.14.0;
-        :class:`RunTimeSettingsV0_14_0` for ucla-roms >= 0.14.0.
+        :class:`RunTimeSettingsV0_14_0` for 0.14.0 <= ucla-roms < 0.15.0;
+        :class:`RunTimeSettingsV0_15_0` for ucla-roms >= 0.15.0.
 
     Warns
     -----
@@ -2467,6 +2534,7 @@ _ONE_TO_ONE_GROUPS: dict[str, tuple[str, ...]] = {
     "sss_correction": ("sss_correction",),
     "sst_correction": ("sst_correction",),
     "dic_alk_correction": ("dic_alk_correction",),
+    "implicit_fs": ("implicit_fs",),
     "diagnostics": ("diagnostics_settings",),
     "stdout_diag": ("stdout_diag_settings",),
     "random_output": ("random_output_settings",),
@@ -2569,7 +2637,7 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     tier's ``param_settings``/``basic_output_settings``/``particles_settings``
     variant is picked up without a branch. A section is dumped 1:1 per
     :data:`_ONE_TO_ONE_GROUPS` when ``rt`` carries it, so the sections a tier
-    adds (``pio_settings``, ``cdr_lite``, ``cdr_lite_output``,
+    adds (``pio_settings``, ``cdr_lite``, ``cdr_lite_output``, ``implicit_fs``,
     ``cdr_gas_exch_output``) only reach the namelist schemas that accept them;
     ``cdr_lite_output`` is written as ``&CDR_TRACER_OUTPUT_SETTINGS`` on the
     0.7/0.8 schema and ``&CDR_LITE_OUTPUT_SETTINGS`` on 0.9+.

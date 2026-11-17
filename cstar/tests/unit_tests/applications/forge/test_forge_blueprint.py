@@ -118,6 +118,11 @@ _MODEL_PATH_ROMS0130 = (
 _MODEL_PATH_ROMS0140 = (
     _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.14-default.yaml"
 )
+# ucla-roms >= 0.15.0 ModelSpec (adds the optional &IMPLICIT_FS group) -- used by
+# the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0150 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.15-default.yaml"
+)
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -2647,6 +2652,35 @@ def test_golden_model_settings_test_tiny_roms0140():
     )
 
 
+def test_golden_model_settings_test_tiny_roms0150():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.15-default`` ModelSpec
+    (ucla-roms >= 0.15.0), resolved from the same test-tiny domain/forcing/output
+    setup as ``test_golden_model_settings_test_tiny_roms0140``.
+
+    The fixture differs from that one by the ``implicit_fs`` section (the defaults,
+    ``fs_mode='split'``). Regenerate the fixture with ``json.dumps(cfg.model_settings,
+    indent=2, sort_keys=True, default=str)`` plus a trailing newline, from
+    ``_build(model_path=_MODEL_PATH_ROMS0150)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0150.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_path=_MODEL_PATH_ROMS0150)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.15-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0150.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
 def test_resolver_0_13_model_spec_carries_v_sponge_trc_beside_the_derived_v_sponge():
     """v_sponge stays domain-owned (derived from the grid spacing); v_sponge_trc is
     the ModelSpec's, and is not derived.
@@ -4254,6 +4288,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.12-default",
         "roms-marbl-0.13-default",
         "roms-marbl-0.14-default",
+        "roms-marbl-0.15-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -6532,6 +6567,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.12-default", True),
         ("roms-marbl-0.13-default", True),
         ("roms-marbl-0.14-default", True),
+        ("roms-marbl-0.15-default", True),
         ("pio-dev", True),
     ],
 )
