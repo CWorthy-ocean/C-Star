@@ -409,7 +409,7 @@ where the file is. Then give them:
   A colleague then runs `cstar init --system-file
   /path/to/shared/cstar-catalog/systems/<name>.yaml`.
 
-Offer to draft a pull request to https://github.com/CWorthy-ocean/C-Star that
+Offer to open a pull request to https://github.com/CWorthy-ocean/C-Star that
 makes the machine part of C-Star, so nobody there needs the file. It holds:
 
 - the file as `cstar/catalog/bundled/systems/<name>.yaml`, with its dated
@@ -423,6 +423,7 @@ makes the machine part of C-Star, so nobody there needs the file. It holds:
   and the diff reviewed.
 
 `docs/developers/system-registration.rst` in the repository has the rules for
-a bundled file. Draft the branch and the description only: the project's AI
-policy asks the user to open the pull request, and to fill in its `AI
-disclosure:` line, themselves.
+a bundled file. Write the description from the repository's pull request
+template and fill in its `AI disclosure:` line, which the project's AI policy
+requires. Ask the user before you push the branch or open the pull request:
+once it is open, it is theirs to check and answer for.
