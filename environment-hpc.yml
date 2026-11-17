@@ -15,7 +15,7 @@ dependencies:
   - threadpoolctl
   - numba
   - fsspec
-  - s3fs  # streams the CONUS404 surface source from S3
+  - s3fs>=2025.1  # streams the CONUS404 surface source from S3
   - kerchunk
   - ujson
   - fastparquet

@@ -64,8 +64,10 @@ dependencies = [
     "numba",
     "fsspec",
     # streams the CONUS404 surface source from its S3 store (roms-tools reads it
-    # through fsspec; s3fs is the S3 backend)
-    "s3fs",
+    # through fsspec; s3fs is the S3 backend). >=2025.1: unfloored, conda can
+    # satisfy it with s3fs 0.4.2 (2020) and downgrade pandas to keep that, when
+    # an existing environment is updated in place.
+    "s3fs>=2025.1",
     "kerchunk",
     "ujson",
     "fastparquet",
