@@ -944,7 +944,10 @@ class ROMSSimulation(Simulation):
         is None and whose rank count is known. The stride is the most ranks
         the launch places on one node, so each node gets one ParallelIO I/O
         task. If the scheduler's placement cannot be read, the stride is 1
-        (every rank an I/O task) with a warning.
+        (every rank an I/O task) with a warning. On a cluster's login node,
+        outside any job (a pre-run), the stride stays empty: the job that
+        launches the model lays out its ranks later and writes the namelist
+        again at launch.
 
         None is allowed in the namelist model because the stride cannot be
         known when the blueprint is written; it is checked only here, and the
@@ -955,6 +958,12 @@ class ROMSSimulation(Simulation):
         if not self.use_pio or pio is None or pio.pio_stride is not None:
             return
         if n_procs_tot is None:
+            return
+        if outside_scheduler_job(get_sysmgr()) is not None:
+            self.log.info(
+                "pio_stride stays empty outside a scheduler job; it is set to the "
+                "ranks per node when the run launches in one"
+            )
             return
         stride = ranks_per_node(os.environ, n_procs_tot)
         if stride is None:

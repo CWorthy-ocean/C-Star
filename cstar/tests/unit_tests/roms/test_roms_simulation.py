@@ -1646,14 +1646,21 @@ class TestROMSSimulationInitialization:
     )
     @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
     @pytest.mark.parametrize(
-        ("use_pio", "override", "env", "expected"),
+        ("use_pio", "override", "env", "login_node", "expected"),
         [
-            (True, None, {"SLURM_TASKS_PER_NODE": "4,2"}, 4),
-            (True, 3, {"SLURM_TASKS_PER_NODE": "4,2"}, 3),
-            (False, None, {"SLURM_TASKS_PER_NODE": "4,2"}, None),
-            (True, None, None, 6),
+            (True, None, {"SLURM_TASKS_PER_NODE": "4,2"}, False, 4),
+            (True, 3, {"SLURM_TASKS_PER_NODE": "4,2"}, False, 3),
+            (False, None, {"SLURM_TASKS_PER_NODE": "4,2"}, False, None),
+            (True, None, None, False, 6),
+            (True, None, None, True, None),
         ],
-        ids=["in-job", "explicit-kept", "non-pio-untouched", "outside-job"],
+        ids=[
+            "in-job",
+            "explicit-kept",
+            "non-pio-untouched",
+            "no-scheduler",
+            "login-node-left-empty",
+        ],
     )
     def test_pio_stride_filled_at_launch(
         self,
@@ -1669,13 +1676,19 @@ class TestROMSSimulationInitialization:
         use_pio,
         override,
         env,
+        login_node,
         expected,
     ):
         """An unset `pio_stride` becomes the most ranks on one node for a PIO
-        build; an explicit value and a non-PIO build are left alone.
+        build; an explicit value and a non-PIO build are left alone, and a
+        cluster's login node (a pre-run) leaves it for the launch to set.
         """
         for var in ("SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID", "SLURM_TASKS_PER_NODE"):
             monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(
+            "cstar.roms.simulation.outside_scheduler_job",
+            lambda _sysmgr: object() if login_node else None,
+        )
         if env is not None:
             monkeypatch.setenv("SLURM_JOB_ID", "1")
             for key, value in env.items():
