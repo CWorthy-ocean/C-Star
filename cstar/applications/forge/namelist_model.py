@@ -471,7 +471,9 @@ class PioSettingsCfg(_SettingsSection):
     # Deliberate default (like ExtractDataCfg.extract_root_name above): blueprints
     # saved before &PIO_SETTINGS existed bypass the resolver and hit
     # model_validate directly, so the Pydantic default is what keeps them valid.
-    pio_stride: int = Field(default=1, ge=1)
+    # None renders as an empty namelist value (``pio_stride = ,``); C-Star sets it
+    # at launch to the ranks on one node (``ROMSSimulation._fill_pio_stride``).
+    pio_stride: int | None = Field(default=1, ge=1)
 
 
 class ImplicitFsCfg(_SettingsSection):

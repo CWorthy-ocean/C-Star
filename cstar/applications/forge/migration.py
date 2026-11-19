@@ -109,6 +109,8 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     ``forge_version``/``cstar_version``/``roms_tools_version``. The bump is also
     what makes an older install reject a newer file with the "upgrade" message
     rather than an unknown-key error.
+    v11 needs no step: ``pio_settings.pio_stride`` may now be null, which every
+    v10 file already satisfies.
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a

@@ -249,6 +249,19 @@ def test_pio_stride_override_is_written(tmp_path):
     assert nml["pio_settings"]["pio_stride"] == 4
 
 
+def test_pio_stride_none_is_written_as_the_empty_value(tmp_path):
+    # ``None`` means "C-Star sets the stride at launch": f90nml writes it as the
+    # Fortran empty value, so ucla-roms keeps its own default until then.
+    rt = _base_settings()
+    rt["pio_settings"] = {"pio_stride": None}
+    write_roms_namelist(
+        settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.6.0"
+    )
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "pio_stride = ," in text
+    assert f90nml.read(tmp_path / "namelist.nml")["pio_settings"]["pio_stride"] is None
+
+
 def test_pio_settings_ignored_before_0_6_0(tmp_path):
     # ``RunTimeSettings``/``RunTimeSettingsV0_5_0`` inherit ``_SettingsSection``'s
     # ``extra="ignore"`` (not "forbid") at the top level, same as any other
