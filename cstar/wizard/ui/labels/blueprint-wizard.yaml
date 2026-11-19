@@ -764,7 +764,7 @@ fields:
   settings.pio_settings.pio_stride:
     label: PIO stride
     symbol: pio_stride
-    hint: Number of MPI ranks per I/O task.
+    hint: "Number of MPI ranks per I/O task. Blank: one I/O task per node, set by C-Star at launch."
   settings.blk_frc.interp_frc:
     label: Interpolate from coarser grid
     symbol: interp_frc

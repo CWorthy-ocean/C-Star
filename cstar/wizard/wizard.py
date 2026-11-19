@@ -28,6 +28,7 @@ import html
 import json
 import os
 import re
+import types
 import typing
 import warnings
 from dataclasses import dataclass, replace
@@ -710,20 +711,46 @@ def _tip(context: str, field: str) -> str:
     return HELP_TEXT.get((context, field), HELP_TEXT.get(field, ""))
 
 
+# ``Optional[X]`` and ``X | None`` have different origins.
+_UNION_ORIGINS = (typing.Union, types.UnionType)
+
+
 def _unwrap_type(ann):
     """Reduce ``Optional[X]`` / ``Annotated[X, ...]`` / ``List[X]`` to a base type
     (``bool``/``int``/``float``/``str``/``list``), best-effort.
+
+    A union of several types (``list[str] | str``) is returned as is, so the
+    widget follows the field's current value instead of the first member.
     """
     if getattr(ann, "__metadata__", None) is not None:  # Annotated[...]
         ann = get_args(ann)[0]
     origin = get_origin(ann)
-    if origin is typing.Union:
+    if origin in _UNION_ORIGINS:
         non_none = [a for a in get_args(ann) if a is not type(None)]
-        if non_none:
+        if len(non_none) == 1:
             return _unwrap_type(non_none[0])
     if origin in (list, list):
         return list
     return ann
+
+
+def _is_optional_numeric(ann) -> bool:
+    """Whether ``ann`` is ``Optional[int]`` / ``Optional[float]`` (through
+    ``Annotated``): a numeric field whose ``None`` a number box cannot show.
+    """
+    if getattr(ann, "__metadata__", None) is not None:  # Annotated[...]
+        ann = get_args(ann)[0]
+    if get_origin(ann) not in _UNION_ORIGINS:
+        return False
+    args = get_args(ann)
+    return type(None) in args and _unwrap_type(ann) in (int, float)
+
+
+def _is_optional_number_widget(widget, base: type) -> bool:
+    """Whether ``widget`` is the blank-able text box of an optional numeric field
+    (a numeric field otherwise gets a number box, whose value is never a ``str``).
+    """
+    return base in (int, float) and isinstance(widget.value, str)
 
 
 def _literal_choices(ann) -> tuple[str, ...] | None:
@@ -778,6 +805,7 @@ def _make_field_widget(
     tooltip: str = "",
     bool_dropdown: tuple[str, str] | None = None,
     choices: tuple[str, ...] | None = None,
+    optional: bool = False,
 ):
     style = {"description_width": "260px"}
     wide = W.Layout(width="560px")
@@ -809,6 +837,15 @@ def _make_field_widget(
             value=bool(value) if value is not None else False,
             description=name,
             indent=False,
+            **kw,
+        )
+    if optional and base in (int, float):
+        return W.Text(
+            value="" if value is None else str(value),
+            description=name,
+            style=style,
+            layout=num,
+            placeholder="(blank: automatic)",
             **kw,
         )
     if base is int:
@@ -856,6 +893,8 @@ def _read_field_widget(
         return v == true_label
     if base is bool:
         return bool(v)
+    if _is_optional_number_widget(widget, base):
+        return _parse_optional_number(v, base)
     if base is int:
         return int(v)
     if base is float:
@@ -2081,6 +2120,8 @@ class _SettingsEditor:
                         # override reset) still re-renders the field.
                         if _read_field_widget(widget, list) != list(value or []):
                             widget.value = ", ".join(str(x) for x in (value or []))
+                    elif _is_optional_number_widget(widget, base):
+                        widget.value = "" if value is None else str(value)
                     elif value is not None:
                         # A Dropdown refuses a value outside its options (a
                         # hand-edited blueprint); the validation reports it.
@@ -2266,6 +2307,7 @@ class _SettingsEditor:
             tooltip=tip,
             bool_dropdown=bool_dropdown,
             choices=_literal_choices(ann),
+            optional=_is_optional_numeric(ann),
         )
         self._widgets[(section, key)] = (w, base)
         return w
@@ -2660,19 +2702,28 @@ def _parse_options(text: str) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _parse_blend_m(text: str) -> float | str | None:
-    """Parse the ``bottom_fill_blend_m`` text box (blank → ``None``, i.e. unset).
+def _parse_optional_number(text: str, base: type) -> Any:
+    """Parse a blank-able numeric text box (blank → ``None``, i.e. unset).
 
-    Text ``float()`` accepts (``inf`` included) → that float; anything else → the
+    Text ``base`` (``int`` or ``float``) accepts → that number; anything else → the
     stripped text, so blueprint validation reports it instead of dropping it.
     """
     text = (text or "").strip()
     if not text:
         return None
     try:
-        return float(text)
+        return base(text)
     except ValueError:
         return text
+
+
+def _parse_blend_m(text: str) -> float | str | None:
+    """Parse the ``bottom_fill_blend_m`` text box (blank → ``None``, i.e. unset).
+
+    Text ``float()`` accepts (``inf`` included) → that float; anything else → the
+    stripped text, so blueprint validation reports it instead of dropping it.
+    """
+    return _parse_optional_number(text, float)
 
 
 def _blend_m_text(value: Any) -> str:
