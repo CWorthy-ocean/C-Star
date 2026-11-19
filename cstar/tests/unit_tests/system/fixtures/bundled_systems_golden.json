@@ -8,7 +8,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -110,7 +111,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -233,7 +235,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -271,7 +274,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -346,7 +350,8 @@
       "elja-job": true,
       "elja-login": true,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -430,7 +435,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -498,7 +504,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -538,7 +545,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -578,7 +586,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -647,7 +656,8 @@
       "elja-job": false,
       "elja-login": false,
       "none": false,
-      "other-cluster": false
+      "other-cluster": false,
+      "stampede3": false
     },
     "environments": {
       "cpu": {
@@ -751,6 +761,92 @@
         "mpi_prefix": "srun --kill-on-bad-exit=1",
         "profile": "gpu"
       }
+    }
+  },
+  "stampede3": {
+    "compiler": "intel",
+    "detection": {
+      "anvil": false,
+      "bouchet-job": false,
+      "bouchet-login": false,
+      "elja-job": false,
+      "elja-login": false,
+      "none": false,
+      "other-cluster": false,
+      "stampede3": true
+    },
+    "environments": {
+      "cpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "LD_RUN_PATH": "/mod/tacc_netcdf_dir/lib:/mod/tacc_pnetcdf_dir/lib:/mod/tacc_impi_dir/lib",
+          "LIBRARY_PATH": "/usr/lib:/mod/tacc_netcdf_dir/lib",
+          "MPIHOME": "/mod/tacc_impi_dir",
+          "NETCDFHOME": "/mod/tacc_netcdf_dir",
+          "PATH": "/mod/tacc_netcdf_dir/bin:/mod/tacc_pnetcdf_dir/bin:/usr/bin:/bin",
+          "PNETCDFHOME": "/mod/tacc_pnetcdf_dir"
+        },
+        "lmod_calls": [
+          "reset",
+          "load intel/24.0",
+          "load impi/21.11",
+          "load hdf5/1.14.6",
+          "load netcdf/4.10.1",
+          "load pnetcdf/1.14.1",
+          "load cmake/4.1.1"
+        ]
+      }
+    },
+    "mpi_prefix": "ibrun",
+    "name": "stampede3",
+    "required_settings": [
+      "CSTAR_SLURM_QUEUE"
+    ],
+    "scheduler": {
+      "directives": {},
+      "documentation": "https://docs.tacc.utexas.edu/hpc/stampede3/",
+      "gpu": null,
+      "max_cpus_per_node": 48,
+      "primary_queue": "skx",
+      "queues": [
+        {
+          "name": "skx",
+          "query_name": "qskx",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "skx-dev",
+          "query_name": "qdevelopment",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "icx",
+          "query_name": "qicx",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "spr",
+          "query_name": "qspr",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
+        }
+      ],
+      "requires_task_distribution": true,
+      "type": "SlurmScheduler"
+    },
+    "scratch": null,
+    "toolchains": {
+      "cpu": {
+        "compiler": "intel",
+        "gpu_arch": "",
+        "link_flags": "",
+        "mpi_prefix": "ibrun",
+        "profile": ""
+      },
+      "gpu": "error: stampede3 has no GPU toolchain registered with C-Star"
     }
   }
 }

@@ -62,6 +62,9 @@ What each system needs:
   unset queue submits to the ``regular`` QOS. GPU jobs must name an account
   (``CSTAR_SLURM_GPU_ACCOUNT`` or ``CSTAR_SLURM_ACCOUNT``); projects have a
   ``_g`` twin for GPU hours. GPU jobs carry ``-C gpu``.
+- **Stampede3**: the queue is required; an unset account charges your only
+  TACC project. Give the account in upper case, as TACC writes the project
+  (``TG-ABC123456``): TACC refuses the lower-case name ``cstar init`` lists.
 - **Anvil** GPU jobs (untested; GPU runs there are planned for a later
   release): need a ``<allocation>-gpu`` account in
   ``CSTAR_SLURM_GPU_ACCOUNT``; the ``gpu`` partition is the default.
@@ -122,7 +125,13 @@ Project runs area
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``). Check with ``echo $PROJECT $SCRATCH``, and
 set them in your shell profile only if they are empty. Oscar exports neither;
-C-Star uses its ``~/scratch`` directory unless you set them.
+C-Star uses its ``~/scratch`` directory unless you set them. Stampede3 exports
+``SCRATCH`` but not ``PROJECT``, and purges scratch files not read for 10 days,
+so put the cache in a folder in your ``$STOCKYARD`` that your project's group
+shares (TACC's `Sharing Project Files
+<https://docs.tacc.utexas.edu/tutorials/sharingprojectfiles/>`__ shows how) and
+point C-Star at it, for example
+``cstar env set CSTAR_PROJECT_HOME $STOCKYARD/shared``.
 
 Keep the environment off ``~/.local``
 --------------------------------------

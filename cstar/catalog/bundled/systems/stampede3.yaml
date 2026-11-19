@@ -1,0 +1,85 @@
+schema_version: 1.0.0
+name: stampede3
+docs: https://docs.tacc.utexas.edu/hpc/stampede3/
+
+# Verified on Stampede3 2026-11-17 (C-Star 0.18.1.dev38): `cstar system check`
+# passed on a login node, a ROMS build through C-Star succeeded there, and a
+# 10-rank job submitted through C-Star completed on skx-dev. Not verified: a
+# ParallelIO build (blueprints with partitioning.use_pio).
+
+# Lmod on Stampede3 sets neither LMOD_SYSHOST nor LMOD_SYSTEM_NAME. TACC's
+# /etc/profile.d/z00_tacc_login.sh sets TACC_SYSTEM from the node's host name
+# (login3.stampede3.tacc.utexas.edu -> stampede3), so the rule holds on the
+# login and compute nodes alike; the 2026-11-17 job ran with this toolchain.
+detect:
+  - {env: TACC_SYSTEM, equals: stampede3}
+
+toolchains:
+  cpu:
+    # Intel oneAPI is TACC's recommended and default compiler on Stampede3.
+    # The build uses ifx through Intel MPI's mpiifx wrapper; impi/21.11 sets
+    # I_MPI_FC=ifx. Intel MPI ships no `mpifort`.
+    compiler: intel
+    # TACC: "Use ibrun to launch MPI codes on TACC systems. Do not use mpirun
+    # or mpiexec." /usr/local/bin/ibrun takes `-n N` without `-o` as the task
+    # count; with impi loaded it runs mpiexec.hydra. srun offers no PMIx
+    # (`srun --mpi=list`: none, pmi2, cray_shasta).
+    mpi_prefix: ibrun
+    # Verified on Stampede3 2026-11-17: each module loads from `module reset`.
+    modules:
+      - intel/24.0  # (system default)
+      - impi/21.11  # (system default)
+      - hdf5/1.14.6  # (default); libnetcdf links this build and finds it through this module's LD_LIBRARY_PATH
+      - netcdf/4.10.1  # (default); netCDF-C 4.10.1 and netCDF-Fortran 4.6.4 in one prefix, serial HDF5
+      - pnetcdf/1.14.1  # (default); PnetCDF, for ParallelIO. TACC's `parallel-netcdf` module is netCDF-C on parallel HDF5, not PnetCDF
+      - cmake/4.1.1  # (system default); ParallelIO builds with cmake, which the HPC conda environment does not provide
+    env:
+      # Each set by its module (module show, 2026-11-17).
+      MPIHOME: ${TACC_IMPI_DIR}
+      # netcdf's lib/ is a symlink to lib64/, where the libraries are.
+      NETCDFHOME: ${TACC_NETCDF_DIR}
+      PNETCDFHOME: ${TACC_PNETCDF_DIR}
+      # pnetcdf/1.14.1 does not put its bin/ on PATH; ParallelIO finds PnetCDF
+      # through pnetcdf-config there.
+      PATH: ${NETCDFHOME}/bin:${PNETCDFHOME}/bin:${PATH}
+      LIBRARY_PATH: ${LIBRARY_PATH}:${NETCDFHOME}/lib
+      # Linux: embed a RUNPATH at link time so the roms binary finds its
+      # libraries without the modules loaded.
+      LD_RUN_PATH: ${NETCDFHOME}/lib:${PNETCDFHOME}/lib:${MPIHOME}/lib
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
+
+  # No `gpu` toolchain yet. The H100 nodes (partition h100: 24 nodes, 4 x H100
+  # SXM5 = cc90 and 96 cores each) pair nvfortran (nvidia/26.1) only with a
+  # CUDA-aware OpenMPI (openmpi/5.0.9), and C-Star's GPU build links MPICH's
+  # -lmpifort, which OpenMPI does not have. TACC also refuses the
+  # --gpus-per-node directive C-Star's GPU jobs carry: the nodes define no
+  # GRES (sbatch --test-only, 2026-11-17).
+
+scheduler:
+  family: slurm
+  # skx is the standard CPU queue. skx-dev is the sinfo default but caps jobs
+  # at 2 hours and 16 nodes.
+  primary_queue: skx
+  queues:
+    # sinfo reports these partitions' limits as `infinite`; each is capped by
+    # its partition QOS (`scontrol show partition`: QoS=...). Verified with
+    # sacctmgr on Stampede3 2026-11-17: qskx, qicx and qspr 2-00:00:00,
+    # qdevelopment 02:00:00.
+    - {name: skx, kind: partition, query_name: qskx, max_walltime: sacctmgr}
+    - {name: skx-dev, kind: partition, query_name: qdevelopment, max_walltime: sacctmgr}
+    - {name: icx, kind: partition, query_name: qicx, max_walltime: sacctmgr}
+    - {name: spr, kind: partition, query_name: qspr, max_walltime: sacctmgr}
+  # TACC's submit filter refuses a job without -N ("please define total node
+  # count with the "-N" option"; sbatch --test-only, 2026-11-17).
+  requires_task_distribution: true
+  # skx nodes: 2 sockets x 24 cores, 1 thread per core (sinfo). Each
+  # partition's own cores per node come from sinfo (icx 80, spr 112); this
+  # value is used only when sinfo cannot answer.
+  max_cpus_per_node: 48
+  # TACC's submit filter refuses a job with no partition ("all jobs must have
+  # a queue name specified with "-p""). With a partition and no account, a job
+  # is charged to the login's only project; a login in more than one project
+  # must name one. Give the account as TACC writes the project, in upper case
+  # (TG-ABC123456): the filter refuses the lower-case name `sacctmgr` lists
+  # ("Unknown project"). Checked with sbatch --test-only 2026-11-17.
+  require: [queue]
