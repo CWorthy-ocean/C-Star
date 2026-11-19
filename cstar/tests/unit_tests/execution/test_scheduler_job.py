@@ -24,8 +24,10 @@ from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
     Scheduler,
+    SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
+    _cpus_per_node_via_sinfo,
 )
 from cstar.system.toolchain import GpuNodes
 
@@ -415,6 +417,57 @@ class TestSchedulerJobBase:
             "Attempting to create scheduler job without 'nodes' and 'cpus_per_node'"
             in caplog.text
         )
+
+    def test_init_without_nodes_or_cpus_per_node_prefers_queue_capacity(self):
+        """Where the scheduler requires a task distribution, the queue's own CPUs
+        per node wins over the scheduler-wide value (64 here).
+        """
+        scheduler = MockScheduler()
+        scheduler.get_queue = lambda name=None: MagicMock(
+            name=name, max_walltime="02:00:00", max_cpus_per_node=80
+        )
+        params = self.common_job_params | {
+            "scheduler": scheduler,
+            "nodes": None,
+            "cpus_per_node": None,
+            "cpus": 160,
+        }
+        job = MockSchedulerJob(**params)
+
+        assert job.nodes == 2
+        assert job.cpus_per_node == 80
+
+    def test_init_partition_capped_by_qos_uses_partition_capacity(self):
+        """A partition whose walltime query names its QOS (TACC Stampede3's
+        `icx`, 80 cores, capped by QOS `qicx`) lays jobs out by the partition's
+        CPUs per node, not by the system file's `max_cpus_per_node` (48).
+        """
+        scheduler = SlurmScheduler(
+            queues=[SlurmPartition(name="icx", query_name="qicx")],
+            primary_queue_name="icx",
+            requires_task_distribution=True,
+            max_cpus_per_node=48,
+        )
+        params = self.common_job_params | {
+            "scheduler": scheduler,
+            "nodes": None,
+            "cpus_per_node": None,
+            "cpus": 160,
+        }
+        sinfo = {"--partition=icx": "80 1"}  # sinfo lists no partition "qicx"
+
+        def answer(cmd: str, **_: object) -> str:
+            return next((out for key, out in sinfo.items() if key in cmd), "")
+
+        _cpus_per_node_via_sinfo.cache_clear()
+        try:
+            with patch("cstar.system.scheduler._run_cmd", side_effect=answer):
+                job = MockSchedulerJob(**params)
+        finally:
+            _cpus_per_node_via_sinfo.cache_clear()
+
+        assert job.nodes == 2
+        assert job.cpus_per_node == 80
 
     @pytest.mark.parametrize("requires_distribution", [True, False])
     def test_init_single_node_clamps_cpus_to_capacity(

@@ -200,9 +200,56 @@ def query_max_walltime_via_sinfo(name: str) -> str | None:
     return format_walltime("\n".join(limits))
 
 
+def _cores_per_node_via_sinfo(partition: str | None) -> list[int]:
+    """Query sinfo for the physical cores per node of each node type.
+
+    sinfo's CPU count (`%c`) counts hardware threads, and an MPI rank on each
+    thread of a core slows the model, so each node type's CPUs are divided by
+    its threads per core (`%Z`). `--exact` keeps node types on rows of their
+    own; without it sinfo merges them into one row of minimums (`64+`), which
+    could pair one node type's CPUs with another's threads.
+
+    Parameters
+    ----------
+    partition : str or None
+        The partition to ask about, or `None` for every partition sinfo lists.
+
+    Returns
+    -------
+    list of int
+        The physical cores per node of each row sinfo prints, at least one.
+
+    Raises
+    ------
+    LookupError
+        If sinfo returns nothing or its output cannot be parsed.
+    """
+    where = "any partition" if partition is None else f"partition {partition!r}"
+    sp_cmd = "sinfo --noheader --exact --format='%c %Z'"
+    if partition is not None:
+        sp_cmd += f" --partition={partition}"
+    stdout = _run_cmd(sp_cmd, msg_err=f"Error querying the cores per node of {where}.")
+    cores: list[int] = []
+    try:
+        for line in stdout.splitlines():
+            if not line.strip():
+                continue
+            cpus, threads = (int(field.rstrip("+")) for field in line.split())
+            cores.append(cpus // max(threads, 1))
+    except ValueError as ex:
+        log.warning(
+            f"Cannot parse cores per node {stdout!r} for {where}; "
+            "treating the value as unknown."
+        )
+        raise LookupError(f"unparseable cores per node for {where}") from ex
+    if not cores:
+        raise LookupError(f"sinfo reported no cores per node for {where}")
+    return cores
+
+
 @functools.cache
 def _cpus_per_node_via_sinfo(name: str) -> int:
-    """Query sinfo for the partition's CPUs per node (smallest node type).
+    """Query sinfo for the partition's physical cores per node (smallest node type).
 
     Cached per partition name: the value is static hardware information and
     every scheduler job would otherwise re-run the query. Only successful
@@ -214,26 +261,12 @@ def _cpus_per_node_via_sinfo(name: str) -> int:
     LookupError
         If sinfo returns nothing or its output cannot be parsed.
     """
-    sp_cmd = f"sinfo --noheader --format='%c' --partition={name}"
-    stdout = _run_cmd(sp_cmd)
-    if not stdout:
-        raise LookupError(f"sinfo reported no CPUs per node for partition {name!r}")
-    try:
-        return min(
-            int(line.strip().rstrip("+"))
-            for line in stdout.splitlines()
-            if line.strip()
-        )
-    except ValueError as ex:
-        log.warning(
-            f"Cannot parse CPUs per node {stdout!r} for partition {name!r}; "
-            "treating the value as unknown."
-        )
-        raise LookupError(f"unparseable CPUs per node for partition {name!r}") from ex
+    return min(_cores_per_node_via_sinfo(name))
 
 
 def query_max_cpus_per_node_via_sinfo(name: str) -> int | None:
-    """Retrieve the CPUs per node for the SLURM partition via sinfo.
+    """Retrieve the CPUs per node for the SLURM partition via sinfo, counting
+    physical cores, not hardware threads.
 
     A heterogeneous partition reports one value per node type; the smallest is
     returned so node counts derived from it are always satisfiable. Successful
@@ -243,8 +276,8 @@ def query_max_cpus_per_node_via_sinfo(name: str) -> int | None:
     Returns
     -------
     int or None
-        The number of CPUs per node on the partition's smallest node type, or
-        `None` if the value cannot be determined.
+        The number of physical cores per node on the partition's smallest node
+        type, or `None` if the value cannot be determined.
     """
     try:
         return _cpus_per_node_via_sinfo(name)
@@ -291,7 +324,8 @@ class Queue(ABC):
     name: Final[str]
     """The name of the queue used to submit jobs, e.g. `regular`."""
     query_name: Final[str]
-    """The name of the queue used for system accounting, e.g. `regular_0`.
+    """The name the walltime query asks about, e.g. `regular_0`, or a
+    partition's QOS.
 
     Defaults to the value of `name` (as the two are usually the same).
     """
@@ -313,7 +347,7 @@ class Queue(ABC):
         name : str
             The name of the queue.
         query_name : str, optional
-            An alternative name used for querying the queue. If not provided, it defaults
+            The name the walltime query asks about. If not provided, it defaults
             to the value of `name`.
         max_walltime_method : Callable[[str], str | None] | None, optional
             An alternative method for determining the maximum walltime. If not provided,
@@ -394,7 +428,7 @@ class SlurmQueue(Queue, ABC):
     name : str
         The name of the SLURM queue.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime: str
         The maximum walltime allowed for the queue.
@@ -421,7 +455,7 @@ class SlurmQOS(SlurmQueue):
     name : str
         The name of the SLURM QOS queue.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime : str
         The maximum walltime allowed for jobs in this QOS, formatted as "HH:MM:SS".
@@ -443,7 +477,7 @@ class SlurmPartition(SlurmQueue):
     name : str
         The name of the SLURM partition.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime : str
         The maximum walltime allowed for jobs in this partition, formatted as "HH:MM:SS".
@@ -455,8 +489,12 @@ class SlurmPartition(SlurmQueue):
 
     @property
     def max_cpus_per_node(self) -> int | None:
-        """CPUs per node on this partition's smallest node type, from sinfo."""
-        return query_max_cpus_per_node_via_sinfo(self.query_name)
+        """CPUs per node on this partition's smallest node type, from sinfo.
+
+        Asks about the partition's `name`, never its `query_name`: the walltime
+        query may name the partition's QOS, which sinfo does not list.
+        """
+        return query_max_cpus_per_node_via_sinfo(self.name)
 
 
 class PBSQueue(Queue):
@@ -470,7 +508,7 @@ class PBSQueue(Queue):
     name : str
         The name of the PBS queue.
     query_name : str
-        The name of the queue used for system accounting, e.g. `regular_0`.
+        The name the walltime query asks about, e.g. `regular_0`.
         Defaults to the value of `name` (as the two are usually the same).
     max_walltime : str
         The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
@@ -486,7 +524,7 @@ class PBSQueue(Queue):
         max_walltime : str
             The maximum walltime allowed for jobs in this queue, formatted as "HH:MM:SS".
         query_name : str, optional
-            An alternative name used for querying the queue. Defaults to the value of `name`.
+            The name the walltime query asks about. Defaults to the value of `name`.
         """
         super().__init__(name, query_name)
         self._max_walltime = max_walltime
@@ -689,25 +727,21 @@ class SlurmScheduler(Scheduler):
         """Retrieve the maximum number of CPUs available per node across all SLURM
         nodes.
 
-        Queries the SLURM scheduler to determine the highest CPU capacity of any single node.
+        The system's fixed `max_cpus_per_node` when it has one; otherwise sinfo
+        is asked, until it answers, for the physical cores of the largest node
+        in any partition it lists.
 
         Returns
         -------
         int or None
             The maximum number of CPUs available per node, or `None` if the query fails or
             returns no results.
-
-        Raises
-        ------
-        RuntimeError
-            If the command to query the SLURM scheduler fails.
         """
         if self._max_cpus_per_node is None:
-            if stdout := _run_cmd(
-                'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
-                msg_err="Error querying node property.",
-            ):
-                self._max_cpus_per_node = int(stdout)
+            try:
+                self._max_cpus_per_node = max(_cores_per_node_via_sinfo(None))
+            except LookupError:
+                return None
 
         return self._max_cpus_per_node
 

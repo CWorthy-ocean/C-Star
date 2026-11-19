@@ -217,7 +217,7 @@ class TestScheduler:
         Uses mock_subprocess_run to simulate a successful system command output.
         """
         mock_subprocess_run.return_value = MagicMock(
-            returncode=0, stdout="128", stderr=""
+            returncode=0, stdout="48 1\n128 1\n", stderr=""
         )
         scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
 
@@ -225,11 +225,24 @@ class TestScheduler:
         assert result == 128
 
         mock_subprocess_run.assert_called_once_with(
-            'scontrol show nodes | grep -o "cpu=[0-9]*" | cut -d= -f2 | sort -nr | head -1',
+            "sinfo --noheader --exact --format='%c %Z'",
             shell=True,
             text=True,
             capture_output=True,
         )
+
+    def test_slurmscheduler_global_max_cpus_per_node_counts_physical_cores(
+        self, mock_subprocess_run
+    ):
+        """The scheduler-wide fallback counts physical cores: a 256-CPU node with 2
+        threads per core has 128 cores, fewer than a 192-core node.
+        """
+        mock_subprocess_run.return_value = MagicMock(
+            returncode=0, stdout="256 2\n192 1\n", stderr=""
+        )
+        scheduler = SlurmScheduler(queues=[], primary_queue_name="general")
+
+        assert scheduler.global_max_cpus_per_node == 192
 
     def test_slurmscheduler_global_max_cpus_per_node_failure(
         self, mock_subprocess_run, caplog: pytest.LogCaptureFixture
@@ -258,7 +271,7 @@ class TestScheduler:
         assert result is None
 
         captured = caplog.text
-        assert "Error querying node property." in captured
+        assert "Error querying the cores per node of any partition." in captured
         assert "STDERR:\nError querying CPUs" in captured
 
     def test_slurmscheduler_global_max_mem_per_node_gb_success(
@@ -611,18 +624,24 @@ def clear_cpus_per_node_cache() -> None:
 @pytest.mark.parametrize(
     ("sinfo_output", "expected"),
     [
-        pytest.param("64", 64, id="single node type"),
-        pytest.param("48\n128\n64", 48, id="heterogeneous partition returns min"),
-        pytest.param("64+", 64, id="grouped row suffix"),
+        pytest.param("64 1", 64, id="single node type"),
+        pytest.param("256 2", 128, id="two threads per core count physical cores"),
+        pytest.param("48 1\n128 1\n64 1", 48, id="heterogeneous partition returns min"),
+        pytest.param("256 2\n48 1", 48, id="mixed threads per core"),
+        pytest.param("256 2\n192 1", 128, id="threads decide the smallest"),
+        pytest.param("64+ 1", 64, id="grouped row suffix"),
         pytest.param("", None, id="no output"),
-        pytest.param("garbage", None, id="unparseable output"),
+        pytest.param("\n  \n", None, id="blank output"),
+        pytest.param("64", None, id="missing threads column"),
+        pytest.param("garbage 1", None, id="unparseable output"),
     ],
 )
 def test_query_max_cpus_per_node_via_sinfo(
     sinfo_output: str, expected: int | None
 ) -> None:
-    """Verify CPUs per node are parsed from sinfo output, taking the smallest node
-    type on a heterogeneous partition, and fall back to None when unavailable.
+    """Verify physical cores per node are parsed from sinfo's CPUs and threads
+    per core, taking the smallest node type on a heterogeneous partition, and
+    fall back to None when unavailable.
     """
     with patch(
         "cstar.system.scheduler._run_cmd", MagicMock(return_value=sinfo_output)
@@ -631,6 +650,10 @@ def test_query_max_cpus_per_node_via_sinfo(
 
         assert result == expected
         mock_sinfo.assert_called_once()
+        cmd = mock_sinfo.call_args.args[0]
+        assert "--exact" in cmd
+        assert "--format='%c %Z'" in cmd
+        assert "--partition=mock-partition-name" in cmd
 
 
 @pytest.mark.usefixtures("clear_cpus_per_node_cache")
@@ -649,7 +672,7 @@ def test_query_max_cpus_per_node_via_sinfo_caches_successes_only() -> None:
 
     # a successful lookup is cached: repeated queries do not re-run sinfo
     with patch(
-        "cstar.system.scheduler._run_cmd", MagicMock(return_value="64")
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="64 1")
     ) as mock_sinfo:
         assert query_max_cpus_per_node_via_sinfo("flaky-partition") == 64
         assert query_max_cpus_per_node_via_sinfo("flaky-partition") == 64
@@ -657,11 +680,43 @@ def test_query_max_cpus_per_node_via_sinfo_caches_successes_only() -> None:
 
     # the cache is keyed by partition name
     with patch(
-        "cstar.system.scheduler._run_cmd", MagicMock(return_value="128")
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="128 1")
     ) as mock_sinfo:
         assert query_max_cpus_per_node_via_sinfo("other-partition") == 128
         assert query_max_cpus_per_node_via_sinfo("flaky-partition") == 64
         assert mock_sinfo.call_count == 1
+
+
+@pytest.mark.usefixtures("clear_cpus_per_node_cache")
+def test_partition_cpus_per_node_asks_sinfo_by_partition_name() -> None:
+    """A partition whose walltime query names its QOS (TACC Stampede3's `icx`,
+    capped by QOS `qicx`) asks sinfo about the partition itself: sinfo lists no
+    partition named after the QOS.
+    """
+    queue = SlurmPartition(
+        name="icx",
+        query_name="qicx",
+        max_walltime_method=query_max_walltime_via_sacctmgr,
+    )
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="80 1")
+    ) as mock_sinfo:
+        assert queue.max_cpus_per_node == 80
+
+    cmd = mock_sinfo.call_args.args[0]
+    assert "--partition=icx" in cmd
+    assert "qicx" not in cmd
+
+
+def test_qos_cpus_per_node_is_unknown() -> None:
+    """A QOS has no CPUs per node of its own, so nothing is queried and a job
+    falls back to the scheduler-wide value.
+    """
+    queue = SlurmQOS(name="regular", query_name="regular_1")
+    with patch("cstar.system.scheduler._run_cmd") as mock_run:
+        assert queue.max_cpus_per_node is None
+
+    mock_run.assert_not_called()
 
 
 def test_query_max_walltime_via_sacctmgr() -> None:

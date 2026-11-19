@@ -1,0 +1,2 @@
+On systems where a partition's walltime limit comes from a QOS (such as TACC Stampede3), jobs are laid out using the partition's own CPUs per node instead of the system file's ``max_cpus_per_node`` or the largest node on the machine.
+- On a system that requires jobs to state their nodes and tasks per node (``requires_task_distribution: true``), a job that gives neither is now spread by its queue's CPUs per node, falling back to ``max_cpus_per_node`` only when the queue's is unknown.

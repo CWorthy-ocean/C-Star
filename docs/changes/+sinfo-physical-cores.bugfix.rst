@@ -1,0 +1,2 @@
+On a SLURM system whose nodes run two hardware threads per core, C-Star now places one MPI rank per physical core instead of one per hardware thread, so jobs there ask for twice as many nodes as before; the model's results do not change.
+- This applies to the CPUs per node C-Star reads from ``sinfo`` for a partition and to its machine-wide fallback; a system file's ``max_cpus_per_node`` and a job's own CPUs per node are used as given.

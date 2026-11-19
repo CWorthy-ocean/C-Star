@@ -1075,14 +1075,15 @@ class SchedulerJob(ExecutionHandler, ABC):
     def _mandatory_distribution(self, cpus: int) -> tuple[int, int, int]:
         """Distribution when the scheduler requires an explicit nodes x cpus
         layout but neither was supplied: spread `cpus` evenly over the fewest
-        nodes the system maximum allows.
+        nodes the per-node capacity allows (the queue's own CPUs per node, else
+        the scheduler-wide maximum).
 
         Raises
         ------
         EnvironmentError
-            If the system's CPUs per node cannot be determined.
+            If the CPUs per node cannot be determined.
         """
-        max_cpus = self._scheduler.global_max_cpus_per_node
+        max_cpus = self._per_node_capacity(None)
         if max_cpus is None:
             raise OSError(
                 "You attempted to create a scheduler job without 'nodes', and "
@@ -1098,8 +1099,7 @@ class SchedulerJob(ExecutionHandler, ABC):
                 + "parameters, but your system requires an explicitly specified task distribution."
                 + "\n C-Star will attempt "
                 + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
-                + "\nbased on your system maximum of "
-                + f"{max_cpus} CPUS per node "
+                + f"\nbased on {max_cpus} CPUs per node "
                 + f"\nand your job requirement of {cpus} CPUS."
             ),
         )
