@@ -409,7 +409,7 @@ where the file is. Then give them:
   A colleague then runs `cstar init --system-file
   /path/to/shared/cstar-catalog/systems/<name>.yaml`.
 
-Offer to draft a pull request to https://github.com/CWorthy-ocean/C-Star that
+Offer to open a pull request to https://github.com/CWorthy-ocean/C-Star that
 makes the machine part of C-Star, so nobody there needs the file. It holds:
 
 - the file as `cstar/catalog/bundled/systems/<name>.yaml`, with its dated
@@ -418,11 +418,25 @@ makes the machine part of C-Star, so nobody there needs the file. It holds:
   marked by the level reached;
 - a release-note file `docs/changes/+<name>-system.feature.rst`, one line, for
   example "C-Star recognises <Machine> (<site>) and loads its modules.";
+- the machine in the tests that list the bundled systems, in
+  `cstar/tests/unit_tests/system/`:
+  - in `test_bundled_systems_golden.py`: its name in `BUNDLED_SYSTEMS`, each
+    variable its `env` takes from a module in `MODULE_ENVIRONMENT` (an
+    unlisted one expands to an empty string), and an environment for its
+    `detect` rule in `DETECTION_ENVIRONMENTS`;
+  - in `test_system_selection.py`: a new detection variable in
+    `DETECTION_VARIABLES`, so the tests do not detect the machine when run on
+    it;
+  - in `test_manager.py`, for SLURM: a case in
+    `test_slurm_system_required_settings` with the settings its `require`
+    makes required;
 - the golden fixture, regenerated with
   `UPDATE_GOLDEN=1 python -m pytest cstar/tests/unit_tests/system/test_bundled_systems_golden.py`,
-  and the diff reviewed.
+  and the diff reviewed: it adds the machine, and other systems gain only a
+  `false` entry for a new detection environment.
 
 `docs/developers/system-registration.rst` in the repository has the rules for
-a bundled file. Draft the branch and the description only: the project's AI
-policy asks the user to open the pull request, and to fill in its `AI
-disclosure:` line, themselves.
+a bundled file. Write the description from the repository's pull request
+template and fill in its `AI disclosure:` line, which the project's AI policy
+requires. Ask the user before you push the branch or open the pull request:
+once it is open, it is theirs to check and answer for.
