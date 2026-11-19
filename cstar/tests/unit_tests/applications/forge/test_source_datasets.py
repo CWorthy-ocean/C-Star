@@ -533,6 +533,15 @@ class TestConstants:
         assert UNIFIED_BGC_URL.startswith("https://")
 
 
+# Every filename an earlier Forge staged the unified BGC file under; extend it with the
+# old filename at each UNIFIED_BGC_VERSION bump.
+SUPERSEDED_UNIFIED_BGC_FILENAMES = (
+    "BGCdataset.nc",
+    "BGCdataset_v2_1.nc",
+    "BGCdataset_v2_1a.nc",
+)
+
+
 class TestPrepareUnifiedBgc:
     """Tests for the UNIFIED_BGC (Google Drive) dataset handler."""
 
@@ -582,8 +591,9 @@ class TestPrepareUnifiedBgc:
 
         assert sd.paths["UNIFIED_BGC"] == staged
 
-    def test_stale_unversioned_file_does_not_satisfy(self, tmp_path, monkeypatch):
-        """A pre-v2.1 ``BGCdataset.nc`` left by an earlier Forge must not be reused."""
+    @pytest.mark.parametrize("stale_name", SUPERSEDED_UNIFIED_BGC_FILENAMES)
+    def test_superseded_file_does_not_satisfy(self, tmp_path, monkeypatch, stale_name):
+        """A file from an earlier unified BGC version must not be reused."""
         downloaded: list[str] = []
 
         def fake_download(url, out, quiet=False):
@@ -595,15 +605,18 @@ class TestPrepareUnifiedBgc:
 
         dataset_dir = tmp_path / "UNIFIED_BGC"
         dataset_dir.mkdir(parents=True)
-        (dataset_dir / "BGCdataset.nc").touch()
+        (dataset_dir / stale_name).touch()
 
         sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert downloaded == [str(dataset_dir / UNIFIED_BGC_FILENAME)]
 
-    def test_stale_unversioned_file_is_reported(self, tmp_path, monkeypatch, capsys):
-        """The orphaned pre-v2.1 file is called out so it can be reclaimed."""
+    @pytest.mark.parametrize("stale_name", SUPERSEDED_UNIFIED_BGC_FILENAMES)
+    def test_superseded_file_is_reported(
+        self, tmp_path, monkeypatch, capsys, stale_name
+    ):
+        """An orphaned earlier-version file is named so it can be reclaimed."""
         monkeypatch.setattr(
             source_datasets.gdown,
             "download",
@@ -612,11 +625,13 @@ class TestPrepareUnifiedBgc:
 
         dataset_dir = tmp_path / "UNIFIED_BGC"
         dataset_dir.mkdir(parents=True)
-        (dataset_dir / "BGCdataset.nc").touch()
+        (dataset_dir / stale_name).touch()
 
         SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path).prepare_all()
 
-        assert "no longer" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert f"{stale_name} (" in out
+        assert "no longer" in out
 
 
 class TestUnifiedBgcRomsToolsCapability:

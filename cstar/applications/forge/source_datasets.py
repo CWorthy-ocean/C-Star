@@ -617,6 +617,7 @@ def _prepare_unified_bgc_dataset(self: SourceDatasets) -> Path:
     for stale, label in (
         (dataset_dir / "BGCdataset.nc", "pre-v2.1"),
         (dataset_dir / "BGCdataset_v2_1.nc", "v2.1, superseded by a unit fix"),
+        (dataset_dir / "BGCdataset_v2_1a.nc", "v2.1a, with negative deep DOC/DON/DOP"),
     ):
         if stale.exists():
             print(
