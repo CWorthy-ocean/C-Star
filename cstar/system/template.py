@@ -143,6 +143,8 @@ scheduler:
   max_cpus_per_node: 128
   #: SlurmSchedulerSpec.require
   require: []
+  #: SlurmSchedulerSpec.upper_case_account
+  upper_case_account: false
   #: SlurmSchedulerSpec.gpu_nodes
   # gpu_nodes:
   #   #: GpuNodesSpec.gpus_per_node
@@ -155,6 +157,8 @@ scheduler:
   #   cores_per_node: 64
   #   #: GpuNodesSpec.account_required
   #   account_required: false
+  #   #: GpuNodesSpec.request_gpus
+  #   request_gpus: true
 
 # On a PBS Professional or OpenPBS machine the scheduler block takes this shape
 # instead; `directives`, `max_cpus_per_node`, `require` and `gpu_nodes` mean

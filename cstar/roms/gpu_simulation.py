@@ -219,6 +219,35 @@ def _library_dirs(link_flags: str) -> list[str]:
     return dirs
 
 
+def fortran_mpi_libraries(mpi_lib: Path) -> tuple[str, ...]:
+    """Name the MPI libraries to link, by the Fortran bindings the MPI installs.
+
+    MPICH and Intel MPI put the Fortran bindings in ``libmpifort``. OpenMPI puts
+    the ``mpif.h`` bindings, which roms-marbl-gpu's external MPI calls use, in
+    ``libmpi_mpifh``. roms-marbl-gpu's own Makefile chooses by the same file test.
+
+    Parameters
+    ----------
+    mpi_lib : Path
+        The MPI installation's ``lib`` directory.
+
+    Returns
+    -------
+    tuple[str, ...]
+        ``("-lmpi_mpifh", "-lmpi")`` when the directory holds ``libmpi_mpifh`` and
+        no ``libmpifort``; otherwise ``("-lmpifort", "-lmpi")``, also when the
+        directory cannot be read.
+    """
+    try:
+        has_mpifh = any(mpi_lib.glob("libmpi_mpifh.*"))
+        has_mpifort = any(mpi_lib.glob("libmpifort.*"))
+    except OSError:
+        return ("-lmpifort", "-lmpi")
+    if has_mpifh and not has_mpifort:
+        return ("-lmpi_mpifh", "-lmpi")
+    return ("-lmpifort", "-lmpi")
+
+
 def gpu_make_command(
     key: GpuBuildKey,
     mpi_home: Path,
@@ -229,8 +258,9 @@ def gpu_make_command(
     """Compose the ``make gpu`` command that builds the GPU executable.
 
     The general form of the README's build recipe, with the MPI and NetCDF
-    installations as parameters. The libraries are named explicitly, with an
-    rpath for each library directory, so the executable runs without
+    installations as parameters. The libraries are named explicitly (the MPI's
+    Fortran library by `fortran_mpi_libraries`), with an rpath for each library
+    directory, so the executable runs without
     `LD_LIBRARY_PATH` set.
 
     The NetCDF flags come from the installations, not from ``nf-config``: Cray's
@@ -271,8 +301,7 @@ def gpu_make_command(
             "-lnetcdff",
             "-lnetcdf",
             f"-L{mpi_lib}",
-            "-lmpifort",
-            "-lmpi",
+            *fortran_mpi_libraries(mpi_lib),
             link_flags.strip(),
             *(f"-Wl,-rpath,{d}" for d in rpath_dirs),
         )

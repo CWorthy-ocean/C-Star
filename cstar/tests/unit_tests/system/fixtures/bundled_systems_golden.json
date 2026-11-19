@@ -42,6 +42,7 @@
       "CSTAR_SLURM_QUEUE"
     ],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {},
       "documentation": "https://www.rcac.purdue.edu/knowledge/anvil/architecture",
       "gpu": {
@@ -51,7 +52,8 @@
           "--gpu-bind": "none"
         },
         "gpus_per_node": 4,
-        "queue": "gpu"
+        "queue": "gpu",
+        "request_gpus": true
       },
       "max_cpus_per_node": 128,
       "primary_queue": "wholenode",
@@ -144,6 +146,7 @@
       "CSTAR_SLURM_QUEUE"
     ],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {},
       "documentation": "https://docs.ycrc.yale.edu/clusters/bouchet",
       "gpu": null,
@@ -301,6 +304,7 @@
     "name": "derecho",
     "required_settings": [],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {},
       "documentation": "https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/",
       "gpu": null,
@@ -380,6 +384,7 @@
     "name": "elja",
     "required_settings": [],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {},
       "documentation": "https://wiki.irei.is",
       "gpu": null,
@@ -461,6 +466,7 @@
       "CSTAR_SLURM_ACCOUNT"
     ],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {},
       "documentation": "https://www.sdsc.edu/support/user_guides/expanse.html",
       "gpu": null,
@@ -613,6 +619,7 @@
     "name": "oscar",
     "required_settings": [],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {},
       "documentation": "https://docs.ccv.brown.edu/oscar",
       "gpu": null,
@@ -706,6 +713,7 @@
     "name": "perlmutter",
     "required_settings": [],
     "scheduler": {
+      "account": "tg-abc123",
       "directives": {
         "-C": "cpu"
       },
@@ -718,7 +726,8 @@
           "-C": "gpu"
         },
         "gpus_per_node": 4,
-        "queue": "regular"
+        "queue": "regular",
+        "request_gpus": true
       },
       "max_cpus_per_node": 128,
       "primary_queue": "regular",
@@ -795,6 +804,22 @@
           "load pnetcdf/1.14.1",
           "load cmake/4.1.1"
         ]
+      },
+      "gpu": {
+        "env": {
+          "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+          "MPIHOME": "/mod/tacc_mpi_dir",
+          "NETCDFHOME": "/mod/tacc_netcdf_dir",
+          "PATH": "/mod/tacc_netcdf_dir/bin:/usr/bin:/bin"
+        },
+        "lmod_calls": [
+          "reset",
+          "load nvidia/26.1",
+          "load cuda/13.1",
+          "load openmpi/5.0.9",
+          "load hdf5/2.1.1",
+          "load netcdf/4.10.1"
+        ]
       }
     },
     "mpi_prefix": "ibrun",
@@ -803,9 +828,17 @@
       "CSTAR_SLURM_QUEUE"
     ],
     "scheduler": {
+      "account": "TG-ABC123",
       "directives": {},
       "documentation": "https://docs.tacc.utexas.edu/hpc/stampede3/",
-      "gpu": null,
+      "gpu": {
+        "account_required": false,
+        "cores_per_node": 96,
+        "directives": {},
+        "gpus_per_node": 4,
+        "queue": "h100",
+        "request_gpus": false
+      },
       "max_cpus_per_node": 48,
       "primary_queue": "skx",
       "queues": [
@@ -832,6 +865,12 @@
           "query_name": "qspr",
           "type": "SlurmPartition",
           "walltime": "query_max_walltime_via_sacctmgr"
+        },
+        {
+          "name": "h100",
+          "query_name": "qh100",
+          "type": "SlurmPartition",
+          "walltime": "query_max_walltime_via_sacctmgr"
         }
       ],
       "requires_task_distribution": true,
@@ -846,7 +885,13 @@
         "mpi_prefix": "ibrun",
         "profile": ""
       },
-      "gpu": "error: stampede3 has no GPU toolchain registered with C-Star"
+      "gpu": {
+        "compiler": "nvfortran",
+        "gpu_arch": "cc90",
+        "link_flags": "-L${TACC_NVIDIA_MATH_LIB}",
+        "mpi_prefix": "ibrun",
+        "profile": "gpu"
+      }
     }
   }
 }

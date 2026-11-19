@@ -55,3 +55,7 @@ class GpuNodes:
     account_required: bool = False
     """Whether the scheduler refuses a GPU job that names no account, so C-Star
     must insist on one."""
+    request_gpus: bool = True
+    """Whether a GPU job asks the scheduler for its GPUs (SLURM
+    ``--gpus-per-node``, PBS ``ngpus=``); false where the GPU nodes define no GPU
+    resource and a job reaches them through its queue alone."""

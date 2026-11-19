@@ -34,6 +34,7 @@ from cstar.roms.gpu_simulation import (
     GpuBuildKey,
     ROMSGpuSimulation,
     fortran_double_literal,
+    fortran_mpi_libraries,
     gpu_make_command,
 )
 from cstar.roms.input_dataset import (
@@ -220,6 +221,35 @@ class TestGpuMakeCommand:
             "LIBS='-L/opt/netcdf/lib -lnetcdff -lnetcdf -L/opt/mpi/lib "
             "-lmpifort -lmpi -Wl,-rpath,/opt/netcdf/lib -Wl,-rpath,/opt/mpi/lib'"
         ) in command
+
+    @pytest.mark.parametrize(
+        ("files", "expected"),
+        [
+            (["libmpi_mpifh.so", "libmpi.so"], "-lmpi_mpifh -lmpi"),
+            (["libmpifort.so", "libmpi.so"], "-lmpifort -lmpi"),
+            (["libmpifort.so", "libmpi_mpifh.so", "libmpi.so"], "-lmpifort -lmpi"),
+            (["libmpi.so"], "-lmpifort -lmpi"),
+        ],
+        ids=["openmpi", "mpich", "both", "neither"],
+    )
+    def test_fortran_library_follows_the_mpi_layout(
+        self, tmp_path: Path, files: list[str], expected: str
+    ) -> None:
+        """OpenMPI's `libmpi_mpifh` is linked only where `libmpifort` is absent."""
+        lib = tmp_path / "mpi" / "lib"
+        lib.mkdir(parents=True)
+        for name in files:
+            (lib / name).touch()
+
+        command = gpu_make_command(
+            self.KEY, tmp_path / "mpi", Path("/n"), Path("/n"), ""
+        )
+
+        assert f"-L{lib} {expected} " in make_variables(command)["LIBS"] + " "
+        assert fortran_mpi_libraries(lib) == tuple(expected.split())
+
+    def test_missing_mpi_directory_links_libmpifort(self, tmp_path: Path) -> None:
+        assert fortran_mpi_libraries(tmp_path / "absent") == ("-lmpifort", "-lmpi")
 
     def test_values_with_spaces_are_quoted(self) -> None:
         key = GpuBuildKey("nv fortran", "cc80", 1000.0, passive_fp64=False)

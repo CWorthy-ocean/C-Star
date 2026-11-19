@@ -669,6 +669,21 @@ class Scheduler(ABC, LoggingMixin):
         else:
             return queue
 
+    def account_name(self, account: str) -> str:
+        """Return the account as a job submits it to this scheduler.
+
+        Parameters
+        ----------
+        account : str
+            The account as the user wrote it.
+
+        Returns
+        -------
+        str
+            The account, unchanged unless the scheduler says otherwise.
+        """
+        return account
+
     @property
     @abstractmethod
     def global_max_cpus_per_node(self) -> int | None:
@@ -711,6 +726,9 @@ class SlurmScheduler(Scheduler):
         The maximum number of CPUs available per node across all SLURM queues.
     global_max_mem_per_node_gb : float
         The maximum amount of memory (in GB) available per node across all SLURM queues.
+    upper_case_account : bool
+        Whether the site knows accounts only in upper case, so jobs submit the
+        account in upper case. Defaults to False.
 
     Methods
     -------
@@ -718,9 +736,59 @@ class SlurmScheduler(Scheduler):
         Retrieves the maximum number of CPUs available per node.
     global_max_mem_per_node_gb
         Retrieves the maximum memory available per node in GB.
+    account_name
+        The account as a job submits it.
     """
 
     family: ClassVar[str] = SCHEDULER_SLURM
+
+    def __init__(
+        self,
+        queues: list["Queue"],
+        primary_queue_name: str,
+        other_scheduler_directives: dict[str, str] | None = None,
+        requires_task_distribution: bool | None = True,
+        documentation: str | None = None,
+        max_cpus_per_node: int | None = None,
+        gpu: "GpuNodes | None" = None,
+        upper_case_account: bool = False,
+    ):
+        """Initialize a SlurmScheduler instance.
+
+        Parameters
+        ----------
+        queues, primary_queue_name, other_scheduler_directives,
+        requires_task_distribution, documentation, max_cpus_per_node, gpu
+            As for `Scheduler`.
+        upper_case_account : bool, optional
+            Whether the site knows accounts only in upper case. Defaults to False.
+        """
+        super().__init__(
+            queues=queues,
+            primary_queue_name=primary_queue_name,
+            other_scheduler_directives=other_scheduler_directives,
+            requires_task_distribution=requires_task_distribution,
+            documentation=documentation,
+            max_cpus_per_node=max_cpus_per_node,
+            gpu=gpu,
+        )
+        self.upper_case_account = upper_case_account
+
+    def account_name(self, account: str) -> str:
+        """Return the account as a job submits it to this scheduler.
+
+        Parameters
+        ----------
+        account : str
+            The account as the user wrote it.
+
+        Returns
+        -------
+        str
+            The account in upper case where the site knows accounts only in upper
+            case, else unchanged.
+        """
+        return account.upper() if self.upper_case_account else account
 
     @property
     def global_max_cpus_per_node(self) -> int | None:

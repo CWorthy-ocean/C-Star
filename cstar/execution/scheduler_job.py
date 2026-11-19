@@ -758,6 +758,15 @@ class SchedulerJob(ExecutionHandler, ABC):
         return self._gpus_per_node_requested
 
     @property
+    def requests_gpus(self) -> bool:
+        """Whether the job script asks the scheduler for GPUs: a GPU job does,
+        unless the system's GPU nodes are reached through their queue alone
+        (`GpuNodes.request_gpus`).
+        """
+        gpu = self._scheduler.gpu
+        return self._gpus > 0 and (gpu is None or gpu.request_gpus)
+
+    @property
     def scheduler_directives(self) -> Mapping[str, str]:
         """The extra scheduler directives for this job: the system's GPU
         directives for a GPU job, else its CPU `other_scheduler_directives`.
@@ -1253,7 +1262,8 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
-            scheduler_script += f"\n#SBATCH --gpus-per-node={self.gpus_per_node}"
+            if self.requests_gpus:
+                scheduler_script += f"\n#SBATCH --gpus-per-node={self.gpus_per_node}"
         elif self.scheduler.requires_task_distribution:
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
@@ -1267,7 +1277,8 @@ class SlurmJob(SchedulerJob):
                 scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         if self.account_key:
-            scheduler_script += f"\n#SBATCH --account={self.account_key}"
+            account = self.scheduler.account_name(self.account_key)
+            scheduler_script += f"\n#SBATCH --account={account}"
         if is_flag_enabled(ENV_CSTAR_SLURM_DISABLE_MT):
             scheduler_script += "\n#SBATCH --hint=nomultithread"
 
@@ -1446,10 +1457,9 @@ class PBSJob(SchedulerJob):
             ncpus = (
                 self.scheduler.gpu.cores_per_node if self.scheduler.gpu else None
             ) or self.cpus_per_node
-            select = (
-                f"select={self.nodes}:ncpus={ncpus}:mpiprocs={self.cpus_per_node}"
-                f":ngpus={self.gpus_per_node}"
-            )
+            select = f"select={self.nodes}:ncpus={ncpus}:mpiprocs={self.cpus_per_node}"
+            if self.requests_gpus:
+                select += f":ngpus={self.gpus_per_node}"
         else:
             select = f"select={self.nodes}:ncpus={self.cpus_per_node}"
         scheduler_script += f"\n#PBS -l {select},walltime={walltime}"

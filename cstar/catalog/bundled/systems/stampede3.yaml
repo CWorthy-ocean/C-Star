@@ -4,8 +4,12 @@ docs: https://docs.tacc.utexas.edu/hpc/stampede3/
 
 # Verified on Stampede3 2026-11-17 (C-Star 0.18.1.dev38): `cstar system check`
 # passed on a login node, a ROMS build through C-Star succeeded there, and a
-# 10-rank job submitted through C-Star completed on skx-dev. Not verified: a
-# ParallelIO build (blueprints with partitioning.use_pio).
+# 10-rank job submitted through C-Star completed on skx-dev. 2026-11-19: the
+# bundled `wales-toy` blueprint (ucla-roms 0.13.0 with ParallelIO 2.7.1-fork)
+# built on a login node and ran as a 9-rank skx-dev job, writing its output
+# through ParallelIO. The gpu toolchain built `wales-toy-gpu` (roms-marbl-gpu
+# v0.1.3-beta) on a login node, and TACC accepted its h100 job script
+# (sbatch --test-only); no GPU job has run yet.
 
 # Lmod on Stampede3 sets neither LMOD_SYSHOST nor LMOD_SYSTEM_NAME. TACC's
 # /etc/profile.d/z00_tacc_login.sh sets TACC_SYSTEM from the node's host name
@@ -48,12 +52,33 @@ toolchains:
       LD_RUN_PATH: ${NETCDFHOME}/lib:${PNETCDFHOME}/lib:${MPIHOME}/lib
       GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
 
-  # No `gpu` toolchain yet. The H100 nodes (partition h100: 24 nodes, 4 x H100
-  # SXM5 = cc90 and 96 cores each) pair nvfortran (nvidia/26.1) only with a
-  # CUDA-aware OpenMPI (openmpi/5.0.9), and C-Star's GPU build links MPICH's
-  # -lmpifort, which OpenMPI does not have. TACC also refuses the
-  # --gpus-per-node directive C-Star's GPU jobs carry: the nodes define no
-  # GRES (sbatch --test-only, 2026-11-17).
+  gpu:
+    # The H100 nodes (partition h100: 4 x H100 SXM5 each). TACC pairs nvfortran
+    # only with a CUDA-aware OpenMPI 5, whose Fortran library is libmpi_mpifh;
+    # C-Star links it in place of MPICH's libmpifort.
+    compiler: nvfortran
+    # ibrun runs OpenMPI's mpirun with the job's host list; srun offers no PMIx.
+    mpi_prefix: ibrun
+    gpu_arch: cc90
+    # nvfortran links -lcublas, -lcublasLt and -lcurand but does not name the
+    # directory TACC installs them in (math_libs/13.1/lib64, which the nvidia
+    # module exports as TACC_NVIDIA_MATH_LIB); the build adds an rpath for it.
+    link_flags: -L${TACC_NVIDIA_MATH_LIB}
+    # Verified on Stampede3 2026-11-19: each module loads, in this order, from
+    # `module reset`; nvidia replaces intel and openmpi replaces impi.
+    modules:
+      - nvidia/26.1  # (system default)
+      - cuda/13.1  # (default); makes the CUDA-aware openmpi visible
+      - openmpi/5.0.9  # (default)
+      - hdf5/2.1.1  # (default for nvidia); libnetcdf links this build
+      - netcdf/4.10.1  # (default for nvidia); netCDF-C and netCDF-Fortran in one prefix
+    env:
+      # Each set by its module (2026-11-19).
+      MPIHOME: ${TACC_MPI_DIR}
+      # netcdf's lib/ is a symlink to lib64/, where the libraries are.
+      NETCDFHOME: ${TACC_NETCDF_DIR}
+      PATH: ${NETCDFHOME}/bin:${PATH}
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"  # ensure git works on distributed file-system, e.g. lustre
 
 scheduler:
   family: slurm
@@ -69,6 +94,9 @@ scheduler:
     - {name: skx-dev, kind: partition, query_name: qdevelopment, max_walltime: sacctmgr}
     - {name: icx, kind: partition, query_name: qicx, max_walltime: sacctmgr}
     - {name: spr, kind: partition, query_name: qspr, max_walltime: sacctmgr}
+    # The H100 nodes; qh100 caps a job at 2-00:00:00 and a user at 4 nodes
+    # (sacctmgr, 2026-11-19).
+    - {name: h100, kind: partition, query_name: qh100, max_walltime: sacctmgr}
   # TACC's submit filter refuses a job without -N ("please define total node
   # count with the "-N" option"; sbatch --test-only, 2026-11-17).
   requires_task_distribution: true
@@ -79,7 +107,17 @@ scheduler:
   # TACC's submit filter refuses a job with no partition ("all jobs must have
   # a queue name specified with "-p""). With a partition and no account, a job
   # is charged to the login's only project; a login in more than one project
-  # must name one. Give the account as TACC writes the project, in upper case
-  # (TG-ABC123456): the filter refuses the lower-case name `sacctmgr` lists
-  # ("Unknown project"). Checked with sbatch --test-only 2026-11-17.
+  # must name one. Checked with sbatch --test-only 2026-11-17.
   require: [queue]
+  # TACC writes projects in upper case (TG-ABC123456), and its submit filter
+  # refuses the lower-case name `sacctmgr` lists ("Unknown project").
+  upper_case_account: true
+  gpu_nodes:
+    # sinfo: 96 cores per node, 1 thread per core.
+    gpus_per_node: 4
+    queue: h100
+    cores_per_node: 96
+    # The nodes define no GRES, and TACC refuses --gpus-per-node ("Invalid
+    # generic resource (gres) specification"); the partition alone reaches the
+    # GPUs (sbatch --test-only, 2026-11-17).
+    request_gpus: false
