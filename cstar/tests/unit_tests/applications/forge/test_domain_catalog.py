@@ -1,14 +1,21 @@
 """Tests for DomainCatalog GitHub URL handling."""
 
+import functools
+import http.server
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import threading
+import urllib.request
 import warnings
+from collections.abc import Iterator
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
+import fsspec
 import pytest
 import yaml
 
@@ -19,6 +26,7 @@ from cstar.catalog.domain_catalog import (
     LayeredCatalog,
     _is_github_catalog_url,
     _parse_github_catalog_url,
+    default_catalog_stack,
     spec_entry_name,
     user_catalog_root,
 )
@@ -46,6 +54,10 @@ from cstar.catalog.domain_catalog import (
         (
             "git@github.com:CWorthy-ocean/cstar-forge.git",
             ("CWorthy-ocean", "cstar-forge", "main", Path(".")),
+        ),
+        (
+            "HTTPS://GitHub.com/CWorthy-ocean/cstar-forge/tree/main/Catalog",
+            ("CWorthy-ocean", "cstar-forge", "main", Path("Catalog")),
         ),
     ],
 )
@@ -1695,3 +1707,151 @@ class TestSpecLayout:
             with pytest.raises(FileExistsError, match="shared"):
                 layered.register_domain_from_dict(name, {"grid_name": name})
         assert not (top_root / "specs" / "DomainSpec").exists()
+
+
+_GITHUB_CATALOG = "https://github.com/CWorthy-ocean/cstar-forge/tree/main/cat"
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    """Static file handler that does not log requests."""
+
+    def log_message(self, format: str, *args: object) -> None:
+        """Stay silent."""
+
+
+@pytest.fixture
+def catalog_server(tmp_path: Path) -> Iterator[str]:
+    """Serve a copy of the bundled catalog over loopback http; yield its URL."""
+    served = tmp_path / "srv"
+    shutil.copytree(_DEFAULT_CATALOG_ROOT, served / "cat")
+    handler = functools.partial(_QuietHandler, directory=str(served))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/cat"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class TestCatalogUrlsFromTheEnvironment:
+    """`CSTAR_CATALOG` URLs are read whole, and a plain http store works."""
+
+    def test_stack_reads_a_github_url_as_one_read_only_store(
+        self, monkeypatch, tmp_path
+    ):
+        """A GitHub URL after a local entry is one read-only store, not split."""
+        local = tmp_path / "mine"
+        local.mkdir()
+        monkeypatch.setenv(
+            "CSTAR_CATALOG", os.pathsep.join([str(local), _GITHUB_CATALOG])
+        )
+        real_filesystem = fsspec.filesystem
+        calls: list[tuple] = []
+
+        def fake_filesystem(protocol, *args, **kwargs):
+            if protocol != "github":
+                return real_filesystem(protocol, *args, **kwargs)
+            calls.append((protocol, kwargs))
+            instance = mock.MagicMock()
+            instance.protocol = "github"
+            instance.exists = lambda _path: False
+            instance.ls = lambda _path, detail=False: []
+            instance.glob = lambda _pattern: []
+            return instance
+
+        with patch(
+            "cstar.catalog.domain_catalog.fsspec.filesystem",
+            side_effect=fake_filesystem,
+        ):
+            stack = default_catalog_stack()
+
+        assert [s.read_only for s in stack.stores] == [False, True, True]
+        assert stack.stores[0].catalog_root == local.resolve()
+        assert calls == [
+            ("github", dict(org="CWorthy-ocean", repo="cstar-forge", sha="main"))
+        ]
+        assert stack.stores[1].catalog_root == Path("cat")
+        assert stack.stores[2].catalog_root == _DEFAULT_CATALOG_ROOT.resolve()
+
+    @pytest.mark.parametrize(
+        ("url", "match"),
+        [
+            ("https://", "no host"),
+            ("http://:8080/cat", "no host"),
+            ("https://host/cat?token=abc", "query or fragment"),
+            ("https://host/cat#top", "query or fragment"),
+        ],
+    )
+    def test_http_store_refuses_a_url_it_cannot_serve(self, url, match):
+        """A URL with no host, or with a query or fragment, is refused up front."""
+        with pytest.raises(ValueError, match=match):
+            DomainCatalog(catalog_root=url, suppress_validation=True)
+
+    def test_user_catalog_root_refuses_a_url_first(self, monkeypatch):
+        """A URL cannot be the writable first entry."""
+        for url in ("https://github.com/o/r", "http://host:8080/cat"):
+            monkeypatch.setenv("CSTAR_CATALOG", url)
+            with pytest.raises(ValueError, match="URL"):
+                user_catalog_root()
+
+    def test_local_directory_named_like_http_is_a_writable_store(
+        self, monkeypatch, tmp_path
+    ):
+        """A directory called ``httpdocs`` is local, not a URL."""
+        (tmp_path / "httpdocs").mkdir()
+        monkeypatch.chdir(tmp_path)
+        for root in ("httpdocs", str(tmp_path / "httpdocs")):
+            cat = DomainCatalog(catalog_root=root, suppress_validation=True)
+            assert cat._is_local
+            assert cat.read_only is False
+            assert cat.catalog_root == (tmp_path / "httpdocs").resolve()
+
+    def test_http_store_matches_the_local_copy(self, catalog_server):
+        """An http store lists the same specs and blueprints as the files it serves."""
+        remote = DomainCatalog(catalog_root=catalog_server, suppress_validation=True)
+        local = DomainCatalog(
+            catalog_root=_DEFAULT_CATALOG_ROOT, suppress_validation=True
+        )
+
+        assert remote.read_only is True
+        assert not remote._is_local
+        assert remote.catalog_root == Path("cat")
+        assert remote.label == catalog_server
+        assert {k: sorted(v) for k, v in remote._specs.items()} == {
+            k: sorted(v) for k, v in local._specs.items()
+        }
+        assert {k: sorted(v) for k, v in remote._blueprints.items()} == {
+            k: sorted(v) for k, v in local._blueprints.items()
+        }
+
+    def test_http_store_file_urls_fetch_the_file(self, catalog_server):
+        """`_remote_file_url` gives the server's own URL for a blueprint."""
+        remote = DomainCatalog(catalog_root=catalog_server, suppress_validation=True)
+        application = sorted(remote._blueprints)[0]
+        name = sorted(remote._blueprints[application])[0]
+        path = remote._blueprints[application][name]
+
+        url = remote._remote_file_url(path)
+
+        assert url == f"{catalog_server.rsplit('/cat', 1)[0]}/{path.as_posix()}"
+        assert url.startswith(f"{catalog_server}/blueprints/")
+        local_file = _DEFAULT_CATALOG_ROOT / path.relative_to("cat")
+        with urllib.request.urlopen(url) as response:
+            assert response.read() == local_file.read_bytes()
+
+    def test_stack_reads_an_http_layer(self, monkeypatch, tmp_path, catalog_server):
+        """An http entry after a local one is a read-only layer that can be read."""
+        mine = tmp_path / "mine"
+        mine.mkdir()
+        monkeypatch.setenv(
+            "CSTAR_CATALOG", os.pathsep.join([str(mine), catalog_server])
+        )
+
+        stack = default_catalog_stack()
+
+        assert [s.read_only for s in stack.stores] == [False, True, True]
+        assert not stack.stores[1]._is_local
+        assert stack.domain_data("wio-toy")

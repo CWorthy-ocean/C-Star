@@ -33,9 +33,10 @@ toolchains:
     modules:
       - hpcx-mpi/2.25.1s  # site-recommended MPI (SLURM/PMIx integrated); its mpifort wraps the system gfortran 11.5
       # The netcdf-mpi bundle loads netCDF-C and netCDF-Fortran and sets NETCDF, which
-      # oscar.env uses for both prefixes. Oscar has two netcdf-c-mpi/4.9.3 builds, and
-      # the default is not the one the bundle loads alongside netcdf-fortran-mpi, so
-      # load the bundle rather than naming the two libraries.
+      # this toolchain's `env` uses for both prefixes (NETCDFHOME and NETCDFFHOME).
+      # Oscar has two netcdf-c-mpi/4.9.3 builds, and the default is not the one the
+      # bundle loads alongside netcdf-fortran-mpi, so load the bundle rather than
+      # naming the two libraries.
       - netcdf-mpi/4.9.3
       - parallel-netcdf-mpi/1.14.0  # for ParallelIO
     # Oscar (Brown CCV). Variable names from `module show` on the machine 2026-11-09.

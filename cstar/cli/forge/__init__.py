@@ -190,13 +190,16 @@ def run(
 ) -> None:
     """Process a forge blueprint with the full executor option set."""
     from cstar.applications.forge.runtime import run_blueprint
+    from cstar.catalog.domain_catalog import user_catalog_root
     from cstar.cli.common import exit_on_failure
     from cstar.system.manager import selected_system_name
 
-    # refuse a system C-Star cannot use (an unknown CSTAR_SYSTEM) in one line, as
-    # the other commands do, before any work; later failures keep their traceback
+    # refuse a system C-Star cannot use (an unknown CSTAR_SYSTEM), or a first
+    # CSTAR_CATALOG entry that is not a directory, in one line, as the other
+    # commands do, before any work; later failures keep their traceback
     with exit_on_failure():
         selected_system_name()
+        user_catalog_root()
     code = run_blueprint(
         forge_blueprint=forge_blueprint,
         no_data=no_data,
