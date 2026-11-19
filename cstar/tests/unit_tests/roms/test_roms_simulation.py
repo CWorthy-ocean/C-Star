@@ -1634,6 +1634,128 @@ class TestROMSSimulationInitialization:
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
     @mock.patch.object(
+        ROMSInitialConditions,
+        "path_for_roms_unpartitioned",
+        new_callable=mock.PropertyMock,
+    )
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(
+        ROMSModelGrid, "path_for_roms_unpartitioned", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    @pytest.mark.parametrize(
+        ("use_pio", "override", "env", "expected"),
+        [
+            (True, None, {"SLURM_TASKS_PER_NODE": "4,2"}, 4),
+            (True, 3, {"SLURM_TASKS_PER_NODE": "4,2"}, 3),
+            (False, None, {"SLURM_TASKS_PER_NODE": "4,2"}, None),
+            (True, None, None, 6),
+        ],
+        ids=["in-job", "explicit-kept", "non-pio-untouched", "outside-job"],
+    )
+    def test_pio_stride_filled_at_launch(
+        self,
+        mock_grid_path,
+        mock_grid_path_unpartitioned,
+        mock_ini_path,
+        mock_ini_path_unpartitioned,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+        monkeypatch,
+        use_pio,
+        override,
+        env,
+        expected,
+    ):
+        """An unset `pio_stride` becomes the most ranks on one node for a PIO
+        build; an explicit value and a non-PIO build are left alone.
+        """
+        for var in ("SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID", "SLURM_TASKS_PER_NODE"):
+            monkeypatch.delenv(var, raising=False)
+        if env is not None:
+            monkeypatch.setenv("SLURM_JOB_ID", "1")
+            for key, value in env.items():
+                monkeypatch.setenv(key, value)
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_13_0,
+            EXAMPLE_NAMELIST_V0_13_0,
+        )
+        assert sim.discretization.n_procs_tot == 6
+        mock_grid_path_unpartitioned.return_value = [Path("grid.nc")]
+        mock_ini_path_unpartitioned.return_value = [Path("fake_ini.nc")]
+        sim.use_pio = use_pio
+        sim.namelist_overrides = {"pio_settings": {"pio_stride": override}}
+
+        result = sim.roms_runtime_settings
+
+        assert result.pio_settings.pio_stride == expected
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions,
+        "path_for_roms_unpartitioned",
+        new_callable=mock.PropertyMock,
+    )
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(
+        ROMSModelGrid, "path_for_roms_unpartitioned", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_pio_stride_unreadable_placement_warns_and_uses_one(
+        self,
+        mock_grid_path,
+        mock_grid_path_unpartitioned,
+        mock_ini_path,
+        mock_ini_path_unpartitioned,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+        monkeypatch,
+    ):
+        """Inside a job whose placement C-Star cannot read, `pio_stride` is 1
+        with a warning rather than an error.
+        """
+        monkeypatch.delenv("SLURM_TASKS_PER_NODE", raising=False)
+        monkeypatch.delenv("SLURM_JOBID", raising=False)
+        monkeypatch.delenv("PBS_JOBID", raising=False)
+        monkeypatch.setenv("SLURM_JOB_ID", "1")
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_13_0,
+            EXAMPLE_NAMELIST_V0_13_0,
+        )
+        mock_grid_path_unpartitioned.return_value = [Path("grid.nc")]
+        mock_ini_path_unpartitioned.return_value = [Path("fake_ini.nc")]
+        sim.use_pio = True
+        sim.namelist_overrides = {"pio_settings": {"pio_stride": None}}
+
+        with pytest.warns(UserWarning, match="could not read how this job places"):
+            result = sim.roms_runtime_settings
+
+        assert result.pio_settings.pio_stride == 1
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
         ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
     )
     @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
