@@ -25,6 +25,7 @@ from cstar.tests.integration_tests.data_registry import (
     TEST_DATA_BASE_URL,
     fetch_all,
 )
+from cstar.tests.integration_tests.toolchain import require_tools
 
 if TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
@@ -253,3 +254,23 @@ def forge_blueprint_factory(
         return cfg, cfg.to_yaml(working_dir / "forge_blueprint.yaml")
 
     return _factory
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the ``requires_tools`` marker."""
+    config.addinivalue_line(
+        "markers",
+        "requires_tools(*names): skip (fail under CI) when a tool in "
+        "`cstar.tests.integration_tests.toolchain.TOOLS` is missing",
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Check a test's ``requires_tools`` tools before any fixture is set up.
+
+    Fixture setup downloads the pinned test data, which a runner that cannot run the
+    test should not fetch, and whose own failure would hide the missing tool.
+    """
+    for mark in item.iter_markers("requires_tools"):
+        require_tools(*mark.args)

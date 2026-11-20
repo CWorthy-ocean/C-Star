@@ -130,7 +130,6 @@ def finished_run(
     root = tmp_path_factory.mktemp("workplan_cd")
     workplan = write_workplan(root)
     env = make_cli_env(root, cstar_shim)
-    env.pop(ENV_CSTAR_LOG_LEVEL, None)
     state_home, data_home = root / "state", root / "data"
 
     proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
