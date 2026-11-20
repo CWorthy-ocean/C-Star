@@ -25,14 +25,19 @@ def pytest_configure(config):
     ``~/cstar/catalog``.
 
     ``network`` and ``slow`` are already registered globally in the repo's
-    ``pyproject.toml``; only ``real_template_staging`` and ``integration`` are
-    forge-specific.
+    ``pyproject.toml``; only ``real_template_staging``, ``real_time_coverage`` and
+    ``integration`` are forge-specific.
     """
     os.environ["CSTAR_CATALOG"] = tempfile.mkdtemp(prefix="cstar-forge-test-catalog-")
     config.addinivalue_line(
         "markers",
         "real_template_staging: keep ForgeExecutor._template_repo_args unpatched (test the "
         "real cfg->AdditionalCode-args mapping instead of the offline working-tree redirect)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "real_time_coverage: keep the input generator's time-coverage checks (they "
+        "open the written netCDF files, which most unit tests fake as empty files)",
     )
     config.addinivalue_line(
         "markers",
@@ -88,6 +93,25 @@ def _offline_template_staging(monkeypatch, request):
     monkeypatch.setattr(
         ForgeExecutor, "_verify_template_hashes", lambda self, stage, dest: None
     )
+
+
+@pytest.fixture(autouse=True)
+def _skip_time_coverage_checks(monkeypatch, request):
+    """Skip the input generator's checks of the written files' time axes.
+
+    Most generation tests mock roms-tools and hand the steps empty ``touch()``-ed
+    files as their outputs, which the checks cannot open. The checks have their own
+    tests on real netCDF files; opt back in with ``@pytest.mark.real_time_coverage``.
+    """
+    if request.node.get_closest_marker("real_time_coverage"):
+        return
+    from cstar.applications.forge import input_generator
+
+    monkeypatch.setattr(
+        input_generator, "check_forcing_covers_window", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(input_generator, "check_initial_time", lambda *a, **kw: None)
+    monkeypatch.setattr(input_generator, "restamp_initial_time", lambda *a, **kw: None)
 
 
 # No separate cache-home isolation fixture needed here: the repo-wide autouse
