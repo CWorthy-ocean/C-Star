@@ -49,8 +49,8 @@ Source names fall into four groups:
 
 Staged
    Has a handler in ``DATASET_REGISTRY``: downloaded (GLORYS, SRTM15, UNIFIED_BGC,
-   WOA_BGC, WOA_SALINITY, MBL_CO2) or checked for user-provided files (TPXO, WOA, GLODAP,
-   GLOFAS, RIVR2O, EMOD).
+   GLOFAS, WOA_BGC, WOA_SALINITY, MBL_CO2) or checked for user-provided files (TPXO, WOA,
+   GLODAP, RIVR2O, EMOD).
 Streamable
    ``STREAMABLE_SOURCES`` (ERA5, CONUS404, DAI, the default river CONSTANTS): read by
    ROMS-Tools at generation time and skipped by ``prepare_all()``.

@@ -102,8 +102,9 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
 # -----------------------------------------
 from cstar.applications.forge.source_registry import (  # noqa: E402,F401  (re-export)
     DERIVED_BGC_SOURCES,
-    GLOFAS_CDS_URL,
     GLOFAS_FILENAME,
+    GLOFAS_URL,
+    GLOFAS_VERSION,
     GLORYS_DATASET_ID,
     MBL_CO2_URL,
     SOURCE_ALIAS,
@@ -1020,47 +1021,58 @@ def _prepare_woa_salinity(self: SourceDatasets) -> Path:
 
 
 # ---------------------------
-# GLOFAS handler (user-provided dataset)
+# GLOFAS handler (Google Drive)
 # ---------------------------
 
 
 @register_dataset("GLOFAS")
 def _prepare_glofas(self: SourceDatasets) -> Path:
     """
-    Verify that the user has provided a preprocessed GloFAS v4.0 river discharge file.
+    Ensure the preprocessed GloFAS v4.0 river discharge file exists locally.
 
-    Unlike DAI (streamed automatically by roms-tools), GloFAS requires manual access
-    to the Copernicus Climate Data Store and preprocessing with the GloFAS
-    Large-scale Drainage Direction (LDD) algorithm to place river mouths on coastal
-    cells, so Forge cannot download or build it. This is a USER_DATASET, like TPXO/WOA:
-    the file must already exist at the expected location.
+    The raw GloFAS data (Copernicus Early Warning Data Store) needs preprocessing that
+    Forge does not do: river mouths placed on coastal cells with the GloFAS
+    Large-scale Drainage Direction (LDD) algorithm, plus per-station RivR2O river-BGC
+    concentrations. The prepared file is published on Google Drive, and this handler
+    downloads it from there, like UNIFIED_BGC.
 
-    Expected file: self.source_data_dir / "GLOFAS" / GLOFAS_FILENAME
+    Download if:
+      - the file does not exist, or
+      - clobber=True.
+
+    The file is stored at self.source_data_dir / "GLOFAS" / GLOFAS_FILENAME.
 
     Returns
     -------
     Path
         Path to the preprocessed GloFAS NetCDF file.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file is missing at the expected location.
     """
-    glofas_path = self.cache_root / "GLOFAS" / GLOFAS_FILENAME
+    dataset_dir = self.cache_root / "GLOFAS"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    path = dataset_dir / GLOFAS_FILENAME
+    needs_download = self.clobber or (not path.exists())
 
-    if not glofas_path.exists():
-        raise FileNotFoundError(
-            f"GloFAS river discharge dataset not found at: {glofas_path}\n"
-            "GloFAS v4.0 must be downloaded manually from the Copernicus Climate "
-            f"Data Store ({GLOFAS_CDS_URL}) and preprocessed with the GloFAS "
-            "Large-scale Drainage Direction (LDD) algorithm to place river mouths on "
-            f"coastal cells. Place the resulting file at {glofas_path}."
+    # The unversioned name users staged by hand before Forge downloaded this file.
+    old_file = dataset_dir / "glofas_v4_rivers_daily_w_rivr2o.nc"
+    if old_file.exists():
+        print(
+            f"ℹ️  The GloFAS file {old_file.name} (unversioned) is still cached at "
+            f"{dataset_dir} and is no longer used: Forge now stages "
+            f"{GLOFAS_FILENAME}. Delete the old file to reclaim the space."
         )
 
-    print(f"✔️  GloFAS dataset verified at: {glofas_path}")
-    self.paths["GLOFAS"] = glofas_path
-    return glofas_path
+    if needs_download:
+        if path.exists():
+            print(f"⚠️  Clobber=True: removing existing GloFAS file {path.name}")
+            path.unlink()
+
+        print(f"⬇️  Downloading GloFAS {GLOFAS_VERSION} river dataset → {path}")
+        gdown.download(GLOFAS_URL, str(path), quiet=False)
+    else:
+        print(f"✔️  Using existing GloFAS dataset: {path}")
+
+    self.paths["GLOFAS"] = path
+    return path
 
 
 # ---------------------------
@@ -1075,7 +1087,7 @@ def _prepare_emod(self: SourceDatasets) -> Path:
 
     Unlike ETOPO5 (fetched automatically by roms-tools at grid-build time), EMODnet
     has no roms-tools auto-download and no single canonical filename, so this is a
-    USER_DATASET, like TPXO/WOA/GLOFAS: the file must already exist at the expected
+    USER_DATASET, like TPXO/WOA: the file must already exist at the expected
     location.
 
     Expected location: self.source_data_dir / "EMOD" / "*.nc" (any NetCDF file;
@@ -1119,7 +1131,7 @@ def _prepare_rivr2o(self: SourceDatasets) -> Path:
     Verify that the user has provided RIVR2O river biogeochemistry export files.
 
     RIVR2O has no roms-tools auto-download (unlike the CONSTANTS river-BGC default,
-    which roms-tools downloads itself), so this is a USER_DATASET, like TPXO/WOA/GLOFAS:
+    which roms-tools downloads itself), so this is a USER_DATASET, like TPXO/WOA/EMOD:
     the files must already exist at the expected location. The product ships one
     NetCDF file per year (1903-2024); roms-tools accepts a wildcard pattern spanning
     multiple years.
