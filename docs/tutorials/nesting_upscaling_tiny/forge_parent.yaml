@@ -235,7 +235,7 @@ model_settings:
   bgc:
     nbgc_flx: 2
     interp_frc: 0
-    xco2air_default: 284.7
+    xco2air_default: 392.6
     wrt_his: false
     output_period_his: 86400
     nrpf_his: 1
@@ -543,7 +543,9 @@ composition:
     name: daily-restarts
     origin: catalog
     modified: true
-  overrides: {}
+  overrides:
+    bgc:
+      xco2air_default: 392.6
 provenance:
   generated_at: null
   generated_by: null
@@ -551,5 +553,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:6cf3725ba2504ee0b30298db6b0dd638b9cfee70b8e106bfae1515c408a329ff
+  content_hash: bp-v2:1076b37a68bbb900d9a594ebc20dba933ea3bb81e17c2da4ce3055982879da22
   notes: null

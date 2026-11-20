@@ -95,6 +95,21 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
+  - source:
+      name: MBL_co2
+      climatology: false
+      path: null
+    type: bgc
+    correct_radiation: false
+    coarse_grid_mode: never
+    restoring_forces: null
+    wind_dropoff: false
+    prefill: null
+    prefill_kwargs: null
+    regrid_method: null
+    extrap_method: null
+    extrap_kwargs: null
+    options: {}
   boundary:
     source:
       name: GLORYS
@@ -135,6 +150,11 @@ forcing:
       dataset_id: null
       url: null
       streamable: true
+    MBL_co2:
+      dataset_key: MBL_CO2
+      dataset_id: null
+      url: https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt
+      streamable: false
     ETOPO5:
       dataset_key: ETOPO5
       dataset_id: null
@@ -148,6 +168,7 @@ datasets:
 - ERA5
 - ETOPO5
 - GLORYS_REGIONAL
+- MBL_CO2
 - UNIFIED_BGC
 model_settings:
   cppdefs:
@@ -165,7 +186,7 @@ model_settings:
     cdr_forcing: false
     use_pio: true
     marbl: true
-    co2_tvarying: false
+    co2_tvarying: true
     sal_restore: false
     tides: false
   lateral_visc:
@@ -529,5 +550,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:eb32777d5297c59cd5c066174aa45c662630e3230263b1fd48b64da7ec2dfa09
+  content_hash: bp-v2:c11348ef4351331192926c58b771ce253216af792ccdcd4129d408aa6c641e9f
   notes: null
