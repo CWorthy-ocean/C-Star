@@ -80,6 +80,10 @@ sections:
     title: Atmospheric CO2
     desc: The air CO2 MARBL exchanges with the ocean, constant or from NOAA's marine boundary layer record.
     required: true
+  forcing.surface.sources:
+    title: Surface forcing sources
+    desc: The atmospheric, biogeochemical and restoring datasets that force the ocean surface.
+    required: true
   forcing.boundary.interpolation:
     title: Interpolation
     desc: How the source data is mapped onto the model grid.

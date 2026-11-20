@@ -3634,6 +3634,8 @@ class _ForcingEditor:
         )
         self.co2_mode.observe(self._on_co2_mode, names="value")
         self._sync_co2_mode()
+        # Heads the rows below the block, so the two read as separate parts.
+        self._surface_rows_header = components.subsection(W, "forcing.surface.sources")
 
     def _sync_co2_mode(self) -> None:
         static = self.co2_mode.value == _CO2_STATIC
@@ -4412,7 +4414,7 @@ class _ForcingEditor:
             extra = [self._sync_to_boundary_btn]
         elif cat == "boundary_bgc":
             extra = [self._sync_to_ic_btn]
-        lead = [self.co2_block] if cat == "surface" else []
+        lead = [self.co2_block, self._surface_rows_header] if cat == "surface" else []
         self._containers[cat].children = [*lead, *boxes, add, *extra]
 
     def clear_category(self, cat: str):
@@ -9352,6 +9354,8 @@ class ForgeBlueprintWizard:
                 summary = f"{name_w.value} · {loc}"
         else:
             names = [row["name"].value for row in fe._rows.get(cat, [])]
+            if cat == "surface" and self.bgc_dd.value == "marbl":
+                names.append(f"CO2 {fe.co2_mode.value}")
             summary = " · ".join(names) if names else "none"
         return summary[:60]
 

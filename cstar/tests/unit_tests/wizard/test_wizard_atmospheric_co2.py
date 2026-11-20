@@ -64,6 +64,7 @@ def test_a_spec_with_mbl_co2_loads_time_varying_in_its_own_place():
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is True
     assert not wiz._forcing_modified()
+    assert wiz._forcing_summary("surface") == "ERA5 · UNIFIED · WOA · CO2 time-varying"
 
 
 def test_bgc_rows_no_longer_offer_mbl_co2():
@@ -88,6 +89,7 @@ def test_a_spec_without_mbl_co2_loads_static_at_the_pre_industrial_default():
     assert "xco2air_default" not in wiz.editor._group_fields[_BGC_PANE].get("bgc", [])
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is False
+    assert wiz._forcing_summary("surface").endswith("CO2 static")
 
 
 def test_the_static_value_is_an_override_shown_as_a_forcing_change():
@@ -156,6 +158,7 @@ def test_only_marbl_shows_the_block_and_writes_mbl_co2():
     wiz.bgc_dd.value = "none"
     assert wiz._forcing_editor is editor
     assert not _shown(editor.co2_block)
+    assert "CO2" not in wiz._forcing_summary("surface")
     surface = wiz._gather()["forcing_inputs"]["forcing"]["surface"]
     assert "MBL_co2" not in [item["source"]["name"] for item in surface]
     assert editor.co2_mode.value == _CO2_TIME_VARYING
