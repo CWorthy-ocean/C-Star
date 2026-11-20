@@ -174,3 +174,24 @@ def test_shipped_blueprints_draw_no_resolver_warning(path: Path) -> None:
     """No shipped blueprint runs MARBL without BGC inputs on a release that allows it."""
     blueprint = ForgeBlueprint.from_yaml(path)
     assert resolver_warnings(blueprint, roms_ref=blueprint.code.roms.commit) == []
+
+
+def test_the_wizard_shows_the_zero_bgc_warning_in_its_status():
+    """The resolver only logs it, which a widget callback never shows."""
+    from datetime import date
+
+    from cstar.wizard.wizard import ForgeBlueprintWizard
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.13-default"
+    editor = wiz._forcing_editor
+    assert editor is not None
+    assert "no BGC sources" not in wiz.validation.value
+    for cat in ("ic_bgc", "boundary_bgc"):
+        for row in list(editor._rows[cat]):
+            row["_remove_btn"].click()
+    assert wiz.config is not None
+    assert "forge-banner warn" in wiz.validation.value
+    assert "have no BGC sources" in wiz.validation.value
