@@ -102,7 +102,6 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
 # -----------------------------------------
 from cstar.applications.forge.source_registry import (  # noqa: E402,F401  (re-export)
     DERIVED_BGC_SOURCES,
-    GLOFAS_CDS_URL,
     GLOFAS_FILENAME,
     GLOFAS_URL,
     GLOFAS_VERSION,
@@ -1053,16 +1052,14 @@ def _prepare_glofas(self: SourceDatasets) -> Path:
     path = dataset_dir / GLOFAS_FILENAME
     needs_download = self.clobber or (not path.exists())
 
-    # The unversioned name a user staged by hand before Forge downloaded this file.
-    for stale, label in (
-        (dataset_dir / "glofas_v4_rivers_daily_w_rivr2o.nc", "unversioned"),
-    ):
-        if stale.exists():
-            print(
-                f"ℹ️  The GloFAS file {stale.name} ({label}) is still cached at "
-                f"{dataset_dir} and is no longer used: Forge now stages "
-                f"{GLOFAS_FILENAME}. Delete the old file to reclaim the space."
-            )
+    # The unversioned name users staged by hand before Forge downloaded this file.
+    old_file = dataset_dir / "glofas_v4_rivers_daily_w_rivr2o.nc"
+    if old_file.exists():
+        print(
+            f"ℹ️  The GloFAS file {old_file.name} (unversioned) is still cached at "
+            f"{dataset_dir} and is no longer used: Forge now stages "
+            f"{GLOFAS_FILENAME}. Delete the old file to reclaim the space."
+        )
 
     if needs_download:
         if path.exists():

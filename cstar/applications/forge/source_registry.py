@@ -91,20 +91,12 @@ UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgd
 # download when the target path already exists, so an unversioned name would leave
 # every already-staged host silently on the old file.
 UNIFIED_BGC_FILENAME = f"BGCdataset_{UNIFIED_BGC_VERSION}.nc"
-GLOFAS_CDS_URL = "https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical"
-# GloFAS v4.0 daily river discharge, preprocessed (river mouths placed on coastal cells
-# with the GloFAS LDD algorithm) and enriched with precomputed per-station RivR2O
-# river-BGC concentrations (see roms-tools' Rivr2oBgcSource "total_discharge" mode).
-# The preprocessing is an external pipeline, not GloFAS/Forge itself; its output is
-# published on Google Drive, and Forge downloads it from there like UNIFIED_BGC.
-# GLOFAS_CDS_URL above is the upstream raw data, kept for error messages and provenance.
-# As with UNIFIED_BGC, upload a new file as a new version of the same Drive file so
-# the id is unchanged, then bump GLOFAS_VERSION (and add the superseded filename to
-# the stale list in ``_prepare_glofas``) so already-staged hosts re-download.
+# Preprocessed GloFAS v4.0 river discharge with per-station RivR2O river-BGC
+# concentrations (see roms-tools' Rivr2oBgcSource "total_discharge" mode). As with
+# UNIFIED_BGC, upload a new file as a new version of the same Drive file and bump
+# GLOFAS_VERSION; the versioned filename makes staged hosts re-download.
 GLOFAS_VERSION = "v1"
 GLOFAS_URL = "https://drive.google.com/uc?id=1WeDRCb3lfbJWmgiNMArRxQqTmowTvKF4"
-# Versioned for the same reason as UNIFIED_BGC_FILENAME: the handler reuses any file
-# already at this path.
 GLOFAS_FILENAME = f"glofas_v4_rivers_daily_w_rivr2o_{GLOFAS_VERSION}.nc"
 
 # --- logical source-name -> dataset key --------------------------------------
