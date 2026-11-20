@@ -283,7 +283,11 @@ def _unknown_keys(
     for key in keys:
         if not isinstance(key, str) or key in accepted or key.casefold() in spellings:
             continue
-        near = difflib.get_close_matches(key, sorted(accepted), n=1)
+        folded = {name.casefold(): name for name in sorted(accepted)}
+        near = [
+            folded[match]
+            for match in difflib.get_close_matches(key.casefold(), folded, n=1)
+        ]
         offenders.append(
             f"{prefix}{key}" + (f" (did you mean {prefix}{near[0]}?)" if near else "")
         )
@@ -2921,21 +2925,22 @@ def settings_support_problems(
     (:func:`check_pipe_forcing`) and tiles with no grid points
     (:func:`check_tile_sizes`). Each message is one list entry.
     """
-    cppdefs = settings.get("cppdefs") or {}
-    checks: tuple[Callable[[], None], ...] = (
-        lambda: check_settings_keys(settings, settings_cls),
-        lambda: check_pipe_forcing(settings.get("pipe_frc") or {}),
-        lambda: check_tile_sizes(
-            settings.get("param") or {},
-            auto_tiling=_flag_requested(cppdefs.get("auto_tiling")),
-        ),
-    )
     problems = []
-    for check in checks:
-        try:
-            check()
-        except ValueError as exc:
-            problems.append(str(exc))
+    try:
+        check_settings_keys(settings, settings_cls)
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
+        check_pipe_forcing(settings.get("pipe_frc") or {})
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
+        auto_tiling = (settings.get("cppdefs") or {}).get("auto_tiling")
+        check_tile_sizes(
+            settings.get("param") or {}, auto_tiling=_flag_requested(auto_tiling)
+        )
+    except ValueError as exc:
+        problems.append(str(exc))
     return problems
 
 
