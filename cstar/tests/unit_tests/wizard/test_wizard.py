@@ -52,10 +52,13 @@ from cstar.wizard.wizard import (
     WIZARD_TOOL,
     ForgeBlueprintWizard,
     _applies_in,
+    _base_type,
     _drain_stream_buffer,
     _ForcingEditor,
     _in_output_card,
+    _is_optional_numeric,
     _is_output_key,
+    _make_field_widget,
     _namelist_tooltip,
     _output_placement,
     _section_submodel,
@@ -3650,6 +3653,49 @@ def test_settings_editor_skips_version_gated_section_not_in_active_schema():
     )
     assert "Physics & subgrid tuning" not in pio_only_editor._pane_sections
     assert pio_only_editor._widgets == {}
+
+
+def test_settings_editor_optional_pio_stride_is_a_blank_able_text_box():
+    """``pio_stride`` is ``int | None`` (None: one I/O task per node at launch), so
+    it gets a text box that shows ``None`` as blank and reads blank back as ``None``.
+    """
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W, {"pio_settings": {"pio_stride": None}}, settings_cls=RunTimeSettingsV0_6_0
+    )
+    widget, _base = editor._widgets[("pio_settings", "pio_stride")]
+    assert isinstance(widget, W.Text)
+    assert widget.value == ""
+    assert editor.read("pio_settings", "pio_stride") is None
+
+    widget.value = "  "
+    assert editor.read("pio_settings", "pio_stride") is None
+    widget.value = "128"
+    assert editor.read("pio_settings", "pio_stride") == 128
+    assert isinstance(editor.read("pio_settings", "pio_stride"), int)
+    widget.value = "abc"
+    assert editor.read("pio_settings", "pio_stride") == "abc"
+
+    editor.sync({"pio_settings": {"pio_stride": 4}})
+    assert widget.value == "4"
+    editor.sync({"pio_settings": {"pio_stride": None}})
+    assert widget.value == ""
+
+
+def test_non_optional_int_field_keeps_number_box():
+    """Only ``Optional[int]`` / ``Optional[float]`` get the blank-able box; a union
+    of several types keeps following the field's value (``list[str] | str``).
+    """
+    import ipywidgets as W
+
+    assert isinstance(_make_field_widget(W, "n", int, 3), W.IntText)
+    assert not _is_optional_numeric(int)
+    assert _is_optional_numeric(int | None)
+    assert _is_optional_numeric(float | None)
+    assert not _is_optional_numeric(str | None)
+    assert _base_type(list[str] | str, "all") is str
+    assert _base_type(list[str] | str, ["PH"]) is list
 
 
 def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():

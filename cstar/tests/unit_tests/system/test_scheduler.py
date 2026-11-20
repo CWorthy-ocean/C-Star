@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -16,6 +17,7 @@ from cstar.system.scheduler import (
     query_max_cpus_per_node_via_sinfo,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
+    ranks_per_node,
     slurm_job_id,
 )
 
@@ -832,3 +834,46 @@ def test_slurm_job_id(environ: dict[str, str], expected: str) -> None:
 def test_in_scheduler_job(environ: dict[str, str], expected: bool) -> None:
     """Verify a SLURM or PBS job id marks a job, and an empty or absent one does not."""
     assert in_scheduler_job(environ) is expected
+
+
+@pytest.mark.parametrize(
+    ("environ", "n_ranks", "expected"),
+    [
+        ({}, 512, 512),
+        ({"SLURM_JOB_ID": "1", "SLURM_TASKS_PER_NODE": "128(x4)"}, 512, 128),
+        ({"SLURM_JOB_ID": "1", "SLURM_TASKS_PER_NODE": "128(x3),72"}, 456, 128),
+        ({"SLURM_JOB_ID": "1", "SLURM_TASKS_PER_NODE": "64"}, 64, 64),
+        ({"SLURM_JOB_ID": "1", "SLURM_TASKS_PER_NODE": "1(x4)"}, 512, 128),
+        ({"SLURM_JOB_ID": "1", "SLURM_TASKS_PER_NODE": "abc"}, 512, None),
+        ({"SLURM_JOB_ID": "1"}, 512, None),
+    ],
+    ids=[
+        "no-job",
+        "slurm-uniform",
+        "slurm-uneven-last-node",
+        "slurm-single-node",
+        "slurm-counts-miss-ranks",
+        "slurm-garbage",
+        "slurm-no-placement",
+    ],
+)
+def test_ranks_per_node(
+    environ: dict[str, str], n_ranks: int, expected: int | None
+) -> None:
+    """Verify the fullest node's rank count is read from the scheduler, or None."""
+    assert ranks_per_node(environ, n_ranks) == expected
+
+
+def test_ranks_per_node_pbs(tmp_path: Path) -> None:
+    """Verify PBS slots are counted per host from `PBS_NODEFILE`."""
+    nodefile = tmp_path / "nodes"
+    nodefile.write_text("n1\n" * 128 + "n2\n" * 72)
+    environ = {"PBS_JOBID": "1.server", "PBS_NODEFILE": str(nodefile)}
+    assert ranks_per_node(environ, 200) == 128
+
+
+def test_ranks_per_node_pbs_without_readable_nodefile(tmp_path: Path) -> None:
+    """Verify a missing variable or file reads as an unknown placement."""
+    assert ranks_per_node({"PBS_JOBID": "1.server"}, 8) is None
+    missing = {"PBS_JOBID": "1.server", "PBS_NODEFILE": str(tmp_path / "absent")}
+    assert ranks_per_node(missing, 8) is None

@@ -782,6 +782,15 @@ def test_pio_stride_zero_rejected():
         RunTimeSettingsV0_6_0.model_validate(bad)
 
 
+def test_pio_stride_none_accepted_and_default_is_one():
+    ok = _populated_rt_dict()
+    ok["pio_settings"] = {"pio_stride": None}
+    assert RunTimeSettingsV0_6_0.model_validate(ok).pio_settings.pio_stride is None
+    unset = _populated_rt_dict()
+    unset["pio_settings"] = {}
+    assert RunTimeSettingsV0_6_0.model_validate(unset).pio_settings.pio_stride == 1
+
+
 def test_rst_period_not_divisible_by_dt_rejected():
     bad = _populated_rt_dict()
     bad["time_stepping"]["dt"] = 100.0
