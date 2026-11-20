@@ -7597,7 +7597,9 @@ class TestForgeBlueprintWizard:
         bgc_pane = group_fields["Biogeochemistry (BGC / MARBL)"]["bgc"]
         bgc_output = group_fields[_OUTPUT_CARD]["bgc"]
         assert "wrt_his" in bgc_output and "wrt_his" not in bgc_pane
-        assert "xco2air_default" in bgc_pane and "xco2air_default" not in bgc_output
+        assert "xco2air_default" not in bgc_pane and "xco2air_default" not in bgc_output
+        # The constant xCO2 sits in the Forcing card's "Atmospheric CO2" block.
+        assert group_fields["Forcing"]["bgc"] == ["xco2air_default"]
         # A bgc physics field and a bgc output field each got a widget (neither half
         # was dropped by the split).
         assert ("bgc", "xco2air_default") in w.editor._widgets  # physics

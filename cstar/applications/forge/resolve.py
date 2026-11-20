@@ -118,7 +118,7 @@ from cstar.roms.precheck import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Sequence
     from datetime import datetime
 
     from cstar.roms.outputs import CarbonateSensitivityFile
@@ -1687,68 +1687,30 @@ def build_forge_blueprint(
         provenance=provenance if provenance is not None else ForgeProvenance(),
     )
     _warn_user_files_need_pio_conversion(bp, use_pio)
-    user_set = {
-        (section, field)
-        for section, fields in current_run_time_overrides.items()
-        for field in (fields if isinstance(fields, dict) else (None,))
-    }
-    for message in resolver_warnings(
-        bp, user_set=user_set, roms_ref=effective_roms_ref
-    ):
+    for message in resolver_warnings(bp, roms_ref=effective_roms_ref):
         log.warning(message)
     return bp
 
 
-_XCO2AIR = ("bgc", "xco2air_default")
-"""The setting MARBL takes atmospheric CO2 from when no ``MBL_co2`` item forces it."""
-
-
-def resolver_warnings(
-    cfg: ForgeBlueprint,
-    *,
-    user_set: Collection[tuple[str, str | None]],
-    roms_ref: str | None,
-) -> list[str]:
+def resolver_warnings(cfg: ForgeBlueprint, *, roms_ref: str | None) -> list[str]:
     """What a resolved blueprint will run with that its author likely did not mean and
-    nothing refuses, one message for each.
+    nothing refuses, one message for each: today a MARBL run without BGC sources on a
+    ucla-roms release that runs it anyway
+    (:func:`~cstar.applications.forge.namelist_model.zero_bgc_inputs_warning`).
 
-    - MARBL with a constant atmospheric CO2 nobody chose: the forcing has no
-      ``MBL_co2`` surface item (``cppdefs.co2_tvarying`` is off) and
-      ``bgc.xco2air_default`` is still the ModelSpec's value, which the bundled
-      ModelSpecs set to the pre-industrial 284.7 ppm. A value the user set, 284.7
-      included, is a choice (a pre-industrial control) and draws no warning.
-    - MARBL without BGC sources on a ucla-roms release that runs it anyway
-      (:func:`~cstar.applications.forge.namelist_model.zero_bgc_inputs_warning`).
-
-    ``user_set`` holds the ``(section, field)`` run-time settings the user set over the
-    composed specs (``field`` is ``None`` for a scalar section).
-    ``build_forge_blueprint`` passes its ``run_time_overrides`` and logs each message. The wizard applies its own overrides
-    after resolving, so it calls this again on the result, with those, and shows the
-    messages in its validation banner.
+    ``build_forge_blueprint`` logs each message. The wizard calls this on the config
+    it shows and puts the messages in its validation banner, where a log line from a
+    widget callback would not be seen.
     """
-    messages: list[str] = []
-    settings = cfg.model_settings
-    cppdefs = settings.get("cppdefs") or {}
-    marbl = bool(cppdefs.get("marbl"))
-    if marbl and not cppdefs.get("co2_tvarying") and _XCO2AIR not in user_set:
-        section, field = _XCO2AIR
-        value = (settings.get(section) or {}).get(field)
-        messages.append(
-            f"MARBL holds atmospheric CO2 at {section}.{field} = {value} ppm, the "
-            "ModelSpec's default, because the forcing has no MBL_co2 surface item. "
-            "Add a bgc surface item with source MBL_co2 for the observed CO2 of the "
-            f"run's dates, or set {section}.{field} to the value you mean, which "
-            "silences this warning."
-        )
-    if message := zero_bgc_inputs_warning(
+    cppdefs = cfg.model_settings.get("cppdefs") or {}
+    message = zero_bgc_inputs_warning(
         cfg.forcing,
         open_boundaries=cfg.domain.open_boundaries.model_dump(),
         is_child=cfg.domain.is_child,
-        marbl=marbl,
+        marbl=bool(cppdefs.get("marbl")),
         roms_ref=roms_ref,
-    ):
-        messages.append(message)
-    return messages
+    )
+    return [message] if message else []
 
 
 def _build_forcing(

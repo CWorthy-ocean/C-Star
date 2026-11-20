@@ -1,9 +1,7 @@
 """The resolver's warnings: what a blueprint would run with that nothing refuses.
 
-``resolver_warnings`` names two of these: MARBL forced with a constant atmospheric CO2
-nobody chose (the ModelSpec's pre-industrial ``bgc.xco2air_default``, with no
-``MBL_co2`` item), and MARBL without BGC sources on a ucla-roms release that starts the
-run anyway with those tracers at zero. ``build_forge_blueprint`` logs each once.
+``resolver_warnings`` names MARBL without BGC sources on a ucla-roms release that starts
+the run anyway with those tracers at zero; ``build_forge_blueprint`` logs it once.
 """
 
 import copy
@@ -80,98 +78,11 @@ def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
-def _without_mbl_co2(forcing: dict[str, t.Any]) -> dict[str, t.Any]:
-    forcing = copy.deepcopy(forcing)
-    surface = forcing["forcing"]["surface"]
-    forcing["forcing"]["surface"] = [
-        item for item in surface if item["source"]["name"] != "MBL_co2"
-    ]
-    assert len(forcing["forcing"]["surface"]) == len(surface) - 1
-    return forcing
-
-
 def _without_bgc_sources(forcing: dict[str, t.Any]) -> dict[str, t.Any]:
     forcing = copy.deepcopy(forcing)
     forcing["initial_conditions"]["bgc_sources"] = []
     forcing["forcing"]["boundary"]["bgc_sources"] = []
     return forcing
-
-
-class TestPreindustrialCo2Warning:
-    """MARBL without an ``MBL_co2`` item and with the ModelSpec's ``xco2air_default``."""
-
-    def test_the_demo_forcing_carries_co2_and_draws_no_warning(self, caplog):
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            cfg = _resolve()
-        assert cfg.model_settings["cppdefs"]["co2_tvarying"] is True
-        assert _logged(caplog) == []
-
-    def test_resolving_wio_toy_simple_reproduces_it_without_a_warning(self, caplog):
-        """The bundled blueprint resolves from its own composition to the same forcing,
-        with CO2 forced from MBL_co2, and draws no warning.
-        """
-        stored = ForgeBlueprint.from_yaml(
-            _BUNDLED / "blueprints" / "forge" / "wio-toy-simple.yaml"
-        )
-        comp = stored.composition
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            cfg = build_forge_blueprint(
-                model_path=_CATALOG.model_path(comp.model.name),
-                grid_name=stored.domain.grid_name,
-                grid_kwargs=stored.domain.grid_kwargs,
-                open_boundaries=stored.domain.open_boundaries.model_dump(),
-                partitioning={
-                    "n_procs_x": stored.domain.partitioning.n_procs_x,
-                    "n_procs_y": stored.domain.partitioning.n_procs_y,
-                },
-                start_date=stored.run.start_date,
-                end_date=stored.run.end_date,
-                dt=stored.domain.dt,
-                forcing_inputs=_CATALOG.forcing_data(comp.forcing.name),
-                output_settings=_CATALOG.output_data(comp.output.name),
-            )
-        assert cfg.model_settings["cppdefs"]["co2_tvarying"] is True
-        assert cfg.forcing == stored.forcing
-        assert cfg.datasets == stored.datasets
-        assert _logged(caplog) == []
-
-    def test_marbl_without_mbl_co2_warns_once_naming_both_fixes(self, caplog):
-        forcing = _without_mbl_co2(_CATALOG.forcing_data("simple-bgc-demo"))
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            cfg = _resolve(forcing=forcing)
-        assert cfg.model_settings["cppdefs"]["co2_tvarying"] is False
-        assert cfg.model_settings["bgc"]["xco2air_default"] == 284.7
-        (message,) = _logged(caplog)
-        assert "bgc.xco2air_default = 284.7 ppm" in message
-        assert "no MBL_co2 surface item" in message
-        assert "source MBL_co2" in message
-        assert "set bgc.xco2air_default" in message
-
-    @pytest.mark.parametrize("value", [284.7, 392.6])
-    def test_a_value_the_user_set_draws_no_warning(self, caplog, value):
-        """Any value the user sets is a choice, the pre-industrial one included."""
-        forcing = _without_mbl_co2(_CATALOG.forcing_data("simple-bgc-demo"))
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            cfg = _resolve(
-                forcing=forcing,
-                run_time_overrides={"bgc": {"xco2air_default": value}},
-            )
-        assert cfg.model_settings["bgc"]["xco2air_default"] == value
-        assert _logged(caplog) == []
-
-    def test_an_override_of_another_bgc_setting_still_warns(self, caplog):
-        forcing = _without_mbl_co2(_CATALOG.forcing_data("simple-bgc-demo"))
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            _resolve(forcing=forcing, run_time_overrides={"bgc": {"nbgc_flx": 2}})
-        assert len(_logged(caplog)) == 1
-
-    def test_no_warning_without_marbl(self, caplog):
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            cfg = _resolve(
-                forcing=_CATALOG.forcing_data("glorys-era5-physics"), bgc_mode="none"
-            )
-        assert cfg.model_settings["cppdefs"]["marbl"] is False
-        assert _logged(caplog) == []
 
 
 class TestZeroBgcInputsWarning:
@@ -260,18 +171,6 @@ def _shipped_forge_blueprints() -> list[Path]:
 
 @pytest.mark.parametrize("path", _shipped_forge_blueprints(), ids=lambda p: p.name)
 def test_shipped_blueprints_draw_no_resolver_warning(path: Path) -> None:
-    """No shipped blueprint runs MARBL at the ModelSpec's pre-industrial CO2 or without
-    BGC inputs; a value a file sets on purpose is recorded in ``composition.overrides``.
-    """
+    """No shipped blueprint runs MARBL without BGC inputs on a release that allows it."""
     blueprint = ForgeBlueprint.from_yaml(path)
-    user_set = {
-        (section, field)
-        for section, fields in blueprint.composition.overrides.items()
-        for field in (fields if isinstance(fields, dict) else (None,))
-    }
-    assert (
-        resolver_warnings(
-            blueprint, user_set=user_set, roms_ref=blueprint.code.roms.commit
-        )
-        == []
-    )
+    assert resolver_warnings(blueprint, roms_ref=blueprint.code.roms.commit) == []

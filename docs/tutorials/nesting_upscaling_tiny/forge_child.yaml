@@ -192,7 +192,7 @@ model_settings:
   bgc:
     nbgc_flx: 2
     interp_frc: 0
-    xco2air_default: 392.6
+    xco2air_default: 284.7
     wrt_his: false
     output_period_his: 86400
     nrpf_his: 1
@@ -510,8 +510,6 @@ composition:
   overrides:
     v_sponge:
       v_sponge_trc: 0.0
-    bgc:
-      xco2air_default: 392.6
 provenance:
   generated_at: null
   generated_by: null
@@ -519,5 +517,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:1a6be1fec082135f86386c74aff6604623fb6aff9543888c153c1d12b6e1feb4
+  content_hash: bp-v2:a89980cda7aef8b64340a22184999cd3935d3168d42ad024532f7d63a5624da3
   notes: null

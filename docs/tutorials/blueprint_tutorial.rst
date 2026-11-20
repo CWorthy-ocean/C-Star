@@ -19,8 +19,8 @@ Before you start
 
 This tutorial leaves out tides and rivers, so there is nothing else to
 register for. The first run downloads the source data it needs into a cache:
-a few hundred megabytes of GLORYS ocean state, a 2 MB record of atmospheric
-CO2, plus the 10 GB biogeochemistry climatology, which takes a while on a slow connection. Later
+a few hundred megabytes of GLORYS ocean state, plus the 10 GB
+biogeochemistry climatology, which takes a while on a slow connection. Later
 runs of this or any other domain reuse the cache.
 
 1. Build a forge blueprint with the wizard
