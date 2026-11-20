@@ -56,6 +56,28 @@ def is_foreign_handle(handle: "ProcessHandle", launcher_name: str) -> bool:
     return bool(handle.launcher_name) and handle.launcher_name != launcher_name
 
 
+def foreign_location(handle: "ProcessHandle", launcher_name: str) -> str:
+    """Describe where an attempt runs when another launcher created it.
+
+    Parameters
+    ----------
+    handle : ProcessHandle
+        The handle read from a persisted sentinel.
+    launcher_name : str
+        The name of the launcher asking.
+
+    Returns
+    -------
+    str
+        `under the <launcher> launcher (job <pid>)` for a foreign handle (see
+        `is_foreign_handle`), which `launcher_name` can neither query nor
+        cancel; empty otherwise.
+    """
+    if not is_foreign_handle(handle, launcher_name):
+        return ""
+    return f"under the {handle.launcher_name} launcher (job {handle.pid})"
+
+
 def prior_of_this_run(
     handle: "_THandle | None",
     run_uuid: str,
@@ -133,7 +155,7 @@ def resolve_prior_attempt(
     prior_status: Status,
     *,
     prior_pre_run: bool = False,
-    prior_foreign: bool = False,
+    prior_untracked: str = "",
     replaced_dependency: bool = False,
 ) -> bool:
     """Decide whether a step's persisted prior handle should be reused.
@@ -150,9 +172,11 @@ def resolve_prior_attempt(
         The freshly-queried status of the step's persisted prior handle.
     prior_pre_run : bool
         Whether the prior attempt ran in pre-run mode (`ProcessHandle.pre_run`).
-    prior_foreign : bool
-        Whether the prior handle was created by another launcher (see
-        `is_foreign_handle`), so its `prior_status` is only the persisted one.
+    prior_untracked : str
+        Where the prior attempt runs when this launch can neither query nor
+        cancel it, so its `prior_status` is only the persisted one: under
+        another launcher (see `foreign_location`), or as a local process on
+        another host. Empty when this launch can track it.
     replaced_dependency : bool
         Whether a dependency was submitted after the prior attempt (see
         `waits_on_replaced_dependency`). A prior attempt still queued then
@@ -171,21 +195,21 @@ def resolve_prior_attempt(
     ------
     CstarExpectationFailed
         If the prior attempt is still in progress and this launch cannot
-        track it, unless the step is clobbered. That is the case when it was
-        created by another launcher, or when it is a pre-run and this launch
-        is a real run (adopting it would report the step done without the
-        model ever launching).
+        track it, unless the step is clobbered. That is the case when
+        `prior_untracked` says where it runs, or when it is a pre-run and this
+        launch is a real run (adopting it would report the step done without
+        the model ever launching).
     """
     reuse: bool
 
     untrackable_pre_run = prior_pre_run and not step.pre_run
-    if Status.is_in_progress(prior_status) and (prior_foreign or untrackable_pre_run):
+    if Status.is_in_progress(prior_status) and (prior_untracked or untrackable_pre_run):
         if not step.clobber:
-            if prior_foreign:
+            if prior_untracked:
                 msg = (
                     f"Step {step.name!r} has an attempt still {prior_status.name} "
-                    f"under another launcher; wait for it to finish, or re-run "
-                    f"with {ARG_CLOBBER} to start over."
+                    f"{prior_untracked}, which this launch cannot track; wait for "
+                    f"it to finish, or re-run with {ARG_CLOBBER} to start over."
                 )
             else:
                 msg = (
@@ -253,15 +277,17 @@ async def cancel_prior_attempt(
     launcher: "type[Launcher[_THandle]]",
     step: "LiveStep",
     handle: _THandle,
+    *,
+    untracked: str,
 ) -> None:
     """Cancel a step's prior attempt that is still in progress, before it is replaced.
 
     Submitting the step again without this leaves two jobs sharing its working
     directory, or a queued job that runs the step's old definition. The step is
     submitted only once the attempt has ended, so the replacement cannot clear
-    the directory under it. An attempt created by another launcher cannot be
-    cancelled by `launcher` (a local pid is no SLURM job id, and vice versa); it
-    is named in a warning and left alone.
+    the directory under it. An attempt `launcher` cannot cancel (one created by
+    another launcher, as a local pid is no SLURM job id and vice versa, or a
+    local process on another host) is named in a warning and left alone.
 
     Parameters
     ----------
@@ -271,6 +297,10 @@ async def cancel_prior_attempt(
         The step whose attempt is replaced.
     handle : ProcessHandle
         The handle of the prior attempt, read from the step's sentinel.
+    untracked : str
+        Where the attempt runs when `launcher` cannot cancel it (see
+        `resolve_prior_attempt`); empty when it can. Required, so no caller
+        cancels an attempt it cannot track by leaving it out.
 
     Raises
     ------
@@ -278,15 +308,14 @@ async def cancel_prior_attempt(
         If the attempt could not be cancelled, or did not end within
         `CANCEL_TIMEOUT` seconds of being cancelled.
     """
-    if is_foreign_handle(handle, launcher.name):
+    if untracked:
         log.warning(
-            "Step %r has an attempt still %s under the %s launcher (job %s), "
-            "which the %s launcher cannot cancel; stop it yourself, as the step "
-            "is submitted again beside it.",
+            "Step %r has an attempt still %s %s, which the %s launcher cannot "
+            "cancel from here; stop it yourself, as the step is submitted again "
+            "beside it.",
             step.name,
             handle.status.name,
-            handle.launcher_name,
-            handle.pid,
+            untracked,
             launcher.name,
         )
         return

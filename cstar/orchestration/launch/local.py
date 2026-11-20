@@ -4,6 +4,7 @@ import datetime
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import time
 import typing as t
@@ -29,6 +30,7 @@ from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     cancel_prior_attempt,
+    foreign_location,
     is_foreign_handle,
     prior_of_this_run,
     resolve_prior_attempt,
@@ -95,6 +97,11 @@ def _still_running(processes: "Sequence[PsProcess]", timeout: float) -> list[PsP
     return alive
 
 
+def _short_host_name(host: str) -> str:
+    """Return a host name without its domain, in lower case."""
+    return host.split(".", 1)[0].casefold()
+
+
 def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
     with log_file.open("w+") as log:
         p = sprun(args=cmd, text=True, check=True, stdout=log, stderr=log)
@@ -108,6 +115,10 @@ class LocalHandle(ProcessHandle):
     """The process creation time as a posix timestamp (in seconds).
 
     `None` only on a handle deserialized from another launcher's sentinel."""
+
+    host: str = Field(default="")
+    """The host the process runs on; empty on a sentinel written before hosts
+    were recorded, or by another launcher."""
 
     _process: subprocess.Popen[bytes] = PrivateAttr()
     """The process handle (used only for simulating local processes)."""
@@ -126,6 +137,19 @@ class LocalHandle(ProcessHandle):
         if isinstance(self.start_at, datetime.datetime):
             return self.start_at.timestamp()
         return self.start_at
+
+    @property
+    def on_this_host(self) -> bool:
+        """Whether the process runs on this host, where it can be looked up.
+
+        A handle holding its process (started by this process) does, and one
+        with no recorded host is taken to, as before hosts were recorded. Hosts
+        are compared by short name, so a domain that changes with the network
+        (`.local`, `.lan`) does not move a process to another host.
+        """
+        if not self.is_expired or not self.host:
+            return True
+        return _short_host_name(self.host) == _short_host_name(socket.gethostname())
 
     @property
     def elapsed(self) -> float:
@@ -501,6 +525,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     run_id=run_id,
                     launcher_name=LocalLauncher.name,
                     start_at=create_time,
+                    host=socket.gethostname(),
                     status=Status.Submitted,
                     pre_run=step.pre_run,
                     submitted_at=submitted_at,
@@ -521,7 +546,8 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         The creation time is compared with the recorded `start_at` so a
         recycled PID belonging to an unrelated process is not mistaken for
-        the step.
+        the step. A process on another host is never looked up: a process
+        here with the same PID is not the step's.
 
         Parameters
         ----------
@@ -531,8 +557,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         Returns
         -------
         PsProcess | None
-            The step's proxy process, or `None` when it has exited.
+            The step's proxy process, or `None` when it has exited or runs on
+            another host.
         """
+        if not handle.on_this_host:
+            return None
         try:
             process = PsProcess(int(handle.pid))
             if process.status() == STATUS_ZOMBIE:
@@ -667,6 +696,9 @@ class LocalLauncher(Launcher[LocalHandle]):
     async def _status(handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
+        A step running on another host cannot be looked up from here, so its
+        recorded status is reported, never a failure.
+
         Parameters
         ----------
         handle : LocalHandle
@@ -684,6 +716,14 @@ class LocalLauncher(Launcher[LocalHandle]):
             # step killed before finalizing its sentinel is re-run, not adopted
             if Status.is_terminal(handle.status):
                 return LocalLauncher._terminal_status(handle.status)
+            if not handle.on_this_host:
+                log.warning(
+                    f"Step {handle.name!r} runs on {handle.host} as process "
+                    f"{handle.pid}, which cannot be checked from "
+                    f"{socket.gethostname()}; showing its recorded status "
+                    f"({handle.status.name})."
+                )
+                return "RUNNING" if Status.is_running(handle.status) else "PENDING"
             if LocalLauncher._is_alive(handle):
                 # the proxy records Running once its dependencies are done
                 return "RUNNING" if Status.is_running(handle.status) else "PENDING"
@@ -744,10 +784,12 @@ class LocalLauncher(Launcher[LocalHandle]):
         Raises
         ------
         CstarError
-            If a dependency was created by another launcher or run: a local
-            process cannot wait on it.
+            If a dependency was created by another launcher or run, or is in
+            progress on another host: a local process cannot wait on it.
         CstarExpectationFailed
-            If a dependency failed, or a prior attempt still in progress is
+            If a dependency failed, a prior attempt is still in progress
+            under another launcher or on another host (see
+            `resolve_prior_attempt`), or a prior attempt still in progress is
             replaced and cannot be cancelled (see `cancel_prior_attempt`).
         """
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
@@ -761,6 +803,18 @@ class LocalLauncher(Launcher[LocalHandle]):
                 f"Step {step.name!r} cannot wait on {names}: the local launcher "
                 "cannot wait on a step of another run, so external steps must "
                 "be Done"
+            )
+            raise CstarError(msg)
+
+        if elsewhere := [
+            h
+            for h in dependencies
+            if not h.on_this_host and not Status.is_terminal(h.status)
+        ]:
+            names = ", ".join(f"{h.name!r} (on {h.host})" for h in elsewhere)
+            msg = (
+                f"Step {step.name!r} cannot wait on {names}: a local process "
+                "cannot wait on a step running on another host"
             )
             raise CstarError(msg)
 
@@ -785,17 +839,26 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if prior_handle:
             last_status = await LocalLauncher.query_status(prior_handle)
+            # an attempt under another launcher, or a process on another host,
+            # can be neither checked nor stopped from here
+            untracked = foreign_location(prior_handle, cls.name) or (
+                ""
+                if prior_handle.on_this_host
+                else f"on {prior_handle.host} (process {prior_handle.pid})"
+            )
             reuse_prior = resolve_prior_attempt(
                 live_step,
                 last_status,
                 prior_pre_run=prior_handle.pre_run,
-                prior_foreign=is_foreign_handle(prior_handle, cls.name),
+                prior_untracked=untracked,
                 replaced_dependency=waits_on_replaced_dependency(
                     prior_handle, dependencies
                 ),
             )
             if not reuse_prior and Status.is_in_progress(last_status):
-                await cancel_prior_attempt(cls, live_step, prior_handle)
+                await cancel_prior_attempt(
+                    cls, live_step, prior_handle, untracked=untracked
+                )
 
         if reuse_prior and prior_handle:
             handle = prior_handle
