@@ -41,7 +41,8 @@ _REGENERATE_HINT = (
 )
 
 
-def _as_paths(paths: str | Path | Iterable[str | Path]) -> list[Path]:
+def as_paths(paths: str | Path | Iterable[str | Path]) -> list[Path]:
+    """One path or several (as roms-tools' ``save`` returns them), as a list."""
     if isinstance(paths, (str, Path)):
         return [Path(paths)]
     return [Path(p) for p in paths]
@@ -119,7 +120,7 @@ def check_forcing_covers_window(
     ValueError
         If a time variable starts after ``start`` or ends before ``end``.
     """
-    files = _as_paths(paths)
+    files = as_paths(paths)
     pooled: dict[str, list[tuple[float, float] | None]] = defaultdict(list)
     for path in files:
         for name, span in _time_spans(path).items():
@@ -155,12 +156,38 @@ def check_forcing_covers_window(
         )
 
 
+def _ocean_time(nc: netCDF4.Dataset, path: Path) -> tuple[netCDF4.Variable, float]:
+    """An initial-conditions file's ``ocean_time`` and its seconds per unit.
+
+    Raises
+    ------
+    ValueError
+        If the file has no ``ocean_time``, or it is not in units ROMS reads.
+    """
+    if _INITIAL_TIME not in nc.variables:
+        raise ValueError(
+            f"{path.name}: no {_INITIAL_TIME!r} variable, which ROMS takes its start "
+            "time from."
+        )
+    var = nc.variables[_INITIAL_TIME]
+    units = getattr(var, "units", None)
+    scale = _SECONDS_PER_UNIT.get(str(units))
+    if scale is None:
+        raise ValueError(
+            f"{path.name}: {_INITIAL_TIME!r} is in units {units!r}, not "
+            f"{' or '.join(_SECONDS_PER_UNIT)}, so Forge cannot tell when it starts "
+            "the model."
+        )
+    var.set_auto_mask(False)
+    return var, scale
+
+
 def initial_time(path: str | Path, reference: datetime) -> datetime:
     """The time an initial-conditions file starts the model at (its ``ocean_time``)."""
+    path = Path(path)
     with netCDF4.Dataset(path) as nc:
-        var = nc.variables[_INITIAL_TIME]
-        var.set_auto_mask(False)
-        seconds = float(var[0]) * _SECONDS_PER_UNIT[var.units]
+        var, scale = _ocean_time(nc, path)
+        seconds = float(var[0]) * scale
     return _stamp(reference, seconds)
 
 
@@ -174,7 +201,7 @@ def check_initial_time(
     ValueError
         If an initial-conditions file's ``ocean_time`` is not ``start``.
     """
-    for path in _as_paths(paths):
+    for path in as_paths(paths):
         actual = initial_time(path, reference)
         if abs((actual - start).total_seconds()) > _TOLERANCE_S:
             raise ValueError(
@@ -204,11 +231,10 @@ def restamp_initial_time(
         The source record's time, or ``None`` when the file already starts at
         ``start`` and was left untouched.
     """
+    path = Path(path)
     target = (start - reference).total_seconds()
     with netCDF4.Dataset(path, "r+") as nc:
-        var = nc.variables[_INITIAL_TIME]
-        var.set_auto_mask(False)
-        scale = _SECONDS_PER_UNIT[var.units]
+        var, scale = _ocean_time(nc, path)
         seconds = float(var[0]) * scale
         if abs(seconds - target) <= _TOLERANCE_S:
             return None

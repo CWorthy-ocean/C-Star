@@ -199,6 +199,16 @@ class TestInitialTime:
         ):
             check_initial_time([path], start=START, reference=REF)
 
+    def test_an_ocean_time_in_other_units_is_refused(self, tmp_path: Path) -> None:
+        """Units ROMS does not read fail with a message, not a ``KeyError``."""
+        path = _write_ic(tmp_path / "ic.nc", START)
+        with netCDF4.Dataset(path, "r+") as nc:
+            nc["ocean_time"].units = "hours"
+        with pytest.raises(ValueError, match=r"'ocean_time' is in units 'hours'"):
+            check_initial_time(path, start=START, reference=REF)
+        with pytest.raises(ValueError, match=r"'ocean_time' is in units 'hours'"):
+            restamp_initial_time(path, start=START, reference=REF)
+
 
 class TestRestampInitialTime:
     def test_a_later_record_is_stamped_at_the_start(self, tmp_path: Path) -> None:

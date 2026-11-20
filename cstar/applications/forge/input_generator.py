@@ -42,6 +42,7 @@ from cstar.applications.forge.namelist_model import (
 )
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.time_coverage import (
+    as_paths,
     check_forcing_covers_window,
     check_initial_time,
     restamp_initial_time,
@@ -2032,7 +2033,7 @@ class RomsInputGenerator(InputGenerator):
         file share the requested window. Runs on roms-tools' netCDF-4 output, before
         ``_pio_finalize`` converts it.
         """
-        for path in saved if isinstance(saved, (list, tuple)) else [saved]:
+        for path in as_paths(saved):
             record = restamp_initial_time(
                 path, start=self.start_date, reference=self._time_reference()
             )
