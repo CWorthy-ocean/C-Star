@@ -313,6 +313,35 @@ async def test_dag_runner_load_run_state_keeps_status_finalized_during_read(
     assert dag_status.details[handle.name] == Status.Done
 
 
+@pytest.mark.asyncio
+async def test_dag_runner_load_run_state_keeps_a_step_running_on_another_host(
+    layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    mock_run_id: str,
+) -> None:
+    """Verify a step running on another host, whose process this host cannot
+    see, is shown with its recorded status and its sentinel is not overwritten
+    with Failed, which would have a resume run the step again beside itself.
+    """
+    _, handles = layered_workplan
+    handle = next(iter(handles.values()))
+    handle.status = Status.Running
+    handle.host = "login01"
+    await StateRepository().put_sentinel(handle)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.local.socket.gethostname",
+            return_value="login03",
+        ),
+        mock.patch.object(LocalLauncher, "_is_alive", return_value=False),
+    ):
+        dag_status = await load_run_state(mock_run_id, LocalLauncher(), persist=True)
+
+    on_disk = deserialize(StateRepository.sentinel_path(handle), LocalHandle)
+    assert on_disk.status == Status.Running
+    assert dag_status.details[handle.name] == Status.Running
+
+
 @pytest.mark.parametrize(
     ("closed_indices", "open_indices"),
     [

@@ -40,6 +40,9 @@ from cstar.orchestration.state import StateRepository
 WHICH = "cstar.orchestration.launch.local.shutil.which"
 """Where the timeout executable is looked up."""
 
+HOSTNAME = "cstar.orchestration.launch.local.socket.gethostname"
+"""Where the local launcher looks up the host it runs on."""
+
 T0 = datetime.datetime(2026, 10, 15, 12, 0, tzinfo=datetime.UTC)
 """When the prior attempt of the re-entry tests was submitted."""
 
@@ -946,6 +949,125 @@ def test_is_alive_matches_pid_and_start_time(mock_run_id: str) -> None:
         assert LocalLauncher._is_alive(handle) is False
 
 
+@pytest.mark.parametrize(
+    ("recorded", "current", "live", "expected"),
+    [
+        pytest.param("login01", "login01", False, True, id="same"),
+        pytest.param("", "login03", False, True, id="not_recorded"),
+        pytest.param("login01", "login03", False, False, id="another"),
+        pytest.param("Mac.local", "mac.lan", False, True, id="domain_changed"),
+        pytest.param("login01.a.edu", "login03.a.edu", False, False, id="another_fqdn"),
+        pytest.param("Mac.local", "other-name", True, True, id="started_here"),
+    ],
+)
+def test_localhandle_on_this_host(
+    mock_run_id: str, recorded: str, current: str, live: bool, expected: bool
+) -> None:
+    """A handle is on this host when its short host name matches, has none
+    recorded, or holds the process this one started, whatever the host is
+    called now.
+    """
+    handle = _expired_handle(mock_run_id)
+    handle.host = recorded
+    if live:
+        handle.process = mock.Mock()
+
+    with mock.patch(HOSTNAME, return_value=current):
+        assert handle.on_this_host is expected
+
+
+@pytest.mark.parametrize(
+    "recorded_host",
+    [
+        pytest.param("login01", id="same_host"),
+        pytest.param("", id="host_not_recorded"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("persisted", "alive", "expected"),
+    [
+        pytest.param(Status.Running, True, "RUNNING", id="alive"),
+        pytest.param(Status.Submitted, True, "PENDING", id="queued"),
+        pytest.param(Status.Running, False, "FAILED", id="gone"),
+    ],
+)
+async def test_status_of_a_step_on_this_host_checks_its_process(
+    mock_run_id: str,
+    recorded_host: str,
+    persisted: Status,
+    alive: bool,
+    expected: str,
+) -> None:
+    """A step recorded on this host, or with no host (a sentinel written before
+    hosts were recorded), is looked up, and fails once its process is gone.
+    """
+    handle = _expired_handle(mock_run_id, status=persisted)
+    handle.host = recorded_host
+
+    with (
+        mock.patch(HOSTNAME, return_value="login01"),
+        mock.patch.object(LocalLauncher, "_is_alive", return_value=alive) as is_alive,
+    ):
+        assert await LocalLauncher._status(handle) == expected
+
+    is_alive.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("persisted", "expected"),
+    [
+        pytest.param(Status.Submitted, "PENDING", id="queued"),
+        pytest.param(Status.Running, "RUNNING", id="running"),
+        pytest.param(Status.Done, "COMPLETED", id="done"),
+        pytest.param(Status.Failed, "FAILED", id="failed"),
+    ],
+)
+async def test_status_of_a_step_on_another_host_is_its_recorded_one(
+    mock_run_id: str,
+    persisted: Status,
+    expected: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A step on another host cannot be looked up here, and a process here with
+    its pid is not the step's: its recorded status is reported, never a failure
+    made up from a process this host cannot see, and one still in progress is
+    named in a warning.
+    """
+    handle = _expired_handle(mock_run_id, status=persisted)
+    handle.host = "login01"
+
+    with (
+        mock.patch(HOSTNAME, return_value="login03"),
+        mock.patch("cstar.orchestration.launch.local.PsProcess") as ps_process,
+    ):
+        assert await LocalLauncher._status(handle) == expected
+
+    ps_process.assert_not_called()
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    if Status.is_terminal(persisted):
+        assert warnings == []
+    else:
+        assert len(warnings) == 1
+        assert "login01" in warnings[0]
+        assert "login03" in warnings[0]
+
+
+async def test_update_status_of_a_step_on_another_host_changes_nothing(
+    mock_run_id: str,
+) -> None:
+    """Verify a status read on another host than the step's reports no change,
+    so nothing is written over the step's sentinel.
+    """
+    handle = _expired_handle(mock_run_id, status=Status.Running)
+    handle.host = "login01"
+
+    with mock.patch(HOSTNAME, return_value="login03"):
+        changed, updated = await LocalLauncher.update_status(handle)
+
+    assert not changed
+    assert updated.status == Status.Running
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 async def test_locallauncher_launch_clobbers_failed_slurm_sentinel_for_pre_run(
     wp_templates_dir: Path,
@@ -1012,7 +1134,7 @@ async def test_locallauncher_launch_refuses_running_slurm_sentinel(
 
     with (
         mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit,
-        pytest.raises(CstarExpectationFailed, match="another launcher"),
+        pytest.raises(CstarExpectationFailed, match="under the slurm launcher"),
     ):
         await LocalLauncher.launch(live_step, [], run_uuid="")
 
@@ -1547,3 +1669,155 @@ def test_proxy_script_announces_each_dependency_once(
     assert proxy.returncode == 0
     assert "sleep 0.2" in script
     assert out.count(f"Awaiting process {dep_process.pid}") == 1
+
+
+def test_locallauncher_terminate_leaves_a_process_of_another_host_alone(
+    process_tree: tuple[subprocess.Popen[bytes], int], mock_run_id: str
+) -> None:
+    """Verify a handle recorded on another host is neither looked up nor
+    stopped, even when a process here has its pid and start time: that process
+    is not the step's.
+    """
+    shell, sleeper = process_tree
+    handle = _handle_of(shell, mock_run_id)
+    handle.host = "login01"
+
+    with mock.patch(HOSTNAME, return_value="login03"):
+        assert LocalLauncher._process_of(handle) is None
+        assert LocalLauncher._terminate(handle) is False
+
+    assert shell.poll() is None
+    assert not _is_gone(sleeper)
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_records_the_host(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the submitted handle records the host its process runs on, and
+    that it survives the sentinel.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+
+    with (
+        mock.patch.object(subprocess, "Popen", return_value=mock.Mock(pid=777777)),
+        mock.patch(HOSTNAME, return_value="login01"),
+    ):
+        handle = await LocalLauncher._submit(live_step, [])
+
+    assert handle.host == "login01"
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, LocalHandle)
+    assert reloaded is not None
+    assert reloaded.host == "login01"
+
+
+@pytest.mark.parametrize("persisted", [Status.Submitted, Status.Running])
+async def test_locallauncher_launch_refuses_an_attempt_in_progress_on_another_host(
+    single_step: LiveStep, mock_run_id: str, persisted: Status
+) -> None:
+    """Verify a step still in progress on another host is neither adopted (its
+    dependents would wait on a pid this host cannot see) nor run again beside
+    it, and the refusal names the host.
+    """
+    prior = _expired_handle(mock_run_id, status=persisted)
+    prior.name = single_step.name
+    prior.host = "login01"
+    await StateRepository().put_sentinel(prior)
+
+    with (
+        mock.patch(HOSTNAME, return_value="login03"),
+        mock.patch.object(LocalLauncher, "_terminate") as terminate,
+        mock.patch.object(subprocess, "Popen") as popen,
+        pytest.raises(CstarExpectationFailed, match=r"on login01 \(process 12345\)"),
+    ):
+        await LocalLauncher.launch(single_step, [], run_uuid="")
+
+    terminate.assert_not_called()
+    popen.assert_not_called()
+
+
+async def test_locallauncher_launch_clobbered_step_starts_over_beside_another_host(
+    single_step: LiveStep, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a clobbered step still running on another host, which this host
+    can neither check nor stop, is submitted again here, with a warning to stop
+    the other one.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    prior = _expired_handle(mock_run_id)
+    prior.name = single_step.name
+    prior.host = "login01"
+    await StateRepository().put_sentinel(prior)
+
+    with (
+        mock.patch(HOSTNAME, return_value="login03"),
+        mock.patch.object(LocalLauncher, "_terminate") as terminate,
+        mock.patch.object(subprocess, "Popen", return_value=mock.Mock(pid=999999)),
+    ):
+        task = await LocalLauncher.launch(single_step, [], run_uuid="")
+
+    terminate.assert_not_called()
+    assert task.handle.pid == "999999"
+    assert task.handle.host == "login03"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any(
+        "on login01 (process 12345)" in w and "stop it yourself" in w for w in warnings
+    )
+
+
+async def test_locallauncher_launch_adopts_an_attempt_finished_on_another_host(
+    single_step: LiveStep, mock_run_id: str
+) -> None:
+    """Verify a step that finished on another host is adopted: its outcome is
+    recorded on the shared file system.
+    """
+    prior = _expired_handle(mock_run_id, status=Status.Done)
+    prior.name = single_step.name
+    prior.host = "login01"
+    await StateRepository().put_sentinel(prior)
+
+    with (
+        mock.patch(HOSTNAME, return_value="login03"),
+        mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit,
+    ):
+        task = await LocalLauncher.launch(single_step, [], run_uuid="")
+
+    mock_submit.assert_not_awaited()
+    assert task.handle.status == Status.Done
+
+
+@pytest.mark.parametrize(
+    ("status", "refused"),
+    [
+        pytest.param(Status.Submitted, True, id="queued"),
+        pytest.param(Status.Running, True, id="running"),
+        pytest.param(Status.Done, False, id="done"),
+    ],
+)
+async def test_locallauncher_launch_waits_only_on_dependencies_of_this_host(
+    single_step: LiveStep, mock_run_id: str, status: Status, refused: bool
+) -> None:
+    """Verify a dependency in progress on another host is refused, as the step's
+    process could not wait on it, while one finished there is accepted.
+    """
+    dependency = _expired_handle(mock_run_id, status=status)
+    dependency.name = "outer"
+    dependency.host = "login01"
+    submitted = LocalHandle(pid="777", name=single_step.name, run_id=mock_run_id)
+
+    with (
+        mock.patch(HOSTNAME, return_value="login03"),
+        mock.patch.object(
+            LocalLauncher, "_submit", mock.AsyncMock(return_value=submitted)
+        ) as mock_submit,
+        pytest.raises(CstarError, match="'outer' \\(on login01\\)")
+        if refused
+        else contextlib.nullcontext(),
+    ):
+        await LocalLauncher.launch(single_step, [dependency], run_uuid="")
+
+    assert mock_submit.await_count == (0 if refused else 1)
