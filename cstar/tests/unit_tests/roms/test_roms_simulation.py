@@ -3924,8 +3924,9 @@ class TestProcessingAndExecution:
 
 class TestOutputCadenceChecks:
     """Output periods and the MARBL step against `dt`, and a run that writes
-    nothing (Rules H, I and K of `cstar.roms.precheck`): refused before `build()`
-    at the end of `setup()`, and before every launch by `_check_runtime_settings`.
+    nothing (Rules H, I and K of `cstar.roms.precheck`): refused in `setup()` once
+    the runtime code is staged, before the inputs are staged and before `build()`,
+    and before every launch by `_check_runtime_settings`.
     The stub runs 2025-01-01 to 2025-12-31; the 0.15.0 fixture has `dt` 2160 s
     and daily restarts.
     """
@@ -3962,7 +3963,7 @@ class TestOutputCadenceChecks:
         ],
         ids=["his-off-dt", "writes-nothing"],
     )
-    def test_setup_refuses_before_build(
+    def test_setup_refuses_before_staging_inputs(
         self,
         mock_externalcodebase_setup,
         mock_additionalcode_get,
@@ -3985,6 +3986,7 @@ class TestOutputCadenceChecks:
             pytest.raises(NamelistConsistencyError, match=match),
         ):
             sim.setup()
+        mock_inputdataset_get.assert_not_called()
         mock_build.assert_not_called()
 
     @mock.patch.object(ROMSSimulation, "build")
@@ -4013,6 +4015,8 @@ class TestOutputCadenceChecks:
             caplog.at_level(logging.WARNING),
         ):
             sim.setup()
+        # the stub has inputs to stage, which the refusals above never reach
+        mock_inputdataset_get.assert_called()
         # the drift warning is left to the launch-time check
         assert not any("cdr_lite" in r.getMessage() for r in caplog.records)
 

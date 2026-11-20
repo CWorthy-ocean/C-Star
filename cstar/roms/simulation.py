@@ -1313,8 +1313,11 @@ class ROMSSimulation(Simulation):
         return messages
 
     def _validate_output_settings(self) -> None:
-        """Run `_check_output_settings` before `build()`, so that output settings
-        ucla-roms refuses at start-up do not cost a compile.
+        """Run `_check_output_settings` in `setup()` once the compile-time and
+        runtime code are staged, so that output settings ucla-roms refuses at
+        start-up cost neither the input staging nor the compile. (It runs after
+        the codebases are set up: a commit-hash pin selects its namelist schema
+        through the staged ucla-roms clone.)
 
         Reads the namelist file with `namelist_overrides` and `ntimes` applied;
         warnings are left to `roms_runtime_settings`, which runs the same rules on
@@ -1875,7 +1878,9 @@ class ROMSSimulation(Simulation):
         The method performs the following steps:
         1. Configures the ROMS and MARBL external codebases.
         2. Fetches and organizes compile-time code.
-        3. Fetches and organizes runtime code (e.g., namelists).
+        3. Fetches and organizes runtime code (e.g., namelists), then checks the
+           output settings against ucla-roms' start-up rules
+           (`_validate_output_settings`).
         4. Fetches and prepares input datasets.
 
         Parameters
@@ -1947,6 +1952,10 @@ class ROMSSimulation(Simulation):
         if self.runtime_code is not None:
             self.runtime_code.get(runtime_code_dir)
 
+        # The output rules read only the namelist, its overrides, `cppdefs.opt`
+        # and the dates: refuse before the inputs are staged.
+        self._validate_output_settings()
+
         # InputDatasets
         self.log.info("📦 Fetching input datasets...")
         for inp, name in staging_names:
@@ -1957,7 +1966,6 @@ class ROMSSimulation(Simulation):
         # Everything the check reads is staged now: fail before `build()` compiles.
         self._validate_carbonate_sensitivity_inputs()
         self._validate_river_count()
-        self._validate_output_settings()
 
     @property
     def is_setup(self) -> bool:
