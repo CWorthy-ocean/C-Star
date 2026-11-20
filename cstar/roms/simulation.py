@@ -838,19 +838,30 @@ class ROMSSimulation(Simulation):
         only piece 0 (all pieces carry the same records). A remote source is
         never read.
         """
-        source = (
-            inp.partitioned_source.sources[0] if inp.source_partitioning else inp.source
-        )
+        source = self._first_source(inp)
         location = source.location
         if location not in self._file_times_memo:
-            local = (
-                source.classification is SourceClassification.LOCAL_BINARY_FILE
-                and Path(location).is_file()
-            )
-            self._file_times_memo[location] = (
-                read_file_times(Path(location)) if local else None
-            )
+            if source.classification is not SourceClassification.LOCAL_BINARY_FILE:
+                return None  # remote sources are never read
+            if not Path(location).is_file():
+                # e.g. an upstream step's output not written yet: ask again later
+                return None
+            self._file_times_memo[location] = read_file_times(Path(location))
         return self._file_times_memo[location]
+
+    @staticmethod
+    def _first_source(inp: ROMSInputDataset) -> SourceData:
+        return (
+            inp.partitioned_source.sources[0] if inp.source_partitioning else inp.source
+        )
+
+    def _awaits_local_file(self, inp: ROMSInputDataset) -> bool:
+        """Whether a dataset's local source file does not exist yet."""
+        source = self._first_source(inp)
+        return (
+            source.classification is SourceClassification.LOCAL_BINARY_FILE
+            and not Path(source.location).is_file()
+        )
 
     def _roms_start(self) -> datetime | None:
         """Return the model time ROMS starts from.
@@ -894,6 +905,10 @@ class ROMSSimulation(Simulation):
         ]
         roms_start = self._roms_start() or self.start_date
         start = min(self.start_date, roms_start)
+        # The end is `end_date` (plus the restart offset), not R + ntimes*dt: this
+        # runs before the runtime code (namelist, dt) is fetched, and
+        # ntimes*dt <= end_date - start_date, so `end_date` bounds ROMS's last
+        # request. `_validate_forcing_coverage` uses the exact window.
         end = (
             None
             if self._ntimes_overridden()
@@ -908,9 +923,8 @@ class ROMSSimulation(Simulation):
         if self._window_memo is not None and self._window_memo[0] == key:
             return self._window_memo[1]
 
-        keep = files_in_window(
-            [self._dataset_file_times(inp) for inp in candidates], start, end
-        )
+        file_times = [self._dataset_file_times(inp) for inp in candidates]
+        keep = files_in_window(file_times, start, end)
         end_text = "the end of the forcing" if end is None else f"{end:%Y-%m-%d %H:%M}"
         dropped: set[int] = set()
         for label in dict.fromkeys(inp.label for inp in candidates):
@@ -933,21 +947,25 @@ class ROMSSimulation(Simulation):
                 + ", ".join(inp.source.location for inp in lost)
             )
         result = frozenset(dropped)
-        self._window_memo = (key, result)
+        # a file not written yet may change the answer: do not remember it
+        if not any(self._awaits_local_file(inp) for inp in candidates):
+            self._window_memo = (key, result)
         return result
 
-    def _stages_input(self, inp: ROMSInputDataset) -> bool:
-        """Whether this simulation stages an input dataset.
+    def _staged_inputs(self) -> list[ROMSInputDataset]:
+        """Return the input datasets this simulation stages.
 
         This is the one gate every consumer uses (`setup`, `attach`,
-        `is_setup`, the namelist's forcing paths): the dataset overlaps the
-        simulation's dates and, if it is forcing, holds records ROMS reads in
-        the run window.
+        `is_setup`, the namelist's forcing paths): a dataset overlapping the
+        simulation's dates that, if it is forcing, holds records ROMS reads in
+        the run window. Call it once per consumer, not per dataset.
         """
-        return (
-            self._overlaps_simulation_dates(inp)
-            and id(inp) not in self._forcing_outside_window()
-        )
+        outside = self._forcing_outside_window()
+        return [
+            inp
+            for inp in self.input_datasets
+            if self._overlaps_simulation_dates(inp) and id(inp) not in outside
+        ]
 
     @property
     def _forcing_paths(self) -> list[Path]:
@@ -973,8 +991,9 @@ class ROMSSimulation(Simulation):
         """
         forcing_paths: list[Path] = []
 
+        staged = {id(i) for i in self._staged_inputs()}
         for forcing in self._forcing_datasets:
-            if not self._stages_input(forcing):
+            if id(forcing) not in staged:
                 continue
             paths = (
                 forcing.path_for_roms_unpartitioned
@@ -1802,7 +1821,7 @@ class ROMSSimulation(Simulation):
             If any name is shared by inputs that cannot be staged side by side;
             every such name is reported.
         """
-        staged = [inp for inp in self.input_datasets if self._stages_input(inp)]
+        staged = self._staged_inputs()
 
         def names_of(inp: ROMSInputDataset) -> list[str]:
             if inp.source_partitioning:
@@ -1996,7 +2015,7 @@ class ROMSSimulation(Simulation):
         - The MARBL external codebase is correctly configured (if applicable).
         - Runtime code (e.g., namelists) exists locally.
         - Compile-time code (e.g., build scripts) exists locally.
-        - Input datasets the simulation stages (see `_stages_input`) exist locally.
+        - Input datasets the simulation stages (see `_staged_inputs`) exist locally.
 
         Returns
         -------
@@ -2012,7 +2031,7 @@ class ROMSSimulation(Simulation):
         Notes
         -----
         - If this method returns `False`, `setup()` should be called.
-        - Input datasets are only required if `_stages_input` selects them: their
+        - Input datasets are only required if `_staged_inputs` selects them: their
           date range overlaps the simulation's and, for forcing, they hold records
           ROMS reads in the run window.
 
@@ -2032,10 +2051,9 @@ class ROMSSimulation(Simulation):
             not self.compile_time_code.exists_locally
         ):
             return False
-        for inp in self.input_datasets:
-            # a dataset that is not staged for this run need not exist locally
-            if not inp.exists_locally and self._stages_input(inp):
-                return False
+        # a dataset that is not staged for this run need not exist locally
+        if any(not inp.exists_locally for inp in self._staged_inputs()):
+            return False
         return True
 
     def _overlaps_simulation_dates(self, inp: ROMSInputDataset) -> bool:
@@ -2168,9 +2186,7 @@ class ROMSSimulation(Simulation):
             # Still check every other input under its own name, so the report is
             # complete; the recorded problem stops the resume either way.
             problems.append(str(e))
-            staging_names = [
-                (inp, "") for inp in self.input_datasets if self._stages_input(inp)
-            ]
+            staging_names = [(inp, "") for inp in self._staged_inputs()]
 
         for inp, name in staging_names:
             try:
@@ -3062,17 +3078,22 @@ class ROMSSimulation(Simulation):
             shown = ", ".join(span.variables[:4])
             if len(span.variables) > 4:
                 shown += f" and {len(span.variables) - 4} more"
-            why = []
-            if span.first > start:
-                why.append(
-                    "starts after the run starts (ROMS stops at its first step: "
-                    "'First available forcing record is past current time')"
-                )
-            if span.last < end:
-                why.append(
-                    "ends before the run ends (ROMS stops at its last step, "
-                    "after the whole run: 'Ran out of time records')"
-                )
+            late = (
+                "starts after the run starts (ROMS stops at its first step: "
+                "'First available forcing record is past current time')"
+            )
+            early = (
+                "ends before the run ends (ROMS stops at its last step, "
+                "after the whole run: 'Ran out of time records')"
+            )
+            why = [
+                t for t, on in ((late, span.late_start), (early, span.early_end)) if on
+            ]
+            if not why:
+                why = [
+                    "starts after the run starts or ends before it ends, depending "
+                    "on which time variable ROMS reads it against"
+                ]
             bullets.append(
                 f"- {labels} {names(span.files)}, variables {shown}, hold records "
                 f"from {span.first:%Y-%m-%d %H:%M} to {span.last:%Y-%m-%d %H:%M}: "

@@ -201,15 +201,35 @@ class TestFilesInWindowTimeVariables:
 class TestUncoveredVariables:
     """Detecting variables whose files miss the window."""
 
+    def test_one_covering_time_variable_is_enough(self) -> None:
+        """`time` covers the window although `rad_time` ends 30 min early."""
+        half = timedelta(minutes=30)
+        f = FileTimes(
+            frozenset({"v"}),
+            {"time": (d(0), d(20)), "rad_time": (d(0) - half, d(20) - half)},
+            False,
+        )
+        assert uncovered_variables([f], ["s"], d(0), d(20)) == []
+
+    def test_mixed_shortfall_is_refused_without_flags(self) -> None:
+        """Each time variable falls short on a different side: refuse, no side named."""
+        f = FileTimes(
+            frozenset({"v"}),
+            {"a": (d(5), d(30)), "b": (d(0), d(10))},
+            False,
+        )
+        got = uncovered_variables([f], ["s"], d(0), d(20))
+        assert got == [UncoveredSpan((0,), ("v",), d(0), d(30), False, False)]
+
     def test_refused_at_start(self) -> None:
         """First record after the start is reported."""
         got = uncovered_variables([ft(5, 30, "a")], ["s"], d(0), d(20))
-        assert got == [UncoveredSpan((0,), ("a",), d(5), d(30))]
+        assert got == [UncoveredSpan((0,), ("a",), d(5), d(30), True, False)]
 
     def test_refused_at_end(self) -> None:
         """Last record before the end is reported."""
         got = uncovered_variables([ft(0, 10, "a")], ["s"], d(0), d(20))
-        assert got == [UncoveredSpan((0,), ("a",), d(0), d(10))]
+        assert got == [UncoveredSpan((0,), ("a",), d(0), d(10), False, True)]
 
     def test_exact_edges_pass(self) -> None:
         """Records on the window edges, or within one second, pass."""
@@ -237,7 +257,7 @@ class TestUncoveredVariables:
     def test_grouping(self) -> None:
         """Variables sharing files and span are one entry."""
         got = uncovered_variables([ft(5, 6, "b", "a")], ["s"], d(0), d(20))
-        assert got == [UncoveredSpan((0,), ("a", "b"), d(5), d(6))]
+        assert got == [UncoveredSpan((0,), ("a", "b"), d(5), d(6), True, True)]
 
     def test_distinct_spans_not_grouped_and_sorted(self) -> None:
         """Different files give separate entries ordered by first file."""

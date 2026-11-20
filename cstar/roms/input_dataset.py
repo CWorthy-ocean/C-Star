@@ -177,10 +177,10 @@ def read_model_reference_date(path: Path) -> RecordedReferenceDate | None:
     import xarray as xr
 
     with xr.open_dataset(path, decode_times=False) as ds:
-        return _recorded_reference_date(ds)
+        return recorded_reference_date(ds)
 
 
-def _recorded_reference_date(ds: "xr.Dataset") -> RecordedReferenceDate | None:
+def recorded_reference_date(ds: "xr.Dataset") -> RecordedReferenceDate | None:
     """Read the model reference date recorded in an open dataset's attributes.
 
     See `read_model_reference_date` for where files record it. Only attributes
@@ -276,7 +276,7 @@ def read_time_axis(path: Path, variable: str) -> TimeAxis | None:
         raw = np.asarray(ds.variables[variable].values, dtype=float).ravel()
         return TimeAxis(
             values=tuple(float(v) for v in raw[np.isfinite(raw)]),
-            reference=_recorded_reference_date(ds),
+            reference=recorded_reference_date(ds),
         )
 
 

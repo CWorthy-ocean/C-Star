@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from cstar.roms.input_dataset import _recorded_reference_date
+from cstar.roms.input_dataset import recorded_reference_date
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -60,6 +60,10 @@ class UncoveredSpan:
     """The earliest record any of the files holds for these variables."""
     last: datetime
     """The latest record any of the files holds for these variables."""
+    late_start: bool
+    """Whether even the earliest record comes after the start of the run."""
+    early_end: bool
+    """Whether even the latest record comes before the end of the run."""
 
 
 def _is_time_name(name: str) -> bool:
@@ -119,7 +123,7 @@ def read_file_times(path: Path) -> FileTimes | None:
             decode_timedelta=False,
             create_default_indexes=False,
         ) as ds:
-            recorded = _recorded_reference_date(ds)
+            recorded = recorded_reference_date(ds)
             if recorded is None:
                 return None
 
@@ -275,19 +279,39 @@ def uncovered_variables(
     unreadable_kinds = {k for t, k in zip(times, kinds, strict=True) if t is None}
     holders = _holders(times, _cyclic_variables(times) | set(ignore))
 
-    groups: dict[tuple[tuple[int, ...], datetime, datetime], list[str]] = {}
+    groups: dict[tuple[tuple[int, ...], datetime, datetime, bool, bool], list[str]] = {}
     for v, indices in holders.items():
         if any(kinds[i] in unreadable_kinds for i in indices):
             continue
-        spans = [times[i] for i in indices]
-        first = min(t.first for t in spans if t is not None)
-        last = max(t.last for t in spans if t is not None)
-        if first > start + _SLACK or last < end - _SLACK:
-            groups.setdefault((tuple(indices), first, last), []).append(v)
+        held_by = [t for i in indices if (t := times[i]) is not None]
+        first = min(t.first for t in held_by)
+        last = max(t.last for t in held_by)
+        # ROMS reads a variable against one of its files' time variables and we
+        # cannot tell which: refuse only if every candidate falls short
+        covered = False
+        for name in {n for t in held_by for n in t.spans}:
+            named = [t.spans[name] for t in held_by if name in t.spans]
+            if (
+                min(f for f, _ in named) <= start + _SLACK
+                and max(la for _, la in named) >= end - _SLACK
+            ):
+                covered = True
+                break
+        if not covered:
+            late = first > start + _SLACK
+            early = last < end - _SLACK
+            groups.setdefault((tuple(indices), first, last, late, early), []).append(v)
 
     return [
-        UncoveredSpan(files=files, variables=tuple(sorted(vs)), first=first, last=last)
-        for (files, first, last), vs in sorted(
+        UncoveredSpan(
+            files=files,
+            variables=tuple(sorted(vs)),
+            first=first,
+            last=last,
+            late_start=late,
+            early_end=early,
+        )
+        for (files, first, last, late, early), vs in sorted(
             groups.items(), key=lambda kv: (kv[0][0], sorted(kv[1]))
         )
     ]

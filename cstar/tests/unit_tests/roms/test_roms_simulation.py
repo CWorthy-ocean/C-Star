@@ -6647,7 +6647,7 @@ class TestForcingWindow:
         sim = self._sim(
             stub_romssimulation, [clash_a, clash_b, locations[0], far], 40, 50
         )
-        expected = [inp for inp in sim.input_datasets if sim._stages_input(inp)]
+        expected = sim._staged_inputs()
         assert sim.surface_forcing[3] not in expected
 
         with (
@@ -6730,7 +6730,7 @@ class TestForcingWindow:
             for _ in range(3):
                 sim._input_staging_names()
                 sim._forcing_outside_window()
-                sim._stages_input(sim.surface_forcing[0])
+                sim._staged_inputs()
         assert reader.call_count == 4
 
     def test_restart_start_keeps_earlier_file(
@@ -6783,6 +6783,32 @@ class TestForcingWindow:
         assert self._names(sim) == ["f1.nc"]
         sim.surface_forcing = [ROMSSurfaceForcing(location=loc) for loc in locations]
         assert self._names(sim) == ["f1.nc"]
+
+    def test_file_not_written_yet_is_not_memoized(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A missing local file is kept and asked again once it exists."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        locations = self._files(tmp_path)
+        sim = self._sim(stub_romssimulation, locations, 40, 50)
+        late = ROMSSurfaceForcing(location=locations[3])
+        Path(locations[3]).rename(tmp_path / "moved.nc")
+        sim.surface_forcing = [*sim.surface_forcing[:3], late]
+
+        with mock.patch(
+            "cstar.roms.simulation.read_file_times", wraps=read_file_times
+        ) as reader:
+            assert sim._dataset_file_times(late) is None
+            assert late.source.location not in sim._file_times_memo
+            assert sim._window_memo is None or sim._window_memo[1] == frozenset()
+            sim._forcing_outside_window()
+            assert sim._window_memo is None
+            (tmp_path / "moved.nc").rename(locations[3])
+            assert self._names(sim) == ["f1.nc"]
+        assert Path(locations[3]) in [c.args[0] for c in reader.call_args_list]
 
     def test_logs_once_per_window(
         self,
