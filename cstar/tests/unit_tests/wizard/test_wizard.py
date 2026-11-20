@@ -7298,10 +7298,10 @@ def test_the_specs_the_wizard_saves_have_only_known_keys():
 def _saving_wizard(path):
     """A wizard holding the default valid config, set to save to ``path``."""
     wiz = _new_wizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
     wiz.save_path.value = str(path)
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
     return wiz
 
 
@@ -7423,6 +7423,7 @@ def test_run_autosave_stamps_through_the_same_path(monkeypatch, tmp_path):
 
 def test_rebuild_preview_and_download_do_not_advance_the_carried_provenance(capsys):
     wiz = _new_wizard()
+    wiz._boundaries_touched = True  # the links wait for real boundaries
     wiz._rebuild()
     carried = wiz._carried_provenance
     assert carried == ForgeProvenance()
