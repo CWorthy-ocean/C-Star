@@ -42,7 +42,8 @@ blueprint has these:
    files that an earlier MARBL run wrote as its ``_cdrgas`` output).
    List a long run's forcing in full: each run passes to ROMS only the files
    that hold records for its own window. A run whose forcing does not reach
-   back to its start or on to its end is refused before ROMS is built.
+   back to its start or on to its end is refused before ROMS is built: extend
+   the forcing, or shorten the run.
 ``cdr_forcing``
    An optional carbon dioxide removal forcing file.
 ``nesting_info``
