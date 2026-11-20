@@ -6240,9 +6240,12 @@ class TestConfigureBuildRefusesUnsupportedSettings:
             self._configure_build_for(cfg, builder)
 
     def test_too_many_tiles_refused(self, mock_grid, tmp_path):
-        cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, param_overrides={"np_xi": 16}
-        )
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        # What the grid step writes for a stored blueprint whose
+        # domain.partitioning says n_procs_x: 16 (the resolver refuses it, so it
+        # cannot be built that way); a stored param.np_xi no longer reaches the
+        # namelist, since the partitioning wins over the snapshot.
+        builder._settings_run_time["param"]["np_xi"] = 16
         with pytest.raises(
             ValueError,
             match=r"param\.np_xi=16 \(partitioning\.n_procs_x\) cannot split the 6 xi",

@@ -3181,6 +3181,9 @@ def test_resolver_nesting_default_period():
             center_lat=55,
             rot=0,
             N=15,
+            theta_s=5.0,
+            theta_b=2.0,
+            hc=300.0,
         )
     )
     assert cfg.model_settings["extract_data"]["extract_period"] == 3600.0

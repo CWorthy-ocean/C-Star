@@ -65,6 +65,11 @@ from cstar.applications.forge.blueprint import (
     sanitize_name,
     vert_kwargs_from_grid_kwargs,
 )
+from cstar.applications.forge.engine import (
+    CHILD_VERTICAL_KWARGS,
+    check_derived_overrides,
+    known_derived_values,
+)
 
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
@@ -543,7 +548,8 @@ _CDR_FRC_DEFAULT: dict[str, Any] = {
 # (the nesting child's grid_kwargs/metadata, passed as grid_kwargs_child/
 # metadata_child) rather than the domain/forcing being resolved -- so, like
 # river_frc/cdr_frc, the resolver seeds this disabled baseline and the nesting block
-# below overwrites it when a child grid is actually provided.
+# below overwrites it when a child grid is actually provided. Its *_chd values are
+# placeholders ROMS never reads while do_extract is off.
 _EXTRACT_DATA_DEFAULT: dict[str, Any] = {
     "do_extract": False,
     "extract_file": "sample_edata.nc",
@@ -970,6 +976,18 @@ def build_forge_blueprint(
     inputs = read_spec("ForcingSpec", forcing_inputs, "forcing_inputs")
     output_settings = read_spec("OutputSpec", output_settings, "output_settings")
 
+    # The child's vertical coordinates build the child grid and fill this parent's
+    # extract_data.*_chd. roms-tools fills a missing one from defaults it keeps
+    # private, which a copy here would drift from, so the parent must state them.
+    if grid_kwargs_child is not None and (
+        missing := [k for k in CHILD_VERTICAL_KWARGS if k not in grid_kwargs_child]
+    ):
+        raise ValueError(
+            f"grid_kwargs_child is missing {', '.join(missing)}: give the child "
+            f"grid's {', '.join(CHILD_VERTICAL_KWARGS)}, which this parent writes "
+            "into its namelist (extract_data) for the child it feeds."
+        )
+
     # ----- optional user-provided grid file ----------------------------------
     # Normalize `grid_file` into a UserProvidedFile, then load the grid ONCE
     # (nx/ny/N/dt/v_sponge derivation below all read from this single object
@@ -1202,15 +1220,8 @@ def build_forge_blueprint(
         extract = dict(settings.get("extract_data", {}))
         extract["do_extract"] = True
         extract["extract_file"] = "nesting.nc"  # fixed convention (see input_generator)
-        if "N" in grid_kwargs_child:
-            extract["n_chd"] = grid_kwargs_child["N"]
-        for src, dst in (
-            ("theta_s", "theta_s_chd"),
-            ("theta_b", "theta_b_chd"),
-            ("hc", "hc_chd"),
-        ):
-            if src in grid_kwargs_child:
-                extract[dst] = grid_kwargs_child[src]
+        for kwarg, leaf in CHILD_VERTICAL_KWARGS.items():
+            extract[leaf] = grid_kwargs_child[kwarg]
         period = (metadata_child or {}).get("period")
         extract["extract_period"] = float(period) if period is not None else 3600.0
         settings["extract_data"] = extract
@@ -1232,6 +1243,13 @@ def build_forge_blueprint(
     )
     if current_run_time_overrides:
         _deep_merge(settings, current_run_time_overrides)
+    # Recorded in the default composition, and checked against what generation
+    # will write once the blueprint is built.
+    explicit_overrides = copy.deepcopy(current_run_time_overrides)
+    if compile_time_overrides:
+        explicit_overrides.setdefault("cppdefs", {}).update(
+            copy.deepcopy(compile_time_overrides.get("cppdefs", compile_time_overrides))
+        )
 
     # After the override merge, so an explicit override can't win.
     force_switches_without_input_off(
@@ -1694,9 +1712,11 @@ def build_forge_blueprint(
             forcing=SpecRef(),
             cdr=SpecRef(),
             output=SpecRef(),
+            overrides=explicit_overrides,
         ),
         provenance=provenance if provenance is not None else ForgeProvenance(),
     )
+    check_derived_overrides(explicit_overrides, known_derived_values(bp))
     _warn_user_files_need_pio_conversion(bp, use_pio)
     return bp
 

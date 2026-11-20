@@ -41,6 +41,7 @@ from cstar.applications.forge.blueprint import (
     infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
 )
+from cstar.applications.forge.engine import check_derived_overrides
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
@@ -2380,6 +2381,9 @@ class ForgeExecutor(BaseModel):
             (``cdr_tracer_output``) is renamed to its current one.
             Defaults to empty dict.
         **kwargs
+            ``explicit_overrides`` (the blueprint's ``composition.overrides``) are the
+            settings a user set by hand; one that contradicts a value generation
+            derived (``GENERATION_DERIVED_LEAF_KEYS``) raises ``ValueError``.
             ``n_tracers`` (int) overrides the tracer count derived from the live
             run-time settings (which, after generation, carry the CDR tracer counts
             read off the generated CDR forcing). ``provenance`` (`Provenance`) is the provenance the emitted
@@ -2490,6 +2494,17 @@ class ForgeExecutor(BaseModel):
         # Update settings with user-provided overrides (deep merge to preserve existing settings)
         self._update_settings_compile_time(compile_time_settings)
         self._update_settings_run_time(run_time_settings)
+        # The overlay leaves out what generation derives (split_model_settings), so
+        # the settings now hold the generated values; refuse an explicit override
+        # that contradicts one, which the pre-generation check could not see.
+        if explicit_overrides := kwargs.get("explicit_overrides"):
+            check_derived_overrides(
+                explicit_overrides,
+                {
+                    **self._settings_run_time,
+                    "cppdefs": self._settings_compile_time.get("cppdefs", {}),
+                },
+            )
 
         # Ensure ntimes is an integer (don't recalculate, just ensure type is correct)
         if "time_stepping" in self._settings_run_time:

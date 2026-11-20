@@ -40,7 +40,12 @@ from typing import (
     runtime_checkable,
 )
 
-from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
+from cstar.applications.forge.blueprint import (
+    CoarseGridMode,
+    ForgeBlueprint,
+    SurfaceType,
+    emitted_provenance,
+)
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     check_cdr_releases,
@@ -132,30 +137,159 @@ PROCESSING_FILLED_SECTIONS = (
 # the CDR release runs with it left off, since cdr_output needs MARBL. Likewise
 # ``cdr_lite_output.do_cdr_lite_output``, which ``configure_build`` forces on under
 # ``bgc_mode: cdr_lite``.
-GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
-    "river_frc": (
-        "river_source",
-        "analytical",
-        "nriv",
-        "rvol_vname",
-        "rvol_tname",
-        "rtrc_vname",
-        "rtrc_tname",
+#
+# The grid step also writes values read off the grids and the partitioning it built
+# (``param`` sizes and tiles, the child's vertical coordinates in ``extract_data``,
+# the ``cppdefs.obc_*`` switches), and each surface step writes ``interp_frc`` from
+# whether roms-tools put that file on the coarse grid. Those leaves carry, in place
+# of ``None``, the blueprint field that controls them. Their stored values are
+# replaced like the rest, and an explicit override (``build_forge_blueprint``'s
+# ``run_time_overrides``/``compile_time_overrides``, recorded with the wizard's in
+# ``composition.overrides``) that contradicts the value is refused by
+# :func:`check_derived_overrides`: before generation when the blueprint alone fixes
+# the value (:func:`known_derived_values`), else in ``configure_build``. A leaf
+# mapped to ``None`` is replaced without that check: a CDR-lite ``"upscaled"`` run
+# states ``param.nt_cdr_*`` through overrides on purpose.
+#
+# A leaf a run does not write (``np_xi``/``np_eta`` under ``auto_tiling``,
+# ``bgc.interp_frc`` without a BGC surface item, ``extract_data`` without a child)
+# keeps its stored value: the executor starts from the same snapshot
+# (``resolved_settings``), so leaving the leaf out of the overlay changes nothing.
+_COARSE_GRID_MODE = "forcing.surface[].coarse_grid_mode"
+# A parent's grid_kwargs_child key -> the extract_data leaf it fills. The resolver
+# requires all four: roms-tools fills a missing one from defaults it keeps private.
+CHILD_VERTICAL_KWARGS: dict[str, str] = {
+    "N": "n_chd",
+    "theta_s": "theta_s_chd",
+    "theta_b": "theta_b_chd",
+    "hc": "hc_chd",
+}
+# section -> {leaf: the blueprint field that controls it, or None}. ``cppdefs``
+# is the compile-time section; every other one is a namelist section.
+GENERATION_DERIVED_LEAF_KEYS: dict[str, dict[str, str | None]] = {
+    "river_frc": dict.fromkeys(
+        (
+            "river_source",
+            "analytical",
+            "nriv",
+            "rvol_vname",
+            "rvol_tname",
+            "rtrc_vname",
+            "rtrc_tname",
+        )
     ),
-    "cdr_frc": (
-        "cdr_source",
-        "cdr_file",
-        "ncdr_parm",
-        "forcing_parameterized",
-        "cdr_volume",
+    "cdr_frc": dict.fromkeys(
+        (
+            "cdr_source",
+            "cdr_file",
+            "ncdr_parm",
+            "forcing_parameterized",
+            "cdr_volume",
+        )
     ),
-    "param": ("nt_cdr_oae", "nt_cdr_dor"),
+    "param": {
+        "nt_cdr_oae": None,
+        "nt_cdr_dor": None,
+        "llm": "domain.grid_kwargs.nx (or the grid file)",
+        "mmm": "domain.grid_kwargs.ny (or the grid file)",
+        "n": "domain.grid_kwargs.N (or the grid file)",
+        "np_xi": "domain.partitioning.n_procs_x",
+        "np_eta": "domain.partitioning.n_procs_y",
+    },
     # Only ntides is genuinely generation-derived (the real tidal-constituent count
     # is only known once TPXO data is actually extracted). bry_tides/pot_tides/
     # ana_tides are static booleans -- the resolver/model_settings is their single
     # official source (e.g. a child grid forces bry_tides=False there).
-    "tides": ("ntides",),
+    "tides": {"ntides": None},
+    "blk_frc": {"interp_frc": _COARSE_GRID_MODE},
+    "bgc": {"interp_frc": _COARSE_GRID_MODE},
+    "extract_data": {
+        leaf: f"domain.grid_kwargs_child.{kwarg}"
+        for kwarg, leaf in CHILD_VERTICAL_KWARGS.items()
+    },
+    "cppdefs": {
+        f"obc_{side}": f"domain.open_boundaries.{side}"
+        for side in ("west", "east", "north", "south")
+    },
 }
+
+
+def known_derived_values(cfg: ForgeBlueprint) -> dict[str, dict[str, Any]]:
+    """The checked ``GENERATION_DERIVED_LEAF_KEYS`` values generation will write
+    that the blueprint alone already fixes, as ``{section: {leaf: value}}``.
+
+    Left out: the grid sizes when a grid file supplies the grid, the tiles under
+    ``auto_tiling`` (ROMS picks them; the namelist carries placeholders), and
+    ``interp_frc`` when every surface item says ``coarse_grid_mode: auto``
+    (roms-tools decides from the source and grid resolution).
+    """
+    domain = cfg.domain
+    known: dict[str, dict[str, Any]] = {
+        "cppdefs": {
+            f"obc_{side}": bool(getattr(domain.open_boundaries, side))
+            for side in ("west", "east", "north", "south")
+        },
+        "param": {},
+        "extract_data": {},
+    }
+    for leaf, kwarg in (("llm", "nx"), ("mmm", "ny"), ("n", "N")):
+        if kwarg in domain.grid_kwargs:
+            known["param"][leaf] = domain.grid_kwargs[kwarg]
+    part = domain.partitioning
+    if not part.auto_tiling:
+        for leaf, value in (("np_xi", part.n_procs_x), ("np_eta", part.n_procs_y)):
+            if value is not None:
+                known["param"][leaf] = value
+    child = domain.grid_kwargs_child or {}
+    for kwarg, leaf in CHILD_VERTICAL_KWARGS.items():
+        if kwarg in child:
+            known["extract_data"][leaf] = child[kwarg]
+    # Every surface step must agree on interp_frc (the generator refuses a mix), so
+    # one item with an explicit mode fixes the value for all of them: "always"
+    # writes the file on the coarse grid, "never" on the model grid. A BGC item
+    # writes bgc.interp_frc (the resolver refuses one without MARBL), any other
+    # blk_frc.interp_frc.
+    modes = {item.coarse_grid_mode for item in cfg.forcing.surface} - {
+        CoarseGridMode.AUTO
+    }
+    if len(modes) == 1:
+        coarse = modes.pop() == CoarseGridMode.ALWAYS
+        for item in cfg.forcing.surface:
+            section = "bgc" if item.type == SurfaceType.BGC else "blk_frc"
+            known.setdefault(section, {})["interp_frc"] = coarse
+    return known
+
+
+def check_derived_overrides(overrides: dict[str, Any], derived: dict[str, Any]) -> None:
+    """Refuse an explicit override of a checked ``GENERATION_DERIVED_LEAF_KEYS``
+    leaf that contradicts the value generation writes.
+
+    ``overrides`` and ``derived`` (the values generation writes) are nested
+    ``{section: {leaf: value}}`` mappings with ``cppdefs`` as one of their
+    sections; a leaf missing from ``derived`` is not checked. Raises
+    ``ValueError`` listing each conflict with the blueprint field that controls
+    it.
+    """
+    problems = []
+    for section, leaves in GENERATION_DERIVED_LEAF_KEYS.items():
+        stated, generated = overrides.get(section), derived.get(section)
+        if not isinstance(stated, dict) or not isinstance(generated, dict):
+            continue
+        for leaf, controlled_by in leaves.items():
+            if controlled_by is None or leaf not in stated or leaf not in generated:
+                continue
+            if stated[leaf] != generated[leaf]:
+                problems.append(
+                    f"{section}.{leaf} is overridden to {stated[leaf]!r}, but the "
+                    f"generated inputs need {generated[leaf]!r}; it is set by "
+                    f"{controlled_by}. Change that field instead and remove the "
+                    "override."
+                )
+    if problems:
+        raise ValueError(
+            "Overrides contradict values Forge derives from the generated inputs:\n  "
+            + "\n  ".join(problems)
+        )
 
 
 def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
@@ -332,8 +466,8 @@ def split_model_settings(cfg: ForgeBlueprint) -> tuple[dict[str, Any], dict[str,
     (run-time) section. These are passed to ``configure_build`` as overrides so the
     reviewed config wins over the builder's re-derived defaults.
 
-    Excludes the leaf keys in ``GENERATION_DERIVED_LEAF_KEYS`` from the run-time
-    overrides: those are only ever meaningfully known once ``generate_inputs`` has run
+    Excludes the leaf keys in ``GENERATION_DERIVED_LEAF_KEYS`` from both overlays:
+    those are only ever meaningfully known once ``generate_inputs`` has run
     against the real forcing data, so the stored (pre-generation) snapshot must not
     overwrite them. See ``GENERATION_DERIVED_LEAF_KEYS`` for why.
     """
@@ -343,7 +477,9 @@ def split_model_settings(cfg: ForgeBlueprint) -> tuple[dict[str, Any], dict[str,
         {"cppdefs": copy.deepcopy(cppdefs)} if cppdefs is not None else {}
     )
     for section, leaf_keys in GENERATION_DERIVED_LEAF_KEYS.items():
-        sub = run_overrides.get(section)
+        sub = (compile_overrides if section == "cppdefs" else run_overrides).get(
+            section
+        )
         if isinstance(sub, dict):
             for key in leaf_keys:
                 sub.pop(key, None)
@@ -501,6 +637,12 @@ def process_forge_blueprint(
             )
         except ValueError as exc:
             problems.append(str(exc))
+        try:
+            check_derived_overrides(
+                cfg.composition.overrides, known_derived_values(cfg)
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
         if problems:
             raise ValueError(
                 "forge_blueprint has invalid values (fix before processing):\n  "
@@ -559,5 +701,6 @@ def process_forge_blueprint(
             compile_time_settings=compile_overrides,
             run_time_settings=run_overrides,
             provenance=provenance,
+            explicit_overrides=cfg.composition.overrides,
         )
     return executor
