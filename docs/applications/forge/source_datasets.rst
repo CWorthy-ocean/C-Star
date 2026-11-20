@@ -36,6 +36,13 @@ UNIFIED_BGC
    The unified biogeochemical climatology from ROMS-Tools, for MARBL initial
    and boundary conditions. The staged filename carries the version, so a
    version bump re-downloads rather than reusing a stale file.
+GLOFAS
+   GloFAS v4.0 daily river discharge, an alternative to Dai. The raw data
+   from the Copernicus Early Warning Data Store is preprocessed outside
+   Forge (river mouths placed on coastal cells, RIVR2O river concentrations
+   added), and Forge downloads the prepared file from Google Drive, like
+   UNIFIED_BGC, into ``<source_data>/GLOFAS/``. The staged filename carries
+   the version.
 WOA_BGC
    World Ocean Atlas 2023 nutrients and oxygen (NO3, PO4, SiO3, O2) with the
    matching monthly temperature and salinity, as a gridded biogeochemical
@@ -138,15 +145,6 @@ GLODAP
    ``GLODAPv2.2016b.{TAlk,TCO2,NO3,PO4,silicate,oxygen}.nc``. The
    ``temperature`` and ``salinity`` files are optional but recommended;
    without them ROMS-Tools uses a uniform density for the unit conversion.
-GLOFAS
-   GloFAS v4.0 daily river discharge, an alternative to Dai. It comes from
-   the Copernicus Early Warning Data Store and must be preprocessed to place
-   river mouths on coastal cells and add RIVR2O river concentrations, so
-   Forge expects one prepared file:
-
-   .. code-block:: text
-
-      <source_data>/GLOFAS/glofas_v4_rivers_daily_w_rivr2o.nc
 
 RIVR2O
    River biogeochemistry, an alternative to the default constants. One
