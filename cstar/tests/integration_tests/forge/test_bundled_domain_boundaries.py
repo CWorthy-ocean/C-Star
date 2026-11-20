@@ -23,7 +23,7 @@ import yaml
 from roms_tools.setup.utils import get_boundary_coords
 
 import cstar
-from cstar.applications.forge.blueprint import OpenBoundaries
+from cstar.applications.forge.blueprint import OpenBoundaries, TopographySource
 
 DOMAIN_SPEC_DIR = (
     Path(cstar.__file__).parent / "catalog" / "bundled" / "specs" / "DomainSpec"
@@ -71,12 +71,11 @@ def closed_wet_edges(spec: dict[str, Any]) -> dict[str, float]:
 def test_no_closed_edge_is_mostly_ocean(path: Path) -> None:
     """A bundled DomainSpec opens every edge that is more than half ocean."""
     spec = yaml.safe_load(path.read_text())
-    topography = spec.get("topography_source") or spec["grid_kwargs"].get(
-        "topography_source", "ETOPO5"
-    )
-    assert topography == "ETOPO5", (
-        f"{path.stem} names topography {topography!r}; this check builds grids "
-        "against ETOPO5 only, so extend it before bundling such a spec"
+    topography = spec.get("topography_source", TopographySource.ETOPO5)
+    assert topography == TopographySource.ETOPO5 and not spec.get("topography_path"), (
+        f"{path.stem} names topography {topography!r} "
+        f"(path {spec.get('topography_path')!r}); this check builds grids against "
+        "ETOPO5 only, so extend it before bundling such a spec"
     )
     wet = closed_wet_edges(spec)
     assert not wet, (
