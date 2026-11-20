@@ -6,7 +6,7 @@ from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import (
@@ -20,6 +20,9 @@ from cstar.base.utils import (
 from cstar.io.constants import FileEncoding, SourceClassification
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
+
+if TYPE_CHECKING:
+    import xarray as xr
 
 roms_tools = lazy_import("roms_tools")
 
@@ -174,37 +177,107 @@ def read_model_reference_date(path: Path) -> RecordedReferenceDate | None:
     import xarray as xr
 
     with xr.open_dataset(path, decode_times=False) as ds:
-        cyclic = str(
-            ds.attrs.get("climatology", "")
-        ).strip().casefold() == "true" or any(
-            "cycle_length" in var.attrs for var in ds.variables.values()
-        )
+        return _recorded_reference_date(ds)
 
-        if (raw := ds.attrs.get("model_reference_date")) is not None:
-            try:
-                return RecordedReferenceDate(
-                    date=dt.datetime.fromisoformat(str(raw).strip()), cyclic=cyclic
-                )
-            except ValueError:
-                pass
 
-        for name, var in ds.variables.items():
-            if name != "ocean_time" and not str(name).endswith("_time"):
+def _recorded_reference_date(ds: "xr.Dataset") -> RecordedReferenceDate | None:
+    """Read the model reference date recorded in an open dataset's attributes.
+
+    See `read_model_reference_date` for where files record it. Only attributes
+    are read, never variable data.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The open dataset to inspect.
+
+    Returns
+    -------
+    RecordedReferenceDate or None
+    """
+    cyclic = str(ds.attrs.get("climatology", "")).strip().casefold() == "true" or any(
+        "cycle_length" in var.attrs for var in ds.variables.values()
+    )
+
+    if (raw := ds.attrs.get("model_reference_date")) is not None:
+        try:
+            return RecordedReferenceDate(
+                date=dt.datetime.fromisoformat(str(raw).strip()), cyclic=cyclic
+            )
+        except ValueError:
+            pass
+
+    for name, var in ds.variables.items():
+        if name != "ocean_time" and not str(name).endswith("_time"):
+            continue
+        long_name = str(var.attrs.get("long_name", "")).strip()
+        try:
+            if match := _ROMS_TIME_LONG_NAME_RE.fullmatch(long_name):
+                year, month, day = map(int, match.groups())
+                date = dt.datetime(year, month, day)
+            elif match := _ROMS_TOOLS_TIME_LONG_NAME_RE.fullmatch(long_name):
+                date = dt.datetime.fromisoformat(match.group(1).strip())
+            else:
                 continue
-            long_name = str(var.attrs.get("long_name", "")).strip()
-            try:
-                if match := _ROMS_TIME_LONG_NAME_RE.fullmatch(long_name):
-                    year, month, day = map(int, match.groups())
-                    date = dt.datetime(year, month, day)
-                elif match := _ROMS_TOOLS_TIME_LONG_NAME_RE.fullmatch(long_name):
-                    date = dt.datetime.fromisoformat(match.group(1).strip())
-                else:
-                    continue
-            except ValueError:
-                continue
-            return RecordedReferenceDate(date=date, cyclic=cyclic)
+        except ValueError:
+            continue
+        return RecordedReferenceDate(date=date, cyclic=cyclic)
 
     return None
+
+
+@dataclass(frozen=True)
+class TimeAxis:
+    """The records of one time variable of a netCDF file, with the file's
+    recorded model reference date.
+    """
+
+    values: tuple[float, ...]
+    """The record values as stored (ROMS forcing times are days since the
+    reference date), without fill values."""
+    reference: RecordedReferenceDate | None
+    """The reference date the file records, if any (see `read_model_reference_date`)."""
+
+
+def read_time_axis(path: Path, variable: str) -> TimeAxis | None:
+    """Read one time variable of the netCDF file at `path` and the reference
+    date the file records, in one open.
+
+    Only the header and `variable` are read, never the data variables, so the
+    cost does not grow with the size of the file's fields.
+
+    Parameters
+    ----------
+    path : Path
+        The netCDF file to read.
+    variable : str
+        The name of the 1-D time variable, e.g. `bry_time`.
+
+    Returns
+    -------
+    TimeAxis or None
+        The variable's records and the file's reference date, or None if the
+        file has no variable named `variable`.
+    """
+    # Lazy import: only needed when this check runs
+    import numpy as np
+    import xarray as xr
+
+    # values stay raw numbers (no time decoding); a `_FillValue` record is
+    # masked to NaN and dropped below
+    with xr.open_dataset(
+        path,
+        decode_times=False,
+        decode_timedelta=False,
+        create_default_indexes=False,
+    ) as ds:
+        if variable not in ds.variables:
+            return None
+        raw = np.asarray(ds.variables[variable].values, dtype=float).ravel()
+        return TimeAxis(
+            values=tuple(float(v) for v in raw[np.isfinite(raw)]),
+            reference=_recorded_reference_date(ds),
+        )
 
 
 class ROMSInputDataset(InputDataset, ABC):
