@@ -41,8 +41,8 @@ def reduced_grid_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Return ``grid_kwargs`` with at most ``MAX_CELLS`` cells along the longer axis.
 
     The extent, centre, rotation and the ratio of ``nx`` to ``ny`` (so the cell
-    shape) are kept. ``metadata`` (nesting settings) and ``verbose`` are dropped,
-    as Forge drops them before it calls ``rt.Grid``.
+    shape) are kept. ``metadata`` (nesting settings), which ``rt.Grid`` rejects,
+    and ``verbose``, which the caller passes itself, are dropped.
     """
     kwargs = {k: v for k, v in grid_kwargs.items() if k not in ("metadata", "verbose")}
     factor = max(kwargs["nx"], kwargs["ny"]) / MAX_CELLS
