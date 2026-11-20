@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 import cstar
-from cstar.base.env import ENV_CSTAR_RUNID, REMOVED_SETTINGS
+from cstar.base.env import ENVVAR_PREFIX
 from cstar.base.utils import slugify
 
 if t.TYPE_CHECKING:
@@ -27,6 +27,8 @@ REPO_ROOT = Path(cstar.__file__).resolve().parents[1]
 DONE, CANCELLED, FAILED = 5, 6, 7
 """Sentinel ``status:`` values of the terminal states of a step."""
 TERMINAL = {DONE, CANCELLED, FAILED}
+AMBIENT_SETTINGS = frozenset({"PROJECT", "SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"})
+"""Non-``CSTAR_`` variables C-Star reads: ``$PROJECT`` and the default ``CSTAR_SCRATCH_DIRS``."""
 
 
 def make_shim(
@@ -80,12 +82,17 @@ def make_cli_env(root: Path, shim: Path) -> dict[str, str]:
     Returns
     -------
     dict[str, str]
-        The parent environment with isolated C-Star directories, the shim and this
+        The parent environment without any ``CSTAR_*`` setting or ``$PROJECT`` and
+        scratch variable (a developer's ``CSTAR_SYSTEM`` or ``CSTAR_CATALOG`` must not
+        change what a test does), with isolated C-Star directories, the shim and this
         interpreter's ``bin`` first on ``PATH``, and ``CONDA_PREFIX`` defaulted to
         ``sys.prefix`` (the system env files expand ``${CONDA_PREFIX}``).
     """
-    ignored = {ENV_CSTAR_RUNID, *REMOVED_SETTINGS}
-    env = {k: v for k, v in os.environ.items() if k not in ignored}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(ENVVAR_PREFIX) and k not in AMBIENT_SETTINGS
+    }
     env_bin = str(Path(sys.prefix) / "bin")
     env.setdefault("CONDA_PREFIX", sys.prefix)
     env.update(

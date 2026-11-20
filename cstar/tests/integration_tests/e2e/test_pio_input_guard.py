@@ -5,7 +5,6 @@ a NETCDF4 copy of the grid and run with ``cstar blueprint run``. The check lives
 ``pre_run``, after the compile, so this test also builds ROMS and takes minutes.
 """
 
-import shutil
 import subprocess
 import typing as t
 from collections.abc import Callable
@@ -18,25 +17,14 @@ from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
 from cstar.orchestration.serialization import read_blueprint_raw
 from cstar.tests.integration_tests.cli_harness import make_cli_env, run_cstar
+from cstar.tests.integration_tests.toolchain import tools_required
 
 if t.TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
 
 GUARD_MESSAGE = "not a classic-format netCDF file"
 RUN_TIMEOUT = 40 * 60
-MISSING_TOOLS = [
-    tool
-    for tool, found in {
-        "nccopy": shutil.which("nccopy"),
-        "mpirun": shutil.which("mpirun"),
-        "mpifort or gfortran": shutil.which("mpifort") or shutil.which("gfortran"),
-    }.items()
-    if not found
-]
-
-pytestmark = pytest.mark.skipif(
-    bool(MISSING_TOOLS), reason=f"ROMS toolchain missing: {', '.join(MISSING_TOOLS)}"
-)
+_toolchain = tools_required("nccopy", "mpirun", "mpifort or gfortran")
 
 
 def with_netcdf4_grid(forge_dir: Path, edited: Path, run_dir: Path) -> Path:

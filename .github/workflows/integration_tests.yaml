@@ -47,7 +47,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e ".[dev]" --force-reinstall
+           python -m pip install -e ".[dev]"
 
       - name: Locate pooch caches
         id: pooch-caches
@@ -79,7 +79,7 @@ jobs:
           UCX_TLS: ${{ runner.os == 'Linux' && 'tcp,sm,self' || '' }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge
+           coverage run --rcfile=coverage.toml -m pytest -s -rs --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge
 
       - name: Get coverage report
         shell: micromamba-shell {0}
@@ -130,7 +130,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e ".[dev]" --force-reinstall
+           python -m pip install -e ".[dev]"
 
       - name: Locate pooch caches
         id: pooch-caches
@@ -157,7 +157,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms
+           coverage run --rcfile=coverage.toml -m pytest -s -rs --verbose cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms
 
       - name: Get coverage report
         shell: micromamba-shell {0}

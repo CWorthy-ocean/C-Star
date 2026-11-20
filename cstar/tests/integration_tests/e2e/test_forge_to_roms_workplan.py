@@ -16,7 +16,6 @@ ParallelIO four times, so it takes tens of minutes.
 
 import json
 import re
-import shutil
 import subprocess
 import typing as t
 from collections.abc import Callable, Sequence
@@ -55,6 +54,7 @@ from cstar.tests.integration_tests.cli_harness import (
     step_root,
     wait_for_terminal,
 )
+from cstar.tests.integration_tests.toolchain import tools_required
 
 if t.TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
@@ -124,19 +124,7 @@ ERROR_CONTEXT_LINES = 20
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 TIMESTAMP = re.compile(r"^\d{14}$")
 PRODUCT_HEADINGS = ("Products missing", "Products whose size", "Products whose content")
-MISSING_TOOLS = [
-    tool
-    for tool, found in {
-        "nccopy": shutil.which("nccopy"),
-        "mpirun": shutil.which("mpirun"),
-        "mpifort or gfortran": shutil.which("mpifort") or shutil.which("gfortran"),
-    }.items()
-    if not found
-]
-
-pytestmark = pytest.mark.skipif(
-    bool(MISSING_TOOLS), reason=f"ROMS toolchain missing: {', '.join(MISSING_TOOLS)}"
-)
+_toolchain = tools_required("nccopy", "mpirun", "mpifort or gfortran")
 
 
 @dataclass(frozen=True)
