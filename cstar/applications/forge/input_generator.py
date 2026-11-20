@@ -41,6 +41,11 @@ from cstar.applications.forge.namelist_model import (
     river_tracer_floor,
 )
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
+from cstar.applications.forge.time_coverage import (
+    check_forcing_covers_window,
+    check_initial_time,
+    restamp_initial_time,
+)
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
 from cstar.applications.forge.util import mem_log
 from cstar.base.utils import convert_to_cdf5, cpus_available
@@ -1782,6 +1787,17 @@ class RomsInputGenerator(InputGenerator):
             return {"model_reference_date": self.model_reference_date}
         return {}
 
+    def _time_reference(self) -> datetime:
+        """The reference date the written input times count from.
+
+        Forge passes ``model_reference_date`` to roms-tools whenever it is set (a forge
+        blueprint always sets it); otherwise roms-tools uses 2000-01-01, the same
+        fallback ``ForgeExecutor`` writes into the namelist.
+        """
+        if self.model_reference_date is not None:
+            return self.model_reference_date
+        return datetime(2000, 1, 1)
+
     @register_input(name="grid", order=10, label="Writing ROMS grid")
     def _generate_grid(self, key: str = "grid", **kwargs):
         """Generate grid input file."""
@@ -1979,12 +1995,18 @@ class RomsInputGenerator(InputGenerator):
                 )
 
             with mem_log("InitialConditions.save", enabled=self.verbose):
-                paths = self._pio_finalize(
-                    ic.save(
-                        self._pio_mangle(output_path),
-                        serialize_dask=ic_serialize_dask,
-                    )
+                saved = ic.save(
+                    self._pio_mangle(output_path),
+                    serialize_dask=ic_serialize_dask,
                 )
+                if input_args.get("allow_flex_time"):
+                    self._stamp_flex_initial_time(saved)
+                paths = self._pio_finalize(saved)
+
+        # ROMS takes its start time from this file, so it must start at start_date.
+        check_initial_time(
+            paths, start=self.start_date, reference=self._time_reference()
+        )
 
         # Append Resources directly to ucla_roms_blueprint_elements.initial_conditions
         ic_dataset = _require_element(
@@ -1999,6 +2021,30 @@ class RomsInputGenerator(InputGenerator):
             ic_dataset.data.append(resource)
 
         self._settings_run_time.setdefault("initial", {})["initial_file"] = paths[0]
+
+    def _stamp_flex_initial_time(self, saved: Path | str | list[Path | str]) -> None:
+        """Stamp a flexible-start initial-conditions file at ``start_date``.
+
+        With ``allow_flex_time``, roms-tools takes the first source record in
+        ``[start_date, start_date + 24 h)`` and stamps the file with that record's
+        time, which ROMS would take as its start time. The record is used as the state
+        at ``start_date`` instead, so the model clock, the blueprint and every forcing
+        file share the requested window. Runs on roms-tools' netCDF-4 output, before
+        ``_pio_finalize`` converts it.
+        """
+        for path in saved if isinstance(saved, (list, tuple)) else [saved]:
+            record = restamp_initial_time(
+                path, start=self.start_date, reference=self._time_reference()
+            )
+            if record is not None:
+                hours = (record - self.start_date).total_seconds() / 3600
+                warnings.warn(
+                    "Flexible start time: the source has no initial-conditions record "
+                    f"at {self.start_date}, so the first record after it, at {record} "
+                    f"({hours:g} h later), is used as the state at {self.start_date}.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
     def _generate_blended_surface_forcing(
         self,
@@ -2193,6 +2239,14 @@ class RomsInputGenerator(InputGenerator):
             with mem_log("SurfaceForcing.save", enabled=self.verbose):
                 paths = self._pio_finalize(frc.save(self._pio_mangle(output_path)))
 
+        check_forcing_covers_window(
+            paths,
+            start=self.start_date,
+            end=self.end_date,
+            reference=self._time_reference(),
+            label=f"{detail} surface forcing",
+        )
+
         if input_args["type"] == "restoring":
             if "sss" in input_args["restoring_forces"]:
                 self._settings_compile_time.setdefault("cppdefs", {})["sal_restore"] = (
@@ -2269,8 +2323,18 @@ class RomsInputGenerator(InputGenerator):
         For ``type_='bgc'``, paths accumulate across multiple bgc boundary items
         (a list, one entry per item -- see ``ForcingCfg.boundary_forcing_bgc_path``);
         for ``type_='physics'`` the single physics path is stored as before.
+
+        Every boundary file, written or reused, passes through here, so this is
+        also where its records are checked against the run window first.
         """
         path_list = list(paths) if isinstance(paths, (list, tuple)) else [paths]
+        check_forcing_covers_window(
+            path_list,
+            start=self.start_date,
+            end=self.end_date,
+            reference=self._time_reference(),
+            label=f"{type_} boundary forcing",
+        )
         boundary = _require_element(
             self.ucla_roms_blueprint_elements.forcing, "forcing"
         ).boundary
@@ -2491,18 +2555,22 @@ class RomsInputGenerator(InputGenerator):
                 bry.bgc, bgc_mangled_paths, bgc_serialize_flags, strict=True
             ):
                 obj.save(str(path), serialize_dask=serialize)
-        self._record_boundary_forcing_result(
-            "physics", self._pio_finalize(physics_paths)
-        )
+        # Finalize every file before recording (and so checking) any of them: a
+        # refused window then leaves a complete set on disk, which a rerun reuses
+        # and refuses with the regenerate hint, rather than a partial set.
+        physics_finalized = self._pio_finalize(physics_paths)
         # `BoundaryForcingSource.save()` returns the `list[Path]` it actually
         # wrote, but a grouped/climatology split (e.g. monthly) may use
         # different filenames than the single mangled path we asked for --
         # discover what was really written the same way as the reuse path
         # above, rather than trusting the return value (which the physics
         # write above can, since it is never grouped this way).
-        for mangled_path in bgc_mangled_paths:
-            saved = self._discover_saved_paths(mangled_path)
-            finalized = self._pio_finalize(saved)
+        bgc_finalized = [
+            self._pio_finalize(self._discover_saved_paths(mangled_path))
+            for mangled_path in bgc_mangled_paths
+        ]
+        self._record_boundary_forcing_result("physics", physics_finalized)
+        for finalized in bgc_finalized:
             self._record_boundary_forcing_result("bgc", finalized)
 
     @register_input(name="forcing.tidal", order=50, label="Generating tidal forcing")

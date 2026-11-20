@@ -1275,7 +1275,12 @@ class InitialConditions(_Section):
     bgc_interpolation_method: BgcInterpMethod = (
         BgcInterpMethod.DEPTH
     )  # BGC vertical interp default; overridable per-source (see BgcSourceItem)
-    allow_flex_time: bool = False  # ±24h search window around ini_time
+    allow_flex_time: bool = False
+    """When the source has no record at ``run.start_date``, use its first record in the
+    24 hours after it as the state at ``start_date``. Forge stamps the initial
+    conditions at ``start_date``, so the model still starts there, and keeps the
+    record's own time in the file's ``ini_time_source_record`` attribute. Off, the
+    source needs a record at ``start_date`` exactly."""
     prefill: Prefill | None = None  # source NaN prefill before regridding
     prefill_kwargs: dict[str, Any] | None = None
     regrid_method: RegridMethod | None = None  # horizontal regrid engine (None -> auto)
