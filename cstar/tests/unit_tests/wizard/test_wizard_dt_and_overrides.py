@@ -5,6 +5,7 @@ one back on.
 Each test saves through the real Save handler and reads the file it wrote.
 """
 
+import shutil
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
 from cstar.applications.forge.resolve import cfl_dt
+from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 from cstar.roms.precheck import marbl_step
 from cstar.wizard.wizard import ForgeBlueprintWizard
 
@@ -161,3 +163,23 @@ class TestOverridesCannotDefeatTheTideRules:
         bp = _save(wiz, tmp_path / "bp.yaml")
         assert bp.model_settings["tides"]["pot_tides"] is False
         assert bp.model_settings["tides"]["bry_tides"] is False
+
+    def test_a_forced_override_does_not_break_saving_a_spec(self, tmp_path):
+        """Saving a spec ("Save as new spec") re-resolves and compares with the blueprint shown;
+        both sides must force the tide switches off over the overrides.
+        """
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        catalog = DomainCatalog(catalog_root=root)
+        wiz = ForgeBlueprintWizard(catalog=catalog)
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.parent_enable.value = True
+        wiz.editor._widgets[_BRY_TIDES][0].value = True
+        assert wiz._overrides[_BRY_TIDES] is True
+        assert wiz.config.model_settings["tides"]["bry_tides"] is False
+
+        wiz.save_domain_name.value = "child-domain"
+        wiz._on_save_domain(None)
+        assert "child-domain" in catalog.domain_names
+        assert wiz.domain_dd.value == "child-domain", wiz.save_domain_status.value

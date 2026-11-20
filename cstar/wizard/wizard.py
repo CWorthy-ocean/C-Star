@@ -5394,7 +5394,7 @@ class ForgeBlueprintWizard:
 
         # --- timestep ---
         self.dt = W.FloatText(
-            value=7200.0,
+            value=0.0,  # the derived dt replaces it on the first _rebuild
             description="dt (s):",
             style={"description_width": "90px"},
             layout=W.Layout(width="220px"),
@@ -7025,6 +7025,12 @@ class ForgeBlueprintWizard:
         except Exception:
             return False
         eff2 = _apply_overrides(cfg2.model_settings, overrides2)
+        # As _show_editor does for self.config.
+        force_switches_without_input_off(
+            eff2,
+            is_child=cfg2.domain.grid_kwargs_parent is not None,
+            has_tidal_forcing=bool(cfg2.forcing.tidal),
+        )
         cfg2 = cfg2.model_copy(update={"model_settings": eff2})
         return cfg2.content_hash() == self.config.content_hash()
 
