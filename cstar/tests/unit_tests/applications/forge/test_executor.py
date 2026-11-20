@@ -19,6 +19,7 @@ Tests cover:
 """
 
 import asyncio
+import contextlib
 import copy
 import logging
 import os
@@ -241,16 +242,6 @@ def _create_empty_dataset(tmp_path):
     return cstar_models.Dataset(
         data=[Resource(location=str(placeholder_file), partitioned=False)]
     )
-
-
-def _cdr_forcing_without_grid(*, grid: Any, **kwargs: Any) -> Any:
-    """The real ``rt.CDRForcing`` built without ``grid``, for tests whose grid is a
-    mock that roms-tools cannot validate release positions against.
-    """
-    # the defining module's class: the test patches the ``roms_tools`` attribute
-    from roms_tools.setup.cdr_forcing import CDRForcing
-
-    return CDRForcing(**kwargs)
 
 
 def _create_grid_mock():
@@ -3978,8 +3969,7 @@ class TestGoldenNamelist:
 
         ``cdr_lite=True`` runs ``bgc_mode: cdr_lite`` instead: a physics-only
         forcing and a "simple" CDR forcing built by the REAL
-        ``rt.CDRForcing`` (saved to a real netCDF, and without the mock grid, so
-        the release positions go unchecked here; Tier 1 checks them) rather than a mock,
+        ``rt.CDRForcing`` (grid-less, saved to a real netCDF) rather than a mock,
         so the tracer counts the namelist carries are read off roms-tools' own
         generated tracer axis -- exactly what the ``CDR_LITE`` build sees.
 
@@ -4059,11 +4049,15 @@ class TestGoldenNamelist:
             patch(
                 "cstar.applications.forge.input_generator.rt.RiverForcing"
             ) as mock_river,
-            patch(
-                "cstar.applications.forge.input_generator.rt.CDRForcing",
-                # cdr_lite: the real class, without the mock grid it cannot validate
-                side_effect=_cdr_forcing_without_grid if cdr_lite else None,
+            (
+                contextlib.nullcontext(MagicMock())
+                if cdr_lite
+                else patch("cstar.applications.forge.input_generator.rt.CDRForcing")
             ) as mock_cdr,
+            # the grid is a mock: no release positions to check it against
+            patch(
+                "cstar.applications.forge.input_generator.check_cdr_release_positions"
+            ),
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},

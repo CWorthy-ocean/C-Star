@@ -42,7 +42,7 @@ from cstar.applications.forge.namelist_model import (
 )
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
-from cstar.applications.forge.util import mem_log
+from cstar.applications.forge.util import check_cdr_release_positions, mem_log
 from cstar.base.utils import convert_to_cdf5, cpus_available
 from cstar.orchestration.models import Resource
 from cstar.roms.input_dataset import (
@@ -931,6 +931,8 @@ class RomsInputGenerator(InputGenerator):
         # Fail fast on an ESPER bgc source without PyESPER -- before the grid or any
         # other input is generated (see _preflight_esper_sources).
         self._preflight_esper_sources(step_kwargs_list)
+        # Likewise the CDR release positions, though the CDR step comes last.
+        self._preflight_cdr_releases(step_kwargs_list, only)
 
         # Compute planned outputs once at the start of execution, and record which already exist.
         planned = self._planned_netcdf_outputs(step_kwargs_list)
@@ -1028,6 +1030,32 @@ class RomsInputGenerator(InputGenerator):
                 print("\n✅ All input files generated.\n")
 
         return self.ucla_roms_blueprint_elements
+
+    def _preflight_cdr_releases(
+        self,
+        step_kwargs_list: list[tuple[InputStep, dict[str, Any]]],
+        only: set[str] | None,
+    ) -> None:
+        """Check the CDR releases against the grid before any input is generated
+        (:func:`~cstar.applications.forge.util.check_cdr_release_positions`).
+
+        The CDR step runs last, after what can be an hour of other inputs on a
+        production domain. ``cdr_frc.relocate_to_wet_pts`` is read from the
+        run-time settings, as ROMS reads it from the namelist.
+        """
+        if only is not None and "cdr_forcing" not in only:
+            return
+        relocate = bool(
+            (self._settings_run_time.get("cdr_frc") or {}).get(
+                "relocate_to_wet_pts", False
+            )
+        )
+        for step, kwargs in step_kwargs_list:
+            releases = (kwargs.get("cdr_kwargs") or {}).get("releases")
+            if step.name == "cdr_forcing" and isinstance(releases, (list, tuple)):
+                check_cdr_release_positions(
+                    self.grid, releases, relocate_to_wet_pts=relocate
+                )
 
     def _preflight_esper_sources(
         self,
@@ -3106,16 +3134,13 @@ class RomsInputGenerator(InputGenerator):
 
         yaml_path = self._yaml_filename(key)
 
-        # With the grid, roms-tools refuses a release outside the domain, on land,
-        # on its edge or below the seafloor, which ucla-roms would otherwise move
-        # to the nearest cell however far away. The run's reference date is the
-        # epoch of cdr_time, as of every other input. Both win over the same keys
-        # in cdr_kwargs: a roms-tools YAML dump carries its own reference date.
+        # The run's reference date is the epoch of cdr_time, as of every other
+        # input; it wins over a roms-tools YAML dump's own. No grid: roms-tools
+        # would then refuse releases ROMS moves (on land, on the edge, below the
+        # seafloor); _preflight_cdr_releases checks the positions instead.
         # cdr_frc.time_interpolation is the resolver's (check_cdr_releases).
         input_args = self._build_input_args(
-            key,
-            base_kwargs=cdr_kwargs,
-            extra={"grid": self.grid, **self._mrd_extra()},
+            key, base_kwargs=cdr_kwargs, extra=self._mrd_extra()
         )
 
         with mem_log("CDRForcing()", enabled=self.verbose):

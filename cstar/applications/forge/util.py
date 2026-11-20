@@ -14,9 +14,12 @@ import sys
 import time
 import warnings
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    import roms_tools as rt
     import xarray as xr
 
 log = logging.getLogger(__name__)
@@ -189,6 +192,150 @@ def compute_grid_spacing_m(grid_size_x: float, grid_nx: int) -> float:
 def compute_v_sponge_from_grid(grid_size_x: float, grid_nx: int) -> float:
     """Default sponge viscosity: grid spacing (m) divided by 10."""
     return compute_grid_spacing_m(grid_size_x, grid_nx) / 10.0
+
+
+_CDR_EARTH_RADIUS_M = 6.371e6
+"""The Earth radius ucla-roms' ``cdr_frc`` measures release distances with."""
+
+_CDR_HSC_CUTOFF = 1e-3
+"""ucla-roms spreads a release with a horizontal scale over the cells whose
+Gaussian weight ``exp(-(dist/hsc)**2)`` exceeds this."""
+
+
+def check_cdr_release_positions(
+    grid: rt.Grid,
+    releases: Sequence[Mapping[str, Any]],
+    *,
+    relocate_to_wet_pts: bool,
+) -> None:
+    """Refuse CDR releases ucla-roms cannot place on ``grid``, and warn about the ones
+    it moves.
+
+    ``releases`` are the release dicts of a roms-tools ``CDRForcing`` kwargs dict.
+    ucla-roms (``cdr_frc.F90``) centres each release on the nearest interior cell of
+    the whole grid, with no distance limit. With ``cdr_frc.relocate_to_wet_pts`` it
+    leaves out land cells; without it, it stops at start-up on a release whose cell is
+    land. It rescales each release's vertical profile to deliver the full flux, unless
+    the profile is zero at every level of every column the release reaches.
+
+    Refused, in one ``ValueError`` naming every release:
+
+    * a release outside the domain: farther from every grid point than the largest
+      half cell diagonal plus 10%, roms-tools' own rule. ucla-roms would move it to
+      the nearest cell however far away.
+    * a release on land while ``relocate_to_wet_pts`` is off, or on a grid without
+      a wet interior cell.
+    * a release so far below the seafloor, for its vertical scale, that its profile
+      is zero at every level, so ROMS would deliver none of it.
+
+    Warned, in one ``UserWarning``: a release on the grid's boundary row (ROMS uses
+    the nearest interior cell), on land with relocation on (ROMS moves it to the
+    nearest wet cell), or below the seafloor (ROMS delivers its flux near the bottom).
+    roms-tools refuses all of these when given a grid, so Forge builds the forcing
+    without one and checks here instead.
+    """
+    import numpy as np
+
+    ds = grid.ds
+    lat = np.deg2rad(np.asarray(ds["lat_rho"].values, dtype=float))
+    lon = np.deg2rad(np.asarray(ds["lon_rho"].values, dtype=float))
+    wet = np.asarray(ds["mask_rho"].values) > 0
+    h = np.asarray(ds["h"].values, dtype=float)
+    pm = np.asarray(ds["pm"].values, dtype=float)
+    pn = np.asarray(ds["pn"].values, dtype=float)
+    sigma_r = np.asarray(ds["sigma_r"].values, dtype=float)
+    cs_r = np.asarray(ds["Cs_r"].values, dtype=float)
+    interior = np.zeros(wet.shape, dtype=bool)
+    interior[1:-1, 1:-1] = True
+    outside_m = 1.1 * float(np.max(np.hypot(1 / pm, 1 / pn) / 2))
+
+    refused: list[str] = []
+    warned: list[str] = []
+    for index, release in enumerate(releases):
+        name = str(release.get("name", f"#{index}"))
+        try:
+            r_lat = float(release["lat"])
+            r_lon = float(release["lon"])
+            depth = float(release["depth"])
+        except (KeyError, TypeError, ValueError):
+            continue  # roms-tools refuses a release without a usable position
+        hsc = float(release.get("hsc") or 0.0)
+        vsc = float(release.get("vsc") or 0.0)
+        here = f"release {name!r} (lat {r_lat:g}, lon {r_lon:g}, depth {depth:g} m)"
+
+        # haversine; periodic in longitude, so no wrapping is needed
+        a = (
+            np.sin((lat - np.deg2rad(r_lat)) / 2) ** 2
+            + np.cos(lat)
+            * np.cos(np.deg2rad(r_lat))
+            * np.sin((lon - np.deg2rad(r_lon)) / 2) ** 2
+        )
+        dist = 2 * _CDR_EARTH_RADIUS_M * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+
+        if float(dist.min()) > outside_m:
+            refused.append(
+                f"{here} is outside the domain, {dist.min() / 1000:.0f} km from the "
+                "nearest grid point; ROMS would move it to the nearest cell"
+            )
+            continue
+        if not interior.flat[int(np.argmin(dist))]:
+            warned.append(
+                f"{here} is on the edge of the grid; ROMS centres it on the nearest "
+                "interior cell"
+            )
+
+        candidates = interior & wet if relocate_to_wet_pts else interior
+        if not candidates.any():
+            refused.append(f"{here}: the grid has no wet interior cell")
+            continue
+        nearest = np.unravel_index(np.argmin(np.where(interior, dist, np.inf)), h.shape)
+        cell = np.unravel_index(np.argmin(np.where(candidates, dist, np.inf)), h.shape)
+        if not wet[nearest]:
+            if not relocate_to_wet_pts:
+                refused.append(
+                    f"{here} is on land, and cdr_frc.relocate_to_wet_pts is off; "
+                    "ROMS stops at start-up"
+                )
+                continue
+            warned.append(
+                f"{here} is on land; ROMS moves it to the nearest wet cell, "
+                f"{dist[cell] / 1000:.1f} km away"
+            )
+
+        if depth <= h[cell]:
+            continue
+        reached = np.zeros(h.shape, dtype=bool)
+        reached[cell] = True
+        if hsc > 0:
+            reached |= (
+                candidates & wet & (np.exp(-((dist / hsc) ** 2)) > _CDR_HSC_CUTOFF)
+            )
+        deepest = float(h[reached].max())
+        # level depths (m, positive down) of the deepest column, as ROMS sets them
+        levels = -deepest * (grid.hc * sigma_r + deepest * cs_r) / (grid.hc + deepest)
+        if vsc > 0 and not np.any(np.exp(-(((depth - levels) / vsc) ** 2)) > 0):
+            refused.append(
+                f"{here} is {depth - h[cell]:.0f} m below the seafloor "
+                f"({h[cell]:.0f} m), {(depth - h[cell]) / vsc:.0f} times its vertical "
+                "scale: its profile is zero at every level, so ROMS would deliver none "
+                "of its flux"
+            )
+            continue
+        warned.append(
+            f"{here} is below the seafloor ({h[cell]:.0f} m); ROMS delivers its "
+            "flux near the bottom"
+        )
+
+    if refused:
+        raise ValueError(
+            "CDR releases ROMS cannot place on the grid:\n  - " + "\n  - ".join(refused)
+        )
+    if warned:
+        warnings.warn(
+            "CDR releases ROMS will move:\n  - " + "\n  - ".join(warned),
+            UserWarning,
+            stacklevel=2,
+        )
 
 
 # --- memory / timing instrumentation (formerly cstar_forge.utils) ----------

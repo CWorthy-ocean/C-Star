@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+import roms_tools as rt
 import xarray as xr
 
 from cstar.applications.forge.engine import process_forge_blueprint
@@ -96,7 +97,9 @@ def _moved(**position: float) -> dict[str, Any]:
 
 
 class TestCdrReleasePositions:
-    """roms-tools checks each release against the grid Forge hands it."""
+    """Forge checks each release against the grid before generating any input,
+    refusing what ROMS cannot place and warning about what it moves.
+    """
 
     def test_the_case_releases_generate(
         self, test_catalog: "LayeredCatalog", tmp_path: Path
@@ -109,12 +112,12 @@ class TestCdrReleasePositions:
     @pytest.mark.parametrize(
         ("position", "message"),
         [
-            ({"lat": 0.0, "lon": 100.0}, "outside of the grid domain"),
-            ({"depth": 9000.0}, "below the seafloor"),
+            ({"lat": 0.0, "lon": 100.0}, "outside the domain"),
+            ({"depth": 9000.0}, "zero at every level"),
         ],
-        ids=["outside-domain", "below-seafloor"],
+        ids=["outside-domain", "profile-vanishes"],
     )
-    def test_a_release_off_the_grid_fails_in_generation(
+    def test_a_release_roms_cannot_place_is_refused(
         self,
         test_catalog: "LayeredCatalog",
         tmp_path: Path,
@@ -124,6 +127,26 @@ class TestCdrReleasePositions:
         cfg = _blueprint(test_catalog, _moved(**position))
         with pytest.raises(ValueError, match=message):
             _generate(cfg, tmp_path, "cdr_forcing")
+
+    @pytest.mark.parametrize("case", ["edge", "below-seafloor"])
+    def test_a_release_roms_moves_warns_and_generates(
+        self, test_catalog: "LayeredCatalog", tmp_path: Path, case: str
+    ) -> None:
+        """roms-tools would refuse both with a grid; Forge builds without one."""
+        grid = rt.Grid(**test_catalog.domain_data(CASE.domain)["grid_kwargs"])
+        eta, xi = (0, 4) if case == "edge" else (4, 4)
+        position = {
+            "lat": float(grid.ds["lat_rho"][eta, xi]),
+            "lon": float(grid.ds["lon_rho"][eta, xi]),
+        }
+        if case == "below-seafloor":
+            position["depth"] = float(grid.ds["h"][eta, xi]) + 5.0
+        cfg = _blueprint(test_catalog, _moved(**position))
+
+        with pytest.warns(UserWarning, match="CDR releases ROMS will move"):
+            input_data = _generate(cfg, tmp_path, "cdr_forcing")
+
+        assert list(input_data.glob("*_cdr.nc"))
 
 
 class TestCdrReferenceDate:

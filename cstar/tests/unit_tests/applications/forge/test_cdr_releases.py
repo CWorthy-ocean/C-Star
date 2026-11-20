@@ -1,5 +1,6 @@
-"""CDR releases against the run: ``check_cdr_releases`` and its three call sites,
-the resolver's ``cdr_frc.time_interpolation``, and the grid and reference date
+"""CDR releases against the run and the grid: ``check_cdr_releases`` and its three
+call sites, the resolver's ``cdr_frc.time_interpolation``,
+``check_cdr_release_positions`` and its preflight, and the reference date
 ``_generate_cdr_forcing`` hands roms-tools.
 """
 
@@ -23,11 +24,15 @@ from cstar.applications.forge.engine import (
 )
 from cstar.applications.forge.executor import ForgeExecutor
 from cstar.applications.forge.host import HostPaths
-from cstar.applications.forge.input_generator import CDR_FORCING_NETCDF_STEM
+from cstar.applications.forge.input_generator import (
+    CDR_FORCING_NETCDF_STEM,
+    INPUT_REGISTRY,
+)
 from cstar.applications.forge.namelist_model import (
     cdr_releases_time_interpolation,
     check_cdr_releases,
 )
+from cstar.applications.forge.util import check_cdr_release_positions
 
 RUN_START = datetime(2012, 1, 1)
 RUN_END = datetime(2012, 1, 2)
@@ -389,7 +394,7 @@ class TestStoredBlueprintCdrNets:
 @pytest.fixture(scope="module")
 def real_grid() -> rt.Grid:
     """A real 20x20 grid at 55N 0E (the ``sample_grid`` of the input generator
-    tests), for roms-tools' release-position checks.
+    tests): North Sea, with land on its edges.
     """
     return rt.Grid(
         nx=20,
@@ -406,11 +411,128 @@ def real_grid() -> rt.Grid:
     )
 
 
+def _at(grid: rt.Grid, eta: int, xi: int, **extra) -> dict:
+    """A release at rho point ``(eta, xi)`` of ``grid``."""
+    return _release(
+        lat=float(grid.ds["lat_rho"][eta, xi]),
+        lon=float(grid.ds["lon_rho"][eta, xi]),
+        **extra,
+    )
+
+
+def _interior_land(grid: rt.Grid) -> tuple[int, int]:
+    """An interior land cell at least two cells from the edge."""
+    mask = grid.ds["mask_rho"].values
+    eta, xi = np.argwhere(mask[2:-2, 2:-2] == 0)[0] + 2
+    return int(eta), int(xi)
+
+
+CENTRE = (11, 11)
+"""A wet interior cell of ``real_grid`` (about 45 m deep)."""
+
+
+def _positions(grid: rt.Grid, *releases: dict, relocate: bool = True) -> None:
+    check_cdr_release_positions(grid, list(releases), relocate_to_wet_pts=relocate)
+
+
+class TestCheckCdrReleasePositions:
+    """What Forge refuses and warns about before ROMS moves a release."""
+
+    def test_a_release_on_a_wet_interior_cell_passes_silently(self, real_grid, recwarn):
+        _positions(real_grid, _at(real_grid, *CENTRE))
+        assert not [w for w in recwarn if "CDR releases" in str(w.message)]
+
+    def test_a_release_outside_the_domain_is_refused(self, real_grid):
+        with pytest.raises(ValueError, match=r"release 'far'.* outside the domain"):
+            _positions(real_grid, _release("far", lat=0.0, lon=100.0))
+
+    def test_a_release_on_land_warns_when_roms_relocates_it(self, real_grid):
+        release = _at(real_grid, *_interior_land(real_grid), name="coast")
+        with pytest.warns(UserWarning, match=r"release 'coast'.* on land; ROMS moves"):
+            _positions(real_grid, release)
+
+    def test_a_release_on_land_is_refused_without_relocation(self, real_grid):
+        release = _at(real_grid, *_interior_land(real_grid), name="coast")
+        with pytest.raises(
+            ValueError, match=r"release 'coast'.*relocate_to_wet_pts is off"
+        ):
+            _positions(real_grid, release, relocate=False)
+
+    def test_a_release_on_the_edge_warns(self, real_grid):
+        with pytest.warns(UserWarning, match=r"release 'rim'.* on the edge"):
+            _positions(real_grid, _at(real_grid, 0, 10, name="rim"))
+
+    def test_a_release_just_below_the_seafloor_warns(self, real_grid):
+        h = float(real_grid.ds["h"][CENTRE])
+        release = _at(real_grid, *CENTRE, name="deep", depth=h + 5.0)
+        with pytest.warns(UserWarning, match=r"release 'deep'.* below the seafloor"):
+            _positions(real_grid, release)
+
+    def test_a_release_whose_profile_vanishes_is_refused(self, real_grid):
+        release = _at(real_grid, *CENTRE, name="abyss", depth=9000.0)
+        with pytest.raises(ValueError, match=r"release 'abyss'.* zero at every level"):
+            _positions(real_grid, release)
+
+    def test_a_point_release_far_below_the_seafloor_warns(self, real_grid):
+        """With no vertical scale ROMS puts it in the bottom level."""
+        release = _at(real_grid, *CENTRE, name="abyss", depth=9000.0, vsc=0.0)
+        with pytest.warns(UserWarning, match=r"release 'abyss'.* below the seafloor"):
+            _positions(real_grid, release)
+
+    def test_every_refused_release_is_named_in_one_error(self, real_grid):
+        with pytest.raises(ValueError) as excinfo:
+            _positions(
+                real_grid,
+                _at(real_grid, *CENTRE, name="ok"),
+                _release("far", lat=0.0, lon=100.0),
+                _at(real_grid, *CENTRE, name="abyss", depth=9000.0),
+            )
+        message = str(excinfo.value)
+        assert "release 'far'" in message
+        assert "release 'abyss'" in message
+        assert "release 'ok'" not in message
+
+
+class TestPreflightCdrReleases:
+    """``generate_all`` checks the release positions before any input is built."""
+
+    @staticmethod
+    def _steps(forcing: dict) -> list:
+        return [(INPUT_REGISTRY["cdr_forcing"], {"cdr_kwargs": forcing})]
+
+    def test_a_release_outside_the_domain_is_refused_before_generation(
+        self, tmp_path, real_grid
+    ):
+        data = _hand_built_cdr_input_data(tmp_path, grid=real_grid)
+        forcing = _forcing(_release("far", lat=0.0, lon=100.0))
+        with pytest.raises(ValueError, match=r"release 'far'"):
+            data._preflight_cdr_releases(self._steps(forcing), None)
+
+    def test_an_only_inputs_selection_without_cdr_skips_it(self, tmp_path, real_grid):
+        data = _hand_built_cdr_input_data(tmp_path, grid=real_grid)
+        forcing = _forcing(_release("far", lat=0.0, lon=100.0))
+        data._preflight_cdr_releases(self._steps(forcing), {"grid"})
+
+    @pytest.mark.parametrize("relocate", [True, False])
+    def test_relocation_is_read_from_the_namelist_settings(
+        self, tmp_path, real_grid, relocate
+    ):
+        data = _hand_built_cdr_input_data(tmp_path, grid=real_grid)
+        data._settings_run_time["cdr_frc"] = {"relocate_to_wet_pts": relocate}
+        forcing = _forcing(_at(real_grid, *_interior_land(real_grid), name="coast"))
+        if relocate:
+            with pytest.warns(UserWarning, match=r"on land; ROMS moves"):
+                data._preflight_cdr_releases(self._steps(forcing), None)
+        else:
+            with pytest.raises(ValueError, match=r"relocate_to_wet_pts"):
+                data._preflight_cdr_releases(self._steps(forcing), None)
+
+
 class TestGenerateCdrForcingCall:
     """What ``_generate_cdr_forcing`` hands ``rt.CDRForcing``."""
 
     @patch("cstar.applications.forge.input_generator.rt.CDRForcing")
-    def test_the_grid_and_the_runs_reference_date_reach_roms_tools(
+    def test_the_runs_reference_date_reaches_roms_tools_without_the_grid(
         self, mock_cdr_class, tmp_path
     ):
         data = _hand_built_cdr_input_data(
@@ -432,22 +554,7 @@ class TestGenerateCdrForcingCall:
         data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs=cdr_kwargs)
 
         kwargs = mock_cdr_class.call_args.kwargs
-        assert kwargs["grid"] is data.grid
+        # with a grid roms-tools would refuse the releases ROMS moves
+        assert "grid" not in kwargs
         assert kwargs["model_reference_date"] == datetime(2010, 1, 1)
         assert kwargs["releases"] == cdr_kwargs["releases"]
-
-    @pytest.mark.parametrize(
-        ("position", "message"),
-        [
-            ({"lat": 0.0, "lon": 100.0}, "outside of the grid domain"),
-            ({"depth": 9000.0}, "below the seafloor"),
-        ],
-    )
-    def test_a_release_off_the_grid_fails_in_generation(
-        self, tmp_path, real_grid, position, message
-    ):
-        data = _hand_built_cdr_input_data(tmp_path, grid=real_grid)
-        forcing = _forcing(_release(**position))
-
-        with pytest.raises(ValueError, match=message):
-            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs=forcing)

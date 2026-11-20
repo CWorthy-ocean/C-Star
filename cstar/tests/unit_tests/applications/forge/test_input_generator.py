@@ -2364,8 +2364,8 @@ class TestRomsInputGeneratorGeneration:
         """End-to-end (no mocked rt.CDRForcing): a real params dict extracted from a
         roms-tools CDRForcing.to_yaml() dump (the wizard-upload shape) must construct,
         save a real NetCDF, and flip the same toggles the mocked unit test only
-        asserts were *called*. Built on the real sample grid, which roms-tools
-        checks the release position against.
+        asserts were *called*. This is the "grid-less construction really works"
+        guarantee the resolver/wizard's "no grid injection" design decision depends on.
         """
         from cstar.applications.forge.resolve import read_cdr_forcing_yaml
 
@@ -3239,12 +3239,10 @@ class TestCdrTracerAxis:
         mock_cdr.to_yaml.assert_not_called()
         mock_cdr.save.assert_not_called()
 
-    def test_real_roms_tools_cdr_lite_forcing_round_trips(self, tmp_path, sample_grid):
-        """End to end against roms-tools >= 5.1, on a real grid (roms-tools checks
-        the release positions against it): its generated axis (temp, salt,
-        passive, OAE pair, DOR) is what the counts are read from.
+    def test_real_roms_tools_cdr_lite_forcing_round_trips(self, data):
+        """End to end against roms-tools >= 5.1 (grid-less): its generated axis
+        (temp, salt, passive, OAE pair, DOR) is what the counts are read from.
         """
-        data = _hand_built_cdr_input_data(tmp_path, grid=sample_grid)
         self._set_mode(data, "cdr_lite", nt_passive=1)
         data._settings_compile_time["cppdefs"]["cdr_forcing"] = True
         data.ucla_roms_blueprint_elements.cdr_forcing = cstar_models.Dataset(data=[])
