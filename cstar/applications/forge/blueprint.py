@@ -63,7 +63,7 @@ import logging
 import math
 import re
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, get_args
@@ -606,7 +606,22 @@ class RunWindow(_Section):
     model_reference_date: datetime = datetime(2000, 1, 1)
     """The ROMS model reference date (t=0). Passed to every rt object that accepts it
     (InitialConditions, SurfaceForcing, BoundaryForcing, TidalForcing, CDRForcing).
-    Defaults to 2000-01-01, which is the roms-tools default."""
+    Defaults to 2000-01-01, which is the roms-tools default. Must be midnight: the
+    namelist's reference date holds no time of day."""
+
+    @field_validator("model_reference_date")
+    @classmethod
+    def _reference_date_at_midnight(cls, value: datetime) -> datetime:
+        """Refuse a time of day: every input would be re-based to it, while the
+        namelist keeps only the date, and the run would stop before starting.
+        """
+        if value.time() != time(0):
+            raise ValueError(
+                f"model_reference_date {value.isoformat()} has a time of day; the "
+                "ROMS namelist records only the date. Use midnight "
+                f"({value.date().isoformat()}T00:00:00)."
+            )
+        return value
 
 
 # ===========================================================================

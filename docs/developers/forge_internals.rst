@@ -392,6 +392,12 @@ older ROMS stops on a key it doesn't know.
   case or by its namelist spelling (``LLm``, ``akv_bak``) is rejected rather than
   ignored. ``namelist_field_for`` is the one map from a Forge setting to its
   namelist group and key.
+- **Unknown keys are refused** with the nearest valid name
+  (``unknown_settings_keys``), and a key another tier models is left to that
+  tier's version gate. A key Forge writes that no namelist key reads (a file
+  variable name, ``nbgc_flx``) goes in its section's ``_carried_keys``, so stored
+  blueprints keep processing. ``cppdefs`` has no model: ``CPPDEFS_KEYS`` lists every
+  key a ``cppdefs.opt.j2`` template has read.
 - **Version-gated sections** (``pio_settings``, ``cdr_lite_output``,
   ``cdr_gas_exch_output``, ``cdr_lite``) exist only in some tiers.
   ``prune_version_gated_sections`` drops one the pinned release doesn't read,

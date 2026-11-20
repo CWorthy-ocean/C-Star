@@ -86,6 +86,7 @@ from cstar.applications.forge.namelist_model import (
     check_output_streams_divide_rst,
     check_restoring_flux_output,
     check_rst_period_divisible,
+    check_settings_supported,
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
@@ -1323,6 +1324,7 @@ def build_forge_blueprint(
     # shared-OutputSpec case. A section whose enable switch is on raises
     # instead -- the pinned release cannot honor it.
     prune_version_gated_sections(settings, settings_cls)
+    check_settings_supported(settings, settings_cls)
 
     # ----- CDR tracer / gas-exchange output consistency (ucla-roms >= 0.7.0) --
     # Unlike do_cdr_output above, these two dedicated output streams (PR #351)
