@@ -6,9 +6,11 @@
 
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
+import cstar.catalog
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
@@ -149,3 +151,66 @@ class TestValidateRunTimeSectionsOutputCadence:
     def test_clean_settings_have_no_problems(self):
         settings = _build(dt=900).model_settings
         assert validate_run_time_sections(settings, roms_ref="0.15.0") == []
+
+
+_BUNDLED_DOMAINS = (
+    "GoA-10th_deg",
+    "NEP-4th_deg",
+    "PAC_2fth_deg",
+    "ccs-12km",
+    "gulf-guinea-toy",
+    "hvalfjordur-0",
+    "wio-toy",
+)
+_BUNDLED_OUTPUTS = ("daily-restarts", "monthly-restarts", "standard", "weekly-restarts")
+_MARBL_STEP_TOO_LONG = {"gulf-guinea-toy", "wio-toy"}
+"""Bundled domains whose CFL dt (14,400 s and 28,800 s) is longer than the MARBL step
+ucla-roms accepts."""
+_WRITES_NOTHING_IN_A_DAY = {"monthly-restarts", "weekly-restarts"}
+"""Bundled OutputSpecs that write nothing in the bundled domains' one-day window."""
+
+
+@pytest.mark.integration
+class TestBundledDomainOutputMatrix:
+    """Every bundled DomainSpec x OutputSpec, at the domain's CFL dt with MARBL,
+    resolves, or fails or warns only for the new output-cadence rules.
+    """
+
+    def test_covers_every_bundled_spec(self):
+        specs = Path(cstar.catalog.__file__).parent / "bundled" / "specs"
+        assert {p.stem for p in (specs / "DomainSpec").glob("*.yaml")} == set(
+            _BUNDLED_DOMAINS
+        )
+        assert {p.stem for p in (specs / "OutputSpec").glob("*.yaml")} == set(
+            _BUNDLED_OUTPUTS
+        )
+
+    @pytest.mark.parametrize("output", _BUNDLED_OUTPUTS)
+    @pytest.mark.parametrize("domain_name", _BUNDLED_DOMAINS)
+    def test_resolves_or_fails_for_the_intended_reason(
+        self, domain_name, output, caplog
+    ):
+        pytest.importorskip("roms_tools")
+        domain = _CATALOG.domain_data(domain_name)
+        kw = dict(
+            model_path=_CATALOG.model_path(domain["model_name"]),
+            grid_name=domain["grid_name"],
+            grid_kwargs=domain["grid_kwargs"],
+            open_boundaries=domain["open_boundaries"],
+            partitioning=domain["partitioning"],
+            start_date=datetime.fromisoformat(str(domain["start_time"])),
+            end_date=datetime.fromisoformat(str(domain["end_time"])),
+            dt=None,
+            output_settings=_CATALOG.output_data(output),
+        )
+        if domain_name in _MARBL_STEP_TOO_LONG:
+            with pytest.raises(NamelistConsistencyError) as exc_info:
+                _build(**kw)
+            assert exc_info.value.rule == "marbl_step_ceiling"
+            return
+        with caplog.at_level(logging.WARNING, logger=_RESOLVE_LOGGER):
+            _build(**kw)
+        warned = any(
+            m.startswith("No output stream writes") for m in _resolver_warnings(caplog)
+        )
+        assert warned == (output in _WRITES_NOTHING_IN_A_DAY)
