@@ -348,7 +348,7 @@ forcing:
     GLOFAS:
       dataset_key: GLOFAS
       dataset_id: null
-      url: https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical
+      url: https://drive.google.com/uc?id=1WeDRCb3lfbJWmgiNMArRxQqTmowTvKF4
       streamable: false
     RIVR2O:
       dataset_key: RIVR2O
@@ -750,5 +750,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:e1a63f07444ab933101f2a0a5e6c13d7dcb6142fab4d81314460661980ab4e13
+  content_hash: bp-v2:df9e4c56d30eb1732c9fd980017235326efdd79c52575402f6e9e0eb043fabcf
   notes: null
