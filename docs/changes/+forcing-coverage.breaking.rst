@@ -1,0 +1,3 @@
+A ucla_roms run whose forcing does not reach back to its start or on to its end is refused before ROMS is built; before, ROMS stopped at its first step ("First available forcing record is past current time") or at its last step ("Ran out of time records"), after the queue wait and the run.
+- The error names each forcing variable that falls short, the files that hold it, the time span they cover and the span the run needs.
+- A file the build does not read is still checked unless it holds carbonate sensitivities for a build that computes them online, or river forcing with rivers off; remove such a file from the blueprint.

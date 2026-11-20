@@ -40,6 +40,9 @@ blueprint has these:
    ``tidal``, ``river`` and, for a CDR-LiTE build that does not compute them
    online, ``carbonate_sensitivity`` (the ``ddic_dco2`` and ``ddic_dalk``
    files that an earlier MARBL run wrote as its ``_cdrgas`` output).
+   List a long run's forcing in full: each run passes to ROMS only the files
+   that hold records for its own window. A run whose forcing does not reach
+   back to its start or on to its end is refused before ROMS is built.
 ``cdr_forcing``
    An optional carbon dioxide removal forcing file.
 ``nesting_info``

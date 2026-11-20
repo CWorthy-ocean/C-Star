@@ -2,12 +2,14 @@ import json
 import logging
 import pickle
 import re
+import shutil
 import tempfile
 import warnings
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest import mock
 
 import numpy as np
@@ -29,12 +31,14 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
+from cstar.io.source_data import SourceData
 from cstar.io.staged_data import StagedFile
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.file_system import BUILD_RECORD_NAME
+from cstar.roms.forcing_window import read_file_times
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
     CARBONATE_SENSITIVITY_VARIABLES,
@@ -2510,6 +2514,14 @@ class TestProcessingAndExecution:
                 datetime(2025, 3, 31),
                 datetime(2025, 6, 1),
                 datetime(2025, 6, 30),
+                False,
+            ),
+            (
+                False,
+                datetime(2025, 8, 1),
+                datetime(2025, 9, 30),
+                datetime(2025, 6, 1),
+                datetime(2025, 6, 30),
                 True,
             ),
         ],
@@ -2563,7 +2575,8 @@ class TestProcessingAndExecution:
         | 2  |False         |None         |None       |None      |None      |False   |
         | 3  |False         |2025-01-01   |2025-12-31 |None      |None      |False   |
         | 4  |False         |2025-01-01   |2025-12-31 |2025-06-01|2025-06-30|False   |
-        | 5  |False         |2025-01-01   |2025-03-31 |2025-06-01|2025-06-30|True    |
+        | 5  |False         |2025-01-01   |2025-03-31 |2025-06-01|2025-06-30|False   |
+        | 6  |False         |2025-08-01   |2025-09-30 |2025-06-01|2025-06-30|True    |
         """
         sim = stub_romssimulation
 
@@ -6486,3 +6499,634 @@ class TestSameNamedInputs:
 
         assert "share a name" in str(exc_info.value)
         assert [c.args[0] for c in mock_attach.call_args_list] == expected
+
+
+class TestForcingWindow:
+    """Tests for the forcing-window trim: forcing files holding no record ROMS
+    reads in the run window are neither staged nor listed in `frcfiles`.
+    """
+
+    # day offsets from 2025-01-01 of four month-like files' first/last records
+    SPANS: ClassVar[list[tuple[float, float]]] = [
+        (0, 30),
+        (31, 59),
+        (60, 89),
+        (90, 119),
+    ]
+
+    @staticmethod
+    def _write(path: Path, first: float, last: float) -> str:
+        """Write a tiny surface file with daily records from `first` to `last`."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        t = np.arange(first, last + 1.0)
+        xr.Dataset(
+            {
+                "time": ("time", t),
+                "data": (("time", "b"), np.zeros((t.size, 2))),
+            },
+            attrs={"model_reference_date": "2025-01-01 00:00:00"},
+        ).to_netcdf(path)
+        return str(path)
+
+    def _files(self, tmp_path: Path) -> list[str]:
+        return [
+            self._write(tmp_path / "src" / f"f{i}.nc", a, b)
+            for i, (a, b) in enumerate(self.SPANS)
+        ]
+
+    @staticmethod
+    def _sim(
+        sim: ROMSSimulation,
+        locations: list[str],
+        start_day: float,
+        end_day: float,
+    ) -> ROMSSimulation:
+        """Make `locations` the simulation's only forcing, over the given days."""
+        sim.tidal_forcing = None
+        sim.river_forcing = None
+        sim.boundary_forcing = []
+        sim.forcing_corrections = []
+        sim.carbonate_sensitivity = []
+        sim.surface_forcing = [ROMSSurfaceForcing(location=loc) for loc in locations]
+        sim.start_date = datetime(2025, 1, 1) + timedelta(days=start_day)
+        sim.end_date = datetime(2025, 1, 1) + timedelta(days=end_day)
+        return sim
+
+    @staticmethod
+    def _names(sim: ROMSSimulation) -> list[str]:
+        forcing = sim._forcing_datasets
+        return [
+            inp.source.basename
+            for inp, _ in sim._input_staging_names()
+            if inp in forcing
+        ]
+
+    def test_outer_files_are_not_staged_or_listed(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Only the file bracketing the window is staged, and `frcfiles` lists it."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, self._files(tmp_path), 40, 50)
+        assert self._names(sim) == ["f1.nc"]
+
+    def test_forcing_paths_list_kept_files_in_order(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Staged files appear in `frcfiles` in their original order."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, self._files(tmp_path), 25, 50)
+        sim.use_pio = True
+        staged_dir = tmp_path / "staged"
+        for inp, name in sim._input_staging_names():
+            if inp in sim._forcing_datasets:
+                inp.get(staged_dir, name=name)
+        assert sim._forcing_paths == [staged_dir / "f0.nc", staged_dir / "f1.nc"]
+
+    @mock.patch.object(
+        AdditionalCode,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    def test_is_setup_ignores_unstaged_file(
+        self,
+        mock_additionalcode_exists: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A trimmed file that was never staged does not make `is_setup` False."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, self._files(tmp_path), 40, 50)
+        with (
+            mock.patch.object(
+                ROMSExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
+            ),
+            mock.patch.object(
+                MARBLExternalCodeBase, "is_configured", new_callable=mock.PropertyMock
+            ),
+            mock.patch.object(
+                ROMSSimulation,
+                "input_datasets",
+                new_callable=mock.PropertyMock,
+                return_value=sim._forcing_datasets,
+            ),
+        ):
+            assert not sim.is_setup
+            kept = sim.surface_forcing[1]
+            kept.get(tmp_path / "staged")
+            assert sim.is_setup
+
+    @mock.patch.object(ROMSSimulation, "_validate_build_flags")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_fallback_uses_the_same_set(
+        self,
+        mock_partition: mock.Mock,
+        mock_marbl_attach: mock.Mock,
+        mock_roms_attach: mock.Mock,
+        mock_verify_linkage: mock.Mock,
+        mock_validate_flags: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+    ):
+        """When names clash, `attach` still checks only the datasets `setup` stages."""
+        locations = self._files(tmp_path)
+        # two same-named, overlapping files (a refused clash) plus one far outside
+        clash_a = self._write(tmp_path / "a" / "x.nc", 0, 200)
+        clash_b = self._write(tmp_path / "b" / "x.nc", 100, 300)
+        far = self._write(tmp_path / "far" / "far.nc", 2000, 2100)
+        sim = self._sim(
+            stub_romssimulation, [clash_a, clash_b, locations[0], far], 40, 50
+        )
+        expected = [inp for inp in sim.input_datasets if sim._stages_input(inp)]
+        assert sim.surface_forcing[3] not in expected
+
+        with (
+            mock.patch.object(
+                ROMSInputDataset,
+                "attach",
+                autospec=True,
+                side_effect=FileNotFoundError("not staged"),
+            ) as mock_attach,
+            mock.patch.object(
+                ROMSInputDataset,
+                "get",
+                autospec=True,
+                side_effect=FileNotFoundError("not staged"),
+            ),
+            pytest.raises(CstarExpectationFailed) as exc_info,
+        ):
+            sim.attach()
+
+        assert "share a name" in str(exc_info.value)
+        assert [c.args[0] for c in mock_attach.call_args_list] == expected
+
+    def test_remote_source_is_kept_and_never_read(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        mocksourcedata_remote_file: Callable[..., SourceData],
+    ):
+        """A remote forcing file is kept without being opened."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        locations = self._files(tmp_path)
+        sim = self._sim(stub_romssimulation, locations, 40, 50)
+        remote = ROMSSurfaceForcing(location=locations[0])
+        remote.source = mocksourcedata_remote_file(
+            location="https://example.com/remote.nc"
+        )
+        sim.surface_forcing = [remote, *sim.surface_forcing]
+
+        with mock.patch(
+            "cstar.roms.simulation.read_file_times", wraps=read_file_times
+        ) as reader:
+            assert self._names(sim) == ["remote.nc", "f1.nc"]
+        assert sorted(c.args[0] for c in reader.call_args_list) == sorted(
+            Path(p) for p in locations
+        )
+
+    def test_partitioned_source_reads_piece_zero(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A partitioned source is read from its first piece only."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, [], 40, 50)
+        piece0 = self._write(tmp_path / "p" / "f.0.nc", 31, 59)
+        shutil.copy(piece0, tmp_path / "p" / "f.1.nc")
+        part = ROMSSurfaceForcing(location=piece0, source_np_xi=2, source_np_eta=1)
+        with mock.patch(
+            "cstar.roms.simulation.read_file_times", wraps=read_file_times
+        ) as reader:
+            times = sim._dataset_file_times(part)
+        assert [c.args[0] for c in reader.call_args_list] == [Path(piece0)]
+        assert times is not None
+        assert times.first == datetime(2025, 2, 1)
+
+    def test_each_file_is_read_once(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Repeated queries read every source file a single time."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, self._files(tmp_path), 40, 50)
+        with mock.patch(
+            "cstar.roms.simulation.read_file_times", wraps=read_file_times
+        ) as reader:
+            for _ in range(3):
+                sim._input_staging_names()
+                sim._forcing_outside_window()
+                sim._stages_input(sim.surface_forcing[0])
+        assert reader.call_count == 4
+
+    def test_restart_start_keeps_earlier_file(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Initial conditions earlier than `start_date` pull the bracket back."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        spans = [(0, 9), (10, 19), (20, 40)]
+        locations = [
+            self._write(tmp_path / "src" / f"g{i}.nc", a, b)
+            for i, (a, b) in enumerate(spans)
+        ]
+        sim = self._sim(stub_romssimulation, locations, 40, 50)
+        assert self._names(sim) == ["g2.nc"]
+
+        # ROMS starts from the restart's time, day 12 (2025-01-13)
+        ic = self._write(tmp_path / "ic" / "run_rst.20250113000000.nc", 0, 1)
+        sim.initial_conditions = ROMSInitialConditions(location=ic)
+        assert sim._roms_start() == datetime(2025, 1, 13)
+        assert self._names(sim) == ["g1.nc", "g2.nc"]
+
+    def test_ntimes_override_keeps_files_after_the_start(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """With `ntimes` set by hand the run length is unknown, so the end is open."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, self._files(tmp_path), 25, 50)
+        assert self._names(sim) == ["f0.nc", "f1.nc"]
+
+        sim.namelist_overrides = {"time_stepping": {"ntimes": 5}}
+        assert sim._ntimes_overridden()
+        assert self._names(sim) == ["f0.nc", "f1.nc", "f2.nc", "f3.nc"]
+
+    def test_replaced_datasets_do_not_hit_a_stale_memo(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """New dataset objects at the same paths are trimmed again."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        locations = self._files(tmp_path)
+        sim = self._sim(stub_romssimulation, locations, 40, 50)
+        assert self._names(sim) == ["f1.nc"]
+        sim.surface_forcing = [ROMSSurfaceForcing(location=loc) for loc in locations]
+        assert self._names(sim) == ["f1.nc"]
+
+    def test_logs_once_per_window(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """The trim is announced at INFO once, not on every query."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        sim = self._sim(stub_romssimulation, self._files(tmp_path), 40, 50)
+        with caplog.at_level(logging.INFO, logger=sim.log.name):
+            for _ in range(3):
+                sim._input_staging_names()
+        assert caplog.text.count("Staging 1 of 4 surface forcing files") == 1
+        assert (
+            "for 2025-02-10 00:00 to 2025-02-20 00:00; the others hold no "
+            "records ROMS reads in this window"
+        ) in caplog.text
+
+
+def _write_forcing(
+    path: Path,
+    first: float,
+    last: float,
+    variable: str = "data",
+    time_variable: str = "time",
+    cyclic: bool = False,
+) -> str:
+    """Write a tiny forcing file with daily records from day `first` to `last`
+    (days since 2025-01-01) and return its location.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    t = np.arange(first, last + 1.0)
+    xr.Dataset(
+        {
+            time_variable: (
+                time_variable,
+                t,
+                {"cycle_length": 365.0} if cyclic else {},
+            ),
+            variable: ((time_variable, "b"), np.zeros((t.size, 2))),
+        },
+        attrs={"model_reference_date": "2025-01-01 00:00:00"},
+    ).to_netcdf(path)
+    return str(path)
+
+
+class TestForcingCoverage:
+    """Tests for `ROMSSimulation._validate_forcing_coverage`: a run whose staged
+    forcing does not span `[R, R + ntimes * dt]` is refused before the build.
+    """
+
+    DAY = 86400.0
+
+    @staticmethod
+    def _nml(
+        dt: float = 86400.0,
+        ntimes: int | None = None,
+        river: bool = True,
+        online: bool = False,
+    ) -> RomsNamelistV0_9_0:
+        nml = RomsNamelistV0_9_0.read(EXAMPLE_NAMELIST_V0_9_0)
+        nml.time_stepping.dt = dt
+        if ntimes is not None:
+            nml.time_stepping.ntimes = ntimes
+        nml.river_frc_settings.river_source = river
+        nml.river_frc_settings.river_analytical = False
+        nml.cdr_lite_settings.cdr_online_carbonate_sensitivity = online
+        return nml
+
+    def _sim(
+        self,
+        sim: ROMSSimulation,
+        tmp_path: Path,
+        spans: list[tuple[float, float]],
+        start_day: float = 40,
+        end_day: float = 50,
+        cls: type[ROMSInputDataset] = ROMSSurfaceForcing,
+        variable: str = "data",
+        time_variable: str = "time",
+    ) -> ROMSSimulation:
+        """Stage `spans` as the only forcing, as `cls` datasets, over the days given."""
+        sim.tidal_forcing = None
+        sim.river_forcing = None
+        sim.boundary_forcing = []
+        sim.surface_forcing = []
+        sim.forcing_corrections = []
+        sim.carbonate_sensitivity = []
+        datasets = []
+        for i, (a, b) in enumerate(spans):
+            loc = _write_forcing(
+                tmp_path / "src" / f"f{i}.nc", a, b, variable, time_variable
+            )
+            ds = cls(location=loc)
+            ds.get(tmp_path / "staged")
+            datasets.append(ds)
+        if cls is ROMSSurfaceForcing:
+            sim.surface_forcing = datasets  # type: ignore[assignment]
+        elif cls is ROMSCarbonateSensitivity:
+            sim.carbonate_sensitivity = datasets  # type: ignore[assignment]
+        elif cls is ROMSRiverForcing:
+            sim.river_forcing = datasets[0]  # type: ignore[assignment]
+        sim.start_date = datetime(2025, 1, 1) + timedelta(days=start_day)
+        sim.end_date = datetime(2025, 1, 1) + timedelta(days=end_day)
+        return sim
+
+    @staticmethod
+    def _check(sim: ROMSSimulation, nml: Any, cdr_lite: bool = False) -> None:
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_read_raw_namelist",
+                return_value=(nml, type(nml), "0.9.0"),
+            ),
+            mock.patch.object(
+                ROMSSimulation,
+                "_active_cppdefs_for_precheck",
+                return_value={"cdr_lite": cdr_lite},
+            ),
+        ):
+            sim._validate_forcing_coverage()
+
+    def test_start_refused(self, stub_romssimulation, tmp_path):
+        """Forcing that begins after the run starts is refused, naming everything."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(45, 60)])
+        with pytest.raises(ValueError) as exc_info:
+            self._check(sim, self._nml())
+        msg = str(exc_info.value)
+        assert "reads forcing from 2025-02-10 00:00 to 2025-02-20 00:00, but" in msg
+        assert "surface forcing f0.nc" in msg
+        assert "data" in msg
+        assert "from 2025-02-15 00:00 to 2025-03-02 00:00" in msg
+        assert "First available forcing record is past current time" in msg
+        assert "Ran out of time records" not in msg
+        assert "shorten the run" in msg
+
+    def test_end_refused(self, stub_romssimulation, tmp_path):
+        """Forcing that ends before the run ends is refused."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(30, 45)])
+        with pytest.raises(ValueError) as exc_info:
+            self._check(sim, self._nml())
+        msg = str(exc_info.value)
+        assert "Ran out of time records" in msg
+        assert "First available forcing record" not in msg
+
+    def test_exact_cover_passes(self, stub_romssimulation, tmp_path):
+        """Records exactly at R and at R_end are enough."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(40, 50)])
+        self._check(sim, self._nml())
+
+    def test_end_uses_dt(self, stub_romssimulation, tmp_path):
+        """A 10.5-day run at dt of one day takes 10 steps and needs 10 days."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(40, 50)], end_day=50.5)
+        self._check(sim, self._nml())
+
+    def test_ntimes_override_extends_the_end(self, stub_romssimulation, tmp_path):
+        """A larger `ntimes` override needs forcing up to R + ntimes * dt."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(40, 50)])
+        sim.namelist_overrides = {"time_stepping": {"ntimes": 15}}
+        with pytest.raises(ValueError, match="to 2025-02-25 00:00, but"):
+            self._check(sim, self._nml(ntimes=15))
+
+    def test_restart_timestamp_shifts_r(self, stub_romssimulation, tmp_path):
+        """ROMS starts from the restart's time, so forcing must reach back to it."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(35, 65)])
+        self._check(sim, self._nml())
+        ic = _write_forcing(tmp_path / "ic" / "run_rst.20250201000000.nc", 0, 1)
+        sim.initial_conditions = ROMSInitialConditions(location=ic)
+        with pytest.raises(ValueError, match="from 2025-02-01 00:00 to") as exc_info:
+            self._check(sim, self._nml())
+        assert "First available forcing record" in str(exc_info.value)
+
+    def test_carbonate_variables_ignored_unless_read(
+        self, stub_romssimulation, tmp_path
+    ):
+        """Sensitivity variables are checked only when ROMS reads them from files."""
+        sim = self._sim(
+            stub_romssimulation,
+            tmp_path,
+            [(45, 60)],
+            cls=ROMSCarbonateSensitivity,
+            variable="ddic_dco2",
+            time_variable="ddic_dco2_time",
+        )
+        self._check(sim, self._nml(), cdr_lite=False)
+        self._check(sim, self._nml(online=True), cdr_lite=True)
+        with pytest.raises(ValueError, match="ddic_dco2"):
+            self._check(sim, self._nml(online=False), cdr_lite=True)
+
+    def test_river_ignored_when_rivers_off(self, stub_romssimulation, tmp_path):
+        """River forcing is not checked when ROMS does not read rivers."""
+        sim = self._sim(
+            stub_romssimulation,
+            tmp_path,
+            [(45, 60)],
+            cls=ROMSRiverForcing,
+            variable="river_volume",
+            time_variable="river_time",
+        )
+        self._check(sim, self._nml(river=False))
+        with pytest.raises(ValueError, match="river forcing"):
+            self._check(sim, self._nml(river=True))
+
+    def test_remote_file_of_the_kind_suppresses_the_check(
+        self, stub_romssimulation, tmp_path, mocksourcedata_remote_file
+    ):
+        """An unreadable file of the same kind might hold the variable."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(45, 60)])
+        remote = ROMSSurfaceForcing(location=sim.surface_forcing[0].source.location)
+        remote.source = mocksourcedata_remote_file(
+            location="https://example.com/remote.nc"
+        )
+        sim.surface_forcing = [remote, *sim.surface_forcing]
+        with mock.patch.object(
+            InputDataset,
+            "exists_locally",
+            new_callable=mock.PropertyMock,
+            return_value=True,
+        ):
+            self._check(sim, self._nml())
+
+    def test_cyclic_files_are_not_checked(self, stub_romssimulation, tmp_path):
+        """A climatology repeats, so its records need not span the run."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(45, 60)])
+        loc = _write_forcing(tmp_path / "src" / "clim.nc", 45, 60, cyclic=True)
+        clim = ROMSSurfaceForcing(location=loc)
+        clim.get(tmp_path / "staged")
+        sim.surface_forcing = [clim]
+        self._check(sim, self._nml())
+
+    def test_no_dates_or_nothing_staged_is_skipped(self, stub_romssimulation, tmp_path):
+        """Without dates or staged forcing nothing is checked."""
+        sim = self._sim(stub_romssimulation, tmp_path, [(45, 60)])
+        sim.end_date = None
+        self._check(sim, self._nml())
+
+    @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch.object(ROMSSimulation, "_validate_pio_inputs")
+    @mock.patch.object(ROMSSimulation, "_validate_reference_dates")
+    def test_pre_run_runs_the_check(
+        self, mock_ref, mock_pio, mock_partition, stub_romssimulation
+    ):
+        """`pre_run` runs the coverage check after the river check."""
+        with (
+            mock.patch.object(ROMSSimulation, "_validate_carbonate_sensitivity_inputs"),
+            mock.patch.object(ROMSSimulation, "_validate_river_count"),
+            mock.patch.object(
+                ROMSSimulation,
+                "_validate_forcing_coverage",
+                side_effect=ValueError("coverage"),
+            ),
+            pytest.raises(ValueError, match="coverage"),
+        ):
+            stub_romssimulation.pre_run()
+
+    @mock.patch.object(ROMSSimulation, "build")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_runs_the_check(
+        self, mock_setup, mock_ac_get, mock_get, mock_build, stub_romssimulation
+    ):
+        """`setup` runs it once everything is staged, before the build."""
+        with (
+            mock.patch.object(ROMSSimulation, "_validate_carbonate_sensitivity_inputs"),
+            mock.patch.object(ROMSSimulation, "_validate_river_count"),
+            mock.patch.object(
+                ROMSSimulation,
+                "_validate_forcing_coverage",
+                side_effect=ValueError("coverage"),
+            ),
+            pytest.raises(ValueError, match="coverage"),
+        ):
+            stub_romssimulation.setup()
+        mock_build.assert_not_called()
+
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSSimulation, "_validate_build_flags")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch.object(
+        ROMSExternalCodeBase,
+        "is_configured",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(
+        MARBLExternalCodeBase,
+        "is_configured",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(
+        AdditionalCode,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(
+        InputDataset,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(ROMSInputDataset, "get")
+    def test_attach_raises_the_coverage_error_as_is(
+        self,
+        mock_get,
+        mock_input_exists,
+        mock_ac_exists,
+        mock_marbl_configured,
+        mock_roms_configured,
+        mock_partition,
+        mock_flags,
+        mock_verify,
+        mock_marbl_attach,
+        mock_roms_attach,
+        stub_romssimulation,
+    ):
+        """A resumed run is checked too, and the error is not the resume wrapper."""
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        TestAttach._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        TestAttach._stage_additional_code(
+            sim.runtime_code, sim.fs_manager.runtime_code_dir
+        )
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        assert np_xi is not None and np_eta is not None
+        for inp in sim.input_datasets:
+            TestAttach._stage_input_dataset(
+                sim.fs_manager.input_datasets_dir, inp, np_xi, np_eta
+            )
+        (sim.fs_manager.compile_time_code_dir / "roms").write_text("binary")
+
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_validate_forcing_coverage",
+                side_effect=ValueError("coverage"),
+            ),
+            pytest.raises(ValueError, match="^coverage$"),
+        ):
+            sim.attach()

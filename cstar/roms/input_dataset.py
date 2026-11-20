@@ -287,6 +287,8 @@ class ROMSInputDataset(InputDataset, ABC):
 
     partitionable: bool = True
     """Set to False if the input dataset should not be partitioned."""
+    label: ClassVar[str] = "input"
+    """What this kind of dataset is called in log and error messages."""
 
     def __init__(
         self,
@@ -849,17 +851,26 @@ class ROMSInitialConditions(ROMSInputDataset):
 class ROMSTidalForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model tidal forcing files."""
 
+    label: ClassVar[str] = "tidal forcing"
+    """What this dataset is called in log and error messages."""
+
 
 class ROMSBoundaryForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model boundary condition
     files.
     """
 
+    label: ClassVar[str] = "boundary forcing"
+    """What this dataset is called in log and error messages."""
+
 
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files.
     """
+
+    label: ClassVar[str] = "surface forcing"
+    """What this dataset is called in log and error messages."""
 
 
 CARBONATE_SENSITIVITY_VARIABLES: Final[tuple[str, ...]] = (
@@ -959,9 +970,15 @@ class ROMSCarbonateSensitivity(ROMSInputDataset):
     UCLA-ROMS run with MARBL.
     """
 
+    label: ClassVar[str] = "carbonate sensitivity"
+    """What this dataset is called in log and error messages."""
+
 
 class ROMSRiverForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for river forcing files."""
+
+    label: ClassVar[str] = "river forcing"
+    """What this dataset is called in log and error messages."""
 
 
 class ROMSForcingCorrections(ROMSInputDataset):
@@ -969,6 +986,9 @@ class ROMSForcingCorrections(ROMSInputDataset):
 
     These are used by older ROMS configurations, and included in C-Star to support them.
     """
+
+    label: ClassVar[str] = "forcing correction"
+    """What this dataset is called in log and error messages."""
 
 
 class ROMSCdrForcing(ROMSInputDataset):
