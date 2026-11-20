@@ -1,0 +1,1 @@
+Forge warns when a MARBL run would hold atmospheric CO2 at the ModelSpec's ``bgc.xco2air_default`` (284.7 ppm, pre-industrial, in the bundled ModelSpecs) because its forcing has no ``MBL_co2`` surface item; the wizard shows the warning under the validation status, and setting ``bgc.xco2air_default`` to any value, 284.7 included, silences it.

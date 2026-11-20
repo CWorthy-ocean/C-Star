@@ -101,6 +101,7 @@ from cstar.applications.forge.resolve import (
     force_switches_without_input_off,
     load_model_spec_data,
     read_cdr_forcing_yaml,
+    resolver_warnings,
     with_cdr_lite_tracer_set,
 )
 from cstar.base.digest import hash_netcdf_contents, short_digest
@@ -9123,6 +9124,17 @@ class ForgeBlueprintWizard:
         else:
             self.validation.value = components.banner(
                 "ok", "<b>Blueprint is valid.</b> All settings pass validation."
+            )
+        # What the run would use that nothing refuses but its author likely did not
+        # mean (a pre-industrial CO2, zero BGC inputs). The resolver logs these for
+        # the composed settings, before the overrides above, so check the effective
+        # ones here and show them.
+        if notes := resolver_warnings(
+            cfg, user_set=active_overrides.keys(), roms_ref=effective_roms_ref
+        ):
+            self.validation.value += components.banner(
+                "warn",
+                "<br>".join(f"<b>Warning:</b> {html.escape(note)}" for note in notes),
             )
         comp = cfg.composition
         self.derived.value = (

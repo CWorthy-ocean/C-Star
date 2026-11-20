@@ -1225,6 +1225,12 @@ def check_diagnostics_pio(cppdefs: Mapping[str, Any], roms_ref: str | None) -> N
 # releases zero-filled it with a warning. Temperature and salinity were always
 # required, and passive and CDR tracers stay optional.
 BGC_INPUTS_REQUIRED_MIN_ROMS: tuple[int, int, int] = UCLA_ROMS_0_14_0
+_ADD_BGC_SOURCES = (
+    "Add BGC sources (forcing.boundary.bgc_sources / "
+    "initial_conditions.bgc_sources), e.g. a ForcingSpec with BGC such as "
+    'glorys-era5-unified, or turn MARBL off (bgc_mode "none").'
+)
+"""The fix that :func:`check_marbl_bgc_inputs` and :func:`zero_bgc_inputs_warning` name."""
 
 
 def check_marbl_bgc_inputs(
@@ -1258,6 +1264,27 @@ def check_marbl_bgc_inputs(
     version = roms_version_from_ref(roms_ref)
     if version is not None and version < BGC_INPUTS_REQUIRED_MIN_ROMS:
         return
+    missing = _inputs_without_bgc(
+        forcing, open_boundaries=open_boundaries, is_child=is_child
+    )
+    if missing:
+        minimum = ".".join(str(part) for part in BGC_INPUTS_REQUIRED_MIN_ROMS)
+        raise ValueError(
+            f"{' and '.join(missing)} {'has' if len(missing) == 1 else 'have'} no BGC "
+            f"sources, and ucla-roms >= {minimum} stops a MARBL run when a BGC "
+            "tracer is missing from the boundary or initial files. " + _ADD_BGC_SOURCES
+        )
+
+
+def _inputs_without_bgc(
+    forcing: Forcing, *, open_boundaries: Mapping[str, bool], is_child: bool
+) -> list[str]:
+    """The inputs a MARBL run reads BGC tracers from that carry no BGC sources.
+
+    The boundary counts only for a domain that is not a child, with an open side and
+    boundary forcing at all; the initial conditions whenever the blueprint carries
+    them (see :func:`check_marbl_bgc_inputs`).
+    """
     missing = []
     if (
         not is_child
@@ -1271,16 +1298,49 @@ def check_marbl_bgc_inputs(
         and not forcing.initial_conditions.bgc_sources
     ):
         missing.append("initial_conditions")
-    if missing:
-        minimum = ".".join(str(part) for part in BGC_INPUTS_REQUIRED_MIN_ROMS)
-        raise ValueError(
-            f"{' and '.join(missing)} {'has' if len(missing) == 1 else 'have'} no BGC "
-            f"sources, and ucla-roms >= {minimum} stops a MARBL run when a BGC "
-            "tracer is missing from the boundary or initial files. Add BGC sources "
-            "(forcing.boundary.bgc_sources / initial_conditions.bgc_sources), e.g. "
-            "a ForcingSpec with BGC such as glorys-era5-unified, or turn MARBL off "
-            '(bgc_mode "none").'
-        )
+    return missing
+
+
+def zero_bgc_inputs_warning(
+    forcing: Forcing,
+    *,
+    open_boundaries: Mapping[str, bool],
+    is_child: bool,
+    marbl: bool,
+    roms_ref: str | None,
+) -> str | None:
+    """The warning for a MARBL run without BGC sources on a ucla-roms release below
+    :data:`BGC_INPUTS_REQUIRED_MIN_ROMS`, or ``None``.
+
+    The other half of :func:`check_marbl_bgc_inputs`: those releases start the run
+    anyway, with the missing BGC tracers at zero in the initial state and zero at the
+    open boundaries, and say so only in a line per tracer of the ROMS log. Only a
+    release tag below the minimum is warned about; a branch or ``None`` is refused by
+    the check instead, and a commit hash, whose release is unknown here, is left alone.
+    """
+    if not marbl or is_commit_hash(roms_ref):
+        return None
+    version = roms_version_from_ref(roms_ref)
+    if version is None or version >= BGC_INPUTS_REQUIRED_MIN_ROMS:
+        return None
+    missing = _inputs_without_bgc(
+        forcing, open_boundaries=open_boundaries, is_child=is_child
+    )
+    if not missing:
+        return None
+    effects = {
+        "forcing.boundary": "the open boundaries feed them zero",
+        "initial_conditions": "they start from zero",
+    }
+    minimum = ".".join(str(part) for part in BGC_INPUTS_REQUIRED_MIN_ROMS)
+    return (
+        f"{' and '.join(missing)} {'has' if len(missing) == 1 else 'have'} no BGC "
+        f"sources, so this MARBL run has no data for its BGC tracers: on ucla-roms "
+        f"{roms_ref} (before {minimum}) "
+        + " and ".join(effects[item] for item in missing)
+        + ", and ROMS reports it only in its log. "
+        + _ADD_BGC_SOURCES
+    )
 
 
 def check_upscaled_cdr_lite_tracer_counts(param: Mapping[str, Any]) -> None:
