@@ -1554,7 +1554,7 @@ def build_forge_blueprint(
     )
 
     # ----- MARBL needs BGC sources on the boundary and initial conditions -----
-    # The mirror of the bgc_mode check further up: ucla-roms >= 0.14.0 stops a MARBL run at
+    # The mirror of the check above: ucla-roms >= 0.14.0 stops a MARBL run at
     # startup when a BGC tracer is missing from them. Keyed on the merged cppdefs
     # (an override can turn MARBL off after bgc_mode set it), like the checks above;
     # needs the built forcing, so it sits here rather than with them.

@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 import re
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
@@ -1026,7 +1026,8 @@ def _bgc_source_vars(item: BgcSourceItem) -> frozenset[str] | None:
     roms-tools dataset reads (its ``var_names`` and ``opt_var_names``, so an
     optional variable a file lacks counts as supplied: the check can only pass
     more, never refuse a complete set). ``None`` for a source name Forge does not
-    know, which is not checked.
+    know, or a dataset whose variables cannot be read off its class (a roms-tools
+    release that declares them differently), which is not checked.
     """
     if item.use_vars is not None:
         return frozenset(item.use_vars)
@@ -1037,25 +1038,24 @@ def _bgc_source_vars(item: BgcSourceItem) -> frozenset[str] | None:
         from roms_tools.setup.esper import ESPER_SUPPORTED_VARS
 
         return frozenset(ESPER_SUPPORTED_VARS)
-    import dataclasses
-
     from roms_tools.datasets import lat_lon_datasets as rt_datasets
 
-    dataset = {
-        "UNIFIED": rt_datasets.UnifiedBGCDataset,
-        "CESM_REGRIDDED": rt_datasets.CESMBGCDataset,
-        "GLODAP": rt_datasets.GLODAPv2BGCDataset,
-        "WOA_BGC": rt_datasets.WOABGCDataset,
+    class_name = {
+        "UNIFIED": "UnifiedBGCDataset",
+        "CESM_REGRIDDED": "CESMBGCDataset",
+        "GLODAP": "GLODAPv2BGCDataset",
+        "WOA_BGC": "WOABGCDataset",
     }.get(name)
+    dataset = getattr(rt_datasets, class_name, None) if class_name else None
     if dataset is None:
         return None
     supplied: set[str] = set()
-    for field in dataclasses.fields(dataset):
+    for field in fields(dataset):
         if field.name in ("var_names", "opt_var_names") and callable(
             field.default_factory
         ):
             supplied |= set(field.default_factory())
-    return frozenset(supplied)
+    return frozenset(supplied) or None
 
 
 def _marbl_seed_problem(label: str, bgc_sources: Sequence[BgcSourceItem]) -> str | None:
@@ -1109,17 +1109,16 @@ def _check_marbl_code(
 
 
 def _check_boundary_block(
-    forcing: Forcing, open_boundaries: Mapping[str, bool], is_child: bool
+    forcing: Forcing, open_sides: Sequence[str], is_child: bool
 ) -> str | None:
     """Open sides with no ``forcing.boundary`` on a domain that is not a child:
     ROMS stops at start-up without boundary files. A child takes its boundary
     from its parent's nesting file and needs none.
     """
-    sides = [side for side, is_open in open_boundaries.items() if is_open]
-    if is_child or not sides or forcing.boundary is not None:
+    if is_child or not open_sides or forcing.boundary is not None:
         return None
     return (
-        f"open_boundaries has open sides ({', '.join(sides)}) but the forcing has no "
+        f"open_boundaries has open sides ({', '.join(open_sides)}) but the forcing has no "
         "boundary block, and ROMS stops at start-up without boundary files. Add "
         "forcing.boundary (e.g. from a ForcingSpec such as glorys-era5-physics), or "
         "close those sides in the domain's open_boundaries"
@@ -1155,30 +1154,30 @@ def check_forcing_coverage(
 
     Raises ``ValueError`` listing every problem.
     """
+    open_sides = [side for side, is_open in open_boundaries.items() if is_open]
     problems = [_check_marbl_code(cppdefs, marbl_code)]
+    seed_problems: list[str | None] = []
     if forcing is not None:
-        problems.append(_check_boundary_block(forcing, open_boundaries, is_child))
+        problems.append(_check_boundary_block(forcing, open_sides, is_child))
         if cppdefs.get("marbl"):
             if forcing.initial_conditions is not None:
-                problems.append(
+                seed_problems.append(
                     _marbl_seed_problem(
                         "initial_conditions", forcing.initial_conditions.bgc_sources
                     )
                 )
-            if (
-                forcing.boundary is not None
-                and not is_child
-                and any(open_boundaries.values())
-            ):
-                problems.append(
+            if forcing.boundary is not None and not is_child and open_sides:
+                seed_problems.append(
                     _marbl_seed_problem(
                         "forcing.boundary", forcing.boundary.bgc_sources
                     )
                 )
     found = [p for p in problems if p]
-    if not found:
+    seeds = [p for p in seed_problems if p]
+    if not found and not seeds:
         return
-    if any(p.startswith(("initial_conditions.", "forcing.boundary.")) for p in found):
+    found += seeds
+    if seeds:
         found.append(
             "A BGC source set needs a source of CHL and Fe: keep a UNIFIED item "
             "(use_vars CHL, Fe, ...) beside ESPER/GLODAP/WOA_BGC as the bundled "
