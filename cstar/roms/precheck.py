@@ -329,6 +329,16 @@ class _StreamCheck:
         whatever its period (Rule K): history, floats and the BGC history streams
         write the initial state; the CDR gas-exchange stream writes a bracket
         record at both ends; upscaling writes its last, partial window.
+    period_divides_dt
+        True if ROMS stops at start-up when the enabled stream's period is not a
+        whole multiple of ``dt`` (Rule H): history and averages
+        (``init_avg_arrays``) and the four BGC streams (``wrt_bgc_tracers``,
+        ``wrt_bgc_diags``). Every other stream writes every ``ceil(period / dt)``
+        steps instead (:func:`output_period_drift_warnings`).
+    divides_dt_cppdefs
+        Cppdef name(s) the Rule H check needs on top of ``cppdef_guard`` to be
+        compiled: ``wrt_bgc_diags`` checks the two BGC diagnostic periods only in
+        a ``MARBL_DIAGS`` (or ``BEC2_DIAG``, not mirrored) build.
     """
 
     label: str
@@ -341,6 +351,16 @@ class _StreamCheck:
     before: type[RomsNamelistBase] | None = None
     monthly_field: str | None = None
     writes_outside_period: bool = False
+    period_divides_dt: bool = False
+    divides_dt_cppdefs: tuple[str, ...] = ()
+
+    def refuses_period_off_dt(self, cppdefs: Mapping[str, Any]) -> bool:
+        """True if ROMS, built with ``cppdefs``, stops at start-up when this
+        enabled stream's period is not a whole multiple of ``dt`` (Rule H).
+        """
+        return self.period_divides_dt and _cppdef_guard_satisfied(
+            self.divides_dt_cppdefs, cppdefs
+        )
 
     def applies_to(self, schema: type[RomsNamelistBase] | None) -> bool:
         """True if this row is in ``schema``'s call list; ``None`` is the newest."""
@@ -377,6 +397,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_his",
         "nrpf_his",
         writes_outside_period=True,
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "avg",
@@ -384,6 +405,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("wrt_file_avg",),
         "output_period_avg",
         "nrpf_avg",
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "frc", "frc_output_settings", ("wrt_frc",), "output_period_frc", "nrpf_frc"
@@ -497,6 +519,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "nrpf_bgc_his",
         cppdef_guard=("marbl_or_bec2",),
         writes_outside_period=True,
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "bgc_avg",
@@ -505,6 +528,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_bgc_avg",
         "nrpf_bgc_avg",
         cppdef_guard=("marbl_or_bec2",),
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "bgc_his_dia",
@@ -514,6 +538,8 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "nrpf_bgc_his_dia",
         cppdef_guard=("marbl_or_bec2",),
         writes_outside_period=True,
+        period_divides_dt=True,
+        divides_dt_cppdefs=("marbl_diags",),
     ),
     _StreamCheck(
         "bgc_avg_dia",
@@ -522,6 +548,8 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_bgc_avg_dia",
         "nrpf_bgc_avg_dia",
         cppdef_guard=("marbl_or_bec2",),
+        period_divides_dt=True,
+        divides_dt_cppdefs=("marbl_diags",),
     ),
 )
 
@@ -728,20 +756,6 @@ def check_restart_period_divisible_by_dt(
         )
 
 
-_DT_MULTIPLE_STREAMS: dict[str, tuple[str, ...]] = {
-    "his": (),
-    "avg": (),
-    "bgc_his": (),
-    "bgc_avg": (),
-    "bgc_his_dia": ("marbl_diags",),
-    "bgc_avg_dia": ("marbl_diags",),
-}
-"""Labels of the :data:`_STREAM_CHECKS` rows whose period ROMS requires to be a
-whole multiple of ``dt`` (Rule H), with the cppdefs it needs on top of the row's
-own guard to compile that check: ``wrt_bgc_diags`` checks the two BGC diagnostic
-periods only in a ``MARBL_DIAGS`` (or ``BEC2_DIAG``, not mirrored) build."""
-
-
 def _time_stepping(
     settings: RomsNamelistBase | Mapping[str, Any],
 ) -> tuple[float | None, int | None]:
@@ -810,8 +824,7 @@ def check_output_periods_divisible_by_dt(
         return
     cppdefs = cppdefs or {}
     for check, section in _enabled_streams(settings, cppdefs, schema):
-        guard = _DT_MULTIPLE_STREAMS.get(check.label)
-        if guard is None or not _cppdef_guard_satisfied(guard, cppdefs):
+        if not check.refuses_period_off_dt(cppdefs):
             continue
         period = _section(section, check.period_field)
         if period is None or is_whole_multiple(period, dt):
@@ -849,8 +862,7 @@ def output_period_drift_warnings(
     cppdefs = cppdefs or {}
     messages = []
     for check, section in _enabled_streams(settings, cppdefs, schema):
-        guard = _DT_MULTIPLE_STREAMS.get(check.label)
-        if guard is not None and _cppdef_guard_satisfied(guard, cppdefs):
+        if check.refuses_period_off_dt(cppdefs):
             continue  # Rule H refuses it
         period = _section(section, check.period_field)
         if period is None or _monthly(check, section) or is_whole_multiple(period, dt):

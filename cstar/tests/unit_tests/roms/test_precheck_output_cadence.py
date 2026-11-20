@@ -9,6 +9,7 @@ import pytest
 
 from cstar.roms.namelist import RomsNamelistV0_15_0
 from cstar.roms.precheck import (
+    _STREAM_CHECKS,
     MAX_MARBL_TIMESTEP,
     NamelistConsistencyError,
     check_marbl_step_ceiling,
@@ -155,6 +156,26 @@ class TestOutputPeriodsDivisibleByDt:
         nml.basic_output_settings.output_period_his = 3600.0
         with pytest.raises(NamelistConsistencyError, match="output_period_his"):
             check_output_periods_divisible_by_dt(nml)
+
+
+def test_rule_h_rows_mirror_the_fortran_checks():
+    """The rows ROMS checks against dt, by their (unique) period key, with the
+    extra cppdefs the check needs: `init_avg_arrays` (his, avg), `wrt_bgc_tracers`
+    and, in a MARBL_DIAGS build, `wrt_bgc_diags`.
+    """
+    rows = {
+        row.period_field: row.divides_dt_cppdefs
+        for row in _STREAM_CHECKS
+        if row.period_divides_dt
+    }
+    assert rows == {
+        "output_period_his": (),
+        "output_period_avg": (),
+        "output_period_bgc_his": (),
+        "output_period_bgc_avg": (),
+        "output_period_bgc_his_dia": ("marbl_diags",),
+        "output_period_bgc_avg_dia": ("marbl_diags",),
+    }
 
 
 class TestOutputPeriodDriftWarnings:
