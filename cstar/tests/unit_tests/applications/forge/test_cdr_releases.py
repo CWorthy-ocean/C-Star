@@ -196,6 +196,27 @@ class TestCheckCdrReleases:
         with pytest.raises(ValueError, match=r"cdr_forcing\.start_time 'not a date'"):
             _check(forcing)
 
+    def test_times_that_are_not_a_list_are_reported(self):
+        forcing = _forcing({**_release("one"), "times": _iso(RUN_START)})
+        with pytest.raises(ValueError, match=r"release 'one': times .* is not a list"):
+            _check(forcing)
+
+    def test_releases_given_as_a_tuple_are_checked(self):
+        forcing = _forcing(end=RUN_END + 10 * DAY)
+        forcing["releases"] = (
+            _release("late", times=(RUN_END + DAY, RUN_END + 2 * DAY)),
+        )
+        with pytest.raises(ValueError, match=r"release 'late'"):
+            _check(forcing)
+
+    def test_a_time_interpolation_that_is_not_a_boolean_is_reported(self):
+        forcing = _forcing(_release("odd", time_interpolation="maybe"))
+        assert cdr_releases_time_interpolation(forcing) is None
+        with pytest.raises(
+            ValueError, match=r"release 'odd': time_interpolation 'maybe' is not"
+        ):
+            _check(forcing, time_interpolation=False)
+
     def test_releases_disagreeing_on_time_interpolation_are_refused(self):
         forcing = _forcing(_release("ramp", time_interpolation=True), _release("step"))
         with pytest.raises(ValueError, match=r"disagree on time_interpolation"):
@@ -252,6 +273,10 @@ class TestResolverCdrReleases:
         forcing_inputs["cdr_frc"] = {"time_interpolation": True}
         with pytest.raises(ValueError, match=r"cdr_frc\.time_interpolation is true"):
             _build(cdr=_simple(_forcing()), forcing_inputs=forcing_inputs)
+
+    def test_a_time_interpolation_that_is_not_a_boolean_is_named(self):
+        with pytest.raises(ValueError, match=r"(?s)does not fit the run.*'maybe'"):
+            _build(cdr=_simple(_forcing(_release(time_interpolation="maybe"))))
 
     def test_without_cdr_forcing_the_flag_is_left_alone(self):
         cfg = _build(run_time_overrides={"cdr_frc": {"time_interpolation": True}})

@@ -1128,7 +1128,17 @@ def _cdr_time(value: Any, label: str, problems: list[str]) -> datetime | None:
 def _cdr_releases(cdr_forcing: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
     """The release dicts of a roms-tools ``CDRForcing`` kwargs dict."""
     releases = (cdr_forcing or {}).get("releases")
-    return releases if isinstance(releases, list) else []
+    return list(releases) if isinstance(releases, (list, tuple)) else []
+
+
+def _release_time_interpolation(release: Mapping[str, Any]) -> bool | None:
+    """A release's ``time_interpolation`` as roms-tools reads it (absent is its
+    default ``False``); ``None`` for a value that is not a boolean.
+    """
+    try:
+        return _BOOL_ADAPTER.validate_python(release.get("time_interpolation", False))
+    except ValidationError:
+        return None
 
 
 def cdr_releases_time_interpolation(
@@ -1138,13 +1148,10 @@ def cdr_releases_time_interpolation(
     kwargs dict shares, a release without the key counting as roms-tools'
     default ``False``.
 
-    ``None`` when there are no releases or they disagree, which
-    :func:`check_cdr_releases` refuses.
+    ``None`` when there are no releases, they disagree, or one is not a boolean,
+    all of which :func:`check_cdr_releases` refuses.
     """
-    values = {
-        _BOOL_ADAPTER.validate_python(release.get("time_interpolation", False))
-        for release in _cdr_releases(cdr_forcing)
-    }
+    values = {_release_time_interpolation(r) for r in _cdr_releases(cdr_forcing)}
     return values.pop() if len(values) == 1 else None
 
 
@@ -1202,11 +1209,24 @@ def check_cdr_releases(
         )
 
     releases = _cdr_releases(cdr_forcing)
+    interpolated: list[tuple[str, bool]] = []
     for index, release in enumerate(releases):
-        name = release.get("name", f"#{index}")
+        name = str(release.get("name", f"#{index}"))
+        interp = _release_time_interpolation(release)
+        if interp is None:
+            problems.append(
+                f"release {name!r}: time_interpolation "
+                f"{release.get('time_interpolation')!r} is not true or false"
+            )
+        else:
+            interpolated.append((name, interp))
+        raw_times = release.get("times") or []
+        if not isinstance(raw_times, (list, tuple)):
+            problems.append(f"release {name!r}: times {raw_times!r} is not a list")
+            continue
         times = [
             t
-            for value in release.get("times") or []
+            for value in raw_times
             if (t := _cdr_time(value, f"release {name!r}: time", problems)) is not None
         ]
         if not times or run_start is None or run_end is None:
@@ -1223,22 +1243,19 @@ def check_cdr_releases(
                 f"run starts at {run_start}"
             )
 
-    common = cdr_releases_time_interpolation(cdr_forcing)
-    if releases and common is None:
-        on = sorted(
-            str(r.get("name", f"#{i}"))
-            for i, r in enumerate(releases)
-            if _BOOL_ADAPTER.validate_python(r.get("time_interpolation", False))
-        )
+    values = {interp for _, interp in interpolated}
+    if len(values) > 1:
+        on = sorted(name for name, interp in interpolated if interp)
         problems.append(
             "the releases disagree on time_interpolation (true for "
             f"{', '.join(on)}, false for the rest); roms-tools needs one value for "
             "all of them"
         )
     elif (
-        common is not None
+        len(values) == 1
         and time_interpolation is not None
-        and common != _BOOL_ADAPTER.validate_python(time_interpolation)
+        and (common := values.pop())
+        != _BOOL_ADAPTER.validate_python(time_interpolation)
     ):
         problems.append(
             f"cdr_frc.time_interpolation is {str(time_interpolation).lower()} but "
