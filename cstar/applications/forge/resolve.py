@@ -544,7 +544,8 @@ _CDR_FRC_DEFAULT: dict[str, Any] = {
 # (the nesting child's grid_kwargs/metadata, passed as grid_kwargs_child/
 # metadata_child) rather than the domain/forcing being resolved -- so, like
 # river_frc/cdr_frc, the resolver seeds this disabled baseline and the nesting block
-# below overwrites it when a child grid is actually provided.
+# below overwrites it when a child grid is actually provided. Its *_chd values are
+# placeholders ROMS never reads while do_extract is off.
 _EXTRACT_DATA_DEFAULT: dict[str, Any] = {
     "do_extract": False,
     "extract_file": "sample_edata.nc",
@@ -1242,8 +1243,8 @@ def build_forge_blueprint(
     # will write once the blueprint is built.
     explicit_overrides = copy.deepcopy(current_run_time_overrides)
     if compile_time_overrides:
-        explicit_overrides["cppdefs"] = copy.deepcopy(
-            compile_time_overrides.get("cppdefs", compile_time_overrides)
+        explicit_overrides.setdefault("cppdefs", {}).update(
+            copy.deepcopy(compile_time_overrides.get("cppdefs", compile_time_overrides))
         )
 
     # A child grid (has a parent) gets its boundaries from the parent's nesting.nc

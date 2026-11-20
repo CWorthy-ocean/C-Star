@@ -19,7 +19,10 @@ import f90nml
 import pytest
 
 from cstar.applications.forge.blueprint import CoarseGridMode
-from cstar.applications.forge.engine import process_forge_blueprint
+from cstar.applications.forge.engine import (
+    known_derived_values,
+    process_forge_blueprint,
+)
 from cstar.applications.forge.executor import ForgeExecutor
 from cstar.applications.forge.host import HostPaths
 
@@ -48,8 +51,11 @@ _CHILD_GRID_KWARGS = {
 
 @dataclass(frozen=True)
 class Processed:
-    """The namelist, cppdefs and executor of the processed parent."""
+    """The namelist, cppdefs and executor of the processed parent, and the blueprint
+    it was processed from.
+    """
 
+    cfg: "ForgeBlueprint"
     namelist: f90nml.Namelist
     cppdefs: str
     executor: ForgeExecutor
@@ -98,7 +104,9 @@ def processed(
     assert isinstance(executor, ForgeExecutor)
     (namelist_path,) = working_dir.rglob("namelist.nml")
     (cppdefs_path,) = working_dir.rglob("cppdefs.opt")
-    return Processed(f90nml.read(namelist_path), cppdefs_path.read_text(), executor)
+    return Processed(
+        cfg, f90nml.read(namelist_path), cppdefs_path.read_text(), executor
+    )
 
 
 def test_coarse_surface_files_are_interpolated(processed: Processed) -> None:
@@ -124,3 +132,20 @@ def test_partitioning_and_boundaries_come_from_the_domain(
 ) -> None:
     assert processed.namelist["param_settings"]["np_xi"] == 2
     assert "#define OBC_WEST" in processed.cppdefs
+
+
+def test_values_known_before_generation_match_what_generation_wrote(
+    processed: Processed,
+) -> None:
+    """``known_derived_values`` restates input generation's rules so conflicts are
+    refused before generation; it must agree with what the generator wrote.
+    """
+    written = {
+        **processed.executor._settings_run_time,
+        "cppdefs": processed.executor._settings_compile_time["cppdefs"],
+    }
+    known = known_derived_values(processed.cfg)
+    assert known["blk_frc"] and known["extract_data"] and known["param"]
+    for section, leaves in known.items():
+        for leaf, value in leaves.items():
+            assert written[section][leaf] == value, f"{section}.{leaf}"

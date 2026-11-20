@@ -153,9 +153,6 @@ PROCESSING_FILLED_SECTIONS = (
 # ``bgc.interp_frc`` without a BGC surface item, ``extract_data`` without a child)
 # keeps its stored value: the executor starts from the same snapshot
 # (``resolved_settings``), so leaving the leaf out of the overlay changes nothing.
-#
-# section -> {leaf: the blueprint field that controls it, or None}. ``cppdefs``
-# is the compile-time section; every other one is a namelist section.
 _COARSE_GRID_MODE = "forcing.surface[].coarse_grid_mode"
 # A parent's grid_kwargs_child key -> the extract_data leaf it fills. The resolver
 # requires all four: roms-tools fills a missing one from defaults it keeps private.
@@ -165,6 +162,8 @@ CHILD_VERTICAL_KWARGS: dict[str, str] = {
     "theta_b": "theta_b_chd",
     "hc": "hc_chd",
 }
+# section -> {leaf: the blueprint field that controls it, or None}. ``cppdefs``
+# is the compile-time section; every other one is a namelist section.
 GENERATION_DERIVED_LEAF_KEYS: dict[str, dict[str, str | None]] = {
     "river_frc": dict.fromkeys(
         (
