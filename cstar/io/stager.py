@@ -3,8 +3,9 @@ from abc import ABC
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Final, cast
 
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd, slugify
+from cstar.base.utils import slugify
 from cstar.execution.file_system import (
     DirectoryManager,
     LockTimeoutError,
@@ -253,7 +254,13 @@ class CachedRemoteRepositoryStager(Stager):
         if target_dir.exists():
             target_dir.rmdir()
 
-        _run_cmd(f"cp -av {cache_path}/ {target_dir}")
+        try:
+            shutil.copytree(cache_path, target_dir, symlinks=True)
+        except OSError as ex:  # includes shutil.Error, listing the files not copied
+            # the target was empty or absent before the copy: all of it is partial
+            shutil.rmtree(target_dir, ignore_errors=True)
+            msg = f"Unable to copy the repository cache {cache_path} to {target_dir}: {ex}"
+            raise CstarError(msg) from ex
 
     def _get_cache_path(self) -> "Path":
         """Calculate the path where the stager will cache the repository.

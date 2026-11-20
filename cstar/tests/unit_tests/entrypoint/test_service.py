@@ -2,6 +2,7 @@ import asyncio
 import logging
 import multiprocessing as mp
 import multiprocessing.synchronize as mp_sync
+import signal
 import time
 import types
 import typing as t
@@ -552,3 +553,95 @@ async def test_user_unhandled_exceptions(user_hook_name: str) -> None:
 
         # Confirm that the bomb went off and the service recovered.
         assert bomb.call_count
+
+
+class _StubService(Service):
+    """A Service whose hooks fail on demand, run in-process.
+
+    Constructing a Service installs its SIGINT/SIGTERM handlers; the
+    `stub_service` fixture puts the prior handlers back after each test.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            ServiceConfiguration(
+                as_service=True,
+                loop_delay=0,
+                health_check_frequency=None,
+                log_level=logging.DEBUG,
+                health_check_log_threshold=20,
+                name="StubService",
+            )
+        )
+        self.fail_can_shutdown = False
+        self.fail_on_shutdown = False
+        self.fail_cancel = False
+
+    async def _on_iteration(self) -> None:
+        """Do nothing."""
+
+    def _can_shutdown(self) -> bool:
+        if self.fail_can_shutdown:
+            raise RuntimeError("shutdown check failed")
+        return False
+
+    def _on_shutdown(self) -> None:
+        if self.fail_on_shutdown:
+            raise RuntimeError("shutdown hook failed")
+
+    def _cancel(self) -> None:
+        if self.fail_cancel:
+            raise RuntimeError("cancel failed")
+        super()._cancel()
+
+
+@pytest.fixture
+def stub_service() -> t.Generator[_StubService, None, None]:
+    """Yield a `_StubService`, restoring the signal handlers it replaced."""
+    service = _StubService()
+    try:
+        yield service
+    finally:
+        service._restore_signal_handlers()
+
+
+def test_can_shutdown_when_the_shutdown_check_raises(
+    stub_service: _StubService,
+) -> None:
+    """Verify a service whose shutdown check raises reports that it can shut
+    down, rather than looping forever.
+    """
+    stub_service.fail_can_shutdown = True
+
+    assert stub_service.can_shutdown is True
+
+
+def test_shutdown_restores_signal_handlers_when_on_shutdown_raises() -> None:
+    """Verify the handlers a service replaced are put back even when its
+    `_on_shutdown` hook raises.
+    """
+    prior = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    service = _StubService()
+    try:
+        assert signal.getsignal(signal.SIGTERM) == service._handle_signal
+        service.fail_on_shutdown = True
+
+        with pytest.raises(RuntimeError, match="shutdown hook failed"):
+            service._shutdown()
+
+        assert {sig: signal.getsignal(sig) for sig in prior} == prior
+    finally:
+        service._restore_signal_handlers()
+
+
+def test_handle_signal_stops_the_service_when_cancel_raises(
+    stub_service: _StubService,
+) -> None:
+    """Verify a termination signal stops the event loop even when the
+    service's own cancellation fails.
+    """
+    stub_service.fail_cancel = True
+
+    stub_service._handle_signal(signal.SIGTERM, None)
+
+    assert stub_service._stop_event.is_set()

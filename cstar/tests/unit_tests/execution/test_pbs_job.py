@@ -431,6 +431,14 @@ class TestPBSJob:
                 None,
             ),  # Completed with Exit_status 0
             (
+                {"Jobs": {"12345": {"job_state": "F"}}},
+                None,
+                ExecutionStatus.FAILED,
+                False,
+                None,
+                None,
+            ),  # Finished with no Exit_status is treated as a failure
+            (
                 None,
                 1,
                 None,

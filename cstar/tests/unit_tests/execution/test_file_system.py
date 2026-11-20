@@ -653,6 +653,24 @@ def test_rotate_file_second_rotation_skips_existing(tmp_path: Path) -> None:
     assert not target.exists()
 
 
+def test_rotate_file_third_rotation_skips_all_existing(tmp_path: Path) -> None:
+    """Verify that with `.1` and `.2` present the new rotation becomes `.3` and
+    neither earlier attempt is overwritten.
+    """
+    target = tmp_path / "step.out"
+    target.write_text("attempt 3")
+    (tmp_path / "step.out.1").write_text("attempt 1")
+    (tmp_path / "step.out.2").write_text("attempt 2")
+
+    rotated = rotate_file(target)
+
+    assert rotated == tmp_path / "step.out.3"
+    assert rotated.read_text() == "attempt 3"
+    assert (tmp_path / "step.out.1").read_text() == "attempt 1"
+    assert (tmp_path / "step.out.2").read_text() == "attempt 2"
+    assert not target.exists()
+
+
 async def test_step_disk_usage_missing_dir(tmp_path: Path) -> None:
     """Verify a missing step directory reports zero usage without running `du`."""
     with mock.patch("cstar.execution.file_system._run_cmd") as mock_run_cmd:
