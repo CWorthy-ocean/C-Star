@@ -18,7 +18,7 @@ grid_kwargs:
   hc: 250.0
 open_boundaries:
   south: true
-  east: false
+  east: true
   north: true
   west: true
 partitioning:

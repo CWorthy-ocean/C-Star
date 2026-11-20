@@ -1,0 +1,4 @@
+The bundled DomainSpecs ``PAC_2fth_deg``, ``NEP-4th_deg`` and ``GoA-10th_deg`` now open their ``east`` boundary, so the same domain writes an east edge into its boundary forcing and defines ``OBC_EAST``; on these rotated grids that edge is the geographic south side, all open ocean, which was a closed wall before.
+- ``GoA-10th_deg`` now closes its ``north`` boundary, which is all land, so it no longer defines ``OBC_NORTH`` or writes boundary data for that edge.
+- Boundary names follow the grid's axes, not the compass. On a grid rotated by about 90 degrees, use the wizard's "Derive from grid" button or the grid plot to find the edges that face the sea.
+- These three grids are still affected by the roms-tools grid-angle bug fixed in CWorthy-ocean/roms-tools#737: where the grid's xi axis points west, winds and initial and boundary currents are written reversed. That holds until C-Star requires a roms-tools release with the fix.

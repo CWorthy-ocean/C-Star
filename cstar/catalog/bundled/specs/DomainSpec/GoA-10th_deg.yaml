@@ -22,8 +22,8 @@ grid_kwargs:
     include_bgc: true
 open_boundaries:
   south: true
-  east: false
-  north: true
+  east: true
+  north: false
   west: true
 partitioning:
   n_procs_x: 16

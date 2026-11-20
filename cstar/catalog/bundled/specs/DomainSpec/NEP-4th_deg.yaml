@@ -22,7 +22,7 @@ grid_kwargs:
     include_bgc: true
 open_boundaries:
   south: true
-  east: false
+  east: true
   north: true
   west: true
 partitioning:
