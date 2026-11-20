@@ -1,0 +1,1 @@
+The wizard no longer saves boundary or potential tides switched on for a run that has no tidal input (a child grid, or no tidal forcing), which stopped ROMS at startup; an Advanced setting edited back to its value from the specs no longer counts as an edit.

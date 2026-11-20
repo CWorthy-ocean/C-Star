@@ -1539,8 +1539,9 @@ def test_cfl_dt_from_a_loaded_grid_reads_its_size_and_shape():
     )
     # grid_kwargs are ignored once a grid is loaded (a grid file carries none)
     assert cfl_dt({}, loaded) == cfl_dt(_GRID_KWARGS)
-    coarser = _FakeLoadedGrid(nx=2, ny=2, N=3, size_x=1000.0, size_y=1000.0)
-    assert cfl_dt({}, coarser) > cfl_dt({}, loaded)
+    # (both grids above are coarse enough to hit the 3600 s ceiling)
+    finer = _FakeLoadedGrid(nx=200, ny=200, N=3, size_x=100.0, size_y=100.0)
+    assert cfl_dt({}, finer) < cfl_dt({}, loaded)
 
 
 def test_cfl_dt_rejects_a_loaded_grid_without_size_x():
@@ -9675,27 +9676,26 @@ class TestSaveModifiedSpecsToCatalog:
 
     def test_save_domain_spec_persists_dt(self, isolated_catalog):
         """``dt`` is a first-class domain property (Domain-derived properties),
-        alongside v_sponge -- but unlike v_sponge/open_boundaries it has no
-        touched flag: the widget is always authoritative (default, CFL-computed,
-        or hand-typed), so saving a domain always records the current dt,
-        whether or not the user ever edited it.
+        alongside v_sponge: a typed dt is saved with the domain and restored on a
+        pick (an untouched, grid-derived one is not saved).
         """
         wiz = self._wizard(isolated_catalog)
         # Must stay an integer multiple of the default output_period_rst (86400)
-        # -- see check_rst_period_divisible.
-        wiz.dt.value = 3600.0
+        # -- see check_rst_period_divisible -- and differ from the derived dt.
+        assert wiz.dt.value != 1800.0
+        wiz.dt.value = 1800.0
 
         wiz.save_domain_name.value = "my-domain-dt"
         wiz._on_save_domain(None)
 
         assert "my-domain-dt" in isolated_catalog.domain_names
         saved = isolated_catalog.domain_data("my-domain-dt")
-        assert saved.get("dt") == 3600.0
+        assert saved.get("dt") == 1800.0
 
         wiz2 = self._wizard(isolated_catalog)
         wiz2.domain_dd.value = "my-domain-dt"
-        assert wiz2.dt.value == 3600.0
-        assert wiz2.config.domain.dt == 3600.0
+        assert wiz2.dt.value == 1800.0
+        assert wiz2.config.domain.dt == 1800.0
         # domain.dt and the model_settings leaf must never diverge.
         assert (
             wiz2.config.domain.dt == wiz2.config.model_settings["time_stepping"]["dt"]
@@ -9711,10 +9711,10 @@ class TestSaveModifiedSpecsToCatalog:
         wiz.domain_dd.value = "my-domain-dt-seed"
         assert wiz.config.composition.domain.modified is False
 
-        # +100 would land on 7300, no longer an integer multiple of the default
-        # output_period_rst (86400) -- see check_rst_period_divisible -- so
-        # double instead (7200 -> 14400, still divisible) to isolate the
-        # "editing dt flags domain modified" behavior under test.
+        # +100 would no longer divide the default output_period_rst (86400) --
+        # see check_rst_period_divisible -- so double instead (the derived
+        # 3600 -> 7200, still divisible) to isolate the "editing dt flags domain
+        # modified" behavior under test.
         wiz.dt.value = wiz.dt.value * 2
         assert wiz.config.composition.domain.modified is True
 

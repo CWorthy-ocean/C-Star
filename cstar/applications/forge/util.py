@@ -24,6 +24,14 @@ log = logging.getLogger(__name__)
 PhaseSpeedMode = Literal["baroclinic", "barotropic"]
 """Wave phase speed mode for the CFL time step calculation."""
 
+MAX_DERIVED_DT = 3600
+"""Ceiling (s) on a time step derived from the CFL criterion; a derived dt is
+always a divisor of it."""
+
+_DERIVED_DT_LADDER = tuple(
+    d for d in range(1, MAX_DERIVED_DT + 1) if MAX_DERIVED_DT % d == 0
+)
+
 
 def compute_timestep_from_cfl(
     grid_size_x: float,
@@ -80,9 +88,8 @@ def compute_timestep_from_cfl(
     Returns
     -------
     float
-        Timestep in seconds, rounded to nearest integer, with minimum of 1.0.
-        The timestep is adjusted to be an even divisor of 86400 (seconds per day)
-        to ensure timesteps align with daily boundaries.
+        Timestep in seconds: the largest divisor of :data:`MAX_DERIVED_DT`
+        (3600) that does not exceed the CFL estimate, and at least 1.0.
 
     Notes
     -----
@@ -90,19 +97,19 @@ def compute_timestep_from_cfl(
     1. Compute minimum grid spacing (dx, dy) from domain size and grid points
     2. Estimate fastest {Baroclinic,Barotropic} wave speed
     3. Apply CFL condition: dt = CFL * dx_min / c
-    4. Round to nearest integer
-    5. Adjust to nearest divisor of 86400 (ensures daily alignment)
+    4. Round down to the largest divisor of 3600 not above that estimate
 
     Logic: grid spacing -> phase speed ``c`` -> ``dt = CFL * dx_min / c`` ->
-    round -> snap to a divisor of 86400. Baroclinic ``c`` is a reduced-gravity
+    round down to a divisor of 3600. Baroclinic ``c`` is a reduced-gravity
     scale for the baroclinic timestep; barotropic stability and
     other limits may still require a smaller ``dt``. The fastest gravity wave speed
     is the barotropic wave speed for shallow water waves, which depends on the
     maximum depth in the domain.
 
-    The timestep is constrained to be an even divisor of 86400 (seconds per day)
-    to ensure that model timesteps align with daily boundaries, which is important
-    for forcing data interpolation and output timing.
+    The timestep never rounds up past the CFL estimate. It is capped at one hour,
+    which keeps MARBL's step (``marbl_timestep`` rounded down to whole steps)
+    under ucla-roms' 10,800 s limit, and it divides an hour, so every hourly and
+    daily output period is a whole number of steps.
     """
     # Compute grid spacing in kilometers
     dx_km = grid_size_x / grid_nx
@@ -142,36 +149,10 @@ def compute_timestep_from_cfl(
     # Compute timestep from CFL condition: dt = CFL * dx / c
     dt = cfl * dx_min_m / c
 
-    # Round to nearest integer (timesteps are typically integers in seconds)
-    dt = round(dt)
-
-    # Ensure minimum timestep (avoid extremely small values)
-    dt = max(dt, 1.0)
-
-    # Adjust dt to be an even divisor of 86400 (seconds per day)
-    # This ensures that timesteps align with daily boundaries
-    # Find the nearest divisor of 86400 that's close to the current dt
-    dt_original = round(dt)  # Ensure integer
-    target_seconds_per_day = 86400
-
-    # Collect all divisors of 86400
-    divisors = set()
-    sqrt_target = int(target_seconds_per_day**0.5) + 1
-    for d in range(1, sqrt_target):
-        if target_seconds_per_day % d == 0:
-            divisors.add(d)
-            divisors.add(target_seconds_per_day // d)
-
-    # Find the closest divisor
-    if divisors:
-        best_dt = min(divisors, key=lambda x: abs(x - dt_original))
-    else:
-        # Fallback (should never happen, but be safe)
-        best_dt = 1
-
-    dt = int(best_dt)
-
-    return dt
+    # The largest divisor of MAX_DERIVED_DT not above the CFL estimate: never
+    # rounds up past it, never exceeds an hour (below MARBL's 10,800 s step limit),
+    # and every hourly or daily output period is a whole number of steps.
+    return float(max((d for d in _DERIVED_DT_LADDER if d <= dt), default=1))
 
 
 def compute_grid_spacing_m(grid_size_x: float, grid_nx: int) -> float:

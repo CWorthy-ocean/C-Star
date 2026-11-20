@@ -1,0 +1,4 @@
+Forge derives the time step from the grid unless you set one, and the derived value never exceeds the CFL estimate, is at most 3600 s and divides an hour, so a new blueprint can run with a different ``dt`` than before.
+- The wizard no longer saves 7200 s by default: until you type a time step, it shows and saves the CFL value for the current grid and follows grid edits. "Use CFL value" (formerly "Compute from CFL") goes back to the derived value. A loaded blueprint keeps its ``dt``.
+- A blueprint without ``dt`` now gets the largest divisor of 3600 s at or below the CFL estimate, instead of the nearest divisor of a day. For the bundled domains: GoA-10th_deg 540 → 450 s, NEP-4th_deg 1600 → 1200 s, PAC_2fth_deg 2700 → 1800 s, ccs-12km 960 → 900 s, hvalfjordur-0 192 → 180 s, and wio-toy and gulf-guinea-toy 28,800 and 14,400 → 3600 s (MARBL stopped at startup with the old values).
+- A DomainSpec saved from the wizard carries ``dt`` only when you set it.

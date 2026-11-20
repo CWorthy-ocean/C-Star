@@ -16,8 +16,8 @@ Usage (in a Jupyter notebook)::
 The wizard discovers Models from ``catalog/specs/ModelSpec/`` and Domains from
 ``catalog/specs/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
 boundaries, partitioning, and dates. The live preview re-resolves on every change
-(using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
-is plain arithmetic on the grid size and builds none either.
+and never builds a grid for it: the time step is derived from the grid size by
+plain CFL arithmetic until the user types one.
 """
 
 from __future__ import annotations
@@ -97,6 +97,7 @@ from cstar.applications.forge.resolve import (
     cfl_dt,
     extract_output_settings,
     find_carbonate_sensitivity_files,
+    force_switches_without_input_off,
     load_model_spec_data,
     read_cdr_forcing_yaml,
     with_cdr_lite_tracer_set,
@@ -150,8 +151,8 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     (
         "run",
         "dt",
-    ): "Baroclinic time step in seconds. Leave blank to compute from the CFL criterion "
-    "(click 'Compute dt (CFL)').",
+    ): "Baroclinic time step in seconds. Derived from the grid (CFL criterion) until "
+    "you type a value; 'Use CFL value' goes back to the derived value.",
     ("run", "description"): "Human-readable description of this blueprint.",
     ("export", "name"): "Canonical blueprint name. Drives the save filename, the "
     "default working directory, casename, and generated file stems. Defaults to a "
@@ -637,9 +638,9 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     (
         "timestep",
         "dt_btn",
-    ): "Compute the baroclinic time step from the CFL criterion for the current grid "
-    "size and resolution. No grid is built, so it works while other settings are "
-    "still incomplete.",
+    ): "Go back to the time step derived from the CFL criterion for the current grid "
+    "size and resolution; it then follows later grid edits. No grid is built, so it "
+    "works while other settings are still incomplete.",
 }
 
 # Label overrides for namelist-section widgets built via _build_section /
@@ -5400,7 +5401,7 @@ class ForgeBlueprintWizard:
             tooltip=_tip("run", "dt"),
         )
         self.dt_btn = W.Button(
-            description=label_for("buttons.compute_dt", "Compute dt (CFL)").label,
+            description=label_for("buttons.compute_dt", "Use CFL value").label,
             icon="calculator",
             tooltip=_tip("timestep", "dt_btn"),
         )
@@ -5853,6 +5854,13 @@ class ForgeBlueprintWizard:
         # The composition names of the last loaded blueprint that this catalog
         # lacks, for the load status (see _set_load_status).
         self._load_unknown_specs: list[str] = []
+        # dt follows v_sponge: derived from the grid (CFL) and mirrored into the
+        # widget until a typed value, a loaded blueprint or a DomainSpec carrying
+        # dt sets it; "Use CFL value" clears it. See _sync_derived_dt.
+        self._dt_touched = False
+        # The resolver-composed model_settings behind the editor (see _show_editor);
+        # _on_editor_edit drops an edit that only restores one of its values.
+        self._composed_settings: dict[str, Any] | None = None
 
         self.derived = W.HTML("")
         self.validation = W.HTML("")
@@ -6085,7 +6093,6 @@ class ForgeBlueprintWizard:
             self.end,
             self.model_ref_date,
             self.description,
-            self.dt,
             self.topo_source,
             self.topo_path,
             self.nest_enable,
@@ -6117,6 +6124,7 @@ class ForgeBlueprintWizard:
         for w in self.bnd.values():
             w.observe(self._on_boundary_edit, names="value")
         self.v_sponge.observe(self._on_v_sponge_edit, names="value")
+        self.dt.observe(self._on_dt_edit, names="value")
 
     def _on_name_change(self, _change):
         # A programmatic backfill (see _rebuild) happens under _suspend() -- only a
@@ -6475,6 +6483,34 @@ class ForgeBlueprintWizard:
         self._v_sponge_touched = True
         self._rebuild()
 
+    def _on_dt_edit(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        self._dt_touched = True
+        self._rebuild()
+
+    def _sync_derived_dt(self) -> None:
+        """While dt is untouched, show the CFL dt for the current grid, which is
+        what the resolver derives from ``dt=None``. Pure arithmetic, so it works
+        while the rest of the blueprint does not resolve.
+        """
+        if self._dt_touched:
+            self.dt_status.value = ""
+            return
+        try:
+            derived = float(cfl_dt(self._base_grid_kwargs(), self._attached_grid()))
+        except Exception as exc:
+            self.dt_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc} "
+                "Type a time step.</span>"
+            )
+            return
+        with self._suspend():
+            self.dt.value = derived
+        self.dt_status.value = (
+            "<span style='color:#080'>derived from the grid (CFL)</span>"
+        )
+
     def _sync_marbl_ref_visibility(self, _change=None):
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
         self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
@@ -6530,7 +6566,25 @@ class ForgeBlueprintWizard:
         # a user edit in the advanced editor -> record as an override (vs composed)
         if self._syncing or getattr(self, "_suspended", False):
             return
-        self._overrides[(section, field)] = self.editor.read(section, field)
+        value = self.editor.read(section, field)
+        composed = self._composed_settings
+        if (
+            composed is not None
+            and section in composed
+            and (
+                composed[section] == value
+                if field is None
+                else isinstance(composed[section], dict)
+                and field in composed[section]
+                and composed[section][field] == value
+            )
+        ):
+            # Back to what the specs and the resolver give: not an override, so
+            # it cannot pin a value the resolver would later change (e.g.
+            # bry_tides once the grid gets a parent).
+            self._overrides.pop((section, field), None)
+        else:
+            self._overrides[(section, field)] = value
         self._wizard_default_keys.discard((section, field))
         self._rebuild()
 
@@ -6951,10 +7005,6 @@ class ForgeBlueprintWizard:
                     kw["open_boundaries"] = d["open_boundaries"]
                 if d.get("v_sponge") is not None:
                     kw["v_sponge"] = d["v_sponge"]
-                # dt is always saved (no touched gate, see _domain_spec_data),
-                # so an absent value here only happens for an older DomainSpec
-                # predating this field -- fall back to kw's existing _gather()
-                # value (the live widget dt) rather than force one in.
                 if d.get("dt") is not None:
                     kw["dt"] = d["dt"]
                 kw["partitioning"] = d.get("partitioning", {})
@@ -7170,13 +7220,10 @@ class ForgeBlueprintWizard:
                     if d in saved_bnd:
                         w.value = bool(saved_bnd[d])
                 self._boundaries_touched = True
-            # dt has no touched flag (see _domain_spec_data) -- a saved
-            # DomainSpec always carries it, but an older file might not, so
-            # restore only if present; otherwise leave the widget's current
-            # value as-is (there's no live re-derive to fall back on for dt).
             saved_dt = data.get("dt")
             if saved_dt is not None:
                 self.dt.value = float(saved_dt)
+            self._dt_touched = saved_dt is not None
             part = data.get("partitioning", {}) or {}
             saved_npx = part.get("n_procs_x")
             if saved_npx is not None:
@@ -7311,11 +7358,6 @@ class ForgeBlueprintWizard:
             "grid_kwargs": kw["grid_kwargs"],
             "partitioning": kw["partitioning"],
             "topography_source": self.topo_source.value,
-            # dt (unlike v_sponge/open_boundaries below) has no touched flag --
-            # the widget is always authoritative (default / CFL-computed / typed)
-            # and _gather() always passes it explicitly -- so it's always saved,
-            # not gated on a "was this edited" check.
-            "dt": kw["dt"],
         }
         # v_sponge/open_boundaries: included only when the user has touched
         # them (a manual edit or a value restored from a prior save/load) --
@@ -7325,6 +7367,8 @@ class ForgeBlueprintWizard:
         # kw["open_boundaries"] with a real mask-derived value first).
         if self._v_sponge_touched:
             data["v_sponge"] = kw["v_sponge"]
+        if self._dt_touched:
+            data["dt"] = kw["dt"]
         if self._boundaries_touched:
             data["open_boundaries"] = kw["open_boundaries"]
         if self.topo_path.value.strip():
@@ -8404,6 +8448,7 @@ class ForgeBlueprintWizard:
                 loaded_dt = (cfg.model_settings.get("time_stepping") or {}).get("dt")
             if loaded_dt is not None:
                 self.dt.value = float(loaded_dt)
+            self._dt_touched = loaded_dt is not None
             self._populate_nesting(cfg)
             # forcing: reconstruct the editor from the loaded sources. Forcing/output
             # dropdowns always need a valid catalog selection (no more "model_default"
@@ -8594,7 +8639,8 @@ class ForgeBlueprintWizard:
             # (self.name.value may still hold the *previous* rebuild's backfilled
             # default -- reusing it here would freeze it instead of tracking inputs).
             name=(self.name.value.strip() or None) if self._name_touched else None,
-            dt=float(self.dt.value),
+            # Untouched: None, so the resolver derives it from the grid (CFL).
+            dt=float(self.dt.value) if self._dt_touched else None,
             # Untouched: pass None so the resolver derives a fresh default from
             # the current grid (see _rebuild, which mirrors it back into the
             # widget for live display); touched: the user's/loaded value wins.
@@ -8702,14 +8748,25 @@ class ForgeBlueprintWizard:
             return False, False
         return bool(self.nest_enable.value), bool(self.parent_enable.value)
 
-    def _show_editor(self, settings: dict[str, Any], key: _EditorKey) -> dict[str, Any]:
+    def _show_editor(
+        self,
+        settings: dict[str, Any],
+        key: _EditorKey,
+        cfg: ForgeBlueprint | None = None,
+    ) -> dict[str, Any]:
         """Show ``settings``, with the active overrides over them, in the settings
         editor for ``key``, building that editor first when the current one is for
         another key; return the effective settings shown. A resolved editor fills the
         Advanced panes, the Output card and the Model card; an unresolved one (see
         ``_show_unresolved_editor``) only the Model card, with a placeholder in the
         other two.
+
+        ``cfg``, the blueprint ``settings`` were resolved for, is given only by a
+        successful resolve: its settings become the baseline ``_on_editor_edit``
+        compares edits with, and the resolver's switches for input the blueprint
+        does not generate are forced off again over the overrides.
         """
+        self._composed_settings = settings if cfg is not None else None
         if self.editor is None or self._editor_key != key:
             self.editor = _SettingsEditor(
                 self.W,
@@ -8741,6 +8798,12 @@ class ForgeBlueprintWizard:
         self._seed_wizard_defaults()
 
         effective = _apply_overrides(settings, self._active_overrides)
+        if cfg is not None:
+            force_switches_without_input_off(
+                effective,
+                is_child=cfg.domain.grid_kwargs_parent is not None,
+                has_tidal_forcing=bool(cfg.forcing.tidal),
+            )
         self._syncing = True
         try:
             self.editor.sync(effective)  # display effective; don't re-record as edits
@@ -8797,6 +8860,7 @@ class ForgeBlueprintWizard:
         # (see _invalidate_cdr_plot_cache's own docstring for why this spot was
         # chosen over a bespoke .observe on each CDR/grid widget).
         self._invalidate_cdr_plot_cache()
+        self._sync_derived_dt()
         # Captured before self.config is reassigned below -- used to detect a
         # real rename (vs. an unrelated edit re-running _rebuild) for the
         # save_path filename re-sync further down.
@@ -8863,7 +8927,7 @@ class ForgeBlueprintWizard:
             is_child,
             resolved=True,
         )
-        effective = self._show_editor(composed, key)
+        effective = self._show_editor(composed, key, cfg)
         active_overrides = self._active_overrides
 
         # composition.*.modified: "did the user deviate from what the catalog spec
@@ -9232,18 +9296,10 @@ class ForgeBlueprintWizard:
 
     # ---- actions -------------------------------------------------------------
     def _on_compute_dt(self, _):
-        self.dt_status.value = "<i>computing…</i>"
-        try:
-            self.dt.value = float(
-                cfl_dt(self._base_grid_kwargs(), self._attached_grid())
-            )
-            self.dt_status.value = (
-                f"<span style='color:#080'>dt = {self.dt.value:g} s (CFL)</span>"
-            )
-        except Exception as exc:
-            self.dt_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
-            )
+        # Back to the derived dt (_rebuild shows it), which then follows grid
+        # edits again.
+        self._dt_touched = False
+        self._rebuild()
 
     def _build_grid_from_widgets(self) -> Any:
         """Build a ``roms_tools.Grid`` from the current (main-domain) grid kwargs
@@ -10100,8 +10156,9 @@ class ForgeBlueprintWizard:
                 W,
                 "info",
                 "Open boundaries, sponge viscosity and the time step are "
-                "derived from the grid when you save or run. Derive them now "
-                "to check or edit the values.",
+                "derived from the grid until you set them. The sponge viscosity "
+                "and time step shown follow the grid; derive the boundaries now "
+                "to check or edit them.",
             ),
             components.field_row(W, "bnd", W.HBox(list(self.bnd.values()))),
             components.field_row(
