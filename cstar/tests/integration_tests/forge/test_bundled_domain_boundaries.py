@@ -87,7 +87,7 @@ def test_no_closed_edge_is_mostly_ocean(path: Path) -> None:
 
 
 def test_check_flags_a_closed_ocean_edge() -> None:
-    """Closing PAC_2fth_deg's east edge, its geographic south near 5 N, fails."""
+    """Closing PAC_2fth_deg's south edge, all open ocean near 5 N, fails."""
     spec = yaml.safe_load((DOMAIN_SPEC_DIR / "PAC_2fth_deg.yaml").read_text())
-    spec["open_boundaries"]["east"] = False
-    assert set(closed_wet_edges(spec)) == {"east"}
+    spec["open_boundaries"]["south"] = False
+    assert set(closed_wet_edges(spec)) == {"south"}
