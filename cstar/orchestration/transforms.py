@@ -1,11 +1,7 @@
 import functools
-import itertools
 import os
 import typing as t
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from datetime import datetime, timedelta
-from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -86,136 +82,8 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-TRANSFORMS: dict[str, list[Transform[LiveStep]]] = defaultdict(list)
-"""Storage for transform registrations."""
-
-
-def register_transform(application: str, transform: Transform[t.Any]) -> None:
-    """Register a transform for an application.
-
-    Parameters
-    ----------
-    application : str
-        The application name.
-    transform : Transform
-        The transform instance to register for the application.
-    """
-    TRANSFORMS[application].append(transform)
-
-
-def get_transforms(application: str) -> list[Transform[t.Any]]:
-    """Retrieve a list of transforms to be applied for an application.
-
-    Parameters
-    ----------
-    application : str
-        The application name.
-
-    Returns
-    -------
-    list[Transform]
-        A list containing transforms
-    """
-    return TRANSFORMS.get(application, [])
-
-
 INLINE_BLUEPRINT_FILENAME: t.Final[str] = "blueprint.yaml"
 """Name of the blueprint file materialized into an inline step's work directory."""
-
-
-class SplitFrequency(StrEnum):
-    Daily = "daily"
-    Weekly = "weekly"
-    Monthly = "monthly"
-
-
-def _dailies(
-    start_date: datetime,
-    end_date: datetime,
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get daily time slices for the given start and end dates."""
-    current_date = datetime(start_date.year, start_date.month, start_date.day)
-    while current_date < end_date:
-        day_start = current_date
-        day_end = day_start + timedelta(days=1)
-        yield (day_start, day_end)
-        current_date = day_end
-
-
-def _weeklies(
-    start_date: datetime,
-    end_date: datetime,
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get weekly time slices for the given start and end dates."""
-    current_date = datetime(start_date.year, start_date.month, start_date.day)
-    while current_date < end_date:
-        week_start = current_date
-        week_end = week_start + timedelta(days=7)
-        yield (week_start, week_end)
-        current_date = week_end
-
-
-def _monthlies(
-    start_date: datetime,
-    end_date: datetime,
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get monthly time slices for the given start and end dates."""
-    current_date = datetime(start_date.year, start_date.month, 1)
-    while current_date < end_date:
-        month_start = current_date
-
-        if month_start.month == 12:
-            month_end = datetime(current_date.year + 1, 1, 1)
-        else:
-            month_end = datetime(current_date.year, month_start.month + 1, 1)
-
-        yield (month_start, month_end)
-        current_date = month_end
-
-
-SLICE_FUNCTIONS = defaultdict(
-    lambda: _monthlies,
-    {
-        SplitFrequency.Daily.value: _dailies,
-        SplitFrequency.Weekly.value: _weeklies,
-        SplitFrequency.Monthly.value: _monthlies,
-    },
-)
-
-
-def get_time_slices(
-    start_date: datetime,
-    end_date: datetime,
-    frequency: str = SplitFrequency.Monthly.value,
-) -> Iterable[tuple[datetime, datetime]]:
-    """Get the time slices for the given start and end dates.
-
-    Parameters
-    ----------
-    start_date : datetime
-        The start date.
-    end_date : datetime
-        The end date.
-    frequency : str
-        The desired frequency (daily, weekly, monthly).
-
-    Returns
-    -------
-    Iterable[tuple[datetime, datetime]]
-        Iterable containing 2-tuples of (start_date, end_date).
-    """
-    slice_fn = SLICE_FUNCTIONS[frequency]
-    time_slices = list(slice_fn(start_date, end_date))
-
-    # adjust when the start date is not the first day of the month
-    if start_date > time_slices[0][0]:
-        time_slices[0] = (start_date, time_slices[0][1])
-
-    # adjust when the end date is not the last day of the month
-    if end_date < time_slices[-1][1]:
-        time_slices[-1] = (time_slices[-1][0], end_date)
-
-    return time_slices
 
 
 def mustache(s: str) -> str:
@@ -1259,15 +1127,6 @@ class WorkplanTransformer(LoggingMixin):
             base_dir = self.wp_path.resolve().parent
             live_steps = [anchor_blueprint_path(s, base_dir) for s in live_steps]
 
-        transformed_steps: list[LiveStep] = []
-        named_dep_map: dict[str, str] = {}
-
-        app_names = {step.application for step in live_steps}
-        app_transforms: dict[str, Sequence[type[Transform[LiveStep]]]] = {
-            app_name: get_application(app_name).applicable_transforms
-            for app_name in app_names
-        }
-
         problems = collect_directive_problems(live_steps)
         problems.extend(
             problem
@@ -1279,84 +1138,17 @@ class WorkplanTransformer(LoggingMixin):
             msg = "\n".join([summary, *(f"- {problem}" for problem in problems)])
             raise ValueError(msg)
 
-        override_transform = OverrideTransform()
         env = resolve_compute_environment(self.original.compute_environment)
 
-        for step in live_steps:
-            active_transforms = [
-                trx for trx in app_transforms[step.application] if trx.is_active()
-            ]
-
-            if (step.is_deferred or step.is_inline) and active_transforms:
-                active_names = [trx.__name__ for trx in active_transforms]
-                msg = (
-                    f"Application transform(s) {', '.join(active_names)} cannot be "
-                    f"applied to step {step.name!r} because its blueprint is "
-                    "deferred or inline and does not exist as a file at "
-                    "schedule time"
-                )
-                raise CstarExpectationFailed(msg)
-
-            if active_transforms:
-                # Schedule-time application transforms operate on a
-                # materialized, merged blueprint written to disk (a
-                # feature-flagged path); system overrides are baked in first.
-                # Do not restructure this pipeline.
-                step = apply_automatic_overrides(step)
-                for trx_klass in active_transforms:
-                    trx = trx_klass()
-                    transform_result = trx(step)
-
-                    # apply overrides generated by the transformation
-                    overridden_steps = list(
-                        itertools.chain.from_iterable(
-                            map(override_transform, transform_result),
-                        ),
-                    )
-                    final_step_name = overridden_steps[-1].name
-                    if final_step_name != step.name:
-                        named_dep_map[step.name] = final_step_name
-                    # children have materialized blueprints (overrides already
-                    # baked in); record their cpu requirement directly
-                    transformed_steps.extend(
-                        _inject_compute_defaults(
-                            _inject_compute(child, child.blueprint.compute_needs),
-                            env,
-                        )
-                        for child in overridden_steps
-                    )
-            else:
-                # Common path: no blueprint file is rewritten; the step
-                # keeps its original blueprint path and carries an
-                # apply-overrides directive to be resolved at runtime.
-                transformed_steps.append(
-                    _inject_compute_defaults(
-                        package_runtime_overrides(preflight_overrides(step)), env
-                    )
-                )
-
-        # remap dependency references to point to the last child of each split parent
-        for trx_step in transformed_steps:
-            depends_on = {str(d) for d in trx_step.depends_on}
-            if to_update := depends_on.intersection(named_dep_map):
-                depends_on.update(named_dep_map[x] for x in to_update)
-                depends_on.difference_update(to_update)
-                trx_step.depends_on.clear()
-                trx_step.depends_on.extend(depends_on)
-
-        # deferred blueprint references must point at steps that still exist;
-        # a split producer writes its outputs into child-step directories
-        for trx_step in transformed_steps:
-            if trx_step.is_deferred:
-                ref = t.cast("DeferredBlueprintRef", trx_step.blueprint_path)
-                if ref.from_step in named_dep_map:
-                    msg = (
-                        f"Step {trx_step.name!r} defers its blueprint to step "
-                        f"{ref.from_step!r}, which was split "
-                        "into sub-steps by an application transform; step "
-                        "references are not yet remapped across split steps"
-                    )
-                    raise CstarExpectationFailed(msg)
+        # no blueprint file is rewritten: each step keeps its original
+        # blueprint path and carries an apply-overrides directive resolved at
+        # runtime
+        transformed_steps = [
+            _inject_compute_defaults(
+                package_runtime_overrides(preflight_overrides(step)), env
+            )
+            for step in live_steps
+        ]
 
         update: dict[str, t.Any] = {"steps": transformed_steps}
         if self.original.runs:
@@ -1499,33 +1291,6 @@ def get_system_overrides(step: LiveStep) -> dict[str, t.Any]:
         The transformed step.
     """
     return {"working_dir": step.fsm.root_dir}
-
-
-def apply_automatic_overrides(step: LiveStep) -> LiveStep:
-    """Materialize system overrides for the schedule-time transform pipeline.
-
-    Automatically overrides the output directory specified in a blueprint
-    to write to the C-Star home directories, baking the result into a
-    rewritten blueprint file. Only steps entering the materialized
-    application-transform pipeline need this; every other step persists its
-    overrides via `package_runtime_overrides` instead.
-
-    See `cstar.execution.file_system.JobFileSystemManager` for more detail
-    on the available set of home directories.
-
-    Returns
-    -------
-    LiveStep
-        The transformed step.
-    """
-    sys_overrides = get_system_overrides(step)
-    if not sys_overrides:
-        return step
-
-    override_transform = OverrideTransform(sys_overrides=sys_overrides)
-    overridden_step_result = override_transform(step)
-
-    return overridden_step_result[0]
 
 
 def preflight_overrides(step: LiveStep) -> LiveStep:

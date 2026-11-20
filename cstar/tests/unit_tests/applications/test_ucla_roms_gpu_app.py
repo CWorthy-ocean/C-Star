@@ -92,10 +92,6 @@ class TestRegistration:
             CarbonateSensitivityDirective,
         }
 
-    def test_no_transform_is_applicable(self) -> None:
-        """`RomsTimeSplitter` rebuilds a ucla_roms blueprint, so it is not listed."""
-        assert tuple(get_application(APP_NAME).applicable_transforms) == ()
-
     def test_directive_keys_are_allowed_for_its_steps(self) -> None:
         allowed = allowed_directives(APP_NAME)
 

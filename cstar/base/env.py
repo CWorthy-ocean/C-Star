@@ -547,6 +547,14 @@ class RemovedSetting:
     do more than was asked (a dry run becoming a real one)."""
 
 
+_TIME_SPLIT_GUIDANCE: t.Final[str] = (
+    "automatic time-splitting was removed; split the run into explicit workplan "
+    'steps chained with `continue-from` (the wizard\'s "Chunk a run in time" '
+    "recipe writes them)."
+)
+"""Guidance for the removed time-splitting settings."""
+
+
 REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     "CSTAR_CLI_DRY_RUN": RemovedSetting(
         "pass --dry-run to `cstar blueprint migrate` or `cstar admin clean`, or "
@@ -575,6 +583,9 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     "CSTAR_FF_DEBUG_BUILD_MODE": RemovedSetting(
         "set CSTAR_DEBUG_BUILD_MODE=1 instead; developer mode no longer enables it."
     ),
+    "CSTAR_FF_ORCH_TRX_TIMESPLIT": RemovedSetting(_TIME_SPLIT_GUIDANCE),
+    "CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ": RemovedSetting(_TIME_SPLIT_GUIDANCE),
+    "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME": RemovedSetting(_TIME_SPLIT_GUIDANCE),
     "CSTAR_FF_SLURM_DISABLE_MT": RemovedSetting(
         "set CSTAR_SLURM_DISABLE_MT=1 instead; developer mode no longer enables it."
     ),
@@ -599,10 +610,7 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     "CSTAR_ORCH_MAX_CONC": RemovedSetting(
         "the limit on concurrent disk operations is fixed."
     ),
-    "CSTAR_ORCH_TRX_FREQ": RemovedSetting(
-        "set the feature flag CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ instead (it is read "
-        "only while CSTAR_FF_ORCH_TRX_TIMESPLIT is on)."
-    ),
+    "CSTAR_ORCH_TRX_FREQ": RemovedSetting(_TIME_SPLIT_GUIDANCE),
     "CSTAR_SLURM_POST_SUBMIT_DELAY": RemovedSetting(
         "the delay after a SLURM submission is fixed."
     ),
