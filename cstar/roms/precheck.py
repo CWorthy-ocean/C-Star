@@ -817,10 +817,9 @@ def check_output_periods_divisible_by_dt(
             continue
         raise NamelistConsistencyError(
             f"{check.section}.{check.period_field} ({period} s) is not a whole "
-            f"multiple of time_stepping.dt ({dt} s): ucla-roms stops at start-up "
-            f"when the '{check.label}' output period is not ('dt is not a factor "
-            f"of {check.period_field}'). Use a period that is a multiple of dt, "
-            "or a dt that divides the period.",
+            f"multiple of time_stepping.dt ({dt} s), so ucla-roms would stop at "
+            f"start-up ('dt is not a factor of {check.period_field}'). Use a "
+            "period that is a multiple of dt, or a dt that divides the period.",
             rule="output_periods_divisible_by_dt",
             section=check.section,
             keys=(check.period_field,),
