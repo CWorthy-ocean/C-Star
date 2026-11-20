@@ -52,5 +52,4 @@ class HelloWorldApplication(
     long_name = APP_NAME
     runner = HelloWorldRunner
     blueprint = HelloWorldBlueprint
-    applicable_transforms = ()
     migrations = ()

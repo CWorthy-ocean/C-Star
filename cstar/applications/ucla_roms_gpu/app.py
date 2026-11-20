@@ -57,8 +57,6 @@ class UclaRomsGpuApplication(
     long_name: str = _APP_NAME_LONG
     runner = UclaRomsGpuRunner
     blueprint = UclaRomsGpuBlueprint
-    # `RomsTimeSplitter` rebuilds a ucla_roms blueprint, so it is not listed
-    applicable_transforms = ()
     directives = (
         ContinuanceDirective,
         NestingDirective,

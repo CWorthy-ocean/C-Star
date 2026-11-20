@@ -223,7 +223,6 @@ class NestIcApplication(
     long_name = _APP_NAME_LONG
     runner = NestIcRunner
     blueprint = NestIcBlueprint
-    applicable_transforms = ()
 
     @t.override
     def artifacts(self, blueprint: NestIcBlueprint) -> Sequence[ArtifactSpec]:

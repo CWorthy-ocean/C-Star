@@ -247,8 +247,6 @@ _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
-    parent: t.Self | None = Field(default=None, exclude=True, frozen=True)
-    """The step for which this step is a sub-task."""
     working_dir: Path = Field(frozen=True)
     """The root directory where this step can write outputs."""
 
@@ -316,8 +314,6 @@ class LiveStep(Step):
         ----------
         step : Step
             The step to convert
-        parent : LiveStep | Step | None (default: None)
-            The parent of the converted step
         update : Mapping[str, t.Any]
             A mapping of updates to apply to the step
         """
@@ -341,15 +337,6 @@ class LiveStep(Step):
         """
         name = str(data.get("name", ""))
         wd = t.cast("Path | None", data.get("working_dir", None))
-        parent = t.cast("Step | None", data.get("parent", None))
-
-        if parent and not isinstance(parent, LiveStep):
-            parent = LiveStep(**parent.model_dump(by_alias=True))
-
-        if parent:
-            fsm = parent.fsm.get_subtask_manager(name)
-            wd = fsm.root_dir
-            data["parent"] = parent
 
         if wd:
             data["working_dir"] = wd

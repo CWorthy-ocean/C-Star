@@ -19,39 +19,6 @@ ENV_FF_DEVELOPER_MODE: t.Annotated[
 enable any other feature flag."""
 
 
-ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
-    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
-    EnvVar(
-        "Enable automatic time-splitting of simulations.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
-"""Enable automatic time-splitting of simulations."""
-
-ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
-    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"],
-    EnvVar(
-        "Enable long name generation during time-splitting.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"
-"""Enable long name generation during time-splitting."""
-
-
-ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: t.Annotated[
-    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ"],
-    EnvVar(
-        "Time-splitting frequency (e.g. Daily, Weekly, Monthly). Read only when "
-        "CSTAR_FF_ORCH_TRX_TIMESPLIT is on; developer mode does not set it.",
-        GROUP_FF,
-        default="Monthly",
-    ),
-] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ"
-"""Time-splitting frequency (e.g. Daily, Weekly, Monthly), read only when time-splitting is on."""
-
-
 def is_flag_enabled(flag: str) -> bool:
     """Determine if a boolean environment varible is enabled.
 
@@ -86,11 +53,11 @@ def is_feature_enabled(flag: str) -> bool:
         flag = f"{FF_PREFIX}{flag}"
 
     # Enable hierarchical feature flag segments - Given a flag:
-    #   CSTAR_FF_ORCH_TRX_TIMESPLIT
+    #   CSTAR_FF_AREA_TOPIC_FEATURE
     # inspect environment for the segments:
-    # - CSTAR_FF_ORCH
-    # - CSTAR_FF_ORCH_TRX
-    # - CSTAR_FF_ORCH_TRX_TIMESPLIT
+    # - CSTAR_FF_AREA
+    # - CSTAR_FF_AREA_TOPIC
+    # - CSTAR_FF_AREA_TOPIC_FEATURE
     flag_parts = flag.split("_")
     if len(flag_parts) > 2:
         for i in range(2, len(flag_parts)):

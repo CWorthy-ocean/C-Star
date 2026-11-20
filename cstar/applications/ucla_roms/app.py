@@ -24,7 +24,6 @@ from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
-    RomsTimeSplitter,
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
@@ -392,7 +391,6 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
     long_name: str = _APP_NAME_LONG
     runner = UclaRomsRunner
     blueprint = UclaRomsBlueprint
-    applicable_transforms = (RomsTimeSplitter,)
     directives = (
         ContinuanceDirective,
         NestingDirective,

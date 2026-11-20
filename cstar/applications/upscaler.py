@@ -257,7 +257,6 @@ class UpscalerApplication(
     long_name = _APP_NAME_LONG
     runner = UpscalerRunner
     blueprint = UpscalerBlueprint
-    applicable_transforms = ()
 
     @t.override
     def artifacts(self, blueprint: UpscalerBlueprint) -> Sequence[ArtifactSpec]:

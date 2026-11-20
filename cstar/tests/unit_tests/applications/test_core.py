@@ -1,3 +1,4 @@
+import logging
 import sys
 import textwrap
 from pathlib import Path
@@ -11,13 +12,18 @@ from pydantic import ValidationError
 from cstar.applications.core import (
     APP_PLUGIN_GROUP,
     BUILTIN_APP_PACKAGE,
+    REMOVED_TRANSFORMS_ATTR,
+    ApplicationDefinition,
     EmittedBlueprint,
     RunnerRequest,
     RunnerResult,
     RunnerState,
     _registry,
     get_application,
+    log,
+    register_application,
 )
+from cstar.applications.hello_world import HelloWorldBlueprint, HelloWorldRunner
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import BlueprintIdentity, ComputeNeeds
@@ -57,7 +63,6 @@ def _external_app_module_source(app_name: str) -> str:
             long_name: str = "Externally Defined App"
             runner = HelloWorldRunner
             blueprint = HelloWorldBlueprint
-            applicable_transforms = ()
         """
     )
 
@@ -830,3 +835,49 @@ def test_emitted_blueprint_requires_a_producer() -> None:
     assert [(e["type"], e["loc"]) for e in exc_info.value.errors()] == [
         ("missing", ("producer",))
     ]
+
+
+@pytest.mark.parametrize(
+    ("declares", "expect_warning"),
+    [
+        pytest.param(True, True, id="declares applicable_transforms"),
+        pytest.param(False, False, id="declares nothing"),
+    ],
+)
+def test_register_application_warns_about_removed_transforms(
+    declares: bool,
+    expect_warning: bool,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registering an application that declares `applicable_transforms` warns.
+
+    Parameters
+    ----------
+    declares : bool
+        Whether the application class declares the removed attribute.
+    expect_warning : bool
+        Whether a warning naming the application and the attribute is expected.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    monkeypatch : pytest.MonkeyPatch
+        Restores the application registry after the test.
+    """
+    app_name = "removed_transforms_app"
+    monkeypatch.setattr("cstar.applications.core._registry", dict(_registry))
+    attrs: dict[str, Any] = {
+        "name": app_name,
+        "long_name": "Declares Removed Transforms",
+        "runner": HelloWorldRunner,
+        "blueprint": HelloWorldBlueprint,
+    }
+    if declares:
+        attrs[REMOVED_TRANSFORMS_ATTR] = ("anything",)
+    klass = type("RemovedTransformsApp", (ApplicationDefinition,), attrs)
+
+    with caplog.at_level(logging.WARNING, logger=log.name):
+        register_application(klass)
+
+    messages = [r.getMessage() for r in caplog.records if r.name == log.name]
+    warned = [m for m in messages if app_name in m and REMOVED_TRANSFORMS_ATTR in m]
+    assert bool(warned) is expect_warning

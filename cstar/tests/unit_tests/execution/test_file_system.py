@@ -154,15 +154,13 @@ def test_file_system_pickle_roms_fs(tmp_path: Path) -> None:
 
 
 def test_live_step(tmp_path: Path) -> None:
-    """Verify parent-child traversal results in the correct root directories."""
+    """Verify a live step's working directory sits under the run's tasks directory."""
     bp = tmp_path / "bp.yml"
     bp.touch()
 
     run_id = "fake-run-id"
 
     step_1 = Step(name="A", application="roms_marbl", blueprint=bp)
-    step_2 = Step(name="B", application="roms_marbl", blueprint=bp)
-    step_3 = Step(name="C", application="roms_marbl", blueprint=bp)
 
     with mock.patch.dict(
         os.environ,
@@ -171,16 +169,12 @@ def test_live_step(tmp_path: Path) -> None:
         },
         clear=True,
     ):
-        # use plan "Step" as parent (expect step_1 parent dir to step_2)
         ls_1 = LiveStep.from_step(step_1)
-        # use "LiveStep" as parent
-        ls_2 = LiveStep.from_step(step_2, update={"parent": step_1})
-        # step from another live step (one with parent, one as base task)
-        ls_3 = LiveStep.from_step(step_3, update={"parent": ls_2})
-        ls_4 = LiveStep.from_step(ls_3)
+        # a step from another live step keeps its place in the run
+        ls_4 = LiveStep.from_step(ls_1)
 
         # updating name should change the dir name
-        ls_5_name = "child of ls 2"
+        ls_5_name = "renamed step"
         ls_5 = LiveStep.from_step(
             ls_1, update={"name": ls_5_name}
         )  # override attributes
@@ -193,19 +187,7 @@ def test_live_step(tmp_path: Path) -> None:
         expected = data_home / "workplan_runs" / run_id / task_dir_name / ls_1.safe_name
         assert actual == expected
 
-        actual = ls_2.working_dir
-        expected = ls_1.working_dir / task_dir_name / ls_2.safe_name  # type: ignore
-        assert actual == expected
-
-        actual = ls_3.working_dir
-        expected = ls_2.working_dir / task_dir_name / ls_3.safe_name  # type: ignore
-        assert actual == expected
-
-        actual = ls_4.working_dir
-        # confirm the parent carries over and ls4 is a child of ls2
-        assert ls_2.working_dir
-        expected = ls_2.working_dir / task_dir_name / ls_4.safe_name
-        assert actual == expected
+        assert ls_4.working_dir == ls_1.working_dir
 
         actual = ls_5.working_dir
         expected = data_home / "workplan_runs" / run_id / task_dir_name / ls_5.safe_name

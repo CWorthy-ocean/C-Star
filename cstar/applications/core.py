@@ -47,6 +47,13 @@ coincides with :data:`BUILTIN_APP_PACKAGE` today only by convention.
 BUILTIN_APP_PACKAGE: t.Final[str] = "cstar.applications"
 """Package holding the in-tree application modules, one per application name."""
 
+REMOVED_TRANSFORMS_ATTR: t.Final[str] = "applicable_transforms"
+"""A removed application attribute that `register_application` warns about.
+
+Schedule-time transforms declared there ran before each step of the application;
+C-Star stopped reading them when the time-splitting transform was removed.
+"""
+
 log = get_logger(__name__)
 
 
@@ -369,20 +376,6 @@ class Transform(t.Protocol, t.Generic[TTransformable]):
         """
         ...
 
-    @classmethod
-    def is_active(cls) -> bool:
-        """Return `True` when the transform will modify steps under the
-        current configuration.
-
-        Transforms gated behind feature flags override this to report
-        their effective state.
-
-        Returns
-        -------
-        bool
-        """
-        return True
-
 
 TRunner = t.TypeVar("TRunner")
 
@@ -491,8 +484,6 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The runner that executes the application blueprints."""
     blueprint: type[TBlueprint]
     """The blueprint containing the application configuration."""
-    applicable_transforms: Sequence[type[Transform[t.Any]]]
-    """Transforms that must be executed prior to execution."""
     directives: Sequence[type["Directive"]] = ()
     """Directives a step of this application may declare; schedule-time validation rejects any other key."""
     migrations: Sequence[type[SchemaAdapter]] | None = None
@@ -597,6 +588,12 @@ def register_application(
     klass: type[_AppDef],
 ) -> type[_AppDef]:
     """Register the decorated type as an available Application."""
+    if getattr(klass, REMOVED_TRANSFORMS_ATTR, ()):
+        log.warning(
+            f"Application {klass.name!r} declares {REMOVED_TRANSFORMS_ATTR!r}, "
+            "which C-Star no longer reads, so those transforms do not run; "
+            "declare the steps they produced in the workplan instead."
+        )
     _registry[klass.name] = klass
     log.trace(f"Registered {klass.__name__!r} application context")
     return klass

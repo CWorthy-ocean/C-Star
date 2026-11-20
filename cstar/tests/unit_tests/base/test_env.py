@@ -337,3 +337,25 @@ def test_catalog_entries_keeps_a_url_whole(monkeypatch: pytest.MonkeyPatch) -> N
 def test_is_remote_catalog_entry(entry: str, remote: bool) -> None:
     """Only a URL or ``git@github.com:`` entry is remote."""
     assert is_remote_catalog_entry(entry) is remote
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT",
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ",
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME",
+    ],
+)
+def test_time_split_flags_are_removed_settings(name: str) -> None:
+    """Verify each time-split flag is a removed setting that is ignored, not refused,
+    and whose guidance points at `continue-from`.
+
+    Parameters
+    ----------
+    name : str
+        A setting that selected the removed time-splitting transform.
+    """
+    assert name in REMOVED_SETTINGS
+    assert not REMOVED_SETTINGS[name].refused
+    assert "continue-from" in REMOVED_SETTINGS[name].guidance

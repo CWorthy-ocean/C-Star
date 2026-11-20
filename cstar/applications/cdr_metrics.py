@@ -728,7 +728,6 @@ class CdrMetricsApplication(
     long_name = _APP_NAME_LONG
     runner = CdrMetricsRunner
     blueprint = CdrMetricsBlueprint
-    applicable_transforms = ()
 
     @t.override
     def artifacts(self, blueprint: CdrMetricsBlueprint) -> Sequence[ArtifactSpec]:
