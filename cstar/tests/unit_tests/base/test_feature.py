@@ -10,6 +10,7 @@ from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
     is_feature_enabled,
+    is_flag_enabled,
 )
 
 
@@ -82,3 +83,25 @@ def test_time_splitting_needs_its_own_flag(env: dict[str, str], expected: bool) 
     with mock.patch.dict(os.environ, env, clear=True):
         assert RomsTimeSplitter.is_active() is expected
         assert is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME) is expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("1", True, id="1"),
+        pytest.param(None, False, id="unset"),
+        pytest.param("", False, id="empty"),
+        pytest.param("0", False, id="0"),
+        pytest.param("true", False, id="true"),
+        pytest.param("yes", False, id="yes"),
+        pytest.param("2", False, id="2"),
+        pytest.param(" 1", False, id="leading space"),
+    ],
+)
+def test_is_flag_enabled_only_for_1(value: str | None, expected: bool) -> None:
+    """Verify a flag is on only when its variable is exactly "1"."""
+    flag = "CSTAR_TEST_FLAG"
+    env = {} if value is None else {flag: value}
+
+    with mock.patch.dict(os.environ, env, clear=True):
+        assert is_flag_enabled(flag) is expected

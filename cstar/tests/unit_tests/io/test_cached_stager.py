@@ -2,6 +2,7 @@ import errno
 import fcntl
 import logging
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -13,6 +14,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.base.exceptions import CstarError
 from cstar.io import retriever
 from cstar.io.source_data import SourceData
 
@@ -207,7 +209,7 @@ def test_cached_stager_refresh_failure(tmp_path: Path, remote_repo_uri: str) -> 
         mock.patch(
             "cstar.io.retriever.RemoteRepositoryRetriever.checkout"
         ) as mock_checkout,
-        mock.patch("cstar.io.stager._run_cmd") as mock_copy_cache,
+        mock.patch("cstar.io.stager.shutil.copytree") as mock_copy_cache,
         mock.patch("cstar.io.staged_data._run_cmd"),
         mock.patch("shutil.rmtree") as mock_rmdir,
         mock.patch.object(
@@ -224,7 +226,7 @@ def test_cached_stager_refresh_failure(tmp_path: Path, remote_repo_uri: str) -> 
     mock_clone.assert_called_once()
 
     # confirm the re-cloned repo is copied from cache to target dir
-    assert mock_copy_cache.call_count == 1  # cp -ar
+    mock_copy_cache.assert_called_once_with(cache_path, stage_path_1, symlinks=True)
 
     # confirm that checkout was called after the cache was copied
     mock_checkout.assert_called_once()
@@ -295,7 +297,12 @@ def test_cached_stager_locks_beside_the_cache(
     lock_path = cache_path.parent / f"{cache_path.name}.lock"
     held_during_copy: list[bool] = []
 
-    def probe_then_copy(cmd: str) -> str:
+    real_copytree = shutil.copytree
+
+    def probe_then_copy(src: Path, dst: Path, *args: t.Any, **kwargs: t.Any) -> Path:
+        if Path(src) != cache_path:
+            # copytree copies each subdirectory through a call of its own
+            return real_copytree(src, dst, *args, **kwargs)
         with lock_path.open("a") as probe:
             try:
                 fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -304,10 +311,9 @@ def test_cached_stager_locks_beside_the_cache(
             else:
                 fcntl.flock(probe, fcntl.LOCK_UN)
                 held_during_copy.append(False)
-        subprocess.run(cmd, shell=True, check=True)
-        return ""
+        return real_copytree(src, dst, *args, **kwargs)
 
-    with mock.patch("cstar.io.stager._run_cmd", side_effect=probe_then_copy):
+    with mock.patch("cstar.io.stager.shutil.copytree", side_effect=probe_then_copy):
         source_data.stage(tmp_path / "my-roms")
 
     assert held_during_copy == [True]
@@ -445,8 +451,7 @@ def test_cached_stager_refresh_runs_no_git_maintenance(
 
     `git pull` ends by starting `git maintenance run --auto`, which by default
     detaches and writes a commit-graph into the cache while the step copies the
-    cache with `cp`, outside the cache lock; `cp` then fails on a file renamed
-    under it. Here maintenance is made synchronous and eager (through a global git
+    cache, outside the cache lock; the copy then fails on a file renamed under it. Here maintenance is made synchronous and eager (through a global git
     config), so any maintenance the refresh starts leaves a commit-graph behind.
 
     Parameters
@@ -501,3 +506,77 @@ def test_cached_stager_refresh_runs_no_git_maintenance(
     assert (staged.path / "README.md").read_text() == "changed\n"
     info = cache_path / ".git" / "objects" / "info"
     assert not list(info.glob("commit-graph*")), sorted(info.iterdir())
+
+
+def test_cached_stager_stages_paths_with_spaces(
+    tmp_path: Path, remote_repo_uri: str
+) -> None:
+    """Verify a repository is cached, refreshed, copied and checked out when the
+    cache and the target directory names hold a space.
+
+    Nothing is mocked but the cache location: the clone, the pull that refreshes
+    the cache on the second stage, the copy and the checkout all run for real.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    """
+    with mock.patch(
+        "cstar.execution.file_system.DirectoryManager.cache_home",
+        return_value=tmp_path / "cache home",
+    ):
+        first = SourceData(remote_repo_uri, identifier="main").stage(
+            tmp_path / "a b" / "first"
+        )
+        second = SourceData(remote_repo_uri, identifier="main").stage(
+            tmp_path / "a b" / "second"
+        )
+
+    for staged in (first, second):
+        assert (staged.path / "README.md").read_text() == "upstream\n"
+        branch = subprocess.run(
+            ["git", "-C", str(staged.path), "branch", "--show-current"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert branch == "main"
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root reads files whatever their permissions"
+)
+def test_cached_stager_raises_when_the_cache_copy_fails(
+    tmp_path: Path, remote_repo_uri: str, cache_home: Path
+) -> None:
+    """Verify a failed copy from the repository cache stops staging, naming the
+    copy, instead of leaving an incomplete repository for a later step to trip on.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    """
+    source_data = SourceData(remote_repo_uri)
+    source_data.stage(tmp_path / "first")
+    cache_path = t.cast("CRRS", source_data.stager)._get_cache_path()
+
+    unreadable = cache_path / "unreadable.txt"
+    unreadable.write_text("secret\n")
+    unreadable.chmod(0)
+    try:
+        with pytest.raises(
+            CstarError, match="Unable to copy the repository cache"
+        ) as exc_info:
+            SourceData(remote_repo_uri).stage(tmp_path / "second")
+    finally:
+        unreadable.chmod(0o644)
+
+    assert "unreadable.txt" in str(exc_info.value)

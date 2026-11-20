@@ -22,7 +22,7 @@ def _clone(source_repo: str, local_path: str | Path) -> None:
         The path to a local directory where the remote repository should be cloned.
     """
     _run_cmd(
-        f"git clone {source_repo} {local_path}",
+        f"git clone {shlex.quote(source_repo)} {shlex.quote(str(local_path))}",
         msg_pre=f"Cloning `{source_repo}`",
         msg_post=f"Cloned {source_repo} to {local_path}",
         msg_err=f"Error when cloning repository {source_repo} to {local_path}",
@@ -43,11 +43,10 @@ def _pull(local_path: str | Path) -> None:
     Automatic maintenance is switched off: `git pull` otherwise ends by starting
     `git maintenance run --auto` in the background, which goes on writing into the
     repository (e.g. a commit-graph) after `pull` returns. The repository cache is
-    copied with `cp` right after it is pulled, and a file renamed under `cp` fails
-    the copy.
+    copied right after it is pulled, and a file renamed under the copy fails it.
     """
     _run_cmd(
-        f"git -C {local_path} -c maintenance.auto=false -c gc.auto=0 pull",
+        f"git -C {shlex.quote(str(local_path))} -c maintenance.auto=false -c gc.auto=0 pull",
         msg_pre=f"Pulling latest to `{local_path}`",
         msg_post=f"Pulled latest in {local_path}",
         msg_err=f"Error when pulling latest changes to {local_path}",
@@ -68,7 +67,7 @@ def _checkout(source_repo: str, local_path: str | Path, checkout_target: str) ->
         A git tag, branch, or commit identifier.
     """
     _run_cmd(
-        f"git -C {local_path} checkout {checkout_target}",
+        f"git -C {shlex.quote(str(local_path))} checkout {shlex.quote(checkout_target)}",
         msg_pre=f"Checking out `{source_repo}` @ `{checkout_target}`",
         msg_post=f"Checked out {checkout_target} in git repository {local_path}",
         msg_err=f"Error when checking out {checkout_target} in git repository {local_path}.",
