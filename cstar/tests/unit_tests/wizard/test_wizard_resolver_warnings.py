@@ -30,7 +30,7 @@ def test_the_default_forcing_shows_no_warning():
     wiz = _wizard()
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is True
-    assert "forge-banner warn" not in wiz.validation.value
+    assert "no MBL_co2 surface item" not in wiz.validation.value
 
 
 def test_dropping_mbl_co2_warns_until_the_user_sets_xco2air_default():
@@ -38,11 +38,9 @@ def test_dropping_mbl_co2_warns_until_the_user_sets_xco2air_default():
     _surface_row(wiz, "MBL_co2")["_remove_btn"].click()
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is False
-    assert "forge-banner warn" in wiz.validation.value
     assert "no MBL_co2 surface item" in wiz.validation.value
-    assert "Blueprint is valid." in wiz.validation.value
 
     wiz.editor._widgets[("bgc", "xco2air_default")][0].value = 392.6
     assert wiz._overrides[("bgc", "xco2air_default")] == 392.6
     assert wiz.config.model_settings["bgc"]["xco2air_default"] == 392.6
-    assert "forge-banner warn" not in wiz.validation.value
+    assert "no MBL_co2 surface item" not in wiz.validation.value

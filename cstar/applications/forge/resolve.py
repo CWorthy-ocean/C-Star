@@ -1737,8 +1737,8 @@ def resolver_warnings(
             f"MARBL holds atmospheric CO2 at {section}.{field} = {value} ppm, the "
             "ModelSpec's default, because the forcing has no MBL_co2 surface item. "
             "Add a bgc surface item with source MBL_co2 for the observed CO2 of the "
-            f"run's dates, or set {section}.{field} to the value you mean; any value "
-            "you set, the pre-industrial 284.7 ppm included, silences this warning."
+            f"run's dates, or set {section}.{field} to the value you mean, which "
+            "silences this warning."
         )
     if message := zero_bgc_inputs_warning(
         cfg.forcing,

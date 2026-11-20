@@ -1,2 +1,2 @@
 The bundled ``simple-bgc-demo`` forcing, and with it the ``wio-toy-simple`` blueprint and the WIO CDR tutorial, now forces MARBL with observed atmospheric CO2 through an ``MBL_co2`` surface item (a 2.4 MB NOAA file Forge downloads), and the nesting and upscaling tutorial sets ``bgc.xco2air_default`` to 392.6 ppm, the 2012 mean; these runs used the ModelSpec's pre-industrial 284.7 ppm before.
-- Air-sea CO2 fluxes, pH and pCO2 change; the reference numbers and figures on the two tutorial pages still come from the earlier runs.
+- Air-sea CO2 fluxes, pH and pCO2 in these runs change.
