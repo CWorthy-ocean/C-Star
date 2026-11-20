@@ -453,6 +453,13 @@ SOURCE_KEY_STEP: t.Final[str] = "step"
 """Directive config key naming another workplan step as the content source."""
 SOURCE_DELIMITER: t.Final[str] = ";"
 """Delimiter separating multiple sources in a directive's `path`/`step` value."""
+_SOURCE_COVERAGE_REMEDY: t.Final[str] = (
+    f"List every segment of the source, separated by `{SOURCE_DELIMITER}` (e.g. "
+    f"`{SOURCE_KEY_STEP}: parent_1{SOURCE_DELIMITER}parent_2{SOURCE_DELIMITER}"
+    f"parent_3`, or `{SOURCE_KEY_PATH}:` with one output directory per segment), "
+    "and make sure the source runs cover the step's start_date to end_date."
+)
+"""How to fix directive sources that do not cover the step, appended to the refusal."""
 
 _OutputFileT = t.TypeVar("_OutputFileT", bound=TimestampedOutputFile)
 
@@ -652,6 +659,7 @@ def verify_source_coverage(
         runtime.start_date,
         runtime.end_date,
         source=f"the `{directive}` {label} files",
+        remedy=_SOURCE_COVERAGE_REMEDY,
         missing_hint=missing_hint,
     )
 

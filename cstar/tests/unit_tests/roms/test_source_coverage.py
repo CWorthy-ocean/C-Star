@@ -342,6 +342,76 @@ class TestCheckSourceCoverage:
         b = bry(tmp_path, "child_bry.20120111000000.nc", halves(10.5, 20))
         check([b, a], 0, 20)
 
+    def test_partitioned_without_variable_refused(self, tmp_path: Path) -> None:
+        """A partitioned file none of whose pieces has the variable is refused.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Temporary directory.
+        """
+        a = bry(tmp_path, "child_bry.20120101000000.nc", halves(0, 10))
+        pieces = [
+            bry(tmp_path, f"child_bry.20120111000000.{n}.nc", None) for n in range(2)
+        ]
+        with pytest.raises(CstarError, match="No piece of .*HINT"):
+            check([a, *pieces], 0, 10, missing_hint="HINT")
+
+    def test_empty_file_skipped(self, tmp_path: Path) -> None:
+        """A file holding the variable but no records adds nothing and is no error.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Temporary directory.
+        """
+        a = bry(tmp_path, "child_bry.20120101000000.nc", halves(0, 10))
+        empty = bry(tmp_path, "child_bry.20120111000000.nc", [])
+        check([a, empty], 0, 10)
+
+    @pytest.mark.parametrize(
+        ("second_reference", "refused"),
+        [("2012/01/11", False), ("2012/01/21", True)],
+    )
+    def test_files_with_different_reference_dates(
+        self, tmp_path: Path, second_reference: str, refused: bool
+    ) -> None:
+        """Records are placed in time with each file's own reference date.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Temporary directory.
+        second_reference : str
+            The reference date the second file records.
+        refused : bool
+            Whether the files leave a gap once placed in time.
+        """
+        a = bry(tmp_path, "child_bry.20120101000000.nc", halves(0, 10))
+        b = bry(
+            tmp_path,
+            "child_bry.20120111000000.nc",
+            halves(0.5, 10),
+            long_name=f"Time since {second_reference}",
+        )
+        if refused:
+            with pytest.raises(CstarError, match="no record between"):
+                check([a, b], 0, 25)
+        else:
+            check([a, b], 0, 20)
+
+    def test_remedy_appended(self, tmp_path: Path) -> None:
+        """The caller's remedy ends the refusal.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Temporary directory.
+        """
+        a = bry(tmp_path, "child_bry.20120101000000.nc", halves(0, 10))
+        with pytest.raises(CstarError, match=r"end_date .* REMEDY$"):
+            check([a], 0, 15, remedy="REMEDY")
+
 
 def make_step(start: float, end: float) -> t.Any:
     """Build a minimal step exposing the run window.
@@ -405,8 +475,9 @@ class TestDirectiveVerify:
             },
         )
         step = make_step(0, 30)
-        with pytest.raises(CstarError, match="`nest-from` boundary files"):
+        with pytest.raises(CstarError, match="`nest-from` boundary files") as err:
             NestingDirective({"path": f"{d1};{d3}"}).verify(step)
+        assert "`step: parent_1;parent_2;parent_3`" in str(err.value)
         NestingDirective({"path": f"{d1};{d2}"}).verify(make_step(0, 20))
 
     def test_carbonate_sensitivity(self, tmp_path: Path) -> None:

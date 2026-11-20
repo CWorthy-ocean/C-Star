@@ -49,14 +49,6 @@ rounding differs from the dates C-Star computes."""
 
 _DAY: t.Final[timedelta] = timedelta(days=1)
 
-_REMEDY: t.Final[str] = (
-    "List every segment of the source, separated by `;` (e.g. "
-    "`step: parent_1;parent_2;parent_3`, or `path:` with one output directory "
-    "per segment), and make sure the source runs cover the step's start_date to "
-    "end_date."
-)
-"""How to fix a source that does not cover the step, appended to the refusal."""
-
 
 @dataclass(frozen=True)
 class _FileRecords:
@@ -156,7 +148,8 @@ def _read_whole_file(
     Raises
     ------
     CstarError
-        If a whole (not partitioned) file lacks `variable` or cannot be read.
+        If a file, or every piece of a partitioned one, lacks `variable`, or a
+        file cannot be read.
     """
     if not pieces[0].is_partitioned:
         path = pieces[0].path
@@ -165,9 +158,19 @@ def _read_whole_file(
             raise CstarError(msg)
         return _FileRecords(path, axis), preferred
 
+    has_variable = False
     for piece in sorted(pieces, key=lambda p: p.partition != preferred):
-        if (axis := _read(piece.path, variable)) is not None and axis.values:
+        if (axis := _read(piece.path, variable)) is None:
+            continue
+        has_variable = True
+        if axis.values:
             return _FileRecords(piece.path, axis), piece.partition
+    if not has_variable:
+        msg = (
+            f"No piece of {pieces[0].path.parent / pieces[0].path.name.rsplit('.', 2)[0]}"
+            f".nc has a {variable!r} variable. {missing_hint}"
+        ).strip()
+        raise CstarError(msg)
     return None, preferred
 
 
@@ -196,6 +199,7 @@ def check_source_coverage(
     end_date: datetime,
     *,
     source: str,
+    remedy: str = "",
     missing_hint: str = "",
 ) -> None:
     """Refuse forcing files whose records leave a gap or do not span a run.
@@ -214,8 +218,10 @@ def check_source_coverage(
       (ROMS needs a record at or before the model time when it starts and one
       at or after it at every later step).
 
-    When no file records a reference date, the run cannot be placed among the
-    records, so every gap is checked and the span is not, with a warning.
+    When no file records a reference date (extractions from ucla-roms releases
+    that label `bry_time` only "Time since 2000"), the run cannot be placed
+    among the records, so every gap is checked and the span is not, with a
+    warning: refusing would stop runs the check cannot judge.
     Cyclic (climatological) files are not checked: ROMS wraps their records.
 
     Parameters
@@ -230,6 +236,8 @@ def check_source_coverage(
         The end of the run the files force.
     source : str
         What supplied the files, for messages, e.g. "the `nest-from` boundary files".
+    remedy : str
+        How to supply files that cover the run, appended to the refusal.
     missing_hint : str
         Advice appended when a file lacks `variable`.
 
@@ -248,7 +256,7 @@ def check_source_coverage(
             read.append(found)
 
     if not read:
-        msg = f"{subject} hold no {variable!r} records. {_REMEDY}"
+        msg = f"{subject} hold no {variable!r} records. {remedy}".strip()
         raise CstarError(msg)
 
     if any(r.axis.reference is not None and r.axis.reference.cyclic for r in read):
@@ -336,6 +344,6 @@ def check_source_coverage(
             f"{subject} do not cover the run from {start_date} to "
             f"{end_date} without gaps: {'; '.join(problems)}. ROMS interpolates "
             "linearly across a gap and stops when the model time passes the last "
-            f"record. {_REMEDY}"
-        )
+            f"record. {remedy}"
+        ).strip()
         raise CstarError(msg)
