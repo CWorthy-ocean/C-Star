@@ -257,6 +257,41 @@ class TestOutputWrittenInWindow:
         assert exc.rule == "output_written_in_window"
         assert "restarts (every 604800 s)" in str(exc)
 
+    @pytest.mark.parametrize(
+        ("restarts", "keys", "advice"),
+        [
+            (
+                {"output_period_rst": 604800.0},
+                ("output_period_rst",),
+                "Set basic_output_settings.output_period_rst to at most the run "
+                "length (86400 s)",
+            ),
+            (
+                {"monthly_restarts": True, "output_period_rst": 0},
+                ("monthly_restarts", "output_period_rst"),
+                "turn off basic_output_settings.monthly_restarts",
+            ),
+            (
+                {"wrt_file_rst": False},
+                ("wrt_file_rst", "output_period_rst"),
+                "Turn on restarts (basic_output_settings.wrt_file_rst)",
+            ),
+        ],
+        ids=["periodic", "monthly", "off"],
+    )
+    def test_advice_names_the_restart_setting_to_change(self, restarts, keys, advice):
+        """The error points at what the user would change: the restart period, the
+        monthly switch, or the restart switch itself.
+        """
+        settings = _settings(dt=7200.0, ntimes=12, basic_output_settings=restarts)
+        with pytest.raises(NamelistConsistencyError) as exc_info:
+            check_output_written_in_window(settings, MARBL, start_date=START)
+        exc = exc_info.value
+        assert exc.keys == keys
+        assert advice in str(exc)
+        # CDR gas exchange and upscaling do write at the end of a run
+        assert "end-of-run" not in str(exc)
+
     def test_restart_inside_the_window_passes(self):
         check_output_written_in_window(
             _settings(dt=7200.0, ntimes=12), MARBL, start_date=START

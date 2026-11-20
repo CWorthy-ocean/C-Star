@@ -966,16 +966,17 @@ def check_output_written_in_window(
     enabled: list[str] = []
 
     basic_output = _section(settings, "basic_output_settings")
-    if _section(basic_output, "wrt_file_rst"):
-        if _section(basic_output, "monthly_restarts"):
-            if month_changes:
-                return
-            enabled.append("restarts (monthly)")
-        else:
-            period = _section(basic_output, "output_period_rst")
-            if period is None or _steps_to_first_write(period, dt) <= ntimes + 1:
-                return
-            enabled.append(f"restarts (every {period:g} s)")
+    restarts_on = bool(_section(basic_output, "wrt_file_rst"))
+    monthly_restarts = restarts_on and bool(_section(basic_output, "monthly_restarts"))
+    if monthly_restarts:
+        if month_changes:
+            return
+        enabled.append("restarts (monthly)")
+    elif restarts_on:
+        period = _section(basic_output, "output_period_rst")
+        if period is None or _steps_to_first_write(period, dt) <= ntimes + 1:
+            return
+        enabled.append(f"restarts (every {period:g} s)")
 
     for check, section in _enabled_streams(settings, cppdefs, schema):
         if check.writes_outside_period:
@@ -990,18 +991,43 @@ def check_output_written_in_window(
             return
         enabled.append(f"'{check.label}' (every {_effective_period(period, dt):g} s)")
 
-    window = timedelta(seconds=dt * ntimes)
+    run_seconds = dt * ntimes
+    if enabled:
+        why = (
+            f"enabled streams: {', '.join(enabled)}, which write only when their "
+            "period elapses or, for monthly output, when the month changes, so the "
+            "run's results would be lost"
+        )
+    else:
+        why = "no output stream is enabled"
+    restart_period = (
+        "basic_output_settings.output_period_rst to at most the run length "
+        f"({run_seconds:g} s)"
+    )
+    # Advice and keys name the restart setting the user would change.
+    if monthly_restarts:
+        fix = (
+            "Monthly restarts write only when the month changes, and this run stays "
+            "in one month: turn off basic_output_settings.monthly_restarts and set "
+            f"{restart_period}"
+        )
+        keys: tuple[str, ...] = ("monthly_restarts", "output_period_rst")
+    elif restarts_on:
+        fix = f"Set {restart_period}"
+        keys = ("output_period_rst",)
+    else:
+        fix = (
+            "Turn on restarts (basic_output_settings.wrt_file_rst) and set "
+            f"{restart_period}"
+        )
+        keys = ("wrt_file_rst", "output_period_rst")
     raise NamelistConsistencyError(
         f"No output stream writes during this run of {ntimes} steps of {dt:g} s "
-        f"({window} from {start_date}): enabled streams: "
-        f"{', '.join(enabled) or 'none'}. ucla-roms writes a stream only when its "
-        "period elapses or, for monthly output, when the month changes, and has no "
-        "end-of-run write, so the run's results would be lost. Set the restart "
-        "period (basic_output_settings.output_period_rst) to at most the run "
-        "length, or turn on an output stream that writes within it.",
+        f"({timedelta(seconds=run_seconds)} from {start_date}): {why}. {fix}, or "
+        "turn on an output stream that writes within the run.",
         rule="output_written_in_window",
         section="basic_output_settings",
-        keys=("output_period_rst",),
+        keys=keys,
     )
 
 
