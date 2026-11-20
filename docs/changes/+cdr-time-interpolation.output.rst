@@ -1,0 +1,1 @@
+The namelist's ``cdr_time_interpolation`` now follows the CDR releases' ``time_interpolation``, so releases with ``time_interpolation: true`` are interpolated in time, as roms-tools accounts them, instead of held as steps one record late.

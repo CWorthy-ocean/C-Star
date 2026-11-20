@@ -334,13 +334,12 @@ class TestStagerSubclasses:
                 new_callable=mock.PropertyMock,
             ) as mock_ret,
             mock.patch("cstar.io.stager.StagedRepository") as mock_staged_repo,
-            mock.patch("cstar.io.stager._run_cmd") as mock_run_cmd,
+            mock.patch("cstar.io.stager.shutil.copytree") as mock_copytree,
             mock.patch(
                 "cstar.io.stager.CachedRemoteRepositoryStager._get_cache_path",
             ) as mock_get_cache_path,
         ):
             mock_get_cache_path.return_value = fake_cache_path
-            mock_run_cmd.return_value = ""
             mock_ret.return_value = fake_retriever
             s = stager.CachedRemoteRepositoryStager(source)
 
@@ -350,7 +349,7 @@ class TestStagerSubclasses:
         fake_retriever.save.assert_called_once_with(target_dir=fake_cache_path)
 
         # confirm the content is copied from the cache to the target
-        mock_run_cmd.assert_called_once_with(f"cp -av {fake_cache_path}/ {fake_path}")
+        mock_copytree.assert_called_once_with(fake_cache_path, fake_path, symlinks=True)
 
         # confirm the result is a new path and the cached location is not leaked
         mock_staged_repo.assert_called_once_with(source=source, path=fake_path)
@@ -383,13 +382,12 @@ class TestStagerSubclasses:
                 new_callable=mock.PropertyMock,
             ) as mock_ret,
             mock.patch("cstar.io.stager.StagedRepository"),  # avoid validation
-            mock.patch("cstar.io.stager._run_cmd") as mock_run_cmd,
+            mock.patch("cstar.io.stager.shutil.copytree"),
             mock.patch(
                 "cstar.io.stager.CachedRemoteRepositoryStager._get_cache_path",
             ) as mock_get_cache_path,
         ):
             mock_get_cache_path.return_value = fake_cache_path
-            mock_run_cmd.return_value = ""
             mock_ret.return_value = fake_retriever
             s = stager.CachedRemoteRepositoryStager(source)
 

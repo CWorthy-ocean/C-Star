@@ -58,7 +58,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e ".[dev]" --force-reinstall
+           python -m pip install -e ".[dev]"
 
       - name: Locate pooch caches
         id: pooch-caches
@@ -96,7 +96,7 @@ jobs:
           PYTEST_IGNORE: ${{ runner.os == 'macOS' && '--ignore=cstar/tests/integration_tests/extended/test_nesting_upscaling_workplan.py' || '' }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms cstar/tests/integration_tests/extended $PYTEST_IGNORE
+           coverage run --rcfile=coverage.toml -m pytest -s -rs --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms cstar/tests/integration_tests/extended $PYTEST_IGNORE
 
       - name: Get coverage report
         shell: micromamba-shell {0}
