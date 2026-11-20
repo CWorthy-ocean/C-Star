@@ -371,7 +371,7 @@ fields:
     label: Baroclinic time step
     symbol: dt
     unit: s
-    hint: Set it directly, or click “Compute from CFL” to derive it from the grid.
+    hint: Derived from the grid (CFL) and follows grid edits until you type a value; “Use CFL value” goes back to the derived one.
   forcing_dd:
     label: Forcing preset
     required: true
@@ -670,7 +670,7 @@ fields:
   buttons.derive:
     label: Derive from grid
   buttons.compute_dt:
-    label: Compute from CFL
+    label: Use CFL value
   buttons.attach:
     label: Attach file
   buttons.detach:
