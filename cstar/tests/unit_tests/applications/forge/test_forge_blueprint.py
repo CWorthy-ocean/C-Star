@@ -2821,11 +2821,16 @@ def test_resolver_rejects_averages_that_end_off_the_marbl_step():
 
 
 def test_resolver_leaves_averages_off_the_marbl_step_to_older_releases():
+    """At dt 1800 s MARBL steps every 3600 s: a 5400 s average is a multiple of
+    dt, which every release requires, but not of the MARBL step, which only
+    ucla-roms >= 0.13.0 requires.
+    """
     cfg = _build(
         model_path=_MODEL_PATH_ROMS0120,
-        run_time_overrides=_bgc_diagnostics_averaged_every(60),
+        dt=1800,
+        run_time_overrides=_bgc_diagnostics_averaged_every(5400),
     )
-    assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 60
+    assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 5400
 
 
 def test_resolver_moves_the_cdr_average_it_turns_on_onto_marbl_steps(caplog):
@@ -5043,6 +5048,22 @@ def test_resolver_bgc_mode_cdr_lite_rejects_bgc_forcing():
     assert 'bgc_mode="cdr_lite"' in msg
     assert "initial_conditions.bgc_source" in msg
     assert "river[0]" in msg
+
+
+class TestResolverOutputCadenceCdrLite:
+    def test_checks_the_cdr_lite_stream_configure_build_turns_on(self, caplog):
+        """In ``bgc_mode`` cdr_lite the resolver checks the CDR-lite tracer stream
+        ``configure_build`` will turn on: its hourly period drifts at dt 7200 s.
+        """
+        with caplog.at_level(
+            logging.WARNING, logger="cstar.applications.forge.resolve"
+        ):
+            cfg = _build_cdr_lite()
+        assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+        (message,) = [
+            m for m in _resolver_warnings(caplog) if "output_period_cdr_lite" in m
+        ]
+        assert "every 7200 s" in message
 
 
 @pytest.mark.parametrize("mode", ["cdr-lite", "CDR_LITE", "", "bgc"])
@@ -9070,6 +9091,7 @@ _PARITY_DOMAINS = [
         ),
         {"south": False, "east": True, "north": True, "west": False},
         {"n_procs_x": 1, "n_procs_y": 1},
+        "marbl",
     ),
     (
         "gulf-guinea-toy",
@@ -9085,6 +9107,9 @@ _PARITY_DOMAINS = [
         ),
         {"south": True, "east": True, "north": True, "west": True},
         {"n_procs_x": 2, "n_procs_y": 5},
+        # Its CFL dt, 14,400 s, is longer than the MARBL step ucla-roms accepts
+        # (check_marbl_step_ceiling), so the derivation is compared without BGC.
+        "none",
     ),
 ]
 
@@ -9104,10 +9129,10 @@ _PARITY_SKIP = {
 @pytest.mark.integration
 class TestResolverBuilderParity:
     @pytest.mark.parametrize(
-        "grid_name,grid_kwargs,boundaries,partitioning", _PARITY_DOMAINS
+        "grid_name,grid_kwargs,boundaries,partitioning,bgc_mode", _PARITY_DOMAINS
     )
     def test_resolver_matches_builder_derivation(
-        self, grid_name, grid_kwargs, boundaries, partitioning, tmp_path
+        self, grid_name, grid_kwargs, boundaries, partitioning, bgc_mode, tmp_path
     ):
         pytest.importorskip("roms_tools")
         from datetime import datetime
@@ -9129,7 +9154,10 @@ class TestResolverBuilderParity:
             partitioning=partitioning,
             start_date=start,
             end_date=end,
-            forcing_inputs=_CATALOG.forcing_data("glorys-era5-unified"),
+            bgc_mode=bgc_mode,
+            forcing_inputs=_CATALOG.forcing_data(
+                "glorys-era5-unified" if bgc_mode == "marbl" else "glorys-era5-physics"
+            ),
             output_settings=_CATALOG.output_data("standard"),
         )
         host = HostPaths(
@@ -9710,10 +9738,11 @@ class TestSaveModifiedSpecsToCatalog:
         assert wiz.config.composition.domain.modified is False
 
         # +100 would land on 7300, no longer an integer multiple of the default
-        # output_period_rst (86400) -- see check_rst_period_divisible -- so
-        # double instead (7200 -> 14400, still divisible) to isolate the
-        # "editing dt flags domain modified" behavior under test.
-        wiz.dt.value = wiz.dt.value * 2
+        # output_period_rst (86400) -- see check_rst_period_divisible -- and
+        # doubling would exceed the 10,800 s MARBL step ucla-roms accepts
+        # (check_marbl_step_ceiling), so halve instead (7200 -> 3600) to isolate
+        # the "editing dt flags domain modified" behavior under test.
+        wiz.dt.value = wiz.dt.value / 2
         assert wiz.config.composition.domain.modified is True
 
     def test_invalid_name_refuses_without_writing(self, isolated_catalog):

@@ -4506,13 +4506,15 @@ class TestGoldenNamelist:
         self, mock_grid, tmp_path, model_path, rejected
     ):
         """The net for stored blueprints: an accordion edit after the resolver ran
-        turns on a ``_bgc_dia_avg`` window shorter than the MARBL step, which
-        ucla-roms >= 0.13.0 stops on at startup and 0.12.0 runs.
+        turns on a ``_bgc_dia_avg`` window that does not end on a MARBL step
+        (5400 s at dt 1800 s, so MARBL steps every 3600 s), which ucla-roms >=
+        0.13.0 stops on at startup and 0.12.0 runs.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid, tmp_path, model_path=model_path
         )
-        cfg.model_settings["bgc"].update(wrt_avg_dia=True, output_period_avg_dia=60)
+        cfg.model_settings["time_stepping"]["dt"] = 1800
+        cfg.model_settings["bgc"].update(wrt_avg_dia=True, output_period_avg_dia=5400)
 
         if rejected:
             with pytest.raises(
@@ -5495,6 +5497,46 @@ class TestGoldenNamelist:
         )
         with pytest.warns(UserWarning, match=r"ucla-roms 0\.7\.0 reads the first"):
             self._configure_build_for(cfg, builder)
+
+
+class TestConfigureBuildOutputCadence:
+    """The ``configure_build`` net for stored blueprints: output periods and the
+    MARBL step against dt, and a window in which nothing writes.
+    """
+
+    _golden = TestGoldenNamelist()
+
+    def _stored(self, mock_grid, tmp_path):
+        return self._golden._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0130
+        )
+
+    def test_hourly_history_with_dt_960_is_refused(self, mock_grid, tmp_path):
+        cfg, builder = self._stored(mock_grid, tmp_path)
+        cfg.model_settings["time_stepping"]["dt"] = 960
+        cfg.model_settings["ocean_vars"].update(
+            wrt_file_his=True, output_period_his=3600, nrpf_his=24
+        )
+        with pytest.raises(ValueError, match=r"output_period_his \(3600(\.0)? s\)"):
+            self._golden._configure_build_for(cfg, builder)
+
+    def test_dt_28800_with_marbl_is_refused(self, mock_grid, tmp_path):
+        cfg, builder = self._stored(mock_grid, tmp_path)
+        cfg.model_settings["time_stepping"]["dt"] = 28800
+        cfg.model_settings["ocean_vars"]["output_period_rst"] = 86400 * 2
+        with pytest.raises(ValueError, match="MARBL step would be 28800"):
+            self._golden._configure_build_for(cfg, builder)
+
+    def test_window_writing_nothing_warns(self, mock_grid, tmp_path, caplog):
+        cfg, builder = self._stored(mock_grid, tmp_path)
+        cfg.model_settings["ocean_vars"]["output_period_rst"] = 604800
+        with caplog.at_level(
+            logging.WARNING, logger="cstar.applications.forge.executor"
+        ):
+            self._golden._configure_build_for(cfg, builder)
+        assert any(
+            r.getMessage().startswith("No output stream writes") for r in caplog.records
+        )
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:

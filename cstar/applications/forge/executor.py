@@ -56,6 +56,7 @@ from cstar.applications.forge.namelist_model import (
     check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_marbl_step_averages,
+    check_output_cadence,
     check_output_streams_divide_rst,
     check_restoring_flux_output,
     check_river_tracer_counts,
@@ -2731,6 +2732,17 @@ class ForgeExecutor(BaseModel):
             settings_cls=settings_cls,
             roms_ref=effective_roms_ref,
         )
+        # Output periods vs dt, the MARBL step ceiling, and a run that writes nothing.
+        for message in check_output_cadence(
+            {
+                **self._settings_run_time,
+                "cppdefs": self._settings_compile_time.get("cppdefs", {}),
+            },
+            settings_cls=settings_cls,
+            start_date=self.start_date,
+            end_date=self.end_date,
+        ):
+            log.warning(message)
 
         # Ensure build output directories exist before writing files.
         self.compile_time_code_dir.mkdir(parents=True, exist_ok=True)

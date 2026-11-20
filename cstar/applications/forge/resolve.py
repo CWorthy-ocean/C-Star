@@ -83,6 +83,7 @@ from cstar.applications.forge.namelist_model import (
     check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_marbl_step_averages,
+    check_output_cadence,
     check_output_streams_divide_rst,
     check_restoring_flux_output,
     check_rst_period_divisible,
@@ -1421,6 +1422,22 @@ def build_forge_blueprint(
     # on the schema the pinned ref selects, deriving it from settings_cls
     # itself (see output_precheck_applies_to) rather than re-deriving via a
     # second, differently-defaulting lookup.
+    precheck_settings = settings
+    if bgc_mode == "cdr_lite":
+        # The CDR-lite tracer stream is the only output the CDR tracers
+        # appear in, and configure_build forces it on once generation has
+        # derived the tracer counts (they are unknown here, so the resolver
+        # leaves the switch as authored). Check the stream it will write now,
+        # not after the expensive generation; configure_build's forcing
+        # remains the net for stored blueprints. A copy, so the stored
+        # settings stay as authored.
+        precheck_settings = {
+            **settings,
+            "cdr_lite_output": {
+                **(settings.get("cdr_lite_output") or {}),
+                "do_cdr_lite_output": True,
+            },
+        }
     if output_precheck_applies_to(settings_cls):
         # The checker is keyed on C-Star's canonical namelist vocabulary
         # (RomsNamelistBase group field names / real Fortran keys), not
@@ -1432,22 +1449,6 @@ def build_forge_blueprint(
         # missing the processing-filled sections (title/grid/initial/forcing/
         # s_coord/reference_date_settings, populated later at generate_inputs()/
         # executor time) -- none of which affect any output-stream field.
-        precheck_settings = settings
-        if bgc_mode == "cdr_lite":
-            # The CDR-lite tracer stream is the only output the CDR tracers
-            # appear in, and configure_build forces it on once generation has
-            # derived the tracer counts (they are unknown here, so the resolver
-            # leaves the switch as authored). Check the stream it will write now,
-            # not after the expensive generation; configure_build's forcing
-            # remains the net for stored blueprints. A copy, so the stored
-            # settings stay as authored.
-            precheck_settings = {
-                **settings,
-                "cdr_lite_output": {
-                    **(settings.get("cdr_lite_output") or {}),
-                    "do_cdr_lite_output": True,
-                },
-            }
         try:
             check_output_streams_divide_rst(
                 canonical_output_sections_for_precheck(precheck_settings, settings_cls),
@@ -1476,6 +1477,14 @@ def build_forge_blueprint(
     check_marbl_step_averages(
         settings, settings_cls=settings_cls, roms_ref=effective_roms_ref
     )
+    # Output periods vs dt, the MARBL step ceiling, and a run that writes nothing.
+    for message in check_output_cadence(
+        precheck_settings,
+        settings_cls=settings_cls,
+        start_date=start_date,
+        end_date=end_date,
+    ):
+        log.warning(message)
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river) --------
     # A child grid (has a parent) receives its boundary values from the parent's
