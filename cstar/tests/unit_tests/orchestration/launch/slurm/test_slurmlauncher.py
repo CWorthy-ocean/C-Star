@@ -1361,3 +1361,57 @@ def test_slurmlauncher_submits_a_gpu_step_where_the_toolchain_exists(
 
     sysmgr.toolchain.assert_called_once_with("gpu")
     assert create_job.call_args.kwargs["gpus"] == 4
+
+
+def _job_handle(pid: str) -> SlurmHandle:
+    """Create the handle of a dependency submitted as SLURM job `pid`."""
+    return SlurmHandle(
+        pid=pid,
+        name=f"step-{pid}",
+        run_id="r",
+        launcher_name=SlurmLauncher.name,
+        status=Status.Running,
+    )
+
+
+@pytest.mark.parametrize(
+    ("states", "kept"),
+    [
+        pytest.param(
+            {"1": "COMPLETED", "2": "RUNNING", "3": "COMPLETED", "4": "PENDING"},
+            ["2", "4"],
+            id="mixed",
+        ),
+        pytest.param({"1": "COMPLETED", "2": "COMPLETED"}, [], id="all-completed"),
+        pytest.param({"1": "RUNNING", "2": "PENDING"}, ["1", "2"], id="none-completed"),
+    ],
+)
+async def test_prune_completed_dependencies(
+    states: dict[str, str], kept: list[str]
+) -> None:
+    """Verify only the dependencies whose jobs SLURM reports as completed are
+    dropped, and the rest are kept in their original order.
+    """
+    dependencies = [_job_handle(pid) for pid in states]
+    batches = {
+        pid: mock.Mock(status=ExecutionStatus[state]) for pid, state in states.items()
+    }
+    get_batches = mock.AsyncMock(return_value=batches)
+
+    with mock.patch("cstar.orchestration.launch.slurm.get_slurm_batches", get_batches):
+        remaining = await SlurmLauncher._prune_completed_dependencies(dependencies)
+
+    get_batches.assert_awaited_once_with(list(states))
+    assert [d.pid for d in remaining] == kept
+    assert all(d in dependencies for d in remaining)
+
+
+async def test_prune_completed_dependencies_without_dependencies() -> None:
+    """Verify a step without dependencies is not looked up in SLURM."""
+    get_batches = mock.AsyncMock(return_value={})
+
+    with mock.patch("cstar.orchestration.launch.slurm.get_slurm_batches", get_batches):
+        remaining = await SlurmLauncher._prune_completed_dependencies([])
+
+    assert remaining == []
+    get_batches.assert_not_awaited()

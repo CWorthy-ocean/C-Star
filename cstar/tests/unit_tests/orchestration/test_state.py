@@ -59,6 +59,24 @@ async def test_put_sentinel_never_exposes_a_partial_file(state_home: Path) -> No
     )
 
 
+async def test_get_sentinel_finds_a_step_by_its_name(state_home: Path) -> None:
+    """Verify a sentinel written for a handle is found by the step's own name,
+    even when the name is not path-safe.
+    """
+    repo = StateRepository()
+    handle = ProcessHandle(
+        pid="7", name="Say Hello", run_id="atomic-run", status=Status.Running
+    )
+
+    written = await repo.put_sentinel(handle)
+    found = await repo.get_sentinel("Say Hello", ProcessHandle)
+
+    assert written is not None
+    assert " " not in written.name
+    assert found is not None
+    assert (found.pid, found.name, found.status) == ("7", "Say Hello", Status.Running)
+
+
 async def test_put_sentinel_writes_where_flock_is_unsupported(
     state_home: Path, flock_unsupported: mock.Mock
 ) -> None:
