@@ -257,10 +257,10 @@ def check_cdr_release_positions(
             r_lat = float(release["lat"])
             r_lon = float(release["lon"])
             depth = float(release["depth"])
+            hsc = float(release.get("hsc") or 0.0)
+            vsc = float(release.get("vsc") or 0.0)
         except (KeyError, TypeError, ValueError):
             continue  # roms-tools refuses a release without a usable position
-        hsc = float(release.get("hsc") or 0.0)
-        vsc = float(release.get("vsc") or 0.0)
         here = f"release {name!r} (lat {r_lat:g}, lon {r_lon:g}, depth {depth:g} m)"
 
         # haversine; periodic in longitude, so no wrapping is needed
@@ -278,11 +278,7 @@ def check_cdr_release_positions(
                 "nearest grid point; ROMS would move it to the nearest cell"
             )
             continue
-        if not interior.flat[int(np.argmin(dist))]:
-            warned.append(
-                f"{here} is on the edge of the grid; ROMS centres it on the nearest "
-                "interior cell"
-            )
+        on_edge = not interior.flat[int(np.argmin(dist))]
 
         candidates = interior & wet if relocate_to_wet_pts else interior
         if not candidates.any():
@@ -301,6 +297,11 @@ def check_cdr_release_positions(
                 f"{here} is on land; ROMS moves it to the nearest wet cell, "
                 f"{dist[cell] / 1000:.1f} km away"
             )
+        elif on_edge:
+            warned.append(
+                f"{here} is on the edge of the grid; ROMS centres it on the nearest "
+                "interior cell"
+            )
 
         if depth <= h[cell]:
             continue
@@ -311,9 +312,12 @@ def check_cdr_release_positions(
                 candidates & wet & (np.exp(-((dist / hsc) ** 2)) > _CDR_HSC_CUTOFF)
             )
         deepest = float(h[reached].max())
-        # level depths (m, positive down) of the deepest column, as ROMS sets them
+        # level depths (m, positive down) of the deepest column, as ROMS sets them;
+        # ROMS's double-precision weights count as zero below the smallest normal
+        # number, where a build that flushes subnormals to zero loses them
         levels = -deepest * (grid.hc * sigma_r + deepest * cs_r) / (grid.hc + deepest)
-        if vsc > 0 and not np.any(np.exp(-(((depth - levels) / vsc) ** 2)) > 0):
+        weights = np.exp(-(((depth - levels) / vsc) ** 2)) if vsc > 0 else None
+        if weights is not None and not np.any(weights > np.finfo(float).tiny):
             refused.append(
                 f"{here} is {depth - h[cell]:.0f} m below the seafloor "
                 f"({h[cell]:.0f} m), {(depth - h[cell]) / vsc:.0f} times its vertical "

@@ -427,6 +427,22 @@ def _interior_land(grid: rt.Grid) -> tuple[int, int]:
     return int(eta), int(xi)
 
 
+def _wet_edge(grid: rt.Grid) -> tuple[int, int]:
+    """A boundary rho point whose interior neighbour is water over 20 m deep."""
+    mask = grid.ds["mask_rho"].values
+    h = grid.ds["h"].values
+    n_eta, n_xi = mask.shape
+    for edge, inner in (
+        *(((0, xi), (1, xi)) for xi in range(2, n_xi - 2)),
+        *(((n_eta - 1, xi), (n_eta - 2, xi)) for xi in range(2, n_xi - 2)),
+        *(((eta, 0), (eta, 1)) for eta in range(2, n_eta - 2)),
+        *(((eta, n_xi - 1), (eta, n_xi - 2)) for eta in range(2, n_eta - 2)),
+    ):
+        if mask[inner] > 0 and h[inner] > 20:
+            return edge
+    raise AssertionError("the grid has no wet edge")
+
+
 CENTRE = (11, 11)
 """A wet interior cell of ``real_grid`` (about 45 m deep)."""
 
@@ -460,7 +476,24 @@ class TestCheckCdrReleasePositions:
 
     def test_a_release_on_the_edge_warns(self, real_grid):
         with pytest.warns(UserWarning, match=r"release 'rim'.* on the edge"):
-            _positions(real_grid, _at(real_grid, 0, 10, name="rim"))
+            _positions(real_grid, _at(real_grid, *_wet_edge(real_grid), name="rim"))
+
+    def test_an_edge_release_whose_cell_is_land_gets_only_the_land_warning(
+        self, real_grid
+    ):
+        mask = real_grid.ds["mask_rho"].values
+        xi = int(np.argwhere(mask[1, 2:-2] == 0)[0][0]) + 2
+        with pytest.warns(UserWarning) as record:
+            _positions(real_grid, _at(real_grid, 0, xi, name="rim"))
+        (message,) = [
+            str(w.message) for w in record if "CDR releases" in str(w.message)
+        ]
+        assert "on land" in message
+        assert "on the edge" not in message
+
+    def test_a_non_numeric_scale_is_left_to_roms_tools(self, real_grid, recwarn):
+        _positions(real_grid, _at(real_grid, *CENTRE, hsc="wide"))
+        assert not [w for w in recwarn if "CDR releases" in str(w.message)]
 
     def test_a_release_just_below_the_seafloor_warns(self, real_grid):
         h = float(real_grid.ds["h"][CENTRE])
