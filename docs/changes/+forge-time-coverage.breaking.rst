@@ -1,0 +1,4 @@
+Forge now refuses surface or boundary forcing whose records do not span the run window, naming the file, the time variable and its first or last record; before, it wrote truncated forcing and ROMS stopped once its clock passed the last record, possibly hours into the run.
+- ROMS needs a record at or before ``start_date`` and one at or after ``end_date`` for every forcing variable; a climatology is exempt. Stage source data that covers the window, or shorten it.
+- The check also runs on files a rerun reuses, so a window extended since the inputs were generated is refused until they are regenerated with ``--clobber``.
+- Initial conditions that would start the model at another time than ``start_date`` are refused the same way, including a file written with flexible start time by an earlier release.

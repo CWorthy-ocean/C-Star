@@ -5,23 +5,26 @@ grid_name: "PAC_2fth_deg"
 start_time: "2012-01-01"
 end_time: "2012-01-02"
 grid_kwargs:
-  nx: 208
-  ny: 192
-  size_x: 7300
-  size_y: 11100
+  nx: 192
+  ny: 208
+  size_x: 11100
+  size_y: 7300
   center_lon: -165
   center_lat: 40
-  rot: -90
+  rot: 0
   N: 10
   theta_s: 6.0
   theta_b: 3.0
   hc: 250.0
 open_boundaries:
   south: true
-  east: false
+  east: true
   north: true
   west: true
+# Sponge viscosity in m2/s, set here because the default (grid spacing along
+# xi / 10) depends on which axis is xi when the cells are not square.
+v_sponge: 3509.6
 partitioning:
-  n_procs_x: 16
-  n_procs_y: 8
+  n_procs_x: 8
+  n_procs_y: 16
 _child_grid_name: "NEP-4th_deg"

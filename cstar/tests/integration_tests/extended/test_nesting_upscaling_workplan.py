@@ -14,7 +14,6 @@ this checkout. The module polls the step sentinels until all nine are terminal.
 """
 
 import re
-import shutil
 import time
 import typing as t
 import warnings
@@ -37,7 +36,6 @@ from cstar.applications.upscaler import (
     USCL_WINDOWS_INFERRED,
 )
 from cstar.base.utils import slugify
-from cstar.orchestration.launch.local import find_timeout_exe
 from cstar.roms.namelist import RomsNamelistV0_13_0, namelist_schema_for_ref
 from cstar.tests.integration_tests.cases import ROMS_REF
 from cstar.tests.integration_tests.cli_harness import (
@@ -125,19 +123,8 @@ REGISTRY_GLORYS_START = "2012-01-01T12:00:00"
 """The first record of the registry's GLORYS extract, where a run with initial conditions starts."""
 USCL_BOUNDARIES = ("north", "south", "east", "west")
 """The sides of the child that can carry an ``ALK_add_<side>`` export in ``_uscl``."""
-MISSING_TOOLS = [
-    tool
-    for tool, found in {
-        "nccopy": shutil.which("nccopy"),
-        "mpirun": shutil.which("mpirun"),
-        "mpifort or gfortran": shutil.which("mpifort") or shutil.which("gfortran"),
-        "GNU timeout or gtimeout": find_timeout_exe(),
-    }.items()
-    if not found
-]
-
-pytestmark = pytest.mark.skipif(
-    bool(MISSING_TOOLS), reason=f"ROMS toolchain missing: {', '.join(MISSING_TOOLS)}"
+pytestmark = pytest.mark.requires_tools(
+    "nccopy", "mpirun", "mpifort or gfortran", "GNU timeout or gtimeout"
 )
 
 

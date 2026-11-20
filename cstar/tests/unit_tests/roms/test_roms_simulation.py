@@ -1796,6 +1796,47 @@ class TestROMSSimulationInitialization:
         with pytest.raises(ValueError, match="does not match that of ROMSSimulation"):
             sim._check_inputdataset_dates(sim.river_forcing)
 
+    @pytest.mark.parametrize(
+        "spans",
+        [
+            pytest.param(
+                [("2025-01-01", "2025-12-31"), ("2025-06-01", "2025-12-31")],
+                id="second file starts late",
+            ),
+            pytest.param(
+                [("2025-02-01", "2025-06-01"), ("2025-06-01", "2025-12-31")],
+                id="sequence starts after the simulation",
+            ),
+        ],
+    )
+    def test_check_inputdataset_dates_raises_for_a_list_with_an_unmatched_start(
+        self, stub_romssimulation, roms_river_forcing, spans
+    ):
+        """Test that a list of datasets raises when one starts neither at the
+        simulation's start nor where another dataset in the list ends.
+
+        The simulation runs 2025-01-01 to 2025-12-31.
+        """
+        sim = stub_romssimulation
+        datasets = [roms_river_forcing(start_date=sd, end_date=ed) for sd, ed in spans]
+
+        with pytest.raises(ValueError, match="Start date of ROMSRiverForcing"):
+            sim._check_inputdataset_dates(datasets)
+
+    def test_check_inputdataset_dates_accepts_a_contiguous_list(
+        self, stub_romssimulation, roms_river_forcing
+    ):
+        """Test that a list of datasets covering the simulation end to end, each
+        starting where the previous one ends, passes the check.
+        """
+        sim = stub_romssimulation
+        datasets = [
+            roms_river_forcing(start_date="2025-01-01", end_date="2025-06-01"),
+            roms_river_forcing(start_date="2025-06-01", end_date="2025-12-31"),
+        ]
+
+        sim._check_inputdataset_dates(datasets)
+
     @mock.patch(
         "cstar.roms.simulation.ROMSInputDataset.source_partitioning",
         new_callable=mock.PropertyMock,

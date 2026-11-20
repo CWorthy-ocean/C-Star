@@ -421,15 +421,17 @@ def test_validate_run_time_sections_reports_misspelled_keys():
     errs = validate_run_time_sections(
         {
             "Marbl_Bgc": {},
-            "cppdefs": {"MARBL": True},  # compile-time: not checked here
+            "cppdefs": {"MARBL": True},
             "vertical_mixing": {"akv": 1.0e-4, "akt_default": 1.0e-6, "AKV": 2},
         },
         roms_ref="0.9.0",
     )
-    assert len(errs) == 2
+    assert len(errs) == 3
     assert "Marbl_Bgc (did you mean marbl_bgc?)" in errs[0]
     assert errs[1].startswith("vertical_mixing: ")
     assert "AKV (did you mean akv?)" in errs[1]
+    # cppdefs has no settings model: its case variants are unknown keys.
+    assert "cppdefs.MARBL (did you mean cppdefs.marbl?)" in errs[2]
 
 
 def test_prune_rejects_a_misspelled_switch_in_a_section_it_would_drop():
@@ -860,11 +862,11 @@ def test_validate_run_time_sections_accepts_good_partial():
     assert validate_run_time_sections({"gamma2": 1.0, "ubind": 0.1}) == []
 
 
-def test_validate_run_time_sections_skips_non_runtime_keys():
-    # cppdefs is a compile-time section, not part of RunTimeSettings -> skipped
-    assert (
-        validate_run_time_sections({"cppdefs": {"obc_west": True, "whatever": 9}}) == []
-    )
+def test_validate_run_time_sections_checks_cppdefs_keys():
+    # cppdefs has no settings model: its keys are checked against CPPDEFS_KEYS.
+    assert validate_run_time_sections({"cppdefs": {"obc_west": True}}) == []
+    errs = validate_run_time_sections({"cppdefs": {"obc_west": True, "whatever": 9}})
+    assert errs == ["Forge would ignore these unknown settings keys: cppdefs.whatever."]
 
 
 def test_validate_run_time_sections_flags_bad_value():

@@ -1578,3 +1578,80 @@ def test_worker_main_returns_nonzero_on_failed_status(
 
     assert return_code == 1
     assert mock_execute.call_count == 1
+
+
+class _StubRunner(BlueprintRunner[UclaRomsBlueprint]):
+    """A BlueprintRunner run as a service, whose `run` raises on demand.
+
+    It never loads its blueprint: `_on_shutdown` is a no-op, so no step record
+    is written. Constructing it installs SIGINT/SIGTERM handlers; the
+    `stub_runner` fixture puts the prior handlers back after each test.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            RunnerRequest("unused-blueprint.yaml", UclaRomsBlueprint),
+            ServiceConfiguration(
+                as_service=True,
+                loop_delay=0,
+                health_check_frequency=None,
+                log_level=logging.DEBUG,
+                health_check_log_threshold=10,
+                name="stub_runner",
+            ),
+        )
+        self.run_error: Exception | None = None
+
+    async def run(self) -> RunnerResult[UclaRomsBlueprint]:
+        if self.run_error is not None:
+            raise self.run_error
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    def _on_shutdown(self) -> None:
+        """Skip the step record and disposition."""
+
+
+@pytest.fixture
+def stub_runner() -> Generator[_StubRunner, None, None]:
+    """Yield a `_StubRunner`, restoring the signal handlers it replaced."""
+    runner = _StubRunner()
+    try:
+        yield runner
+    finally:
+        runner._restore_signal_handlers()
+
+
+def test_runner_cancel_records_cancelled(stub_runner: _StubRunner) -> None:
+    """Verify a cancelled runner records CANCELLED, not FAILED, and stops."""
+    stub_runner._cancel()
+
+    assert stub_runner.state.status == ExecutionStatus.CANCELLED
+    assert stub_runner._stop_event.is_set()
+
+
+def test_runner_with_errors_can_shut_down_while_running(
+    stub_runner: _StubRunner,
+) -> None:
+    """Verify a runner that recorded an error stops even though its status is not
+    terminal, and one without errors keeps running.
+    """
+    stub_runner.add_state(ExecutionStatus.RUNNING)
+    assert stub_runner.can_shutdown is False
+
+    stub_runner.add_state(ExecutionStatus.RUNNING, ["x"])
+    assert stub_runner.can_shutdown is True
+
+
+async def test_runner_on_iteration_records_a_raising_run_as_failed(
+    stub_runner: _StubRunner,
+) -> None:
+    """Verify an exception from `run` is recorded as FAILED with its message
+    instead of escaping the iteration.
+    """
+    stub_runner.run_error = RuntimeError("model blew up")
+
+    await stub_runner._on_iteration()
+
+    assert stub_runner.state.status == ExecutionStatus.FAILED
+    assert "model blew up" in stub_runner.result.errors

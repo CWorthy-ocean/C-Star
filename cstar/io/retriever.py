@@ -3,7 +3,7 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, Final, override
 
 import requests
 
@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from cstar.io.source_data import SourceData
 
 _registry: dict["SourceClassification", type["Retriever"]] = {}
+
+CLONE_ATTEMPTS: Final[int] = 3
+"""How many times a repository clone is attempted before staging fails."""
+CLONE_RETRY_DELAY: Final[float] = 30.0
+"""Seconds to wait after a failed clone attempt before the next one."""
 
 
 def register_retriever(
@@ -292,29 +297,32 @@ class RemoteRepositoryRetriever(Retriever):
         if any(target_dir.iterdir()):
             raise ValueError(f"cannot clone repository to {target_dir} - dir not empty")
 
-        delays = [30, 30]  # allow 3 clone attempts, retry after each 30s delay.
-        cloned = False
-
-        while delays and not cloned:
-            delay = delays.pop(0)
-
+        error: Exception | None = None
+        for attempt in range(1, CLONE_ATTEMPTS + 1):
+            if attempt > 1:
+                time.sleep(CLONE_RETRY_DELAY)
             try:
                 _clone(
                     source_repo=self.source.location,
                     local_path=target_dir,
                 )
-                cloned = True
-            except Exception:
-                msg = f"An error occurred while cloning {self.source.location}. Retrying in {delay} seconds."
-                self.log.exception(msg)
-                time.sleep(delay)
+                return target_dir
+            except Exception as ex:
+                error = ex
+                retry = (
+                    f" Retrying in {CLONE_RETRY_DELAY} seconds."
+                    if attempt < CLONE_ATTEMPTS
+                    else ""
+                )
+                self.log.exception(
+                    f"An error occurred while cloning {self.source.location} "
+                    f"(attempt {attempt} of {CLONE_ATTEMPTS}).{retry}"
+                )
 
-        if not cloned:
-            raise CstarError(
-                f"All clone attempts have failed for: {self.source.location}"
-            )
-
-        return target_dir
+        raise CstarError(
+            f"All {CLONE_ATTEMPTS} clone attempts have failed for: "
+            f"{self.source.location}"
+        ) from error
 
     def checkout(self, target_dir: Path) -> Path:
         """Perform a checkout on the repository cloned to `target_dir`.

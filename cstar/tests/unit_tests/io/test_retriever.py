@@ -1,9 +1,11 @@
+import hashlib
 import typing as t
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from cstar.base.exceptions import CstarError
 from cstar.base.utils import _get_sha256_hash
 from cstar.io import retriever
 from cstar.io.constants import SourceClassification
@@ -166,6 +168,30 @@ class TestRemoteBinaryFileRetriever:
             with pytest.raises(ValueError, match="Hash mismatch"):
                 r._save(tmp_path)
 
+        assert not (tmp_path / source.basename).exists()
+
+    def test_save_accepts_an_uppercase_hash(
+        self,
+        tmp_path: Path,
+        mocksourcedata_remote_file: SourceDataFactory,
+    ) -> None:
+        """Tests that a checksum `identifier` given in uppercase still matches the
+        downloaded file's (lowercase) digest.
+        """
+        fake_chunk = b"abc"
+        source = mocksourcedata_remote_file()
+        source._identifier = hashlib.sha256(fake_chunk).hexdigest().upper()
+
+        fake_response = mock.MagicMock()
+        fake_response.__enter__.return_value = fake_response
+        fake_response.iter_content.return_value = [fake_chunk]
+        fake_response.raise_for_status = mock.Mock()
+
+        with mock.patch("cstar.io.retriever.requests.get", return_value=fake_response):
+            path = retriever.RemoteBinaryFileRetriever(source=source)._save(tmp_path)
+
+        assert path.read_bytes() == fake_chunk
+
 
 class TestLocalFileRetriever:
     def test_read_and_save(
@@ -225,3 +251,45 @@ class TestRemoteRepositoryRetriever:
         r = retriever.RemoteRepositoryRetriever(source)
         with pytest.raises(ValueError):
             r._save(tmp_path)
+
+    def test_save_retries_a_failed_clone(
+        self,
+        mocksourcedata_remote_repo: SourceDataFactory,
+        working_dir: Path,
+    ) -> None:
+        """Test that a clone that fails once is retried after a delay and succeeds."""
+        source = mocksourcedata_remote_repo()
+        with (
+            mock.patch(
+                "cstar.io.retriever._clone",
+                side_effect=[RuntimeError("network blip"), None],
+            ) as mock_clone,
+            mock.patch("cstar.io.retriever.time.sleep") as mock_sleep,
+        ):
+            result = retriever.RemoteRepositoryRetriever(source)._save(working_dir)
+
+        assert result == working_dir
+        assert mock_clone.call_count == 2
+        mock_sleep.assert_called_once_with(retriever.CLONE_RETRY_DELAY)
+
+    def test_save_raises_after_three_failed_clones(
+        self,
+        mocksourcedata_remote_repo: SourceDataFactory,
+        working_dir: Path,
+    ) -> None:
+        """Test that a clone is attempted three times, with a delay between attempts
+        but none after the last, before staging fails.
+        """
+        source = mocksourcedata_remote_repo()
+        with (
+            mock.patch(
+                "cstar.io.retriever._clone", side_effect=RuntimeError("unreachable")
+            ) as mock_clone,
+            mock.patch("cstar.io.retriever.time.sleep") as mock_sleep,
+            pytest.raises(CstarError, match="clone attempts have failed") as exc_info,
+        ):
+            retriever.RemoteRepositoryRetriever(source)._save(working_dir)
+
+        assert mock_clone.call_count == 3
+        assert mock_sleep.call_count == 2
+        assert isinstance(exc_info.value.__cause__, RuntimeError)

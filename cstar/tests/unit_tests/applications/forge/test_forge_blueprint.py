@@ -8676,6 +8676,8 @@ class TestForgeBlueprintWizard:
         import re
 
         wiz = self._wizard()
+        wiz._boundaries_touched = True  # the link waits for real boundaries
+        wiz._rebuild()
         html = wiz.download_link.value
         assert 'download="' in html and "data:text/yaml;base64," in html
         b64 = re.search(r"base64,([A-Za-z0-9+/=]+)", html).group(1)

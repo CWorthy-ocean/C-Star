@@ -1,0 +1,1 @@
+In the Forge wizard, a BGC source's **Constant values** entry that is not ``key=number`` and an options box holding invalid JSON now mark the blueprint invalid and name the entry to fix. The wizard used to drop them and save the rest, removing that tracer or option from the blueprint.

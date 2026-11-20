@@ -71,16 +71,14 @@ def make_env(root: Path, shim: Path, project: Path | None = None) -> dict[str, s
     shim : Path
         The shim written by ``make_shim``.
     project : Path | None
-        The project home of the set; none by default, so a ``$PROJECT`` of the
-        developer's own cannot reach the test.
+        The project home of the set; none by default (``make_cli_env`` drops a
+        ``$PROJECT`` of the developer's own).
 
     Returns
     -------
     dict[str, str]
     """
     env = make_cli_env(root, shim)
-    env.pop("PROJECT", None)
-    env.pop(ENV_CSTAR_PROJECT_HOME, None)
     if project is not None:
         env[ENV_CSTAR_PROJECT_HOME] = str(project)
     return env

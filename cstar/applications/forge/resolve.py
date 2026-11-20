@@ -73,11 +73,13 @@ from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
     cdr_nz_chd_from_file,
+    cdr_releases_time_interpolation,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_cdr_releases,
     check_constant_fe,
     check_diagnostics_pio,
     check_forcing_coverage,
@@ -87,6 +89,7 @@ from cstar.applications.forge.namelist_model import (
     check_output_streams_divide_rst,
     check_restoring_flux_output,
     check_rst_period_divisible,
+    check_settings_supported,
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
@@ -1249,6 +1252,26 @@ def build_forge_blueprint(
         tides_settings["bry_tides"] = False
         tides_settings["pot_tides"] = False
 
+    # ----- CDR releases against the run --------------------------------------
+    # ucla-roms reads only cdr_frc.time_interpolation, never the releases' own
+    # flag, so it follows the releases unless the ForcingSpec's cdr_frc block or
+    # run_time_overrides set it; check_cdr_releases refuses a set value that
+    # contradicts them. Decided here, where a set value is still visible:
+    # configure_build overlays the stored settings onto whatever generation sets.
+    if not any(
+        "time_interpolation" in (layer.get("cdr_frc") or {})
+        for layer in (inputs, current_run_time_overrides)
+    ):
+        releases_interp = cdr_releases_time_interpolation(cdr_spec.cdr_forcing)
+        if releases_interp is not None:
+            settings["cdr_frc"]["time_interpolation"] = releases_interp
+    check_cdr_releases(
+        cdr_spec.cdr_forcing,
+        start_date=start_date,
+        end_date=end_date,
+        time_interpolation=settings["cdr_frc"].get("time_interpolation"),
+    )
+
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
     # ROMS opens no CDR file). Any active CDR mode (generated -- "simple"/"yaml",
@@ -1324,6 +1347,7 @@ def build_forge_blueprint(
     # shared-OutputSpec case. A section whose enable switch is on raises
     # instead -- the pinned release cannot honor it.
     prune_version_gated_sections(settings, settings_cls)
+    check_settings_supported(settings, settings_cls)
 
     # ----- CDR tracer / gas-exchange output consistency (ucla-roms >= 0.7.0) --
     # Unlike do_cdr_output above, these two dedicated output streams (PR #351)

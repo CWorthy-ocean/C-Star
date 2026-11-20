@@ -51,6 +51,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_cdr_releases,
     check_constant_fe,
     check_diagnostics_pio,
     check_forcing_coverage,
@@ -61,6 +62,7 @@ from cstar.applications.forge.namelist_model import (
     check_restoring_flux_output,
     check_river_tracer_counts,
     check_rst_period_divisible,
+    check_settings_supported,
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
@@ -156,6 +158,14 @@ def _deep_merge_settings_dict(target: dict[str, Any], update: dict[str, Any]) ->
             _deep_merge_settings_dict(target[k], v)
         else:
             target[k] = copy.deepcopy(v)
+
+
+def _merged_settings(*layers: dict[str, Any]) -> dict[str, Any]:
+    """A deep merge of ``layers`` (later wins) into a new dict, none mutated."""
+    merged: dict[str, Any] = {}
+    for layer in layers:
+        _deep_merge_settings_dict(merged, layer)
+    return merged
 
 
 @contextmanager
@@ -2464,6 +2474,19 @@ class ForgeExecutor(BaseModel):
                 settings_cls.__name__,
             )
 
+        # Unknown keys, pipe forcing and empty tiles, on the settings the merges
+        # below produce: before them, as the run-time merge refuses an unknown
+        # section without naming the nearest valid one.
+        check_settings_supported(
+            _merged_settings(
+                self._settings_run_time,
+                run_time_settings,
+                self._settings_compile_time,
+                compile_time_settings,
+            ),
+            settings_cls,
+        )
+
         # Update settings with user-provided overrides (deep merge to preserve existing settings)
         self._update_settings_compile_time(compile_time_settings)
         self._update_settings_run_time(run_time_settings)
@@ -2671,6 +2694,20 @@ class ForgeExecutor(BaseModel):
                 if effective_roms_ref is not None
                 else None,
             )
+
+        # CDR releases net, mirroring the resolver's: a stored or hand-edited
+        # blueprint, or a wizard override applied after the resolver, can move the
+        # run window off the CDR window or the releases, or set
+        # cdr_frc.time_interpolation against the releases. Shared via
+        # check_cdr_releases.
+        check_cdr_releases(
+            self.cdr_forcing,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            time_interpolation=(self._settings_run_time.get("cdr_frc") or {}).get(
+                "time_interpolation"
+            ),
+        )
 
         # Restoring-flux output net, mirroring the resolver's, on the cppdefs
         # generation left (it sets sal_restore for an SSS restoring file).
