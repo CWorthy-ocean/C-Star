@@ -1211,9 +1211,14 @@ class ROMSSimulation(Simulation):
             check_output_streams_divide_rst(nml, cppdefs)
         if averages_end_on_marbl_step_applies_to_schema(type(nml)):
             check_averages_end_on_marbl_step(nml, cppdefs)
-        return self._check_output_cadence(nml)
+        return self._check_output_cadence(nml, cppdefs, self._staged_cppdefs())
 
-    def _check_output_cadence(self, nml: RomsNamelistBase) -> list[str]:
+    def _check_output_cadence(
+        self,
+        nml: RomsNamelistBase,
+        cppdefs: dict[str, bool],
+        staged: dict[str, bool] | None,
+    ) -> list[str]:
         """Check the output periods and the MARBL step against `dt`, and that
         something writes during the run (Rules H, I and K of `cstar.roms.precheck`).
 
@@ -1222,6 +1227,17 @@ class ROMSSimulation(Simulation):
         step may want no output, so it is a warning then. With `cppdefs.opt` not
         staged yet, every cppdef-gated stream counts as writing. An override
         point: a model whose output writer differs replaces these rules.
+
+        Parameters
+        ----------
+        nml : RomsNamelistBase
+            The namelist to check.
+        cppdefs : dict[str, bool]
+            The build's cppdefs (`_active_cppdefs_for_precheck`), empty if not
+            staged, for the rules that refuse.
+        staged : dict[str, bool] or None
+            The same, `None` if not staged (`_staged_cppdefs`), for the rule that
+            must not miss a stream.
 
         Returns
         -------
@@ -1237,14 +1253,11 @@ class ROMSSimulation(Simulation):
             `dt`, the MARBL step exceeds 10,800 s, or nothing writes during a run
             whose `ntimes` comes from its dates.
         """
-        cppdefs = self._active_cppdefs_for_precheck()
         check_output_periods_divisible_by_dt(nml, cppdefs)
         check_marbl_step_ceiling(nml, cppdefs)
         messages = output_period_drift_warnings(nml, cppdefs)
         try:
-            check_output_written_in_window(
-                nml, self._staged_cppdefs(), start_date=self.start_date
-            )
+            check_output_written_in_window(nml, staged, start_date=self.start_date)
         except NamelistConsistencyError as exc:
             if "ntimes" not in self.namelist_overrides.get("time_stepping", {}):
                 raise

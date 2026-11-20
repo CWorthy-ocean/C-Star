@@ -716,7 +716,12 @@ class ROMSGpuSimulation(ROMSSimulation):
         else:
             self.log.info(message)
 
-    def _check_output_cadence(self, nml: RomsNamelistBase) -> list[str]:
+    def _check_output_cadence(
+        self,
+        nml: RomsNamelistBase,
+        cppdefs: dict[str, bool],
+        staged: dict[str, bool] | None,
+    ) -> list[str]:
         """Check nothing: Rules H, I and K of `cstar.roms.precheck` mirror
         ucla-roms' output writer and MARBL driver, and roms-marbl-gpu has its own,
         whose period, start-up and end-of-run rules C-Star does not mirror.

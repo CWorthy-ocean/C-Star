@@ -191,11 +191,12 @@ class NamelistConsistencyError(ValueError):
     ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"``,
     ``"file_name_lengths"``, ``"forcing_file_count"``, ``"gpu_features"``,
     ``"gpu_array_sizes"``, ``"output_periods_divisible_by_dt"``,
-    ``"marbl_step_ceiling"`` or ``"output_written_in_window"``). ``"file_name_lengths"`` reports every offending key in
-    one error, so its ``section`` may join several group names with ``", "`` and
-    its ``keys`` may span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"``
-    also report every offender in one error, but their ``section`` and ``keys``
-    name the first of them only.
+    ``"marbl_step_ceiling"`` or ``"output_written_in_window"``).
+    ``"file_name_lengths"`` reports every offending key in one error, so its
+    ``section`` may join several group names with ``", "`` and its ``keys`` may
+    span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"`` also report
+    every offender in one error, but their ``section`` and ``keys`` name the
+    first of them only.
     """
 
     def __init__(
@@ -839,7 +840,8 @@ def output_period_drift_warnings(
     A stream averaged over calendar months ignores its period and is skipped, as
     is every stream when ``dt`` is missing. ``settings``, ``cppdefs`` and
     ``schema`` are as for :func:`check_output_periods_divisible_by_dt`. Returns
-    the messages for the caller to log, so that a check run twice warns once.
+    the messages for the caller to log, so a caller that runs the rules again
+    (``setup`` before ``build``) can drop them.
     """
     dt, _ = _time_stepping(settings)
     if dt is None:
