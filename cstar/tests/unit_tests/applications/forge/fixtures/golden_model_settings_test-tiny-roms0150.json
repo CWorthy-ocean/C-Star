@@ -238,7 +238,7 @@
     "ppm3": 1e-06
   },
   "pio_settings": {
-    "pio_stride": 1
+    "pio_stride": null
   },
   "pipe_frc": {
     "npip": 1,

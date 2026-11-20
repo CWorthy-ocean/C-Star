@@ -219,7 +219,7 @@
 /
 
 &pio_settings
-    pio_stride = 1
+    pio_stride = ,
 /
 
 &pipe_frc_settings

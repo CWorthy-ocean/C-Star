@@ -225,8 +225,14 @@ class ParamSettingsV0_4_0(ParamSettings):
 class PioSettings(_NmlGroup):
     """Parallel-IO (PIO) library run-time settings (ucla-roms `&PIO_SETTINGS`)."""
 
-    pio_stride: int = Field(default=1, ge=1)
-    """Stride between MPI ranks assigned as PIO I/O tasks (requires PARALLEL_IO)"""
+    pio_stride: int | None = Field(default=1, ge=1)
+    """Stride between MPI ranks assigned as PIO I/O tasks (requires PARALLEL_IO).
+
+    ``None`` is an empty value in the file (``pio_stride = ,``), which ucla-roms
+    reads as its own default of 1. For a PIO build, C-Star replaces it at launch
+    with the ranks on one node, so that each node has one I/O task. A key absent
+    from the file keeps the default of 1.
+    """
 
 
 FsMode = Literal["split", "implicit"]

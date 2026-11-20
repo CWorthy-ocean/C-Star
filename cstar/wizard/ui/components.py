@@ -247,7 +247,7 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 .forge-app .forge-catalog-bar > .widget-html {{ min-width: 0; }}
 
 /* buttons: neutral by default, brand-blue primary, red-outline danger.
-   width:auto lets captions like "Compute from CFL" size themselves instead of
+   width:auto lets captions like "Use CFL value" size themselves instead of
    truncating at ipywidgets' fixed default button width. */
 .forge-app .jupyter-button {{
     border-radius: 4px;

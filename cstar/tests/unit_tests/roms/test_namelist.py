@@ -1,6 +1,7 @@
 """Tests for the versioned ROMS namelist schemas in `cstar.roms.namelist`."""
 
 import logging
+import re
 from pathlib import Path
 from unittest import mock
 
@@ -627,6 +628,28 @@ def test_pio_settings_rejects_non_positive_stride():
     """`pio_stride` must be >= 1."""
     with pytest.raises(ValidationError):
         PioSettings(pio_stride=0)
+
+
+def test_pio_settings_stride_defaults_to_one_and_accepts_none():
+    """An unset stride is allowed; an absent key keeps the default of 1."""
+    assert PioSettings().pio_stride == 1
+    assert PioSettings(pio_stride=None).pio_stride is None
+
+
+def test_pio_settings_empty_stride_round_trips_as_none(tmp_path):
+    """`pio_stride = ,` (Fortran's empty value) reads as None and writes back."""
+    text = V0_15_0_NAMELIST.read_text()
+    assert "pio_stride" in text
+    src = tmp_path / "empty_stride.nml"
+    src.write_text(re.sub(r"pio_stride\s*=\s*\d+", "pio_stride = ,", text))
+
+    nml = RomsNamelistV0_15_0.read(src)
+    assert nml.pio_settings.pio_stride is None
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert re.search(r"pio_stride\s*=\s*,", out.read_text())
+    assert RomsNamelistV0_15_0.read(out).pio_settings.pio_stride is None
 
 
 def test_roms_namelist_v0_7_0_round_trip(tmp_path):

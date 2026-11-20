@@ -5,7 +5,7 @@ description: 'CCS parent (168x336x20, ~16 km): writes the nesting extraction for
 application: forge
 state: notset
 schema_version: 1.1.0
-forge_blueprint_version: 10
+forge_blueprint_version: 11
 run:
   start_date: '2010-01-15T00:00:00'
   end_date: '2010-01-19T00:00:00'

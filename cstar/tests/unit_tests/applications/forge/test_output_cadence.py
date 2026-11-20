@@ -14,7 +14,7 @@ import cstar.catalog
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
-from cstar.roms.precheck import NamelistConsistencyError
+from cstar.roms.precheck import MAX_MARBL_TIMESTEP, NamelistConsistencyError
 
 _MODEL = "roms-marbl-0.15-default"
 _RESOLVE_LOGGER = "cstar.applications.forge.resolve"
@@ -85,17 +85,19 @@ class TestResolverOutputCadence:
         )
         assert cfg.model_settings["time_stepping"]["dt"] == 28800
 
-    def test_wio_toy_cfl_dt_with_marbl_is_refused(self):
-        """The CFL dt of the bundled wio-toy grid is 28,800 s, too long for MARBL."""
+    def test_wio_toy_cfl_dt_with_marbl_stays_under_the_marbl_step_limit(self):
+        """FG-10b: the CFL dt of the bundled wio-toy grid, once 28,800 s, resolves
+        to a step MARBL accepts.
+        """
         domain = _CATALOG.domain_data("wio-toy")
-        with pytest.raises(NamelistConsistencyError, match="MARBL step"):
-            _build(
-                grid_name=domain["grid_name"],
-                grid_kwargs=domain["grid_kwargs"],
-                open_boundaries=domain["open_boundaries"],
-                partitioning=domain["partitioning"],
-                dt=None,
-            )
+        cfg = _build(
+            grid_name=domain["grid_name"],
+            grid_kwargs=domain["grid_kwargs"],
+            open_boundaries=domain["open_boundaries"],
+            partitioning=domain["partitioning"],
+            dt=None,
+        )
+        assert cfg.model_settings["time_stepping"]["dt"] <= MAX_MARBL_TIMESTEP
 
     def test_hourly_cdr_gas_with_dt_960_warns_3840(self, caplog):
         with caplog.at_level(logging.WARNING, logger=_RESOLVE_LOGGER):
@@ -163,9 +165,6 @@ _BUNDLED_DOMAINS = (
     "wio-toy",
 )
 _BUNDLED_OUTPUTS = ("daily-restarts", "monthly-restarts", "standard", "weekly-restarts")
-_MARBL_STEP_TOO_LONG = {"gulf-guinea-toy", "wio-toy"}
-"""Bundled domains whose CFL dt (14,400 s and 28,800 s) is longer than the MARBL step
-ucla-roms accepts."""
 _WRITES_NOTHING_IN_A_DAY = {"monthly-restarts", "weekly-restarts"}
 """Bundled OutputSpecs that write nothing in the bundled domains' one-day window."""
 
@@ -187,7 +186,7 @@ class TestBundledDomainOutputMatrix:
 
     @pytest.mark.parametrize("output", _BUNDLED_OUTPUTS)
     @pytest.mark.parametrize("domain_name", _BUNDLED_DOMAINS)
-    def test_resolves_or_fails_for_the_intended_reason(
+    def test_resolves_and_warns_only_when_nothing_writes(
         self, domain_name, output, caplog
     ):
         pytest.importorskip("roms_tools")
@@ -203,11 +202,6 @@ class TestBundledDomainOutputMatrix:
             dt=None,
             output_settings=_CATALOG.output_data(output),
         )
-        if domain_name in _MARBL_STEP_TOO_LONG:
-            with pytest.raises(NamelistConsistencyError) as exc_info:
-                _build(**kw)
-            assert exc_info.value.rule == "marbl_step_ceiling"
-            return
         with caplog.at_level(logging.WARNING, logger=_RESOLVE_LOGGER):
             _build(**kw)
         warned = any(

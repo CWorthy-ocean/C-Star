@@ -123,7 +123,7 @@ from cstar.system.manager import (
     outside_scheduler_job,
     warn_once,
 )
-from cstar.system.scheduler import SUBMITTABLE_FAMILIES
+from cstar.system.scheduler import SUBMITTABLE_FAMILIES, ranks_per_node
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
@@ -942,6 +942,51 @@ class ROMSSimulation(Simulation):
             repo_path=codebase_copy.path if codebase_copy is not None else None,
         )
 
+    def _fill_pio_stride(self, nml: "RomsNamelistBase") -> None:
+        """Replace an unset `pio_settings.pio_stride` with the ranks per node.
+
+        Applies only to a PIO build whose namelist has the group, whose stride
+        is None and whose rank count is known. The stride is the most ranks
+        the launch places on one node, so each node gets one ParallelIO I/O
+        task. If the scheduler's placement cannot be read, the stride is 1
+        (every rank an I/O task) with a warning. On a cluster's login node,
+        outside any job (a pre-run), the stride stays empty: the job that
+        launches the model lays out its ranks later and writes the namelist
+        again at launch.
+
+        None is allowed in the namelist model because the stride cannot be
+        known when the blueprint is written; it is checked only here, and the
+        namelist written to the run directory records the value used.
+        """
+        pio = getattr(nml, "pio_settings", None)
+        n_procs_tot = self.discretization.n_procs_tot
+        if not self.use_pio or pio is None or pio.pio_stride is not None:
+            return
+        if n_procs_tot is None:
+            return
+        if outside_scheduler_job(get_sysmgr()) is not None:
+            self.log.info(
+                "pio_stride stays empty outside a scheduler job; it is set to the "
+                "ranks per node when the run launches in one"
+            )
+            return
+        stride = ranks_per_node(os.environ, n_procs_tot)
+        if stride is None:
+            warnings.warn(
+                "C-Star could not read how this job places ranks on nodes, so "
+                "pio_stride is 1 (every rank an I/O task). To choose it, set "
+                "namelist_overrides: {pio_settings: {pio_stride: <ranks per node>}}.",
+                UserWarning,
+                stacklevel=2,
+            )
+            pio.pio_stride = 1
+            return
+        pio.pio_stride = stride
+        self.log.info(
+            f"pio_stride = {stride}: one ParallelIO I/O task per node "
+            f"({stride} ranks on the fullest node)"
+        )
+
     def _layer_namelist_overrides(
         self,
         nml: "RomsNamelistBase",
@@ -1022,7 +1067,8 @@ class ROMSSimulation(Simulation):
            of time steps (`ntimes`) is derived from the run length and the
            *effective* `dt` (i.e. after any override), unless the user has
            explicitly overridden `time_stepping.ntimes`, in which case their
-           value stands.
+           value stands. A PIO build's unset `pio_stride` becomes the most
+           ranks the launch places on one node (one I/O task per node).
 
         Returns
         -------
@@ -1135,6 +1181,8 @@ class ROMSSimulation(Simulation):
                     stacklevel=2,
                 )
             setattr(nml.param_settings, key, n_procs)
+
+        self._fill_pio_stride(nml)
 
         dt = nml.time_stepping.dt
         if dt <= 0:

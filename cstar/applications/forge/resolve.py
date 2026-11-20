@@ -1233,24 +1233,12 @@ def build_forge_blueprint(
     if current_run_time_overrides:
         _deep_merge(settings, current_run_time_overrides)
 
-    # A child grid (has a parent) gets its boundaries from the parent's nesting.nc
-    # extraction: no boundary tides and no sponge ub_tune. Force both off after the
-    # override merge so an explicit bry_tides=True / ub_tune=True override can't win.
-    if grid_kwargs_parent is not None:
-        settings.setdefault("tides", {})["bry_tides"] = False
-        settings.setdefault("sponge_tune", {})["ub_tune"] = False
-
-    # No tidal forcing item: force the run-time tide switches off too. ROMS enables
-    # tides via bry_tides/pot_tides in TIDAL_FRC_SETTINGS (the TIDES cppdef only
-    # stamps a netCDF attribute), so leaving the ModelSpec's defaults on would send
-    # ROMS looking for tidal input data that was never generated. Applied after the
-    # override merge so an explicit bry_tides=True override can't reintroduce the
-    # crash -- except with ana_tides, which computes tides analytically and needs
-    # no input file.
-    if not tidal_items and not settings.get("tides", {}).get("ana_tides", False):
-        tides_settings = settings.setdefault("tides", {})
-        tides_settings["bry_tides"] = False
-        tides_settings["pot_tides"] = False
+    # After the override merge, so an explicit override can't win.
+    force_switches_without_input_off(
+        settings,
+        is_child=grid_kwargs_parent is not None,
+        has_tidal_forcing=bool(tidal_items),
+    )
 
     # ----- CDR releases against the run --------------------------------------
     # ucla-roms reads only cdr_frc.time_interpolation, never the releases' own
@@ -1998,6 +1986,32 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> 
     if grid is not None:
         return compute_v_sponge_from_grid(grid.size_x, grid.nx)
     return compute_v_sponge_from_grid(grid_kwargs["size_x"], grid_kwargs["nx"])
+
+
+def force_switches_without_input_off(
+    settings: dict[str, Any], *, is_child: bool, has_tidal_forcing: bool
+) -> None:
+    """Turn off, in place, the run-time switches that would make ROMS read input
+    this blueprint never generates.
+
+    Applied last, over every override, by the resolver and by the wizard's
+    override layer, so no explicit value can switch one back on.
+
+    - A child grid (one with a parent) gets its boundaries from the parent's
+      ``nesting.nc`` extraction: no boundary tides and no sponge ``ub_tune``.
+    - With no tidal forcing item, ``bry_tides``/``pot_tides`` go off too. ROMS
+      enables tides through them (the ``TIDES`` cppdef only stamps a netCDF
+      attribute), so the ModelSpec's defaults would send ROMS looking for tidal
+      input that was never generated -- except with ``ana_tides``, which
+      computes tides analytically and needs no input file.
+    """
+    if is_child:
+        settings.setdefault("tides", {})["bry_tides"] = False
+        settings.setdefault("sponge_tune", {})["ub_tune"] = False
+    if not has_tidal_forcing and not settings.get("tides", {}).get("ana_tides", False):
+        tides_settings = settings.setdefault("tides", {})
+        tides_settings["bry_tides"] = False
+        tides_settings["pot_tides"] = False
 
 
 def cfl_dt(grid_kwargs: dict[str, Any], loaded_grid: Any = None) -> float:

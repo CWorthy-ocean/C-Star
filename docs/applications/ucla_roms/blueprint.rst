@@ -99,6 +99,19 @@ writes whole files, so nothing is partitioned. Input files must then be in a
 netCDF format ParallelIO can read (classic or CDF-5, not NETCDF4); Forge
 writes them that way, and C-Star refuses a file that is not.
 
+ParallelIO does its reading and writing on every ``pio_stride``-th rank. When
+the namelist leaves ``pio_stride`` empty (``pio_stride = ,``), as namelists
+from the ``roms-marbl-0.15-default`` model do, C-Star sets it when the run
+starts to the number of ranks on one node, so each node has one I/O rank. A
+number in the namelist is kept. To have C-Star choose for an existing
+blueprint, add this to it:
+
+.. code-block:: yaml
+
+   namelist_overrides:
+     pio_settings:
+       pio_stride: null
+
 Example
 -------
 

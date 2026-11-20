@@ -1,6 +1,8 @@
 import functools
+import math
 import shutil
 from abc import ABC, abstractmethod
+from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar, Final
 
@@ -53,6 +55,61 @@ def in_scheduler_job(environ: "Mapping[str, str]") -> bool:
         (`PBS_JOBID`) is set to a non-empty value.
     """
     return bool(slurm_job_id(environ) or environ.get("PBS_JOBID"))
+
+
+def _slurm_tasks_per_node(value: str) -> list[int]:
+    """Expand a `SLURM_TASKS_PER_NODE` value into one task count per node.
+
+    ``128(x3),72`` means three nodes with 128 tasks, then one with 72.
+
+    Raises
+    ------
+    ValueError
+        If *value* is not in SLURM's compressed format.
+    """
+    counts: list[int] = []
+    for item in value.split(","):
+        tasks, _, repeat = item.strip().partition("(x")
+        counts.extend([int(tasks)] * (int(repeat.removesuffix(")")) if repeat else 1))
+    return counts
+
+
+def ranks_per_node(environ: "Mapping[str, str]", n_ranks: int) -> int | None:
+    """Find the most MPI ranks a launch of *n_ranks* places on one node.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+    n_ranks : int
+        The number of MPI ranks the launch starts.
+
+    Returns
+    -------
+    int or None
+        *n_ranks* outside a scheduler job (every rank runs on this machine).
+        Inside a job, the largest per-node task count the scheduler reports
+        (`SLURM_TASKS_PER_NODE`, or the slots per host in `PBS_NODEFILE`) when
+        the counts add up to *n_ranks*; otherwise (an allocation made without
+        a task count) *n_ranks* spread evenly over the allocated nodes. None
+        when the placement cannot be read.
+    """
+    if not in_scheduler_job(environ):
+        return n_ranks
+    try:
+        if slurm_job_id(environ):
+            counts = _slurm_tasks_per_node(environ["SLURM_TASKS_PER_NODE"])
+        else:
+            with open(environ["PBS_NODEFILE"]) as nodefile:
+                hosts = [line.strip() for line in nodefile if line.strip()]
+            counts = list(Counter(hosts).values())
+    except (KeyError, ValueError, OSError):
+        return None
+    if not counts:
+        return None
+    if sum(counts) == n_ranks:
+        return max(counts)
+    return math.ceil(n_ranks / len(counts))
 
 
 SCHEDULER_SLURM: Final = "SLURM"

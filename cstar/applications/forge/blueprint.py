@@ -438,7 +438,12 @@ _HASH_EXCLUDE = frozenset({"forge_blueprint_version", "composition"})
 # ``provenance.generated_by``, which v9 builds reject as an unknown key, so the bump
 # makes an older install say "upgrade cstar-ocean" instead; and ``composition``
 # spec names are plain strings (``name: null`` becomes ``""``, applied on every load).
-FORGE_BLUEPRINT_VERSION = 10
+# v11 (2026-11): ``model_settings.pio_settings.pio_stride`` may be null: one PIO I/O
+# task per node, with C-Star setting the stride at launch. Nothing to migrate. This is
+# an explicit exception to the "additive fields don't bump" rule above: a v10 build
+# rejects null, so the bump makes it say "upgrade cstar-ocean" instead of failing
+# validation.
+FORGE_BLUEPRINT_VERSION = 11
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
