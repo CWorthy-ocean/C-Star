@@ -73,11 +73,13 @@ from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
     cdr_nz_chd_from_file,
+    cdr_releases_time_interpolation,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_cdr_releases,
     check_constant_fe,
     check_diagnostics_pio,
     check_marbl_bgc_inputs,
@@ -1247,6 +1249,26 @@ def build_forge_blueprint(
         tides_settings = settings.setdefault("tides", {})
         tides_settings["bry_tides"] = False
         tides_settings["pot_tides"] = False
+
+    # ----- CDR releases against the run --------------------------------------
+    # ucla-roms reads only cdr_frc.time_interpolation, never the releases' own
+    # flag, so it follows the releases unless the ForcingSpec's cdr_frc block or
+    # run_time_overrides set it; check_cdr_releases refuses a set value that
+    # contradicts them. Decided here, where a set value is still visible:
+    # configure_build overlays the stored settings onto whatever generation sets.
+    if not any(
+        "time_interpolation" in (layer.get("cdr_frc") or {})
+        for layer in (inputs, current_run_time_overrides)
+    ):
+        releases_interp = cdr_releases_time_interpolation(cdr_spec.cdr_forcing)
+        if releases_interp is not None:
+            settings["cdr_frc"]["time_interpolation"] = releases_interp
+    check_cdr_releases(
+        cdr_spec.cdr_forcing,
+        start_date=start_date,
+        end_date=end_date,
+        time_interpolation=settings["cdr_frc"].get("time_interpolation"),
+    )
 
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;

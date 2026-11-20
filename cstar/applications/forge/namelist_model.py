@@ -29,6 +29,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
@@ -1101,6 +1102,158 @@ def check_upscaled_cdr_lite_tracer_counts(param: Mapping[str, Any]) -> None:
         "matching the child's CDR-lite tracers (one nt_cdr_oae per "
         "CDR_OAE_ALK<n>/CDR_OAE_DIC<n> pair, one nt_cdr_dor per CDR_DOR_DIC<n>)."
     )
+
+
+_DATETIME_ADAPTER: TypeAdapter[datetime] = TypeAdapter(datetime)
+
+
+def _cdr_time(value: Any, label: str, problems: list[str]) -> datetime | None:
+    """``value`` parsed as roms-tools parses a CDR time (pydantic), as a naive UTC
+    datetime so it compares with the run window's naive dates.
+
+    ``None`` for an unset value; an unparseable one is added to ``problems``.
+    """
+    if value is None:
+        return None
+    try:
+        parsed = _DATETIME_ADAPTER.validate_python(value)
+    except ValidationError:
+        problems.append(f"{label} {value!r} is not a date and time")
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _cdr_releases(cdr_forcing: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    """The release dicts of a roms-tools ``CDRForcing`` kwargs dict."""
+    releases = (cdr_forcing or {}).get("releases")
+    return releases if isinstance(releases, list) else []
+
+
+def cdr_releases_time_interpolation(
+    cdr_forcing: Mapping[str, Any] | None,
+) -> bool | None:
+    """The ``time_interpolation`` every release of a roms-tools ``CDRForcing``
+    kwargs dict shares, a release without the key counting as roms-tools'
+    default ``False``.
+
+    ``None`` when there are no releases or they disagree, which
+    :func:`check_cdr_releases` refuses.
+    """
+    values = {
+        _BOOL_ADAPTER.validate_python(release.get("time_interpolation", False))
+        for release in _cdr_releases(cdr_forcing)
+    }
+    return values.pop() if len(values) == 1 else None
+
+
+def check_cdr_releases(
+    cdr_forcing: Mapping[str, Any] | None,
+    *,
+    start_date: datetime,
+    end_date: datetime,
+    time_interpolation: bool | None = None,
+) -> None:
+    """Reject a CDR forcing whose window, release times or interpolation do not fit
+    the run.
+
+    ``cdr_forcing`` is the roms-tools ``CDRForcing`` kwargs dict of the "simple" and
+    "yaml" CDR modes (``CdrSpec.cdr_forcing``); ``None``, as in the other modes,
+    checks nothing. Refused:
+
+    * a CDR window (``start_time``/``end_time``) that starts after the run starts
+      or ends before it ends: ucla-roms stops at start-up, or mid-run, when the CDR
+      file has no record at or past the model time. An unset bound is not checked:
+      nothing fills one in, and roms-tools refuses a forcing without it.
+    * a release whose ``times`` all fall outside the run: the first at or after the
+      run end, or the last before the run start (a window that moved after the
+      release was written, or a mistyped date). A release without times spans the
+      whole CDR window.
+    * releases that disagree on ``time_interpolation``, which roms-tools refuses.
+    * when ``time_interpolation`` (the namelist's ``cdr_frc.time_interpolation``)
+      is given, releases whose common value differs from it. ucla-roms reads only
+      the namelist flag, so ROMS would run interpolated releases as a step
+      function held one record late, or step releases as ramps, unlike the file
+      roms-tools wrote and accounted.
+
+    The resolver, ``process_forge_blueprint`` and ``configure_build`` call this.
+
+    Raises ``ValueError`` naming every problem and every offending release.
+    """
+    if cdr_forcing is None:
+        return
+    problems: list[str] = []
+    run_start = _cdr_time(start_date, "the run start", problems)
+    run_end = _cdr_time(end_date, "the run end", problems)
+    cdr_start = _cdr_time(
+        cdr_forcing.get("start_time"), "cdr_forcing.start_time", problems
+    )
+    cdr_end = _cdr_time(cdr_forcing.get("end_time"), "cdr_forcing.end_time", problems)
+    if cdr_start is not None and run_start is not None and cdr_start > run_start:
+        problems.append(
+            f"the CDR window starts at {cdr_start} (cdr_forcing.start_time), after "
+            f"the run starts at {run_start}; ROMS stops at start-up"
+        )
+    if cdr_end is not None and run_end is not None and cdr_end < run_end:
+        problems.append(
+            f"the CDR window ends at {cdr_end} (cdr_forcing.end_time), before the "
+            f"run ends at {run_end}; ROMS stops when the run passes it"
+        )
+
+    releases = _cdr_releases(cdr_forcing)
+    for index, release in enumerate(releases):
+        name = release.get("name", f"#{index}")
+        times = [
+            t
+            for value in release.get("times") or []
+            if (t := _cdr_time(value, f"release {name!r}: time", problems)) is not None
+        ]
+        if not times or run_start is None or run_end is None:
+            continue
+        first, last = min(times), max(times)
+        if first >= run_end:
+            problems.append(
+                f"release {name!r}: its times ({first} to {last}) start at or after "
+                f"the run ends at {run_end}"
+            )
+        elif last < run_start:
+            problems.append(
+                f"release {name!r}: its times ({first} to {last}) end before the "
+                f"run starts at {run_start}"
+            )
+
+    common = cdr_releases_time_interpolation(cdr_forcing)
+    if releases and common is None:
+        on = sorted(
+            str(r.get("name", f"#{i}"))
+            for i, r in enumerate(releases)
+            if _BOOL_ADAPTER.validate_python(r.get("time_interpolation", False))
+        )
+        problems.append(
+            "the releases disagree on time_interpolation (true for "
+            f"{', '.join(on)}, false for the rest); roms-tools needs one value for "
+            "all of them"
+        )
+    elif (
+        common is not None
+        and time_interpolation is not None
+        and common != _BOOL_ADAPTER.validate_python(time_interpolation)
+    ):
+        problems.append(
+            f"cdr_frc.time_interpolation is {str(time_interpolation).lower()} but "
+            f"the releases set time_interpolation: {str(common).lower()}; ROMS reads "
+            f"only cdr_frc.time_interpolation, so it would run the releases "
+            f"{'as steps' if common else 'interpolated'}, unlike the CDR file "
+            f"roms-tools wrote. Set cdr_frc.time_interpolation to "
+            f"{str(common).lower()}, or change the releases"
+        )
+
+    if problems:
+        raise ValueError(
+            f"The CDR forcing does not fit the run ({start_date} to {end_date}):\n  - "
+            + "\n  - ".join(problems)
+        )
 
 
 # ucla-roms release from which a river forcing file may leave out the CDR tracer

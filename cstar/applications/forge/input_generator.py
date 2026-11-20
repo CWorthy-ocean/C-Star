@@ -2984,6 +2984,13 @@ class RomsInputGenerator(InputGenerator):
         lacks ``cdr_trcflx`` and a tracer-perturbation file legitimately lacks
         ``cdr_volume``/``cdr_tracer`` -- so only the complete absence of *both*
         families (or a volume file missing its paired ``cdr_tracer``) is an error.
+
+        The file cannot say whether its schedule is meant to be interpolated in
+        time: roms-tools does not write the releases' ``time_interpolation`` into
+        it, so ``cdr_frc.time_interpolation`` stays as the blueprint sets it (off,
+        a step function, unless set). Its release positions and window are not
+        checked against the grid or the run either; ``pre_run`` checks its
+        ``cdr_time`` epoch against the reference date.
         """
         if not isinstance(custom_file, UserProvidedFile):
             custom_file = UserProvidedFile(**custom_file)
@@ -3099,7 +3106,17 @@ class RomsInputGenerator(InputGenerator):
 
         yaml_path = self._yaml_filename(key)
 
-        input_args = self._build_input_args(key, base_kwargs=cdr_kwargs)
+        # With the grid, roms-tools refuses a release outside the domain, on land,
+        # on its edge or below the seafloor, which ucla-roms would otherwise move
+        # to the nearest cell however far away. The run's reference date is the
+        # epoch of cdr_time, as of every other input. Both win over the same keys
+        # in cdr_kwargs: a roms-tools YAML dump carries its own reference date.
+        # cdr_frc.time_interpolation is the resolver's (check_cdr_releases).
+        input_args = self._build_input_args(
+            key,
+            base_kwargs=cdr_kwargs,
+            extra={"grid": self.grid, **self._mrd_extra()},
+        )
 
         with mem_log("CDRForcing()", enabled=self.verbose):
             cdr = rt.CDRForcing(**input_args)

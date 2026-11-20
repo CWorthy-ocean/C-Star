@@ -51,6 +51,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_cdr_releases,
     check_constant_fe,
     check_diagnostics_pio,
     check_marbl_bgc_inputs,
@@ -2658,6 +2659,20 @@ class ForgeExecutor(BaseModel):
                 if effective_roms_ref is not None
                 else None,
             )
+
+        # CDR releases net, mirroring the resolver's: a stored or hand-edited
+        # blueprint, or a wizard override applied after the resolver, can move the
+        # run window off the CDR window or the releases, or set
+        # cdr_frc.time_interpolation against the releases. Shared via
+        # check_cdr_releases.
+        check_cdr_releases(
+            self.cdr_forcing,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            time_interpolation=(self._settings_run_time.get("cdr_frc") or {}).get(
+                "time_interpolation"
+            ),
+        )
 
         # Restoring-flux output net, mirroring the resolver's, on the cppdefs
         # generation left (it sets sal_restore for an SSS restoring file).
