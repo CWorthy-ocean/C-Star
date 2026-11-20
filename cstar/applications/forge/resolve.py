@@ -1692,11 +1692,6 @@ def build_forge_blueprint(
         for section, fields in current_run_time_overrides.items()
         for field in (fields if isinstance(fields, dict) else (None,))
     }
-    if compile_time_overrides:
-        user_set |= {
-            ("cppdefs", field)
-            for field in compile_time_overrides.get("cppdefs", compile_time_overrides)
-        }
     for message in resolver_warnings(
         bp, user_set=user_set, roms_ref=effective_roms_ref
     ):
@@ -1725,9 +1720,9 @@ def resolver_warnings(
     - MARBL without BGC sources on a ucla-roms release that runs it anyway
       (:func:`~cstar.applications.forge.namelist_model.zero_bgc_inputs_warning`).
 
-    ``user_set`` holds the ``(section, field)`` settings the user set over the composed
-    specs (``field`` is ``None`` for a scalar section). ``build_forge_blueprint``
-    passes its overrides and logs each message. The wizard applies its own overrides
+    ``user_set`` holds the ``(section, field)`` run-time settings the user set over the
+    composed specs (``field`` is ``None`` for a scalar section).
+    ``build_forge_blueprint`` passes its ``run_time_overrides`` and logs each message. The wizard applies its own overrides
     after resolving, so it calls this again on the result, with those, and shows the
     messages in its validation banner.
     """
@@ -1742,9 +1737,8 @@ def resolver_warnings(
             f"MARBL holds atmospheric CO2 at {section}.{field} = {value} ppm, the "
             "ModelSpec's default, because the forcing has no MBL_co2 surface item. "
             "Add a bgc surface item with source MBL_co2 for the observed CO2 of the "
-            f"run's dates, or set {section}.{field} to the value you mean (about 393 "
-            "ppm for 2012; 284.7 is pre-industrial). Any value you set, 284.7 "
-            "included, silences this warning."
+            f"run's dates, or set {section}.{field} to the value you mean; any value "
+            "you set, the pre-industrial 284.7 ppm included, silences this warning."
         )
     if message := zero_bgc_inputs_warning(
         cfg.forcing,
