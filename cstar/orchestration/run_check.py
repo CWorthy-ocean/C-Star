@@ -661,8 +661,8 @@ def orphan_task_dirs(run_root: Path, workplan: "LiveWorkplan") -> tuple[Path, ..
 
     A directory is accounted for when a step works in it or in a directory
     nested beneath it, as the sub-steps of a step split by C-Star 0.18 and
-    earlier do. Paths are compared
-    resolved, so a run root reached through a symlink is still recognised.
+    earlier do. Paths are compared resolved, so a run root reached through a
+    symlink is still recognised.
 
     Parameters
     ----------

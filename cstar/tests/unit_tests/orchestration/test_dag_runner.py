@@ -105,6 +105,8 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
     Task,
+    check_environment,
+    configure_environment,
 )
 from cstar.orchestration.serialization import (
     deserialize,
@@ -118,6 +120,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
+    get_run_id,
 )
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 from cstar.system.manager import (
@@ -5002,3 +5005,55 @@ async def test_build_and_run_dag_env(
         await build_and_run_dag(generated_wp_path, run_id)
 
     assert key in str(ex)
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_hosted_dag(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    create_host_workplan: Callable[[str, Path, Path, str], Path],
+) -> None:
+    """Verify that the DAG runner prepares a template-hosted workplan step by step.
+
+    The year-long ucla_roms step stays one step, keeps the blueprint it was
+    given, and works in its own directory under the run.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    create_host_workplan : Callable
+        Fixture that writes a template workplan hosting a blueprint, returning its path
+    """
+    workplan_name: str = "single_step"
+    bp_template_path = bp_templates_dir / "blueprint.yaml"
+    working_dir = tmp_path / "original-output-dir"
+    run_id = "my-run"
+
+    mock_env = {
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
+        ENV_CSTAR_SLURM_QUEUE: "wholenode",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+    }
+
+    with mock.patch.dict(os.environ, mock_env):
+        generated_wp_path = create_host_workplan(
+            workplan_name, bp_template_path, working_dir, run_id
+        )
+        original = deserialize(generated_wp_path, Workplan)
+
+        configure_environment(working_dir, run_id)
+        run_id = get_run_id()
+        check_environment()
+        run_dir = StateDirectoryManager.data_dir(run_id)
+        _, wp_path, _, _ = await prepare_workplan(generated_wp_path, run_dir)
+
+    wp = deserialize(wp_path, LiveWorkplan)
+
+    assert [s.name for s in wp.steps] == [s.name for s in original.steps]
+    for step, before in zip(wp.steps, original.steps, strict=True):
+        assert Path(step.blueprint_path) == Path(before.blueprint_path)
+        assert step.working_dir.is_relative_to(run_dir)
+    assert len({s.working_dir for s in wp.steps}) == len(wp.steps)
