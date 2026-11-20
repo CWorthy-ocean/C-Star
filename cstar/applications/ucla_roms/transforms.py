@@ -35,6 +35,7 @@ from cstar.roms.outputs import (
 from cstar.roms.source_coverage import check_source_coverage
 
 if t.TYPE_CHECKING:
+    from cstar.applications.ucla_roms.models import UclaRomsBlueprint
     from cstar.orchestration.orchestration import LiveWorkplan
 
 log = get_logger(__name__)
