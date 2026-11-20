@@ -256,7 +256,9 @@ class CachedRemoteRepositoryStager(Stager):
 
         try:
             shutil.copytree(cache_path, target_dir, symlinks=True)
-        except (OSError, shutil.Error) as ex:
+        except OSError as ex:  # includes shutil.Error, listing the files not copied
+            # the target was empty or absent before the copy: all of it is partial
+            shutil.rmtree(target_dir, ignore_errors=True)
             msg = f"Unable to copy the repository cache {cache_path} to {target_dir}: {ex}"
             raise CstarError(msg) from ex
 

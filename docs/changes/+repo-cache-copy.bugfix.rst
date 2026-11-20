@@ -1,1 +1,1 @@
-Staging a code repository (such as ucla-roms or MARBL) no longer breaks when the repository cache or the target directory has a space in its path, and a failed copy from the repository cache now stops staging with an error that names the copy, instead of a later git error.
+A failed copy from the repository cache now stops staging with an error that names the copy, and removes the partial copy.

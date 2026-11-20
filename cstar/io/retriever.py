@@ -3,7 +3,7 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, Final, override
 
 import requests
 
@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 
 _registry: dict["SourceClassification", type["Retriever"]] = {}
 
-CLONE_ATTEMPTS = 3
+CLONE_ATTEMPTS: Final[int] = 3
 """How many times a repository clone is attempted before staging fails."""
-CLONE_RETRY_DELAY = 30
+CLONE_RETRY_DELAY: Final[float] = 30.0
 """Seconds to wait after a failed clone attempt before the next one."""
 
 

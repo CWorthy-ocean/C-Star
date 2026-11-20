@@ -451,7 +451,8 @@ def test_cached_stager_refresh_runs_no_git_maintenance(
 
     `git pull` ends by starting `git maintenance run --auto`, which by default
     detaches and writes a commit-graph into the cache while the step copies the
-    cache, outside the cache lock; the copy then fails on a file renamed under it. Here maintenance is made synchronous and eager (through a global git
+    cache, outside the cache lock; the copy then fails on a file renamed under it.
+    Here maintenance is made synchronous and eager (through a global git
     config), so any maintenance the refresh starts leaves a commit-graph behind.
 
     Parameters
@@ -553,7 +554,8 @@ def test_cached_stager_raises_when_the_cache_copy_fails(
     tmp_path: Path, remote_repo_uri: str, cache_home: Path
 ) -> None:
     """Verify a failed copy from the repository cache stops staging, naming the
-    copy, instead of leaving an incomplete repository for a later step to trip on.
+    copy, and removes the partial copy instead of leaving an incomplete repository
+    for a later step to trip on.
 
     Parameters
     ----------
@@ -580,3 +582,4 @@ def test_cached_stager_raises_when_the_cache_copy_fails(
         unreadable.chmod(0o644)
 
     assert "unreadable.txt" in str(exc_info.value)
+    assert not (tmp_path / "second").exists()
