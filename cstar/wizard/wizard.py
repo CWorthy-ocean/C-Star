@@ -101,6 +101,7 @@ from cstar.applications.forge.resolve import (
     force_switches_without_input_off,
     load_model_spec_data,
     read_cdr_forcing_yaml,
+    resolver_warnings,
     with_cdr_lite_tracer_set,
 )
 from cstar.base.digest import hash_netcdf_contents, short_digest
@@ -648,9 +649,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
 # Label overrides for namelist-section widgets built via _build_section /
 # _make_field_widget. Keyed the same way as HELP_TEXT: (section, field_name).
 # Falls back to the raw field name when no override is present.
-LABEL_TEXT: dict[tuple[str, str], str] = {
-    ("bgc", "xco2air_default"): "Static xco2air (if co2_tvarying is False)",
-}
+LABEL_TEXT: dict[tuple[str, str], str] = {}
 
 
 def _namelist_label(section: str, field_name: str) -> str:
@@ -1302,6 +1301,13 @@ _MODEL_CARD = "Model"
 _MODEL_CARD_FIELDS: dict[str, frozenset[str]] = {
     "cdr_lite": frozenset({"cdr_carbonate_sensitivity_time_interpolation"}),
 }
+# Likewise for the Forcing card: MARBL's constant atmospheric xCO2 shows in the
+# Surface forcing pane's "Atmospheric CO2" block (see ``_ForcingEditor``), as the
+# static alternative to an ``MBL_co2`` surface item.
+_FORCING_CARD = "Forcing"
+_FORCING_CARD_FIELDS: dict[str, frozenset[str]] = {
+    "bgc": frozenset({"xco2air_default"}),
+}
 
 # Values the wizard puts over the ModelSpec's while the setting's widget is shown,
 # until the user edits it; a fresh session and a model pick seed them, a loaded
@@ -1804,11 +1810,15 @@ def _split_fields(
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
     handful of compile-time flags it owns -- and ``param`` shows only
     :data:`_PARAM_PANE_FIELDS`. The fields of :data:`_MODEL_CARD_FIELDS` show in the
-    Model card only.
+    Model card only, and those of :data:`_FORCING_CARD_FIELDS` in the Forcing card
+    only.
     """
     model_card = _MODEL_CARD_FIELDS.get(section, frozenset())
+    forcing_card = _FORCING_CARD_FIELDS.get(section, frozenset())
     if category_title == _MODEL_CARD:
         return model_card, frozenset()
+    if category_title == _FORCING_CARD:
+        return forcing_card, frozenset()
     include: frozenset | None = None
     exclude: frozenset = frozenset()
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
@@ -1820,7 +1830,7 @@ def _split_fields(
         include = frozenset(parts)
     elif parts is not None:
         exclude = frozenset(parts)
-    return include, exclude | model_card
+    return include, exclude | model_card | forcing_card
 
 
 def _in_output_card(section: str, field: str | None) -> bool:
@@ -1843,6 +1853,13 @@ def _in_model_card(section: str, field: str | None) -> bool:
     :data:`_MODEL_CARD_FIELDS`).
     """
     return field in _MODEL_CARD_FIELDS.get(section, frozenset())
+
+
+def _in_forcing_card(section: str, field: str | None) -> bool:
+    """Whether the ``(section, field)`` setting is placed in the Forcing card (see
+    :data:`_FORCING_CARD_FIELDS`).
+    """
+    return field in _FORCING_CARD_FIELDS.get(section, frozenset())
 
 
 def _output_placement(
@@ -1920,7 +1937,8 @@ class _SettingsEditor:
     consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`)
     plus the output streams the Output card shows (``output_box``, see
     :data:`_OUTPUT_MAIN_SECTIONS`) and the few settings the Model card shows
-    (``model_box``, see :data:`_MODEL_CARD_FIELDS`).
+    (``model_box``, see :data:`_MODEL_CARD_FIELDS`) and the Forcing card shows
+    (``forcing_box``, see :data:`_FORCING_CARD_FIELDS`).
 
     Each pane groups several namelist sections under a sub-header per section, so the
     grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR)
@@ -2000,6 +2018,15 @@ class _SettingsEditor:
         self.model_box = W.VBox(
             self._build_group(
                 _MODEL_CARD, tuple(_MODEL_CARD_FIELDS), model_settings, headers=False
+            )
+        )
+        # Likewise the Forcing card's: the constant atmospheric xCO2.
+        self.forcing_box = W.VBox(
+            self._build_group(
+                _FORCING_CARD,
+                tuple(_FORCING_CARD_FIELDS),
+                model_settings,
+                headers=False,
             )
         )
         # Before the on_edit observers attach, so locking one is never an edit.
@@ -2467,7 +2494,10 @@ _STICKY_STEPS = (
 # by `None`, mirroring "ic_bgc" (also type-less: physics is IC's own scalar source).
 _SOURCE_OPTS: dict[Any, list[str]] = {
     ("surface", SurfaceType.PHYSICS.value): [e.value for e in PhysicsSurfaceSource],
-    ("surface", SurfaceType.BGC.value): [e.value for e in BgcSurfaceSource],
+    # MBL_co2 is set in the pane's own "Atmospheric CO2" block, not as a row.
+    ("surface", SurfaceType.BGC.value): [
+        e.value for e in BgcSurfaceSource if e is not BgcSurfaceSource.MBL_CO2
+    ],
     ("surface", SurfaceType.RESTORING.value): [e.value for e in RestoringSurfaceSource],
     ("boundary", None): [e.value for e in PhysicsBoundarySource],
     ("boundary_bgc", None): [e.value for e in BgcBoundarySource],
@@ -3116,22 +3146,52 @@ def _row_seed_items(
     """The items a forcing-editor row category is seeded from, read off a
     ForcingSpec's ``initial_conditions`` (*ic*) and ``forcing`` (*forc*) blocks.
     "ic_bgc"/"boundary_bgc" are pseudo-categories fed by those blocks'
-    ``bgc_sources``; every other category is its own ``forcing`` list.
+    ``bgc_sources``; every other category is its own ``forcing`` list. An
+    ``MBL_co2`` surface item is not a row: the "Atmospheric CO2" block takes it.
     """
     if cat == "ic_bgc":
         return ic.get("bgc_sources") or []
     if cat == "boundary_bgc":
         return (forc.get("boundary") or {}).get("bgc_sources") or []
+    if cat == "surface":
+        return [it for it in forc.get("surface") or [] if not _is_co2_item(it)]
     return forc.get(cat) or []
+
+
+_CO2_SOURCE = BgcSurfaceSource.MBL_CO2.value
+"""The surface source that forces MARBL's atmospheric CO2 in time."""
+_CO2_STATIC = "static"
+_CO2_TIME_VARYING = "time-varying"
+_CO2_MODE_OPTS = (
+    ("Static", _CO2_STATIC),
+    ("Time-varying", _CO2_TIME_VARYING),
+)
+
+
+def _is_co2_item(item: Any) -> bool:
+    """Whether a surface forcing item is the ``MBL_co2`` atmospheric CO2 one."""
+    return (
+        isinstance(item, dict)
+        and item.get("type") == SurfaceType.BGC.value
+        and (item.get("source") or {}).get("name") == _CO2_SOURCE
+    )
 
 
 class _ForcingEditor:
     """Editor for the forcing spec: initial conditions + per-category forcing items,
     with add/remove. ``gather()`` returns an ``inputs``-shaped dict the resolver
     accepts via ``forcing_inputs=``.
+
+    The Surface forcing pane opens with an "Atmospheric CO2" block, MARBL's air
+    CO2: Static (the ModelSpec's constant ``bgc.xco2air_default``, whose widget the
+    wizard mounts in ``co2_static``, a settings-editor widget like the Model card's)
+    or Time-varying (the one ``MBL_co2`` surface item, edited here instead of as a
+    row).
     """
 
-    def __init__(self, W, forcing_inputs: dict[str, Any], on_change):
+    def __init__(
+        self, W, forcing_inputs: dict[str, Any], on_change, *, co2_static: Any = None
+    ):
         self.W = W
         self.on_change = on_change
         # Deep-copied so no `.get(...)` below can mutate the caller's dict (a
@@ -3502,6 +3562,14 @@ class _ForcingEditor:
         )
 
         self._rows: dict[str, list] = {c: [] for c in _ROW_CATEGORIES}
+        # Before the rows: `_render("surface")` puts the CO2 block above them.
+        surface = forc.get("surface") or []
+        co2_index = next((i for i, it in enumerate(surface) if _is_co2_item(it)), None)
+        self._build_co2(
+            surface[co2_index] if co2_index is not None else None,
+            co2_index,
+            co2_static,
+        )
         self._containers: dict[str, Any] = {}
         for cat in _ROW_CATEGORIES:
             self._containers[cat] = W.VBox([])
@@ -3512,6 +3580,93 @@ class _ForcingEditor:
         # could not reach it yet).
         _sync_ic_layout_visibility()
         _sync_boundary_layout_visibility()
+
+    # ---- atmospheric CO2 -----------------------------------------------------
+    def _build_co2(
+        self, item: dict[str, Any] | None, index: int | None, co2_static: Any
+    ) -> None:
+        """Build the "Atmospheric CO2" block: Time-varying when the forcing has an
+        ``MBL_co2`` surface item (*item*, at *index* in the surface list, where
+        ``gather`` puts it back), else Static.
+
+        The time-varying fields are a surface row fixed to a bgc ``MBL_co2`` source,
+        without its type, source and climatology boxes (roms-tools refuses an
+        ``MBL_co2`` climatology). The static value is the settings editor's
+        ``bgc.xco2air_default`` widget, mounted by the wizard in *co2_static*.
+        """
+        W = self.W
+        self._co2_index = index
+        seed = copy.deepcopy(item) if item is not None else {}
+        seed["type"] = SurfaceType.BGC.value
+        seed.setdefault("source", {}).update(name=_CO2_SOURCE, climatology=False)
+        self._co2_row = self._make_row("surface", seed, fixed_source=_CO2_SOURCE)
+        for key in ("type", "name", "climatology"):
+            self._co2_row[key].layout.display = "none"
+        self.co2_mode = W.RadioButtons(
+            options=_CO2_MODE_OPTS,
+            value=_CO2_TIME_VARYING if item is not None else _CO2_STATIC,
+            layout=W.Layout(width="auto"),
+        )
+        self._co2_static_box = W.VBox(
+            [
+                co2_static if co2_static is not None else W.VBox([]),
+                W.HTML(
+                    "<div class='forge-hint'>284.7 ppm is the pre-industrial "
+                    "average. MARBL uses this value for the whole run.</div>"
+                ),
+            ]
+        )
+        self._co2_varying_box = W.VBox(
+            [
+                self._row_box(self._co2_row, removable=False),
+                W.HTML(
+                    "<div class='forge-hint'>Forge downloads NOAA's marine "
+                    "boundary layer CO2 record (1979 to 2024) unless you give a "
+                    "path, and MARBL follows it through the run.</div>"
+                ),
+            ]
+        )
+        self.co2_block = components.subsection(
+            W,
+            "forcing.surface.co2",
+            self.co2_mode,
+            self._co2_static_box,
+            self._co2_varying_box,
+        )
+        self.co2_mode.observe(self._on_co2_mode, names="value")
+        self._sync_co2_mode()
+        # Heads the rows below the block, so the two read as separate parts.
+        self._surface_rows_header = components.subsection(W, "forcing.surface.sources")
+
+    def _sync_co2_mode(self) -> None:
+        static = self.co2_mode.value == _CO2_STATIC
+        self._co2_static_box.layout.display = "" if static else "none"
+        self._co2_varying_box.layout.display = "none" if static else ""
+
+    def _on_co2_mode(self, _change) -> None:
+        self._sync_co2_mode()
+        self.on_change()
+
+    def show_co2(self, visible: bool) -> None:
+        """Show the "Atmospheric CO2" block (only MARBL has an air CO2)."""
+        self.co2_block.layout.display = "" if visible else "none"
+
+    def _with_co2(self, surface: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """*surface* (the gathered rows) with the ``MBL_co2`` item added when CO2 is
+        time-varying: where the seeded item was, else after the last bgc row (where
+        every bundled ForcingSpec has it), else last.
+        """
+        if self.co2_mode.value != _CO2_TIME_VARYING:
+            return surface
+        index = self._co2_index
+        if index is None:
+            bgc = [i for i, it in enumerate(surface) if it.get("type") == "bgc"]
+            index = bgc[-1] + 1 if bgc else len(surface)
+        surface = list(surface)
+        surface.insert(
+            min(index, len(surface)), self._gather_item("surface", self._co2_row)
+        )
+        return surface
 
     # ---- one item row --------------------------------------------------------
     @staticmethod
@@ -3699,7 +3854,13 @@ class _ForcingEditor:
         w["name"].observe(_on_surface_name_change, names="value")
         w["blend_fallback"].observe(_on_fallback_change, names="value")
 
-    def _make_row(self, cat: str, item: dict[str, Any]):
+    def _make_row(
+        self, cat: str, item: dict[str, Any], *, fixed_source: str | None = None
+    ):
+        """One editable row for an item of *cat*. *fixed_source* pins the source
+        name (the "Atmospheric CO2" block's ``MBL_co2`` row, a source the row
+        dropdowns do not offer).
+        """
         W = self.W
         src = item.get("source") or {}
         w: dict[str, Any] = {}
@@ -3714,7 +3875,9 @@ class _ForcingEditor:
             _name_opts = _source_opts_for("boundary_bgc", None)
         else:
             _cur_type = item.get("type", "physics")
-            _name_opts = _source_opts_for(cat, _cur_type)
+            _name_opts = (
+                [fixed_source] if fixed_source else _source_opts_for(cat, _cur_type)
+            )
         _name_val = str(src.get("name", ""))
         if _name_val not in _name_opts and _name_opts:
             _name_val = _name_opts[0]
@@ -4210,7 +4373,7 @@ class _ForcingEditor:
         self._apply_row_visibility(w)
         return w
 
-    def _row_box(self, w):
+    def _row_box(self, w, *, removable: bool = True):
         # `type` (when present) drives the other options in the row, so show it first.
         # The remove button goes at the FRONT (not the end): a row can grow quite wide
         # (name/path/climatology/constants/esper dropdowns/options editor), and a
@@ -4220,16 +4383,18 @@ class _ForcingEditor:
         # Underscore-prefixed keys are not layout children: `_remove_btn` is
         # placed explicitly below, and `_custom_file`/`_serialize_dask` are carried
         # data rather than widgets. Filter by prefix so a future carry cannot be
-        # forgotten here and end up handed to HBox as a child.
+        # forgotten here and end up handed to HBox as a child. A row that is not
+        # *removable* (the "Atmospheric CO2" block's) gets no remove button.
         keys = [k for k in w if not k.startswith("_")]
         if "type" in keys:
             keys = ["type", *[k for k in keys if k != "type"]]
         w["_remove_btn"].layout.display = ""
+        lead = [w["_remove_btn"]] if removable else []
         # Wrap onto further lines instead of overflowing horizontally: a fully
         # populated row (source, path, climatology, constants, ESPER, options…)
         # is wider than any sensible page.
         row = self.W.HBox(
-            [w["_remove_btn"], *(w[k] for k in keys)],
+            [*lead, *(w[k] for k in keys)],
             layout=self.W.Layout(flex_flow="row wrap", align_items="flex-start"),
         )
         row.add_class("forge-frow")  # divider + spacing between wrapped rows
@@ -4250,7 +4415,8 @@ class _ForcingEditor:
             extra = [self._sync_to_boundary_btn]
         elif cat == "boundary_bgc":
             extra = [self._sync_to_ic_btn]
-        self._containers[cat].children = [*boxes, add, *extra]
+        lead = [self.co2_block, self._surface_rows_header] if cat == "surface" else []
+        self._containers[cat].children = [*lead, *boxes, add, *extra]
 
     def clear_category(self, cat: str):
         """Remove all rows for a row category (e.g. ``"boundary_bgc"`` for a
@@ -4516,10 +4682,12 @@ class _ForcingEditor:
         return title
 
     def gather(self) -> dict[str, Any]:
-        forcing: dict[str, list[dict[str, Any]] | dict[str, Any] | None] = {
+        items = {
             cat: [self._gather_item(cat, w) for w in self._rows[cat]]
             for cat in _FORCING_CATEGORIES
         }
+        items["surface"] = self._with_co2(items["surface"])
+        forcing: dict[str, list[dict[str, Any]] | dict[str, Any] | None] = dict(items)
         if self.ic_name.value == _IC_NONE:
             # No IC for this domain -- omit the key entirely (the resolver
             # requires a hard error for a non-child domain with no IC, and
@@ -4621,10 +4789,6 @@ class _ForcingEditor:
             if boundary_opts:
                 boundary["options"] = boundary_opts
 
-        forcing = {
-            cat: [self._gather_item(cat, w) for w in self._rows[cat]]
-            for cat in _FORCING_CATEGORIES
-        }
         forcing["boundary"] = boundary
         return {
             "initial_conditions": ic,
@@ -5547,6 +5711,9 @@ class ForgeBlueprintWizard:
         # ucla-roms release has the switch and the ModelSpec declares it -- on an
         # invalid blueprint too (see _show_unresolved_editor).
         self.cs_interp_box = W.VBox([])
+        # The Forcing card's "Atmospheric CO2" Static value: the settings editor's
+        # forcing_box, mounted the same way, inside every forcing editor built.
+        self.co2_static_box = W.VBox([])
         self.cs_interp_note = W.HTML(
             "<div class='forge-hint' style='margin-bottom:10px'>Leave this off if "
             "your sensitivity files hold "
@@ -6116,6 +6283,7 @@ class ForgeBlueprintWizard:
         self.show_archived_models.observe(self._on_show_archived_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
+        self.bgc_dd.observe(self._sync_co2_visibility, names="value")
         self.bgc_dd.observe(self._on_bgc_mode, names="value")
         self.cs_source_dd.observe(
             self._sync_carbonate_sensitivity_visibility, names="value"
@@ -6871,9 +7039,18 @@ class ForgeBlueprintWizard:
 
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
-            self.W, base_inputs, on_change=self._on_forcing_change
+            self.W,
+            base_inputs,
+            on_change=self._on_forcing_change,
+            co2_static=self.co2_static_box,
         )
+        self._forcing_editor.show_co2(self.bgc_dd.value == "marbl")
         self.forcing_box.children = [self._forcing_editor.widget]
+
+    def _sync_co2_visibility(self, _change=None) -> None:
+        """Show the forcing editor's "Atmospheric CO2" block under MARBL only."""
+        if self._forcing_editor is not None:
+            self._forcing_editor.show_co2(self.bgc_dd.value == "marbl")
 
     def _on_forcing_spec(self, _change):
         """Selecting a ForcingSpec reseeds the forcing editor. CDR is its own
@@ -8757,6 +8934,13 @@ class ForgeBlueprintWizard:
             # open, just fed differently. `None` (not `[]`) is "no boundary
             # section at all" under the new singular BoundaryForcing schema.
             kw["forcing_inputs"]["forcing"]["boundary"] = None
+        if self.bgc_dd.value != "marbl":
+            # Only MARBL has an air CO2: the hidden "Atmospheric CO2" block keeps its
+            # choice for a switch back, but a time-varying one reaches no blueprint.
+            surface = kw["forcing_inputs"]["forcing"]["surface"]
+            kw["forcing_inputs"]["forcing"]["surface"] = [
+                item for item in surface if not _is_co2_item(item)
+            ]
         kw["output_settings"] = self._output_settings()
         kw["composition"] = self._composition()
         kw["cdr"] = self._current_cdr_dict()
@@ -8853,6 +9037,11 @@ class ForgeBlueprintWizard:
                 if _MODEL_CARD in self.editor._group_fields
                 else []
             )
+            self.co2_static_box.children = (
+                [self.editor.forcing_box]
+                if _FORCING_CARD in self.editor._group_fields
+                else []
+            )
         self._seed_wizard_defaults()
 
         effective = _apply_overrides(settings, self._active_overrides)
@@ -8872,8 +9061,9 @@ class ForgeBlueprintWizard:
     def _show_unresolved_editor(self) -> None:
         """After a failed resolve, replace an editor built for another model, BGC
         mode, nesting role or ucla-roms tier with one built from the selected
-        ModelSpec's Model card settings alone (see :data:`_MODEL_CARD_FIELDS`), so
-        the Model card keeps its settings on an invalid blueprint: the carbonate
+        ModelSpec's Model and Forcing card settings alone (see
+        :data:`_MODEL_CARD_FIELDS`, :data:`_FORCING_CARD_FIELDS`), so those cards
+        keep their settings on an invalid blueprint: the carbonate
         sensitivity switch shows as soon as ``cdr_lite`` is picked, before a CDR
         forcing makes the blueprint valid. The Advanced panes and the Output card
         show a placeholder until the next valid resolve rebuilds the editor: the old
@@ -8903,7 +9093,8 @@ class ForgeBlueprintWizard:
         self._show_editor(
             {
                 section: {f: v for f, v in spec[section].items() if f in fields}
-                for section, fields in _MODEL_CARD_FIELDS.items()
+                for card in (_MODEL_CARD_FIELDS, _FORCING_CARD_FIELDS)
+                for section, fields in card.items()
                 if section in spec
             },
             key,
@@ -9125,6 +9316,14 @@ class ForgeBlueprintWizard:
             self.validation.value = components.banner(
                 "ok", "<b>Blueprint is valid.</b> All settings pass validation."
             )
+        # What the run would use that nothing refuses but its author likely did not
+        # mean (zero BGC inputs on an older ucla-roms). The resolver only logs these,
+        # which a widget callback never shows, so show them here.
+        if notes := resolver_warnings(cfg, roms_ref=effective_roms_ref):
+            self.validation.value += components.banner(
+                "warn",
+                "<br>".join(f"<b>Warning:</b> {html.escape(note)}" for note in notes),
+            )
         comp = cfg.composition
         self.derived.value = (
             f"<b>name</b>: <code>{cfg.name}</code> &nbsp; "
@@ -9156,6 +9355,8 @@ class ForgeBlueprintWizard:
                 summary = f"{name_w.value} · {loc}"
         else:
             names = [row["name"].value for row in fe._rows.get(cat, [])]
+            if cat == "surface" and self.bgc_dd.value == "marbl":
+                names.append(f"CO2 {fe.co2_mode.value}")
             summary = " · ".join(names) if names else "none"
         return summary[:60]
 
@@ -9263,18 +9464,22 @@ class ForgeBlueprintWizard:
             chips["grid"].value = components.chip(f"● {n} fields to check", "warn")
         else:
             chips["grid"].value = components.chip("● Complete", "ok")
-        forcing_modified = bool(cfg is not None and cfg.composition.forcing.modified)
+        # Placement, not OutputSpec ownership: the two chips partition the overrides
+        # the Model and Forcing cards do not show; the Forcing card's (its static
+        # CO2) count as a forcing change.
+        active = self._active_overrides
+        n_output = sum(1 for key in active if _in_output_card(*key))
+        n_model = sum(1 for key in active if _in_model_card(*key))
+        n_forcing = sum(1 for key in active if _in_forcing_card(*key))
+        n_advanced = len(active) - n_output - n_model - n_forcing
+        forcing_modified = bool(
+            cfg is not None and cfg.composition.forcing.modified
+        ) or bool(n_forcing)
         chips["forcing"].value = (
             components.chip("● Modified", "info")
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
-        # Placement, not OutputSpec ownership: the two chips partition the overrides
-        # the Model card does not show.
-        active = self._active_overrides
-        n_output = sum(1 for key in active if _in_output_card(*key))
-        n_model = sum(1 for key in active if _in_model_card(*key))
-        n_advanced = len(active) - n_output - n_model
         chips["output"].value = (
             components.chip(f"● {n_output} modified", "info")
             if n_output

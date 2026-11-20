@@ -104,6 +104,7 @@ from cstar.applications.forge.namelist_model import (
     prune_version_gated_sections,
     river_tracer_floor,
     run_time_settings_for_ref,
+    zero_bgc_inputs_warning,
 )
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
@@ -1718,7 +1719,30 @@ def build_forge_blueprint(
     )
     check_derived_overrides(explicit_overrides, known_derived_values(bp))
     _warn_user_files_need_pio_conversion(bp, use_pio)
+    for message in resolver_warnings(bp, roms_ref=effective_roms_ref):
+        log.warning(message)
     return bp
+
+
+def resolver_warnings(cfg: ForgeBlueprint, *, roms_ref: str | None) -> list[str]:
+    """What a resolved blueprint will run with that its author likely did not mean and
+    nothing refuses, one message for each: today a MARBL run without BGC sources on a
+    ucla-roms release that runs it anyway
+    (:func:`~cstar.applications.forge.namelist_model.zero_bgc_inputs_warning`).
+
+    ``build_forge_blueprint`` logs each message. The wizard calls this on the config
+    it shows and puts the messages in its validation banner, where a log line from a
+    widget callback would not be seen.
+    """
+    cppdefs = cfg.model_settings.get("cppdefs") or {}
+    message = zero_bgc_inputs_warning(
+        cfg.forcing,
+        open_boundaries=cfg.domain.open_boundaries.model_dump(),
+        is_child=cfg.domain.is_child,
+        marbl=bool(cppdefs.get("marbl")),
+        roms_ref=roms_ref,
+    )
+    return [message] if message else []
 
 
 def _build_forcing(

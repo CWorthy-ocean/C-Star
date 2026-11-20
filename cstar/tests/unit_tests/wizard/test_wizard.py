@@ -43,6 +43,7 @@ from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
+    _FORCING_CARD,
     _IC_NONE,
     _MODEL_CARD,
     _OUTPUT_CARD,
@@ -55,6 +56,7 @@ from cstar.wizard.wizard import (
     _base_type,
     _drain_stream_buffer,
     _ForcingEditor,
+    _in_forcing_card,
     _in_output_card,
     _is_optional_numeric,
     _is_output_key,
@@ -241,10 +243,10 @@ def test_type_switch_rebuilds_labelled_options(editor):
     """
     w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
     w["type"].value = "bgc"
+    # MBL_co2 is the "Atmospheric CO2" block's, not a row source.
     assert [value for _label, value in w["name"].options] == [
         "UNIFIED",
         "CESM_REGRIDDED",
-        "MBL_co2",
     ]
     assert w["name"].value == "UNIFIED"
 
@@ -6722,7 +6724,7 @@ def test_download_html_custom_caption_moves_filename_to_title():
 # ---------------------------------------------------------------------------
 _OUTPUT_CARD_SETTINGS = {
     **_BGC_MODE_SETTINGS_SAMPLE,
-    "bgc": {"wrt_his": True, "xco2air_default": 284.7},
+    "bgc": {"interp_frc": 0, "wrt_his": True, "xco2air_default": 284.7},
     "marbl_bgc": {"marbl_config_file": "marbl_in", "marbl_tracers_to_write": ["DIC"]},
     "surf_flux": {"output_period": 3600.0},
     "diagnostics": {"output_period": 3600.0},
@@ -6813,8 +6815,10 @@ def test_output_card_main_streams_and_more_accordion_membership():
     # Widgets sit in exactly one container, and the registry is shared.
     for (section, field), (widget, _base) in editor._widgets.items():
         in_output = _is_in_tree(editor.output_box, widget)
+        in_forcing = _is_in_tree(editor.forcing_box, widget)
         assert in_output is _in_output_card(section, field), (section, field)
-        assert _is_in_tree(editor.accordion, widget) is not in_output
+        assert in_forcing is _in_forcing_card(section, field), (section, field)
+        assert _is_in_tree(editor.accordion, widget) is not (in_output or in_forcing)
 
 
 def test_output_card_main_streams_are_stacked_under_glossary_headers():
@@ -6858,11 +6862,12 @@ def test_output_card_splits_bgc_fields_along_the_output_seam():
     editor = _output_editor()
     pane = editor._group_fields["Biogeochemistry (BGC / MARBL)"]
     card = editor._group_fields[_OUTPUT_CARD]
-    assert pane["bgc"] == ["xco2air_default"]
+    assert pane["bgc"] == ["interp_frc"]
     assert card["bgc"] == ["wrt_his"]
+    assert editor._group_fields[_FORCING_CARD] == {"bgc": ["xco2air_default"]}
     assert pane["marbl_bgc"] == ["marbl_config_file"]
     assert card["marbl_bgc"] == ["marbl_tracers_to_write"]
-    assert _built_fields(editor)["bgc"] == ["xco2air_default", "wrt_his"]
+    assert _built_fields(editor)["bgc"] == ["interp_frc", "wrt_his", "xco2air_default"]
 
 
 def test_extract_data_is_built_only_for_a_parent_with_nesting_owned_fields_hidden():
@@ -7041,13 +7046,15 @@ def test_output_and_advanced_chips_partition_the_overrides():
         ("particles", "floats"),  # More, ModelSpec-owned
         ("bgc", "wrt_his"),  # bgc's output half
     ]
-    advanced_keys = [("lateral_visc", "visc2"), ("bgc", "xco2air_default")]
-    for key in output_keys + advanced_keys:
+    advanced_keys = [("lateral_visc", "visc2")]
+    forcing_keys = [("bgc", "xco2air_default")]  # the Forcing card's static CO2
+    for key in output_keys + advanced_keys + forcing_keys:
         widget = wiz.editor._widgets[key][0]
         widget.value = (not widget.value) if isinstance(widget.value, bool) else 7
-    assert set(wiz._overrides) == {*output_keys, *advanced_keys}
+    assert set(wiz._overrides) == {*output_keys, *advanced_keys, *forcing_keys}
     assert "● 3 modified" in wiz.card_chips["output"].value
-    assert "● 2 modified" in wiz.card_chips["advanced"].value
+    assert "● 1 modified" in wiz.card_chips["advanced"].value
+    assert "Modified" in wiz.card_chips["forcing"].value
 
 
 def test_output_card_titles_carry_modified_counts():

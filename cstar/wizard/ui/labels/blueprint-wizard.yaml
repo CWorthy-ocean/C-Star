@@ -76,6 +76,14 @@ sections:
     title: Interpolation
     desc: How the source data is mapped onto the model grid.
     required: false
+  forcing.surface.co2:
+    title: Atmospheric CO2
+    desc: The air CO2 MARBL exchanges with the ocean, constant or from NOAA's marine boundary layer record.
+    required: true
+  forcing.surface.sources:
+    title: Surface forcing sources
+    desc: The atmospheric, biogeochemical and restoring datasets that force the ocean surface.
+    required: true
   forcing.boundary.interpolation:
     title: Interpolation
     desc: How the source data is mapped onto the model grid.
@@ -577,9 +585,10 @@ fields:
   # settings.<section>.<field> -- Advanced settings (examples only; filled in later)
   # ===========================================================================
   settings.bgc.xco2air_default:
-    label: Static xco2air
+    label: Constant atmospheric xCO2
     symbol: xco2air_default
-    hint: Used when co2_tvarying is False.
+    unit: ppm
+    hint: The atmospheric CO2 mole fraction MARBL uses for the whole run when atmospheric CO2 is Static (cppdefs.co2_tvarying off). 284.7 ppm is the pre-industrial average.
 
   # ===========================================================================
   # buttons.<name> -- button captions (examples only; filled in later)
