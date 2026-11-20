@@ -1,6 +1,7 @@
 """Tests for the prior-attempt reuse logic shared by every launcher."""
 
 import logging
+import re
 import typing as t
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,6 +12,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     cancel_prior_attempt,
+    foreign_location,
     is_foreign_handle,
     prior_of_this_run,
     resolve_prior_attempt,
@@ -32,6 +34,9 @@ from cstar.orchestration.orchestration import (
 
 T0 = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 """When the prior attempt of the dependency tests was submitted."""
+
+UNDER_SLURM = "under the slurm launcher (job 12345)"
+"""Where an attempt this launch cannot track runs, as `foreign_location` puts it."""
 
 
 def _live_step(
@@ -222,6 +227,23 @@ def test_is_foreign_handle(handle_launcher: str, expected: bool) -> None:
 
 
 @pytest.mark.parametrize(
+    ("handle_launcher", "expected"),
+    [
+        pytest.param("", "", id="empty-treated-as-own"),
+        pytest.param("local", "", id="same"),
+        pytest.param("slurm", "under the slurm launcher (job 12345)", id="different"),
+    ],
+)
+def test_foreign_location(handle_launcher: str, expected: str) -> None:
+    """Only a foreign handle has a location, naming its launcher and job."""
+    handle = ProcessHandle(
+        pid="12345", name="step", run_id="run", launcher_name=handle_launcher
+    )
+
+    assert foreign_location(handle, "local") == expected
+
+
+@pytest.mark.parametrize(
     ("handle_uuid", "run_uuid", "kept"),
     [
         pytest.param("a", "a", True, id="same-run"),
@@ -251,18 +273,26 @@ def test_prior_of_this_run_without_a_handle() -> None:
     assert prior_of_this_run(None, "a") is None
 
 
+@pytest.mark.parametrize(
+    "untracked",
+    [
+        pytest.param(UNDER_SLURM, id="another launcher"),
+        pytest.param("on login01 (process 12345)", id="another host"),
+    ],
+)
 @pytest.mark.parametrize("prior_status", [Status.Submitted, Status.Running])
 @pytest.mark.parametrize("step_pre_run", [False, True])
 def test_resolve_prior_attempt_foreign_in_progress_fails_loudly(
-    tmp_path: Path, prior_status: Status, step_pre_run: bool
+    tmp_path: Path, prior_status: Status, step_pre_run: bool, untracked: str
 ) -> None:
-    """An in-progress attempt under another launcher cannot be tracked here, so
-    it is neither adopted nor silently duplicated.
+    """An in-progress attempt under another launcher, or on another host, cannot
+    be tracked here, so it is neither adopted nor silently duplicated, and the
+    refusal says where it runs.
     """
     step = _live_step(tmp_path, pre_run=step_pre_run)
 
-    with pytest.raises(CstarExpectationFailed, match="another launcher"):
-        resolve_prior_attempt(step, prior_status, prior_foreign=True)
+    with pytest.raises(CstarExpectationFailed, match=re.escape(untracked)):
+        resolve_prior_attempt(step, prior_status, prior_untracked=untracked)
 
     assert KEY_CLOBBER not in step.workflow_overrides
 
@@ -271,7 +301,7 @@ def test_resolve_prior_attempt_foreign_in_progress_clobbered(tmp_path: Path) -> 
     """With clobber requested, an in-progress foreign attempt is resubmitted."""
     step = _live_step(tmp_path, clobber=True)
 
-    reuse = resolve_prior_attempt(step, Status.Running, prior_foreign=True)
+    reuse = resolve_prior_attempt(step, Status.Running, prior_untracked=UNDER_SLURM)
 
     assert reuse is False
 
@@ -280,14 +310,14 @@ def test_resolve_prior_attempt_foreign_done_reused(tmp_path: Path) -> None:
     """A terminal foreign attempt is adopted as-is: nothing will query it."""
     step = _live_step(tmp_path)
 
-    assert resolve_prior_attempt(step, Status.Done, prior_foreign=True) is True
+    assert resolve_prior_attempt(step, Status.Done, prior_untracked=UNDER_SLURM) is True
 
 
 def test_resolve_prior_attempt_foreign_failed_clobbers(tmp_path: Path) -> None:
     """A failed foreign attempt leads to a clobbered re-run, like a local one."""
     step = _live_step(tmp_path, pre_run=True)
 
-    reuse = resolve_prior_attempt(step, Status.Failed, prior_foreign=True)
+    reuse = resolve_prior_attempt(step, Status.Failed, prior_untracked=UNDER_SLURM)
 
     assert reuse is False
     assert step.workflow_overrides[KEY_CLOBBER] is True
@@ -469,9 +499,12 @@ def test_resolve_prior_attempt_replaced_dependency_foreign_fails_loudly(
     """
     step = _live_step(tmp_path)
 
-    with pytest.raises(CstarExpectationFailed, match="another launcher"):
+    with pytest.raises(CstarExpectationFailed, match="under the slurm launcher"):
         resolve_prior_attempt(
-            step, Status.Submitted, prior_foreign=True, replaced_dependency=True
+            step,
+            Status.Submitted,
+            prior_untracked=UNDER_SLURM,
+            replaced_dependency=True,
         )
 
 
@@ -528,7 +561,7 @@ async def test_cancel_prior_attempt_cancels_the_handle(
     launcher = _fake_launcher(cancel_works=True, statuses=[Status.Cancelled])
 
     with caplog.at_level(logging.INFO):
-        await cancel_prior_attempt(launcher, step, handle)
+        await cancel_prior_attempt(launcher, step, handle, untracked="")
 
     assert len(launcher.cancelled) == 1
     assert launcher.cancelled[0].handle is handle
@@ -547,7 +580,9 @@ async def test_cancel_prior_attempt_refuses_a_job_it_cannot_cancel(
     launcher = _fake_launcher(cancel_works=False, statuses=[Status.Running])
 
     with pytest.raises(CstarExpectationFailed) as exc_info:
-        await cancel_prior_attempt(launcher, step, _handle(status=Status.Running))
+        await cancel_prior_attempt(
+            launcher, step, _handle(status=Status.Running), untracked=""
+        )
 
     assert "12345" in str(exc_info.value)
     assert "'test step'" in str(exc_info.value)
@@ -566,7 +601,9 @@ async def test_cancel_prior_attempt_accepts_a_job_that_ended_by_itself(
     launcher = _fake_launcher(cancel_works=False, statuses=[ended])
 
     with caplog.at_level(logging.INFO):
-        await cancel_prior_attempt(launcher, step, _handle(status=Status.Running))
+        await cancel_prior_attempt(
+            launcher, step, _handle(status=Status.Running), untracked=""
+        )
 
     assert len(launcher.cancelled) == 1
     assert not any("Cancelled job" in r.getMessage() for r in caplog.records)
@@ -581,7 +618,9 @@ async def test_cancel_prior_attempt_refuses_a_cancelled_job_that_never_ends(
     launcher = _fake_launcher(cancel_works=True, statuses=[Status.Running])
 
     with pytest.raises(CstarExpectationFailed, match="still Running") as exc_info:
-        await cancel_prior_attempt(launcher, step, _handle(status=Status.Running))
+        await cancel_prior_attempt(
+            launcher, step, _handle(status=Status.Running), untracked=""
+        )
 
     assert "12345" in str(exc_info.value)
     assert "'test step'" in str(exc_info.value)
@@ -597,7 +636,9 @@ async def test_cancel_prior_attempt_waits_for_the_job_to_end(
         cancel_works=True, statuses=[Status.Running, Status.Cancelled]
     )
 
-    await cancel_prior_attempt(launcher, step, _handle(status=Status.Running))
+    await cancel_prior_attempt(
+        launcher, step, _handle(status=Status.Running), untracked=""
+    )
 
     assert len(launcher.cancelled) == 1
     assert len(launcher.queried) == 2
@@ -613,7 +654,9 @@ async def test_cancel_prior_attempt_leaves_a_foreign_job_alone(
     launcher = _fake_launcher(cancel_works=True, statuses=[Status.Running])
     foreign = _handle(pid="777", launcher_name="slurm", status=Status.Running)
 
-    await cancel_prior_attempt(launcher, step, foreign)
+    await cancel_prior_attempt(
+        launcher, step, foreign, untracked=foreign_location(foreign, "local")
+    )
 
     assert launcher.cancelled == []
     assert launcher.queried == []

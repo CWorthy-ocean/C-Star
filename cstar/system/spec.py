@@ -335,6 +335,10 @@ class GpuNodesSpec(_SpecModel):
     """The CPU cores on each GPU node."""
     account_required: bool = Field(default=False)
     """Whether the scheduler refuses a GPU job that names no account."""
+    request_gpus: bool = Field(default=True)
+    """Whether a GPU job asks the scheduler for its GPUs (SLURM `--gpus-per-node`,
+    PBS `ngpus=`); false where the GPU nodes define no GPU resource and a job
+    reaches them through its queue alone."""
 
     def build(self) -> GpuNodes:
         """Return the GPU nodes this entry describes."""
@@ -344,6 +348,7 @@ class GpuNodesSpec(_SpecModel):
             directives=dict(self.directives),
             cores_per_node=self.cores_per_node,
             account_required=self.account_required,
+            request_gpus=self.request_gpus,
         )
 
 
@@ -393,6 +398,10 @@ class SlurmSchedulerSpec(_SchedulerSpec):
     """The partitions and QOS jobs can be submitted to."""
     requires_task_distribution: bool = Field(default=False)
     """Whether a job must state its nodes and tasks per node, not only its CPUs."""
+    upper_case_account: bool = Field(default=False)
+    """Whether the site knows accounts only in upper case (TACC's submit filter
+    refuses `tg-abc123`, the lower-case name `sacctmgr` lists, and wants
+    `TG-ABC123`); C-Star then submits the account in upper case."""
 
     def build(self, docs: str) -> Scheduler:
         """Return the scheduler this entry describes."""
@@ -401,6 +410,7 @@ class SlurmSchedulerSpec(_SchedulerSpec):
             primary_queue_name=self.primary_queue,
             other_scheduler_directives=dict(self.directives),
             requires_task_distribution=self.requires_task_distribution,
+            upper_case_account=self.upper_case_account,
             documentation=docs or None,
             max_cpus_per_node=self.max_cpus_per_node,
             gpu=self.gpu_nodes.build() if self.gpu_nodes else None,

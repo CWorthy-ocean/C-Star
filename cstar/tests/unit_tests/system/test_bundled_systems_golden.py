@@ -69,6 +69,7 @@ MODULE_ENVIRONMENT = {
             "OPAL_PREFIX",
             "OPENMPI_HOME",
             "TACC_IMPI_DIR",
+            "TACC_MPI_DIR",
             "TACC_NETCDF_DIR",
             "TACC_PNETCDF_DIR",
         )
@@ -124,6 +125,8 @@ def _scheduler(scheduler: Scheduler | None) -> dict[str, Any] | None:
         "requires_task_distribution": scheduler.requires_task_distribution,
         "max_cpus_per_node": scheduler._max_cpus_per_node,
         "documentation": scheduler.documentation,
+        # how a lower-case account is submitted
+        "account": scheduler.account_name("tg-abc123"),
         "gpu": None if scheduler.gpu is None else dataclasses.asdict(scheduler.gpu),
     }
 

@@ -81,7 +81,7 @@ directory and stops with instructions if they are absent.
 
 - **WOA** (0.25 degree World Ocean Atlas salinity) for sea-surface salinity
   restoring.
-- **GLOFAS** river discharge and **RIVR2O** river biogeochemistry.
+- **RIVR2O** river biogeochemistry.
 - **EMOD** bathymetry as an alternative topography source.
 - **GLODAP** mapped climatology as a biogeochemical initial and boundary
   source.
@@ -91,5 +91,5 @@ downloaded automatically, which stream at generation time, and the expected
 file layout for each user-staged one.
 
 Everything else, including ERA5 atmospheric forcing, the unified
-biogeochemical climatology, World Ocean Atlas nutrients and the default
-topography, is fetched without an account.
+biogeochemical climatology, the preprocessed GloFAS river discharge, World
+Ocean Atlas nutrients and the default topography, is fetched without an account.

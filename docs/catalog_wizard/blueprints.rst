@@ -73,6 +73,12 @@ Boundaries and forcing
    that you must download yourself (TPXO tides, for example) are noted here;
    see :doc:`../getting_started/data_access`.
 
+   With MARBL, the **Surface forcing** panel starts with **Atmospheric CO2**.
+   *Static* holds the air CO2 at **Constant atmospheric xCO2** for the whole
+   run; the default, 284.7 ppm, is the pre-industrial average, so set the
+   value for your run's period. *Time-varying* follows NOAA's marine boundary
+   layer CO2 record (1979 to 2024), which Forge downloads.
+
 .. figure:: ../images/wizard-forcing.png
    :alt: The Boundaries and forcing section with one collapsed panel per forcing type
    :width: 100%

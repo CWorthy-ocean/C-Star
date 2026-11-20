@@ -56,4 +56,3 @@ class CompressApplication(ApplicationDefinition[CompressBlueprint, CompressRunne
     long_name = _APP_NAME_LONG
     runner = CompressRunner
     blueprint = CompressBlueprint
-    applicable_transforms = ()

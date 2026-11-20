@@ -1,0 +1,1 @@
+Forge warns when a MARBL run pinned to ucla-roms before 0.14.0 has no BGC sources for its boundary forcing or initial conditions: those releases start the run with the missing BGC tracers at zero and say so only in the ROMS log.

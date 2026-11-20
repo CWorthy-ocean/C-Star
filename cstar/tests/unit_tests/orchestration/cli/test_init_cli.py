@@ -133,6 +133,20 @@ class FakeGpuSlurmContext(FakeSlurmContext):
         )
 
 
+class FakeUpperCaseSlurmContext(FakeSlurmContext):
+    """A SLURM system that knows accounts only in upper case."""
+
+    name = "fakeuppercaseslurm"
+
+    @classmethod
+    def create_scheduler(cls) -> SlurmScheduler:
+        return SlurmScheduler(
+            queues=[SlurmPartition(name="regular")],
+            primary_queue_name="regular",
+            upper_case_account=True,
+        )
+
+
 class Recorder:
     """What the fake shell and kernel installers were asked to do."""
 
@@ -1107,6 +1121,27 @@ def test_slurm_hints_list_associations_and_partitions(
     assert "m1234 regular" in output
     assert "m5678 (any partition)" in output
     assert "Partitions on this system: regular, debug" in output
+
+
+def test_slurm_hints_list_accounts_as_the_scheduler_submits_them(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scheduler that wants upper-case accounts lists them so."""
+    use_context(monkeypatch, FakeUpperCaseSlurmContext)
+
+    def query(args: t.Sequence[str]) -> list[str]:
+        return ["tg-abc123|regular"] if args[0] == "sacctmgr" else []
+
+    monkeypatch.setattr("cstar.cli.init.query_slurm", query)
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "TG-ABC123 regular" in output
+    assert "tg-abc123" not in output
 
 
 def test_slurm_without_hints_prints_no_hint_lines(

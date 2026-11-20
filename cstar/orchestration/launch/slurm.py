@@ -22,6 +22,7 @@ from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     cancel_prior_attempt,
+    foreign_location,
     is_foreign_handle,
     prior_of_this_run,
     resolve_prior_attempt,
@@ -643,17 +644,18 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
             last_status = await SlurmLauncher.query_status(prior_handle)
+            untracked = foreign_location(prior_handle, cls.name)
             reuse_prior = resolve_prior_attempt(
                 step,
                 last_status,
                 prior_pre_run=prior_handle.pre_run,
-                prior_foreign=is_foreign_handle(prior_handle, cls.name),
+                prior_untracked=untracked,
                 replaced_dependency=waits_on_replaced_dependency(
                     prior_handle, dependencies
                 ),
             )
             if not reuse_prior and Status.is_in_progress(last_status):
-                await cancel_prior_attempt(cls, step, prior_handle)
+                await cancel_prior_attempt(cls, step, prior_handle, untracked=untracked)
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)

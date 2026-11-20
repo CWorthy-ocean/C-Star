@@ -22,7 +22,6 @@ from cstar.applications.ucla_roms.transforms import (
     ContinuanceDirective,
     NestingDirective,
     RestartFileTrxAdapter,
-    RomsTimeSplitter,
     _split_sources,
     step_output_files,
 )
@@ -30,9 +29,8 @@ from cstar.applications.ucla_roms.transforms import (
     log as transforms_log,
 )
 from cstar.base.deprecation import CstarDeprecationWarning
-from cstar.base.env import ENV_CSTAR_PROJECT_HOME, ENV_CSTAR_RUNID, FLAG_OFF
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
 from cstar.orchestration.check import deep_check
@@ -56,7 +54,6 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.models import (
     Application,
     BlueprintIdentity,
-    BlueprintState,
     ComputeNeeds,
     DeferredBlueprintRef,
     InlineBlueprintRef,
@@ -91,14 +88,12 @@ from cstar.orchestration.transforms import (
     _inject_compute,
     _inject_compute_defaults,
     anchor_blueprint_path,
-    apply_automatic_overrides,
     collect_directive_problems,
     effective_blueprint,
     external_dependencies,
     fill_runs,
     get_fsm_resolver,
     get_system_overrides,
-    get_transforms,
     lookup_step,
     materialize_inline_blueprints,
     mustache,
@@ -222,36 +217,35 @@ def step_overiding_wp(
     return wp
 
 
-def test_get_transforms() -> None:
-    """Confirm that registered transforms are returned via `get_transforms`"""
-    with mock.patch.dict(
-        "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.UCLA_ROMS.value: [OverrideTransform]},
-        clear=True,
-    ):
-        transforms = get_transforms(Application.UCLA_ROMS.value)
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT",
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ",
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME",
+    ],
+)
+def test_removed_time_split_flags_do_not_split_a_step(
+    step_overiding_wp: Workplan, flag: str
+) -> None:
+    """Verify a leftover time-split flag in the environment changes no step.
 
-    assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
+    The blueprint spans a year; the transformer must still return the one step.
 
-    with mock.patch.dict(
-        "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.UCLA_ROMS.value: [RomsTimeSplitter()]},
-        clear=True,
-    ):
-        transforms = get_transforms(Application.UCLA_ROMS.value)
-
-    assert any(isinstance(tx, RomsTimeSplitter) for tx in transforms)
-
-
-def test_get_transforms_empty() -> None:
-    """Confirm that `get_transforms` does not blow up when requesting transforms
-    for an application that has no transforms registered.
+    Parameters
+    ----------
+    step_overiding_wp : Workplan
+        A workplan whose single ucla_roms step spans more than a month.
+    flag : str
+        A removed time-splitting setting, set in the environment.
     """
-    with mock.patch.dict("cstar.orchestration.transforms.TRANSFORMS", {}, clear=True):
-        transforms = get_transforms(Application.UCLA_ROMS.value)
+    names = [str(s.name) for s in step_overiding_wp.steps]
+    assert len(names) == 1
 
-    assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
-    assert not any(isinstance(tx, RomsTimeSplitter) for tx in transforms)
+    with mock.patch.dict(os.environ, {flag: "1"}):
+        transformed = WorkplanTransformer(step_overiding_wp).apply()
+
+    assert [str(s.name) for s in transformed.steps] == names
 
 
 def test_override_transform(
@@ -3937,7 +3931,6 @@ def test_workplan_transformer_applies_working_dir_overrides(
     mock_overrides = {"working_dir": sys_working_dir_override}
 
     with (
-        mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF}),
         mock.patch(
             "cstar.orchestration.transforms.get_system_overrides",
             mock.Mock(return_value=mock_overrides),
@@ -5831,33 +5824,6 @@ def test_app_specific_system_overrides(live_step_with_templates: LiveStep) -> No
     assert sys_overrides_for_app
 
 
-def test_apply_automatic_overrides(
-    live_step_with_templates: LiveStep, bp_templates_dir: Path
-) -> None:
-    """Verify that app-specific overrides are applied."""
-    live_step_with_templates.blueprint_overrides.clear()
-    Path(live_step_with_templates.blueprint_path).write_text(
-        (bp_templates_dir / "blueprint.yaml").read_text(),
-    )
-    blueprint = live_step_with_templates.blueprint
-    assert blueprint is not None
-    assert blueprint.state != BlueprintState.Validated
-
-    value = "validated"
-    mock_overrides = {"state": BlueprintState.Validated}
-
-    with mock.patch(
-        "cstar.orchestration.transforms.get_system_overrides",
-        mock.Mock(return_value=mock_overrides),
-    ):
-        step = apply_automatic_overrides(live_step_with_templates)
-
-    # the mocked system overrides should be applied
-    updated = step.blueprint
-    assert updated is not None
-    assert updated.state == value
-
-
 @pytest.fixture
 def deferred_workplan(hello_world_bp_path: Path) -> Workplan:
     """Generate a workplan whose second step defers its blueprint to the first.
@@ -6006,53 +5972,12 @@ def test_workplan_transformer_deferred_untouched_by_producer_transform(
     assert ApplyOverridesDirective.key() in directives
 
 
-def test_workplan_transformer_deferred_active_transform_raises(
-    hello_world_bp_path: Path,
-) -> None:
-    """Verify that a deferred step whose application has an active transform
-    is rejected at schedule time.
-
-    Parameters
-    ----------
-    hello_world_bp_path : Path
-        Fixture returning the path to a hello-world blueprint file.
-    """
-    producer = Step(
-        name="producer",
-        application="hello_world",
-        blueprint=hello_world_bp_path.as_posix(),
-    )
-    consumer = Step.model_validate(
-        {
-            "name": "consumer",
-            "application": Application.UCLA_ROMS.value,
-            "blueprint": {"from_step": "producer"},
-            "depends_on": ["producer"],
-        },
-    )
-    wp = Workplan(
-        name="deferred-workplan",
-        description="A workplan with a deferred ucla_roms blueprint.",
-        steps=[producer, consumer],
-    )
-
-    with mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: "1"}):
-        transformer = WorkplanTransformer(wp)
-
-        with pytest.raises(CstarExpectationFailed) as error:
-            _ = transformer.apply()
-
-    assert "deferred" in str(error.value)
-    assert RomsTimeSplitter.__name__ in str(error.value)
-
-
 def test_workplan_transformer_deferred_inactive_transform_ok(
     hello_world_bp_path: Path,
     test_bp_path: Path,
     bp_templates_dir: Path,
 ) -> None:
-    """Verify that a deferred ucla_roms step is permitted when the time
-    splitter feature flag is disabled.
+    """Verify that a deferred ucla_roms step is permitted.
 
     Parameters
     ----------
@@ -6082,8 +6007,7 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
         steps=[producer, consumer],
     )
 
-    with mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF}):
-        transformed = WorkplanTransformer(wp).apply()
+    transformed = WorkplanTransformer(wp).apply()
 
     consumer_trx = next(s for s in transformed.steps if s.name == "consumer")
     assert consumer_trx.is_deferred
@@ -6878,55 +6802,6 @@ def test_resolve_deferred_blueprint_requires_run_context() -> None:
         _ = resolve_deferred_blueprint(ref)
 
 
-def test_workplan_transformer_deferred_split_producer_raises(
-    tmp_path: Path,
-    bp_templates_dir: Path,
-) -> None:
-    """Verify that a deferred blueprint referencing a producer that is split
-    into sub-steps is rejected at schedule time.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs
-    bp_templates_dir : Path
-        Fixture returning the path to the directory containing blueprint templates.
-    """
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(
-        "working_dir: .",
-        f"working_dir: {tmp_path.as_posix()}",
-    )
-    bp_path.write_text(bp_content)
-
-    producer = Step(
-        name="producer",
-        application=Application.UCLA_ROMS.value,
-        blueprint=bp_path.as_posix(),
-    )
-    consumer = Step.model_validate(
-        {
-            "name": "consumer",
-            "application": "hello_world",
-            "blueprint": {"from_step": "producer"},
-            "depends_on": ["producer"],
-        },
-    )
-    wp = Workplan(
-        name="deferred-split-workplan",
-        description="A deferred blueprint referencing a split producer.",
-        steps=[producer, consumer],
-    )
-
-    with (
-        mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: "1"}),
-        pytest.raises(CstarExpectationFailed, match="split"),
-    ):
-        _ = WorkplanTransformer(wp).apply()
-
-
 async def test_load_workplan_missing_trx_file_raises_runtime_error(
     tmp_path: Path,
     mock_run_id: str,
@@ -7167,31 +7042,6 @@ def test_workplan_transformer_inline_step(inline_workplan: Workplan) -> None:
 
     # a schedule-time check must not write the blueprint
     assert not (consumer.fsm.run_dir / "blueprint.yaml").exists()
-
-
-def test_workplan_transformer_inline_active_transform_raises() -> None:
-    """Verify an inline step whose application has an active transform is
-    rejected at schedule time.
-    """
-    consumer = Step.model_validate(
-        {
-            "name": "consumer",
-            "application": Application.UCLA_ROMS.value,
-            "blueprint": "inline",
-        },
-    )
-    wp = Workplan(
-        name="inline-workplan",
-        description="A workplan with an inline ucla_roms blueprint.",
-        steps=[consumer],
-    )
-
-    with mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: "1"}):
-        with pytest.raises(CstarExpectationFailed) as error:
-            _ = WorkplanTransformer(wp).apply()
-
-    assert "inline" in str(error.value)
-    assert RomsTimeSplitter.__name__ in str(error.value)
 
 
 def test_materialize_inline_blueprints(inline_workplan: Workplan) -> None:

@@ -191,7 +191,6 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
     long_name = _APP_NAME_LONG
     runner = ForgeRunner
     blueprint = ForgeBlueprint
-    applicable_transforms = ()
     migrations = ()
 
     @t.override

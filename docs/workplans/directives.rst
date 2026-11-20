@@ -65,7 +65,9 @@ Several sources can be joined by separating them with ``;`` in a single
 combined, in the order given. If your parent and child are split into matching
 time segments, you may need to specify the directly corresponding parent segment
 as well as the one right after it, so that ROMS has enough forcing data to finish
-the last time step.
+the last time step. Before ROMS starts, the step stops with an error naming the
+files if their records leave a gap or do not cover its ``start_date`` to
+``end_date``; list every parent segment, e.g. ``step: parent_1;parent_2;parent_3``.
 
 
 
@@ -86,7 +88,8 @@ dataset. Configure exactly one of:
 ``step`` and ``path`` are mutually exclusive. Several sources can be joined by
 separating them with ``;`` in a single ``step`` or ``path`` value; the files
 from every listed source are combined, in the order given, and every listed
-source must contain carbonate sensitivity files.
+source must contain carbonate sensitivity files. As with ``nest-from``, the
+files must cover the step's ``start_date`` to ``end_date`` without a gap.
 
 ROMS writes the sensitivities to ``<output_root_name>_cdrgas.<timestamp>.nc``
 files only when the producing run has MARBL enabled and its namelist sets

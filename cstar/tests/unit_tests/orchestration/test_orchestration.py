@@ -1,16 +1,10 @@
-import os
 import typing as t
-import uuid
 from collections.abc import Mapping
-from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.applications.ucla_roms.models import UclaRomsBlueprint
-from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -24,16 +18,13 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import (
-    SplitFrequency,
-    WorkplanTransformer,
-    get_time_slices,
-)
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
 )
+
+if t.TYPE_CHECKING:
+    from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 
 APP_NAME: t.Final[str] = "roms_marbl"
 
@@ -120,51 +111,6 @@ def test_dep_keys(tmp_path: Path) -> None:
                 ),
             ],
         )
-
-
-def test_workplan_transformation(diamond_workplan: Workplan) -> None:
-    """Verify that the workplan transformation applies appropriate transforms when enabled."""
-    for step in diamond_workplan.steps:
-        step.application = Application.UCLA_ROMS.value
-
-    diamond_steps = {str(s.name) for s in diamond_workplan.steps}
-
-    transformer = WorkplanTransformer(diamond_workplan)
-    with (
-        mock.patch.dict(
-            os.environ,
-            {
-                ENV_CSTAR_RUNID: str(uuid.uuid4()),
-                ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-                ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
-            },
-        ),
-    ):
-        transformed = transformer.apply()
-
-    # start & end date in the blueprint.yaml file
-    sd, ed = datetime(2020, 1, 1), datetime(2021, 1, 1)
-
-    # start/end date cover 12 months. expect 4 steps per month.
-    n_expected_steps = 4 * 12
-    assert len(transformed.steps) == n_expected_steps, (
-        f"Expected {n_expected_steps} steps, got {len(transformed.steps)}"
-    )
-
-    for step in transformed.steps:
-        # confirm that the original dependencies were updated
-        assert not diamond_steps.intersection(step.depends_on)
-
-        assert step.blueprint_overrides is not None
-        blueprint = deserialize(step.blueprint_path, UclaRomsBlueprint)
-
-        # overrides will be transferred to the model after call to .apply
-        assert "runtime_params" not in step.blueprint_overrides
-
-        step_sd = blueprint.runtime_params.start_date
-        step_ed = blueprint.runtime_params.end_date
-
-        assert ((step_sd, step_ed)) in get_time_slices(sd, ed)
 
 
 def test_planner_creates_external_nodes(

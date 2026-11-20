@@ -155,7 +155,6 @@ class PlotterApplication(
     long_name = _APP_NAME_LONG
     runner = PlotterRunner
     blueprint = PlotterBlueprint
-    applicable_transforms = ()
     migrations = (PlotterSchemaAdapterV1V2,)
 
     @t.override

@@ -1119,6 +1119,32 @@ class TestCreateSchedulerJob:
     @patch(
         "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
     )
+    def test_create_pbs_gpu_job_without_gpu_resource(self, mock_scheduler):
+        """Where the GPU nodes define no GPU resource, the select line leaves
+        out `ngpus` and keeps the rest of the layout.
+        """
+        mock_scheduler.return_value = PBSScheduler(
+            queues=[PBSQueue(name="gpu_q", max_walltime="02:00:00")],
+            primary_queue_name="gpu_q",
+            gpu=GpuNodes(4, "gpu_q", {}, 64, request_gpus=False),
+        )
+
+        job = create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=8,
+            gpus=8,
+            account_key="pbs_account",
+            walltime="02:00:00",
+        )
+
+        assert (
+            "#PBS -l select=2:ncpus=64:mpiprocs=4,walltime=02:00:00"
+            in job.script.split("\n")
+        )
+
+    @patch(
+        "cstar.system.manager.CStarSystemManager.scheduler", new_callable=PropertyMock
+    )
     def test_create_pbs_gpu_job_needs_uniform_tasks(self, mock_scheduler):
         """PBS needs the same task count on every node of a GPU job."""
         mock_scheduler.return_value = PBSScheduler(

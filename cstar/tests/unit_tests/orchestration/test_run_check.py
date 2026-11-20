@@ -512,16 +512,17 @@ def run_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def make_workplan(
-    blueprint: Path, run_root: Path, *names: str, parent: LiveStep | None = None
+    blueprint: Path, run_root: Path, *names: str, under: Path | None = None
 ) -> LiveWorkplan:
-    """A prepared workplan whose steps work in `<run_root>/tasks/<slug>`."""
-    tasks_dir = JobFileSystemManager(run_root).tasks_dir
+    """A prepared workplan whose steps work in `<under>/tasks/<slug>`.
+
+    `under` defaults to the run root.
+    """
+    tasks_dir = JobFileSystemManager(under or run_root).tasks_dir
     steps = [
         LiveStep.from_step(
             Step(name=name, application="hello_world", blueprint=blueprint),
-            update={"parent": parent}
-            if parent
-            else {"working_dir": tasks_dir / slugify(name)},
+            update={"working_dir": tasks_dir / slugify(name)},
         )
         for name in names
     ]
@@ -582,17 +583,16 @@ def test_find_orphans_reports_what_no_step_claims(
     assert kept not in orphans.sentinels
 
 
-def test_find_orphans_accounts_for_the_parent_of_a_split_step(
+def test_find_orphans_accounts_for_a_run_split_by_an_earlier_release(
     run_root: Path, fake_blueprint_path: Path
 ) -> None:
-    """Verify the directory of a step that was split is not reported: its
-    sub-steps work beneath it and only they remain in the workplan.
+    """Verify the directory of a step an earlier release split is not reported:
+    its sub-steps work beneath it and only they remain in the workplan.
     """
-    parent_wp = make_workplan(fake_blueprint_path, run_root, "simulate")
-    wp = make_workplan(
-        fake_blueprint_path, run_root, "part-1", "part-2", parent=parent_wp.steps[0]
-    )
     parent_dir = JobFileSystemManager(run_root).tasks_dir / "simulate"
+    wp = make_workplan(
+        fake_blueprint_path, run_root, "part-1", "part-2", under=parent_dir
+    )
     assert wp.steps[0].working_dir == parent_dir / "tasks" / "part-1"
     (parent_dir / "tasks" / "part-1").mkdir(parents=True)
 

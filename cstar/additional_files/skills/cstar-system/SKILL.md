@@ -285,10 +285,15 @@ The ROMS build reads these variables, each an install prefix holding `lib/`:
   such as a missing node constraint: run `sbatch --test-only` again with the
   `directives` you chose (as `--key value`), and judge the account and the
   queue from that answer.
+- `upper_case_account: true` when `sbatch --test-only` refuses the account as
+  `sacctmgr` lists it but accepts it in upper case (TACC); C-Star then submits
+  the account in upper case.
 - PBS: list the queues the documentation tells users to submit to, each with
   the `resources_max.walltime` from `qstat -Qf` as a fixed, quoted walltime.
 - `gpu_nodes` and a `gpu` toolchain: only when the user wants GPU runs; the
   template's commented-out blocks show the keys.
+  Set `request_gpus: false` when `sbatch --test-only` with `--gpus-per-node`
+  is refused as an invalid GRES and the GPU partition alone reaches the nodes.
 
 ### Detection
 

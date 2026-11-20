@@ -3,23 +3,12 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
-from cstar.applications.core import ArtifactKind, Transform
-from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.core import ArtifactKind
 from cstar.base.deprecation import deprecated
-from cstar.base.env import get_env_item
 from cstar.base.exceptions import CstarError
-from cstar.base.feature import (
-    ENV_FF_ORCH_TRX_TIMESPLIT,
-    ENV_FF_ORCH_TRX_TIMESPLIT_FREQ,
-    ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
-    is_feature_enabled,
-)
 from cstar.base.log import get_logger
 from cstar.base.utils import (
     coerce_datetime,
-    deep_merge,
-    min_padded_index,
-    slugify,
 )
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
@@ -27,177 +16,28 @@ from cstar.orchestration.manifest import (
     require_recorded_files,
 )
 from cstar.orchestration.orchestration import LiveStep
-from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
     OverrideDirective,
-    get_time_slices,
     lookup_step,
 )
 from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_REMEDY
 from cstar.roms.outputs import (
     EXTRACT_ROLE,
-    OUTPUT_ROOT_NAME,
     BoundaryFile,
     CarbonateSensitivityFile,
     RestartFile,
     TimestampedOutputFile,
     warn_on_restart_start_date_mismatch,
 )
+from cstar.roms.source_coverage import check_source_coverage
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveWorkplan
 
 log = get_logger(__name__)
-
-
-class RomsTimeSplitter(Transform[LiveStep]):
-    """A step tranformation that splits a ROMS simulation into
-    multiple sub-steps based on the timespan covered by the simulation.
-    """
-
-    frequency: str
-    """The step splitting frequency used to generate new time steps."""
-
-    def __init__(self) -> None:
-        """Initialize the transform instance."""
-        self.frequency = get_env_item(ENV_FF_ORCH_TRX_TIMESPLIT_FREQ).value.lower()
-
-    @classmethod
-    def is_active(cls) -> bool:
-        """Return `True` when time splitting is enabled via feature flag.
-
-        Returns
-        -------
-        bool
-        """
-        return is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT)
-
-    def get_subtask_name(
-        self,
-        i: int,
-        n: int,
-        sd: datetime,
-        ed: datetime,
-        name: str,
-    ) -> str:
-        """Generate an appropriate subtask name given subtask-specific metadata.
-
-        Returns
-        -------
-        str
-        """
-        padded_idx = min_padded_index(i, n)
-        dynamic_name = f"{self.suffix()}{padded_idx}"
-
-        if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME):
-            compact_fmt = "%Y%m%d%H%M"
-            compact_sd = sd.strftime(compact_fmt)
-            compact_ed = ed.strftime(compact_fmt)
-            dynamic_name = f"{padded_idx}_{name}_{compact_sd}_{compact_ed}"
-
-        return slugify(dynamic_name)
-
-    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
-        """Split a step into multiple sub-steps.
-
-        Parameters
-        ----------
-        step : Step
-            The step to split.
-
-        Returns
-        -------
-        Sequence[LiveStep]
-            Steps for each subtask resulting from the split.
-        """
-        blueprint = t.cast("UclaRomsBlueprint", step.blueprint)
-        start_date = blueprint.runtime_params.start_date
-        end_date = blueprint.runtime_params.end_date
-
-        bp_path = step.fsm.run_dir / Path(step.blueprint_path).name
-        serialize(bp_path, blueprint)
-
-        time_slices = list(get_time_slices(start_date, end_date, self.frequency))
-        n_slices = len(time_slices)
-
-        if end_date <= start_date:
-            msg = "end_date must be after start_date"
-            raise ValueError(msg)
-
-        depends_on = step.depends_on
-        last_restart_file: RestartFile | None = None
-
-        results: list[LiveStep] = []
-        for i, (sd, ed) in enumerate(time_slices):
-            bp_copy = UclaRomsBlueprint(
-                **blueprint.model_dump(
-                    exclude_unset=True,
-                    exclude_defaults=True,
-                    exclude_computed_fields=True,
-                    exclude={"$schema"},
-                ),
-            )
-
-            child_step_name = self.get_subtask_name(i, n_slices, sd, ed, step.safe_name)
-
-            child_fs = step.fsm.get_subtask_manager(child_step_name)
-
-            description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
-            overrides: dict[str, t.Any] = {
-                "name": child_step_name,
-                "description": description,
-                "runtime_params": {
-                    "start_date": sd,
-                    "end_date": ed,
-                },
-                "working_dir": child_fs.root_dir.as_posix(),
-            }
-
-            if last_restart_file:
-                overrides = deep_merge(
-                    overrides,
-                    RestartFileTrxAdapter.adapt(last_restart_file),
-                )
-
-            child_bp_path = child_fs.run_dir / f"{child_step_name}_bp.yaml"
-            serialize(child_bp_path, bp_copy)
-
-            updates: dict[str, t.Any] = {
-                "blueprint": child_bp_path.as_posix(),
-                "blueprint_overrides": overrides,
-                "depends_on": depends_on,
-                "name": child_step_name,
-                "parent": step,
-            }
-            child_step = LiveStep.from_step(step, update=updates)
-            results.append(child_step)
-
-            if i == len(time_slices) - 1:
-                break
-
-            # use dependency on the prior substep to chain all the dynamic steps
-            depends_on = [child_step.name]
-
-            # post_run always leaves a whole restart file in `output`, so the
-            # predicted name for the follow-up step's initial conditions never
-            # carries a partition segment.
-            restart_file = RestartFile.from_parts(
-                OUTPUT_ROOT_NAME, ed, None, child_fs.output_dir
-            )
-
-            # use output dir of the last step as the input for the next step
-            last_restart_file = restart_file
-
-        return tuple(results)
-
-    @staticmethod
-    def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
-        """
-        return "split"
 
 
 class RestartFileTrxAdapter:
@@ -451,6 +291,13 @@ SOURCE_KEY_STEP: t.Final[str] = "step"
 """Directive config key naming another workplan step as the content source."""
 SOURCE_DELIMITER: t.Final[str] = ";"
 """Delimiter separating multiple sources in a directive's `path`/`step` value."""
+_SOURCE_COVERAGE_REMEDY: t.Final[str] = (
+    f"List every segment of the source, separated by `{SOURCE_DELIMITER}` (e.g. "
+    f"`{SOURCE_KEY_STEP}: parent_1{SOURCE_DELIMITER}parent_2{SOURCE_DELIMITER}"
+    f"parent_3`, or `{SOURCE_KEY_PATH}:` with one output directory per segment), "
+    "and make sure the source runs cover the step's start_date to end_date."
+)
+"""How to fix directive sources that do not cover the step, appended to the refusal."""
 
 _OutputFileT = t.TypeVar("_OutputFileT", bound=TimestampedOutputFile)
 
@@ -604,6 +451,55 @@ def collect_output_files(
         deduped.setdefault(file.path.resolve(), file)
 
     return list(deduped.values())
+
+
+def verify_source_coverage(
+    directive: str,
+    files: Sequence[TimestampedOutputFile],
+    time_variable: str,
+    label: str,
+    step: LiveStep,
+    *,
+    missing_hint: str = "",
+) -> None:
+    """Refuse the files a directive supplies when they do not cover the step's run.
+
+    For a directive's `verify`: it runs once every directive has been applied,
+    so the run window is the one ROMS will use (a `continue-from` listed after
+    the directive sets `start_date`), and the files of the upstream steps the
+    directive names exist. See `check_source_coverage` for the rules.
+
+    Parameters
+    ----------
+    directive : str
+        The directive's key, for messages.
+    files : Sequence[TimestampedOutputFile]
+        The files the directive supplied.
+    time_variable : str
+        The time variable ROMS reads the files' records by.
+    label : str
+        What the files hold, for messages, e.g. "boundary".
+    step : LiveStep
+        The step with every directive applied.
+    missing_hint : str
+        Advice appended when a file lacks `time_variable`.
+
+    Raises
+    ------
+    CstarError
+        If the files leave a gap, do not span the step's `start_date` to
+        `end_date`, or cannot be read.
+    """
+    runtime = t.cast("UclaRomsBlueprint", step.blueprint).runtime_params
+    check_source_coverage(
+        files,
+        time_variable,
+        runtime.start_date,
+        runtime.end_date,
+        source=f"the `{directive}` {label} files",
+        remedy=_SOURCE_COVERAGE_REMEDY,
+        missing_hint=missing_hint,
+    )
 
 
 class ContinuanceDirective(OverrideDirective):
@@ -923,9 +819,15 @@ class NestingDirective(OverrideDirective):
     would set `initial_conditions`. Both deprecated keys are announced by
     `deprecated` at check and schedule time and again where the directive is
     applied, and stop working in 0.20.0.
+
+    Before the run starts, `verify` refuses boundary files whose records leave
+    a gap or do not span the step's `start_date` to `end_date`.
     """
 
     REPLACE_LISTS = True
+
+    _boundary_files: list[BoundaryFile]
+    """The boundary files `_generate_overrides` collected, for `verify`."""
 
     KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for the boundary forcing."""
@@ -1138,7 +1040,7 @@ class NestingDirective(OverrideDirective):
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
 
-        boundary_files = collect_output_files(
+        self._boundary_files = collect_output_files(
             BoundaryFile,
             ArtifactKind.boundary_forcing,
             self._config.get(self.KEY_PATH) or self._config.get(self.KEY_BRY_PATH),
@@ -1147,7 +1049,7 @@ class NestingDirective(OverrideDirective):
             role=EXTRACT_ROLE,
         )
 
-        overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
+        overrides = BoundaryFileTrxAdapter.adapt(self._boundary_files)
 
         if rst_path := self._config.get(self.KEY_RST_PATH):
             rst_search_path = Path(rst_path)
@@ -1158,6 +1060,29 @@ class NestingDirective(OverrideDirective):
                 raise ValueError(msg)
 
         return overrides
+
+    @t.override
+    def verify(self, step: LiveStep) -> None:
+        """Refuse boundary files that leave a gap or do not span the step's run.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step with every directive applied.
+
+        Raises
+        ------
+        CstarError
+            If the boundary files leave a gap, do not span the step's
+            `start_date` to `end_date`, or cannot be read.
+        """
+        verify_source_coverage(
+            self.key(),
+            self._boundary_files,
+            BoundaryFile.TIME_VARIABLE,
+            BoundaryFile.LABEL,
+            step,
+        )
 
     @t.override
     @staticmethod
@@ -1193,10 +1118,15 @@ class CarbonateSensitivityDirective(OverrideDirective):
     `;` (surrounding whitespace ignored); the `_cdrgas` files from every listed
     source are combined, in the order given, and every listed source must
     contain such files. The producing step must be a MARBL run whose namelist
-    sets `do_cdr_gas_exch_output` for ROMS to write them.
+    sets `do_cdr_gas_exch_output` for ROMS to write them. Before the run starts,
+    `verify` refuses files whose records leave a gap or do not span the step's
+    `start_date` to `end_date`.
     """
 
     REPLACE_LISTS = True
+
+    _files: list[CarbonateSensitivityFile]
+    """The `_cdrgas` files `_generate_overrides` collected, for `verify`."""
 
     KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for the carbonate sensitivities."""
@@ -1316,7 +1246,7 @@ class CarbonateSensitivityDirective(OverrideDirective):
             raise NotImplementedError("; ".join(problems))
 
         try:
-            files = collect_output_files(
+            self._files = collect_output_files(
                 CarbonateSensitivityFile,
                 ArtifactKind.gas_exchange,
                 self._config.get(self.KEY_PATH),
@@ -1326,7 +1256,31 @@ class CarbonateSensitivityDirective(OverrideDirective):
         except FileNotFoundError as err:
             raise FileNotFoundError(f"{err} {_CDR_GAS_OUTPUT_HINT}") from err
 
-        return CarbonateSensitivityTrxAdapter.adapt(files)
+        return CarbonateSensitivityTrxAdapter.adapt(self._files)
+
+    @t.override
+    def verify(self, step: LiveStep) -> None:
+        """Refuse `_cdrgas` files that leave a gap or do not span the step's run.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step with every directive applied.
+
+        Raises
+        ------
+        CstarError
+            If the files leave a gap, do not span the step's `start_date` to
+            `end_date`, lack the forcing time variable, or cannot be read.
+        """
+        verify_source_coverage(
+            self.key(),
+            self._files,
+            CarbonateSensitivityFile.TIME_VARIABLE,
+            CarbonateSensitivityFile.LABEL,
+            step,
+            missing_hint=CARBONATE_SENSITIVITY_REMEDY,
+        )
 
     @t.override
     @staticmethod

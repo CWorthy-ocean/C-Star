@@ -21,6 +21,8 @@ from cstar.applications.forge import source_datasets
 from cstar.applications.forge.source_datasets import (
     DATASET_REGISTRY,
     GLOFAS_FILENAME,
+    GLOFAS_URL,
+    GLOFAS_VERSION,
     SOURCE_ALIAS,
     SRTM15_URL,
     SRTM15_VERSION,
@@ -720,26 +722,85 @@ class TestRegistryConsistency:
 
 
 class TestPrepareGlofas:
-    """Tests for the GLOFAS user-provided dataset handler."""
+    """Tests for the GLOFAS (Google Drive) dataset handler."""
 
-    def test_missing_file_raises_with_instructions(self, tmp_path):
-        """Missing GloFAS file raises FileNotFoundError pointing at the expected path."""
+    @staticmethod
+    def _fake_download(calls: list[tuple[str, str]]):
+        def fake_download(url, out, quiet=False):
+            calls.append((url, out))
+            Path(out).touch()
+            return out
+
+        return fake_download
+
+    def test_downloads_to_versioned_filename(self, tmp_path, monkeypatch):
+        """A missing file is downloaded from GLOFAS_URL to the versioned path."""
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            source_datasets.gdown, "download", self._fake_download(calls)
+        )
+
         sd = SourceDatasets(datasets=["GLOFAS"], source_data_dir=tmp_path)
+        sd.prepare_all()
 
-        with pytest.raises(FileNotFoundError, match="GloFAS"):
-            sd.prepare_all()
+        expected = tmp_path / "GLOFAS" / GLOFAS_FILENAME
+        assert GLOFAS_VERSION in GLOFAS_FILENAME
+        assert sd.paths["GLOFAS"] == expected
+        assert calls == [(GLOFAS_URL, str(expected))]
 
-    def test_verified_when_file_present(self, tmp_path):
-        """Existing GloFAS file is accepted and recorded in sd.paths."""
-        glofas_dir = tmp_path / "GLOFAS"
-        glofas_dir.mkdir(parents=True)
-        glofas_file = glofas_dir / GLOFAS_FILENAME
+    def test_existing_file_is_reused(self, tmp_path, monkeypatch):
+        """An already-staged versioned file short-circuits the download."""
+
+        def fail_download(*args, **kwargs):
+            raise AssertionError("gdown.download should not be called")
+
+        monkeypatch.setattr(source_datasets.gdown, "download", fail_download)
+
+        glofas_file = tmp_path / "GLOFAS" / GLOFAS_FILENAME
+        glofas_file.parent.mkdir(parents=True)
         glofas_file.touch()
 
         sd = SourceDatasets(datasets=["GLOFAS"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert sd.paths["GLOFAS"] == glofas_file
+
+    def test_clobber_redownloads(self, tmp_path, monkeypatch):
+        """clobber=True replaces an already-staged file."""
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            source_datasets.gdown, "download", self._fake_download(calls)
+        )
+
+        glofas_file = tmp_path / "GLOFAS" / GLOFAS_FILENAME
+        glofas_file.parent.mkdir(parents=True)
+        glofas_file.write_text("old")
+
+        sd = SourceDatasets(datasets=["GLOFAS"], source_data_dir=tmp_path, clobber=True)
+        sd.prepare_all()
+
+        assert calls == [(GLOFAS_URL, str(glofas_file))]
+        assert glofas_file.read_text() == ""
+
+    def test_unversioned_file_is_reported_not_reused(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """A hand-staged unversioned file is named as stale and not reused."""
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            source_datasets.gdown, "download", self._fake_download(calls)
+        )
+
+        dataset_dir = tmp_path / "GLOFAS"
+        dataset_dir.mkdir(parents=True)
+        (dataset_dir / "glofas_v4_rivers_daily_w_rivr2o.nc").touch()
+
+        SourceDatasets(datasets=["GLOFAS"], source_data_dir=tmp_path).prepare_all()
+
+        assert calls == [(GLOFAS_URL, str(dataset_dir / GLOFAS_FILENAME))]
+        out = capsys.readouterr().out
+        assert "glofas_v4_rivers_daily_w_rivr2o.nc (unversioned)" in out
+        assert "no longer" in out
 
     def test_dataset_key_for_source(self):
         """Logical name 'GLOFAS' resolves to the 'GLOFAS' dataset key."""

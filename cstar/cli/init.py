@@ -304,8 +304,14 @@ def query_slurm(args: "Sequence[str]") -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def slurm_hints() -> None:
-    """Show the user's SLURM associations and the partitions, when they can be queried."""
+def slurm_hints(scheduler: "Scheduler | None" = None) -> None:
+    """Show the user's SLURM associations and the partitions, when they can be queried.
+
+    Parameters
+    ----------
+    scheduler : Scheduler, optional
+        The system's scheduler; a SLURM one lists the accounts as jobs submit them.
+    """
     user = current_user()
     assoc = query_slurm(
         ["sacctmgr", "-nP", "show", "assoc", f"user={user}", "format=Account,Partition"]
@@ -314,6 +320,8 @@ def slurm_hints() -> None:
         echo("Your SLURM associations (account, partition):")
         for line in assoc:
             account, _, partition = line.partition("|")
+            if scheduler is not None:
+                account = scheduler.account_name(account)
             echo(f"{account}  {partition or '(any partition)'}", indent=4)
     partitions = query_slurm(["sinfo", "-h", "-o", "%P"])
     if partitions:
@@ -458,7 +466,7 @@ def scheduler_section(
     header("Scheduler (SLURM)")
     echo("A workplan run on this system submits jobs with these settings; a")
     echo("workplan can override them per step.")
-    slurm_hints()
+    slurm_hints(scheduler)
     if not yes:
         echo(PROMPT_HINT)
     required = required_slurm_settings(context)

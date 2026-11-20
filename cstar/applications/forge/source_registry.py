@@ -91,11 +91,13 @@ UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgd
 # download when the target path already exists, so an unversioned name would leave
 # every already-staged host silently on the old file.
 UNIFIED_BGC_FILENAME = f"BGCdataset_{UNIFIED_BGC_VERSION}.nc"
-GLOFAS_CDS_URL = "https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical"
-# Enriched with precomputed per-station RivR2O river-BGC concentrations (see
-# roms-tools' Rivr2oBgcSource "total_discharge" mode); produced by an external
-# preprocessing pipeline, not by GloFAS/Forge itself.
-GLOFAS_FILENAME = "glofas_v4_rivers_daily_w_rivr2o.nc"
+# Preprocessed GloFAS v4.0 river discharge with per-station RivR2O river-BGC
+# concentrations (see roms-tools' Rivr2oBgcSource "total_discharge" mode). As with
+# UNIFIED_BGC, upload a new file as a new version of the same Drive file and bump
+# GLOFAS_VERSION; the versioned filename makes staged hosts re-download.
+GLOFAS_VERSION = "v1"
+GLOFAS_URL = "https://drive.google.com/uc?id=1WeDRCb3lfbJWmgiNMArRxQqTmowTvKF4"
+GLOFAS_FILENAME = f"glofas_v4_rivers_daily_w_rivr2o_{GLOFAS_VERSION}.nc"
 
 # --- logical source-name -> dataset key --------------------------------------
 SOURCE_ALIAS: dict[str, str] = {
@@ -120,7 +122,7 @@ SOURCE_ALIAS: dict[str, str] = {
     "DAI": "DAI",  # placeholder until a real DAI handler exists
     "GLOFAS": "GLOFAS",  # alternative river-discharge dataset (roms-tools rt>=4, PR #625)
     "EMOD": "EMOD",  # alternative topography source (EMODnet); user-staged, like TPXO/WOA
-    "RIVR2O": "RIVR2O",  # river biogeochemistry source; user-staged, like TPXO/WOA/GLOFAS
+    "RIVR2O": "RIVR2O",  # river biogeochemistry source; user-staged, like TPXO/WOA/EMOD
     "GLODAP": "GLODAP",  # GLODAPv2.2016b mapped BGC climatology; user-staged, like EMOD/RIVR2O
     "CONSTANTS": "CONSTANTS",  # river-BGC default (roms-tools' own auto-download)
 }
@@ -146,8 +148,8 @@ STREAMABLE_SOURCES = ["ERA5", "CONUS404", "DAI", "CONSTANTS"]
 #   - "DAI":    river dataset streamed at run time (placeholder; no handler yet).
 # `SourceDatasets` treats these as valid-but-skipped, distinct from a genuinely unknown key
 # (a typo), which still raises. NOTE: "GLOFAS" (the other river source) is NOT here —
-# unlike DAI it has no roms-tools auto-download, so it IS staged (verified) by Forge via
-# a real @register_dataset("GLOFAS") handler, same as the TPXO/WOA user-provided pattern.
+# unlike DAI it has no roms-tools auto-download, so it IS staged by Forge via a real
+# @register_dataset("GLOFAS") handler, which downloads it from Google Drive.
 UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 
 # Pseudo-source names that are computed/derived at generation time, not fetched or staged
@@ -181,7 +183,7 @@ DATASET_METADATA: dict[str, dict[str, str]] = {
     "ERA5": {},
     "CONUS404": {},
     "DAI": {},
-    "GLOFAS": {"url": GLOFAS_CDS_URL},
+    "GLOFAS": {"url": GLOFAS_URL},
     "EMOD": {},  # user-staged (EMODnet has no canonical download URL Forge can pin)
     "RIVR2O": {},  # user-staged (no roms-tools auto-download; annual files, 1903-2024)
     "GLODAP": {},  # user-staged (GLODAPv2.2016b mapped climatology; no auto-download)

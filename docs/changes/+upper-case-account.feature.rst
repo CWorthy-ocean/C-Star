@@ -1,0 +1,1 @@
+A SLURM system file can set ``upper_case_account: true`` for a site that accepts accounts only in upper case; C-Star then submits the account, and lists it in ``cstar init``, in upper case. Stampede3's file sets it, since TACC refuses the lower-case name SLURM reports.

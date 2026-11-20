@@ -3,15 +3,15 @@ import unittest.mock as mock
 
 import pytest
 
-from cstar.applications.ucla_roms.transforms import RomsTimeSplitter
 from cstar.base.env import FLAG_OFF, FLAG_ON, get_env_item
 from cstar.base.feature import (
     ENV_FF_DEVELOPER_MODE,
-    ENV_FF_ORCH_TRX_TIMESPLIT,
-    ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
     is_feature_enabled,
     is_flag_enabled,
 )
+
+SYNTHETIC_FLAG = "CSTAR_FF_AREA_TOPIC_FEATURE"
+"""A flag name that no C-Star feature uses, for the hierarchy tests."""
 
 
 def test_feature_default() -> None:
@@ -29,8 +29,6 @@ def test_feature_default() -> None:
     [
         (ENV_FF_DEVELOPER_MODE, FLAG_ON),
         (ENV_FF_DEVELOPER_MODE, FLAG_OFF),
-        (ENV_FF_ORCH_TRX_TIMESPLIT, FLAG_ON),
-        (ENV_FF_ORCH_TRX_TIMESPLIT, FLAG_OFF),
     ],
 )
 def test_feature_set_externally(key: str, flag_value: bool) -> None:
@@ -72,17 +70,19 @@ def test_is_feature_enabled(env: dict[str, str], flag: str, expected: bool) -> N
     [
         ({}, False),
         ({ENV_FF_DEVELOPER_MODE: FLAG_ON}, False),
-        ({ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON}, True),
-        ({ENV_FF_DEVELOPER_MODE: FLAG_ON, ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON}, True),
+        ({SYNTHETIC_FLAG: FLAG_ON}, True),
+        ({"CSTAR_FF_AREA": FLAG_ON}, True),
+        ({"CSTAR_FF_AREA_TOPIC": FLAG_ON}, True),
+        ({ENV_FF_DEVELOPER_MODE: FLAG_ON, SYNTHETIC_FLAG: FLAG_ON}, True),
+        ({ENV_FF_DEVELOPER_MODE: FLAG_ON, SYNTHETIC_FLAG: FLAG_OFF}, False),
     ],
 )
-def test_time_splitting_needs_its_own_flag(env: dict[str, str], expected: bool) -> None:
-    """Verify developer mode does not turn on time-splitting or its long names;
-    only the time-splitting flag does (it encloses the long-name flag).
+def test_a_feature_needs_its_own_flag(env: dict[str, str], expected: bool) -> None:
+    """Verify developer mode does not turn on another flag; only that flag, or a
+    segment enclosing it, does.
     """
     with mock.patch.dict(os.environ, env, clear=True):
-        assert RomsTimeSplitter.is_active() is expected
-        assert is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME) is expected
+        assert is_feature_enabled(SYNTHETIC_FLAG) is expected
 
 
 @pytest.mark.parametrize(

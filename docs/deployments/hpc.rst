@@ -63,8 +63,7 @@ What each system needs:
   (``CSTAR_SLURM_GPU_ACCOUNT`` or ``CSTAR_SLURM_ACCOUNT``); projects have a
   ``_g`` twin for GPU hours. GPU jobs carry ``-C gpu``.
 - **Stampede3**: the queue is required; an unset account charges your only
-  TACC project. Give the account in upper case, as TACC writes the project
-  (``TG-ABC123456``): TACC refuses the lower-case name ``cstar init`` lists.
+  TACC project. GPU jobs go to the ``h100`` partition.
 - **Anvil** GPU jobs (untested; GPU runs there are planned for a later
   release): need a ``<allocation>-gpu`` account in
   ``CSTAR_SLURM_GPU_ACCOUNT``; the ``gpu`` partition is the default.

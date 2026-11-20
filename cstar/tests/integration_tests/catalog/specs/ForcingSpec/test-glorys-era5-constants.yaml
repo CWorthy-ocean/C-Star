@@ -1,6 +1,7 @@
 schema_version: 2.0.0
 description: "Test: GLORYS + ERA5 from pinned local files, BGC from constant values"
-# No bgc surface item: forge has no constants surface source.
+# No bgc surface item: forge has no constants surface source. CHL and Fe seed the
+# plankton and ligand tracers (roms-tools derives them); without them they start at zero.
 
 initial_conditions:
   source:
@@ -10,7 +11,7 @@ initial_conditions:
   bgc_sources:
     - source:
         name: constants
-        constants: {PO4: 0.5, NO3: 5.0, SiO3: 10.0, NH4: 0.1, O2: 200.0, DIC: 2100.0, ALK: 2300.0}
+        constants: {PO4: 0.5, NO3: 5.0, SiO3: 10.0, NH4: 0.1, O2: 200.0, DIC: 2100.0, ALK: 2300.0, Fe: 0.0006, CHL: 0.3}
 
 forcing:
   surface:
@@ -28,6 +29,6 @@ forcing:
     bgc_sources:
       - source:
           name: constants
-          constants: {PO4: 0.5, NO3: 5.0, SiO3: 10.0, NH4: 0.1, O2: 200.0, DIC: 2100.0, ALK: 2300.0}
+          constants: {PO4: 0.5, NO3: 5.0, SiO3: 10.0, NH4: 0.1, O2: 200.0, DIC: 2100.0, ALK: 2300.0, Fe: 0.0006, CHL: 0.3}
   tidal: []
   river: []
