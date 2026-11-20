@@ -40,8 +40,9 @@ WOA_BGC
    World Ocean Atlas 2023 nutrients and oxygen (NO3, PO4, SiO3, O2) with the
    matching monthly temperature and salinity, as a gridded biogeochemical
    source: 78 files, about 3 GB, staged into ``<source_data>/WOA/`` and
-   resumable. WOA has no DIC, alkalinity or iron, so a MARBL run pairs it
-   with GLODAP, ESPER or constants.
+   resumable. WOA has no DIC, alkalinity, chlorophyll or iron, so a MARBL run
+   pairs it with GLODAP, ESPER or constants for DIC and alkalinity, and with
+   UNIFIED_BGC or constants for chlorophyll and iron.
 WOA_SALINITY
    The single World Ocean Atlas 2023 annual-mean salinity file (about 25 MB)
    that ESPER's salinity conditioning reads (see ESPER below). Downloaded

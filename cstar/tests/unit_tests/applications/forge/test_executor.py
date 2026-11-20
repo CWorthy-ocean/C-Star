@@ -161,6 +161,8 @@ _PHYSICS_ONLY_FORCING = {
     "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     "forcing": {
         "surface": [{"source": {"name": "ERA5"}, "type": "physics"}],
+        # the test domains have open sides, which need a boundary block
+        "boundary": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     },
 }
 
@@ -6183,3 +6185,30 @@ class TestOnlyInputsReuseIsIdempotent:
             "A second full run against a working_dir that already has all "
             "inputs must re-derive a byte-identical B_{name}.yaml."
         )
+
+
+class TestConfigureBuildForcingCoverage:
+    """``configure_build``'s net for stored or hand-edited blueprints run with
+    validate=False: ``check_forcing_coverage`` refuses MARBL without MARBL code and
+    a MARBL source set with no CHL or Fe provider. Reuses ``TestGoldenNamelist``'s
+    generation helpers; the edits are made after generation, which the mocked
+    roms-tools objects would not survive before.
+    """
+
+    def test_refuses_marbl_without_marbl_code(self, mock_grid, tmp_path):
+        host = TestGoldenNamelist()
+        cfg, builder = host._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        builder.code_spec = builder.code_spec.model_copy(update={"marbl": None})
+        with pytest.raises(ValueError, match=r"cppdefs\.marbl is on"):
+            host._configure_build_for(cfg, builder)
+
+    def test_refuses_esper_only_initial_conditions(self, mock_grid, tmp_path):
+        from cstar.applications.forge.blueprint import BgcSourceItem, SourceSpec
+
+        host = TestGoldenNamelist()
+        cfg, builder = host._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        builder.forcing.initial_conditions.bgc_sources = [
+            BgcSourceItem(source=SourceSpec(name="ESPER"))
+        ]
+        with pytest.raises(ValueError, match="no source provides CHL or Fe"):
+            host._configure_build_for(cfg, builder)

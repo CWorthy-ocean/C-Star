@@ -53,6 +53,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_diagnostics_pio,
+    check_forcing_coverage,
     check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_marbl_step_averages,
@@ -2642,6 +2643,18 @@ class ForgeExecutor(BaseModel):
         check_constant_fe(
             self._settings_run_time.get("marbl_bgc") or {},
             bgc_mode_is_marbl=cppdefs.get("marbl", False),
+        )
+
+        # MARBL code, boundary block and CHL/Fe providers, mirroring the resolver's
+        # (first, as there). Shared via check_forcing_coverage.
+        check_forcing_coverage(
+            self.forcing,
+            cppdefs=cppdefs,
+            marbl_code=None
+            if self.code_spec is None
+            else self.code_spec.marbl is not None,
+            open_boundaries=self.open_boundaries.model_dump(),
+            is_child=self.grid_kwargs_parent is not None,
         )
 
         # MARBL BGC-inputs net, mirroring the resolver's: a stored or hand-edited

@@ -80,6 +80,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_diagnostics_pio,
+    check_forcing_coverage,
     check_marbl_bgc_inputs,
     check_marbl_only_outputs,
     check_marbl_step_averages,
@@ -1541,8 +1542,19 @@ def build_forge_blueprint(
                 "the ForcingSpec."
             )
 
+    # ----- MARBL code, boundary block, CHL/Fe providers ----------------------
+    # First, so a MARBL override under bgc_mode "none" is named as such rather
+    # than as missing BGC sources.
+    check_forcing_coverage(
+        sources,
+        cppdefs=settings["cppdefs"],
+        marbl_code=bgc_mode == "marbl",
+        open_boundaries=open_boundaries,
+        is_child=grid_kwargs_parent is not None,
+    )
+
     # ----- MARBL needs BGC sources on the boundary and initial conditions -----
-    # The mirror of the check above: ucla-roms >= 0.14.0 stops a MARBL run at
+    # The mirror of the bgc_mode check further up: ucla-roms >= 0.14.0 stops a MARBL run at
     # startup when a BGC tracer is missing from them. Keyed on the merged cppdefs
     # (an override can turn MARBL off after bgc_mode set it), like the checks above;
     # needs the built forcing, so it sits here rather than with them.

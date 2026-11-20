@@ -45,7 +45,10 @@ ForcingSpec (``specs/ForcingSpec/<name>.yaml``)
    for ``bgc_mode`` ``none`` and ``cdr_lite``. With MARBL on ucla-roms 0.14.0
    or later, the boundary forcing and the initial conditions need
    biogeochemical sources (a nested child gets its boundary from its parent).
-   See :doc:`source_datasets` for the sources.
+   Under MARBL, one of those sources must supply chlorophyll (``CHL``) and one
+   iron (``Fe``), from which ROMS-Tools derives the plankton and the iron
+   ligand; the bundled ESPER and GLODAP/WOA entries take both from the unified
+   climatology. See :doc:`source_datasets` for the sources.
 
 OutputSpec (``specs/OutputSpec/<name>.yaml``)
    Which fields the model writes, how often, and how files are packed, per

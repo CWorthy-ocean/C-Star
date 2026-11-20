@@ -94,7 +94,7 @@ from cstar.roms.precheck import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Container, Iterable, Mapping, Sequence
 
-    from cstar.applications.forge.blueprint import Forcing
+    from cstar.applications.forge.blueprint import BgcSourceItem, Forcing
 
 
 def _coerce_pathlike(v):
@@ -1011,6 +1011,181 @@ def check_diagnostics_pio(cppdefs: Mapping[str, Any], roms_ref: str | None) -> N
             f"before {minimum}. Pin ucla-roms >= {minimum}, or turn off use_pio or "
             "cppdefs.diagnostics."
         )
+
+
+# The source fields roms-tools derives MARBL tracers from that no other field can
+# replace: ``Fe`` gives ``Lig``, and ``CHL`` gives every phytoplankton and
+# zooplankton tracer (``BGCMarbl.derivation_rules``). Without them, and without the
+# tracers themselves, roms-tools sets those tracers to zero.
+_MARBL_SEED_FIELDS: tuple[str, ...] = ("CHL", "Fe")
+
+
+def _bgc_source_vars(item: BgcSourceItem) -> frozenset[str] | None:
+    """The BGC variables one ``bgc_sources`` item hands roms-tools: its
+    ``use_vars``, else a ``constants`` source's names, else everything the
+    roms-tools dataset reads (its ``var_names`` and ``opt_var_names``, so an
+    optional variable a file lacks counts as supplied: the check can only pass
+    more, never refuse a complete set). ``None`` for a source name Forge does not
+    know, which is not checked.
+    """
+    if item.use_vars is not None:
+        return frozenset(item.use_vars)
+    name = item.source.name.upper()
+    if name == "CONSTANTS":
+        return frozenset(item.source.constants or {})
+    if name == "ESPER":
+        from roms_tools.setup.esper import ESPER_SUPPORTED_VARS
+
+        return frozenset(ESPER_SUPPORTED_VARS)
+    import dataclasses
+
+    from roms_tools.datasets import lat_lon_datasets as rt_datasets
+
+    dataset = {
+        "UNIFIED": rt_datasets.UnifiedBGCDataset,
+        "CESM_REGRIDDED": rt_datasets.CESMBGCDataset,
+        "GLODAP": rt_datasets.GLODAPv2BGCDataset,
+        "WOA_BGC": rt_datasets.WOABGCDataset,
+    }.get(name)
+    if dataset is None:
+        return None
+    supplied: set[str] = set()
+    for field in dataclasses.fields(dataset):
+        if field.name in ("var_names", "opt_var_names") and callable(
+            field.default_factory
+        ):
+            supplied |= set(field.default_factory())
+    return frozenset(supplied)
+
+
+def _marbl_seed_problem(label: str, bgc_sources: Sequence[BgcSourceItem]) -> str | None:
+    """Why roms-tools would zero MARBL tracers for one IC or boundary source set:
+    the ``Fe``- and ``CHL``-derived tracers (and ``Fe``) that no source supplies,
+    directly or through the field they derive from. ``None`` when the set is
+    complete, empty (:func:`check_marbl_bgc_inputs` owns that) or holds a source
+    Forge does not know.
+    """
+    if not bgc_sources:
+        return None
+    supplied: set[str] = set()
+    for item in bgc_sources:
+        variables = _bgc_source_vars(item)
+        if variables is None:
+            return None
+        supplied |= variables
+
+    from roms_tools.setup.bgc_model import BGCMarbl
+
+    rules = BGCMarbl.derivation_rules()
+    tracers = BGCMarbl().tracer_vars()
+    seeded = {t for t, source, _ in rules if source in _MARBL_SEED_FIELDS}
+    seeded |= tracers.intersection(_MARBL_SEED_FIELDS)
+    present = supplied | {t for t, source, _ in rules if source in supplied}
+    zero = [t for t in BGCMarbl.TRACER_NAMES if t in seeded - present]
+    if not zero:
+        return None
+    absent = [f for f in _MARBL_SEED_FIELDS if f not in supplied]
+    names = ", ".join(item.source.name for item in bgc_sources)
+    return (
+        f"{label}.bgc_sources ({names}): no source provides {' or '.join(absent)}, "
+        f"so roms-tools sets {', '.join(zero)} to zero"
+    )
+
+
+def _check_marbl_code(
+    cppdefs: Mapping[str, Any], marbl_code: bool | None
+) -> str | None:
+    """``cppdefs.marbl`` on while the blueprint builds no MARBL library: ucla-roms
+    then fails to compile. ``marbl_code`` is whether ``code.marbl`` is (or, in the
+    resolver, will be) set; ``None`` when unknown, which is not checked.
+    """
+    if not cppdefs.get("marbl") or marbl_code is None or marbl_code:
+        return None
+    return (
+        'cppdefs.marbl is on but bgc_mode is not "marbl", so code.marbl is not set '
+        "and the MARBL library is not built (ucla-roms would fail to compile). Set "
+        'bgc_mode "marbl" instead of overriding cppdefs.marbl, or drop the override'
+    )
+
+
+def _check_boundary_block(
+    forcing: Forcing, open_boundaries: Mapping[str, bool], is_child: bool
+) -> str | None:
+    """Open sides with no ``forcing.boundary`` on a domain that is not a child:
+    ROMS stops at start-up without boundary files. A child takes its boundary
+    from its parent's nesting file and needs none.
+    """
+    sides = [side for side, is_open in open_boundaries.items() if is_open]
+    if is_child or not sides or forcing.boundary is not None:
+        return None
+    return (
+        f"open_boundaries has open sides ({', '.join(sides)}) but the forcing has no "
+        "boundary block, and ROMS stops at start-up without boundary files. Add "
+        "forcing.boundary (e.g. from a ForcingSpec such as glorys-era5-physics), or "
+        "close those sides in the domain's open_boundaries"
+    )
+
+
+def check_forcing_coverage(
+    forcing: Forcing | None,
+    *,
+    cppdefs: Mapping[str, Any],
+    marbl_code: bool | None,
+    open_boundaries: Mapping[str, bool],
+    is_child: bool,
+) -> None:
+    """Reject a build whose forcing or MARBL switch would fail late or start wrong.
+
+    - ``cppdefs.marbl`` on without ``code.marbl`` (an override under a
+      ``bgc_mode`` other than ``"marbl"``): ucla-roms fails to compile.
+    - Open sides with no boundary block on a domain that is not a child: ROMS
+      stops at start-up.
+    - Under MARBL, an initial-conditions or (open, non-child) boundary source set
+      in which no source provides ``CHL`` (or the phytoplankton and zooplankton
+      tracers themselves) or none provides ``Fe``: roms-tools sets those tracers,
+      and ``Lig``, to zero with one warning, and the run starts with no biomass.
+      This is roms-tools' behaviour, so unlike :func:`check_marbl_bgc_inputs` it
+      is not gated on the ucla-roms release. An empty source list is left to that
+      check. Other zero-fills (``DIC``/``ALK`` from a WOA-only set) stay a
+      roms-tools warning.
+
+    ``forcing`` is ``None`` where the caller has none, which skips the forcing
+    rules. The resolver, ``process_forge_blueprint`` and ``configure_build`` call
+    this before :func:`check_marbl_bgc_inputs`.
+
+    Raises ``ValueError`` listing every problem.
+    """
+    problems = [_check_marbl_code(cppdefs, marbl_code)]
+    if forcing is not None:
+        problems.append(_check_boundary_block(forcing, open_boundaries, is_child))
+        if cppdefs.get("marbl"):
+            if forcing.initial_conditions is not None:
+                problems.append(
+                    _marbl_seed_problem(
+                        "initial_conditions", forcing.initial_conditions.bgc_sources
+                    )
+                )
+            if (
+                forcing.boundary is not None
+                and not is_child
+                and any(open_boundaries.values())
+            ):
+                problems.append(
+                    _marbl_seed_problem(
+                        "forcing.boundary", forcing.boundary.bgc_sources
+                    )
+                )
+    found = [p for p in problems if p]
+    if not found:
+        return
+    if any(p.startswith(("initial_conditions.", "forcing.boundary.")) for p in found):
+        found.append(
+            "A BGC source set needs a source of CHL and Fe: keep a UNIFIED item "
+            "(use_vars CHL, Fe, ...) beside ESPER/GLODAP/WOA_BGC as the bundled "
+            "glorys-era5-esper and glorys-era5-glodap-woa ForcingSpecs do, or give "
+            "a constants source CHL and Fe values"
+        )
+    raise ValueError("\n  - ".join(["The blueprint cannot run as configured:", *found]))
 
 
 # ucla-roms release from which a MARBL (or BEC2) run stops at startup when a BGC
