@@ -122,7 +122,7 @@ SOURCE_ALIAS: dict[str, str] = {
     "DAI": "DAI",  # placeholder until a real DAI handler exists
     "GLOFAS": "GLOFAS",  # alternative river-discharge dataset (roms-tools rt>=4, PR #625)
     "EMOD": "EMOD",  # alternative topography source (EMODnet); user-staged, like TPXO/WOA
-    "RIVR2O": "RIVR2O",  # river biogeochemistry source; user-staged, like TPXO/WOA/GLOFAS
+    "RIVR2O": "RIVR2O",  # river biogeochemistry source; user-staged, like TPXO/WOA/EMOD
     "GLODAP": "GLODAP",  # GLODAPv2.2016b mapped BGC climatology; user-staged, like EMOD/RIVR2O
     "CONSTANTS": "CONSTANTS",  # river-BGC default (roms-tools' own auto-download)
 }

@@ -67,15 +67,16 @@ The case uses GLORYS, ERA5, GLODAP, WOA, UNIFIED BGC, TPXO, GloFAS rivers (with
 RIVR2O) and MBL CO2, plus SRTM15 bathymetry. They come in three ways:
 
 - **Forge downloads them** into the shared source-data cache: GLORYS, SRTM15,
-  UNIFIED BGC, the WOA nutrients and oxygen, and MBL CO2. GLORYS needs a free
-  Copernicus Marine login (see :ref:`forge-data-access-glorys`) unless the
-  days you need are already in the cache.
+  UNIFIED BGC, the GloFAS river discharge, the WOA nutrients and oxygen, and
+  MBL CO2. GLORYS needs a free Copernicus Marine login (see
+  :ref:`forge-data-access-glorys`) unless the days you need are already in the
+  cache.
 - **ERA5 is streamed** by roms-tools when the inputs are generated.
 - **You stage them** in the source-data cache: TPXO tides (registration
   required, see :ref:`forge-data-access-tpxo`), the GLODAP climatology, the WOA
-  salinity used for surface salinity restoring, and the GloFAS river discharge
-  with the RIVR2O river chemistry. Forge stops and lists the paths it
-  expected if a staged file is missing.
+  salinity used for surface salinity restoring, and the RIVR2O river
+  chemistry. Forge stops and lists the paths it expected if a staged file is
+  missing.
 
 ``cstar forge show-paths`` prints the cache location. See
 :doc:`../applications/forge/source_datasets` for the layout each staged source expects and

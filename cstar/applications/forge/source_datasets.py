@@ -1087,7 +1087,7 @@ def _prepare_emod(self: SourceDatasets) -> Path:
 
     Unlike ETOPO5 (fetched automatically by roms-tools at grid-build time), EMODnet
     has no roms-tools auto-download and no single canonical filename, so this is a
-    USER_DATASET, like TPXO/WOA/GLOFAS: the file must already exist at the expected
+    USER_DATASET, like TPXO/WOA: the file must already exist at the expected
     location.
 
     Expected location: self.source_data_dir / "EMOD" / "*.nc" (any NetCDF file;
@@ -1131,7 +1131,7 @@ def _prepare_rivr2o(self: SourceDatasets) -> Path:
     Verify that the user has provided RIVR2O river biogeochemistry export files.
 
     RIVR2O has no roms-tools auto-download (unlike the CONSTANTS river-BGC default,
-    which roms-tools downloads itself), so this is a USER_DATASET, like TPXO/WOA/GLOFAS:
+    which roms-tools downloads itself), so this is a USER_DATASET, like TPXO/WOA/EMOD:
     the files must already exist at the expected location. The product ships one
     NetCDF file per year (1903-2024); roms-tools accepts a wildcard pattern spanning
     multiple years.
