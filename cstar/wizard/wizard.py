@@ -558,7 +558,8 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     ): "River dataset source name. 'DAI' uses the Dai-Trenberth global river discharge "
     "climatology (streamable, no download required). 'GLOFAS' uses the GloFAS v4.0 "
     "daily discharge dataset (higher resolution, more rivers); Forge downloads the "
-    "preprocessed file into source_data/GLOFAS/ the first time it is needed.",
+    "preprocessed file (about 10 GB) into source_data/GLOFAS/ the first time it is "
+    "needed.",
     (
         "river",
         "climatology",

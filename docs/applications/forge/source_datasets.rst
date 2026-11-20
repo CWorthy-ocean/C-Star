@@ -41,8 +41,8 @@ GLOFAS
    from the Copernicus Early Warning Data Store is preprocessed outside
    Forge (river mouths placed on coastal cells, RIVR2O river concentrations
    added), and Forge downloads the prepared file from Google Drive, like
-   UNIFIED_BGC, into ``<source_data>/GLOFAS/``. The staged filename carries
-   the version.
+   UNIFIED_BGC, into ``<source_data>/GLOFAS/``. The file is about 10 GB.
+   The staged filename carries the version.
 WOA_BGC
    World Ocean Atlas 2023 nutrients and oxygen (NO3, PO4, SiO3, O2) with the
    matching monthly temperature and salinity, as a gridded biogeochemical
