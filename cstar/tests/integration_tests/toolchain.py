@@ -5,6 +5,10 @@ CI (``CI`` set) it fails instead: a runner image that loses ``nccopy`` or a comp
 would otherwise turn the job green with no ROMS test run, since pytest exits 0 when
 everything is skipped. This is the rule the ``integration_test_data`` fixture in
 ``conftest.py`` follows for a failed download.
+
+A module declares its tools with ``pytestmark = pytest.mark.requires_tools("nccopy")``;
+the ``pytest_runtest_setup`` hook in ``conftest.py`` applies `require_tools` before any
+fixture is set up, so a runner without the tool does not first download the test data.
 """
 
 import os
@@ -39,27 +43,3 @@ def require_tools(*names: str) -> None:
     if os.environ.get("CI"):
         pytest.fail(reason, pytrace=False)
     pytest.skip(reason)
-
-
-def tools_required(*names: str) -> object:
-    """Build the autouse module fixture that applies `require_tools` to a test module.
-
-    Bind it to a module-level name, ``_toolchain = tools_required("nccopy")``, so that
-    every test in the module is skipped (failed under CI) when a tool is missing.
-
-    Parameters
-    ----------
-    *names : str
-        Keys of `TOOLS`.
-
-    Returns
-    -------
-    object
-        The pytest fixture.
-    """
-
-    @pytest.fixture(scope="module", autouse=True)
-    def _require() -> None:
-        require_tools(*names)
-
-    return _require

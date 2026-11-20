@@ -17,14 +17,13 @@ from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
 from cstar.orchestration.serialization import read_blueprint_raw
 from cstar.tests.integration_tests.cli_harness import make_cli_env, run_cstar
-from cstar.tests.integration_tests.toolchain import tools_required
 
 if t.TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
 
 GUARD_MESSAGE = "not a classic-format netCDF file"
 RUN_TIMEOUT = 40 * 60
-_toolchain = tools_required("nccopy", "mpirun", "mpifort or gfortran")
+pytestmark = pytest.mark.requires_tools("nccopy", "mpirun", "mpifort or gfortran")
 
 
 def with_netcdf4_grid(forge_dir: Path, edited: Path, run_dir: Path) -> Path:

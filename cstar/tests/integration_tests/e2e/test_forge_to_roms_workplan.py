@@ -54,7 +54,6 @@ from cstar.tests.integration_tests.cli_harness import (
     step_root,
     wait_for_terminal,
 )
-from cstar.tests.integration_tests.toolchain import tools_required
 
 if t.TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
@@ -124,7 +123,7 @@ ERROR_CONTEXT_LINES = 20
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 TIMESTAMP = re.compile(r"^\d{14}$")
 PRODUCT_HEADINGS = ("Products missing", "Products whose size", "Products whose content")
-_toolchain = tools_required("nccopy", "mpirun", "mpifort or gfortran")
+pytestmark = pytest.mark.requires_tools("nccopy", "mpirun", "mpifort or gfortran")
 
 
 @dataclass(frozen=True)

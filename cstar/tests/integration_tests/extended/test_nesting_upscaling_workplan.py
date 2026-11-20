@@ -49,7 +49,6 @@ from cstar.tests.integration_tests.cli_harness import (
     step_root,
     wait_for_terminal,
 )
-from cstar.tests.integration_tests.toolchain import tools_required
 
 if t.TYPE_CHECKING:
     import xarray as xr
@@ -124,7 +123,7 @@ REGISTRY_GLORYS_START = "2012-01-01T12:00:00"
 """The first record of the registry's GLORYS extract, where a run with initial conditions starts."""
 USCL_BOUNDARIES = ("north", "south", "east", "west")
 """The sides of the child that can carry an ``ALK_add_<side>`` export in ``_uscl``."""
-_toolchain = tools_required(
+pytestmark = pytest.mark.requires_tools(
     "nccopy", "mpirun", "mpifort or gfortran", "GNU timeout or gtimeout"
 )
 

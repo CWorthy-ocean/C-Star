@@ -43,14 +43,13 @@ from cstar.tests.integration_tests.cases import (
     RUN_END,
     RUN_START,
 )
-from cstar.tests.integration_tests.toolchain import tools_required
 
 if TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
     from cstar.applications.forge.engine import ForgeBlueprintExecutor
     from cstar.roms.namelist import RomsNamelistBase
 
-_toolchain = tools_required("nccopy")  # converts use_pio inputs to CDF-5
+pytestmark = pytest.mark.requires_tools("nccopy")  # converts use_pio inputs to CDF-5
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CDF5_MAGIC = b"CDF\x05"

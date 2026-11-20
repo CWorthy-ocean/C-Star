@@ -11,8 +11,9 @@ import typing as t
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from cstar.tests.integration_tests.cli_harness import make_cli_env, run_cstar
-from cstar.tests.integration_tests.toolchain import tools_required
 
 CASE = "test_case_remote_with_netcdf_datasets"
 COMPLETED_MESSAGE = "Blueprint execution completed"
@@ -20,7 +21,8 @@ RUN_TIMEOUT = 25 * 60
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 # joined outputs end in the timestamp; per-processor pieces add a rank after it
 PARTITIONED_OUTPUT = re.compile(r"\.\d{14}\.\d+\.nc$")
-_toolchain = tools_required("mpirun", "mpifort or gfortran")
+
+pytestmark = pytest.mark.requires_tools("mpirun", "mpifort or gfortran")
 
 
 def test_prebuilt_case_runs_with_partitioned_inputs(
