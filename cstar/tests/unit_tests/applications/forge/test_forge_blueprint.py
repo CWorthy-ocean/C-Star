@@ -3422,6 +3422,15 @@ def test_resolver_river_surface_forcing_source_with_path_not_noted():
     assert "ERA5" not in cfg.forcing.resolved_datasets
 
 
+# A constants item supplying CHL and Fe, which a MARBL source set without UNIFIED
+# needs (check_forcing_coverage), and the variables an ESPER item takes beside it.
+_CHL_FE_ITEM = {
+    "source": {"name": "constants", "constants": {"CHL": 0.3, "Fe": 6.0e-4}},
+    "use_vars": ["CHL", "Fe"],
+}
+_ESPER_USE_VARS = ["ALK", "DIC", "NO3", "PO4", "SiO3", "O2"]
+
+
 def test_resolver_ic_bgc_esper_source_excluded_from_datasets():
     """Regression: an ESPER-named IC-BGC source (SourceSpec.name == "ESPER") is
     derived from physics T/S via PyESPER at generation time -- Forge has no
@@ -3436,7 +3445,11 @@ def test_resolver_ic_bgc_esper_source_excluded_from_datasets():
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["initial_conditions"]["bgc_sources"] = [
-        {"source": {"name": "ESPER", "path": "/tmp/PyESPER"}}
+        {
+            "source": {"name": "ESPER", "path": "/tmp/PyESPER"},
+            "use_vars": _ESPER_USE_VARS,
+        },
+        _CHL_FE_ITEM,
     ]
 
     cfg = _build(forcing_inputs=fdata)
@@ -3453,10 +3466,13 @@ def test_resolver_boundary_bgc_esper_source_excluded_from_datasets():
     from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
-    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
-        "name": "ESPER",
-        "path": "/tmp/PyESPER",
-    }
+    fdata["forcing"]["boundary"]["bgc_sources"] = [
+        _CHL_FE_ITEM,
+        {
+            "source": {"name": "ESPER", "path": "/tmp/PyESPER"},
+            "use_vars": _ESPER_USE_VARS,
+        },
+    ]
 
     cfg = _build(forcing_inputs=fdata)
 
@@ -3476,10 +3492,13 @@ def test_resolver_esper_salinity_conditioning_notes_the_woa_salinity_file():
     from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
-    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
-        "name": "ESPER",
-        "esper_salinity_conditioning": True,
-    }
+    fdata["forcing"]["boundary"]["bgc_sources"] = [
+        _CHL_FE_ITEM,
+        {
+            "source": {"name": "ESPER", "esper_salinity_conditioning": True},
+            "use_vars": _ESPER_USE_VARS,
+        },
+    ]
     cfg = _build(forcing_inputs=fdata)
     src = cfg.forcing.boundary.bgc_sources[-1].source
     assert src.name == "ESPER" and src.esper_salinity_conditioning is True
@@ -3561,10 +3580,13 @@ def test_esper_conditioning_on_requires_the_woa_salinity_dataset():
     from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
-    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
-        "name": "ESPER",
-        "esper_salinity_conditioning": True,
-    }
+    fdata["forcing"]["boundary"]["bgc_sources"] = [
+        _CHL_FE_ITEM,
+        {
+            "source": {"name": "ESPER", "esper_salinity_conditioning": True},
+            "use_vars": _ESPER_USE_VARS,
+        },
+    ]
     cfg = _build(forcing_inputs=fdata)
     data = yaml.safe_load(cfg.to_yaml_str())
     assert "WOA_SALINITY" in data["datasets"]
@@ -3700,13 +3722,14 @@ def test_resolver_ic_bgc_constants_source_excluded_from_datasets():
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["initial_conditions"]["bgc_sources"] = [
-        {"source": {"name": "constants", "constants": {"Fe": 3.0e-3}}}
+        {"source": {"name": "constants", "constants": {"Fe": 3.0e-3, "CHL": 0.3}}}
     ]
 
     cfg = _build(forcing_inputs=fdata)
 
     assert cfg.forcing.initial_conditions.bgc_sources[0].source.constants == {
-        "Fe": 3.0e-3
+        "Fe": 3.0e-3,
+        "CHL": 0.3,
     }
     assert "CONSTANTS" not in cfg.datasets
     assert "CONSTANTS" not in cfg.forcing.resolved_datasets
@@ -6203,6 +6226,8 @@ _PHYSICS_ONLY_FORCING = {
     "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     "forcing": {
         "surface": [{"source": {"name": "ERA5"}, "type": "physics"}],
+        # the test domains have open sides, which need a boundary block
+        "boundary": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     },
 }
 
@@ -8100,7 +8125,7 @@ class TestForgeBlueprintWizard:
         fe._add("ic_bgc")
         row1 = fe._rows["ic_bgc"][-1]
         row1["name"].value = "UNIFIED"
-        row1["use_vars"].value = "ALK, DIC"
+        row1["use_vars"].value = "ALK, DIC, CHL, Fe"
         fe._add("ic_bgc")
         row2 = fe._rows["ic_bgc"][-1]
         row2["name"].value = "GLODAP"
@@ -8122,13 +8147,13 @@ class TestForgeBlueprintWizard:
         w2._on_load_path(None)
         bgc_sources = w2.config.forcing.initial_conditions.bgc_sources
         assert [bs.source.name for bs in bgc_sources] == ["UNIFIED", "GLODAP"]
-        assert bgc_sources[0].use_vars == ["ALK", "DIC"]
+        assert bgc_sources[0].use_vars == ["ALK", "DIC", "CHL", "Fe"]
         assert bgc_sources[1].use_vars == ["PO4", "NO3"]
         # the reloaded wizard's own IC-BGC rows reflect the same, so re-editing and
         # re-gathering round-trips too (not just the one-shot load).
         fe2 = w2._forcing_editor
         assert [r["name"].value for r in fe2._rows["ic_bgc"]] == ["UNIFIED", "GLODAP"]
-        assert fe2._rows["ic_bgc"][0]["use_vars"].value == "ALK, DIC"
+        assert fe2._rows["ic_bgc"][0]["use_vars"].value == "ALK, DIC, CHL, Fe"
         assert fe2._rows["ic_bgc"][1]["use_vars"].value == "PO4, NO3"
 
     def test_boundary_bgc_use_vars_round_trips_through_load(self, tmp_path):
@@ -8144,7 +8169,7 @@ class TestForgeBlueprintWizard:
         fe = w1._forcing_editor
         bgc_rows = fe._rows["boundary_bgc"]
         assert bgc_rows, "expected a bgc boundary row in the bundled ForcingSpec"
-        bgc_rows[0]["use_vars"].value = "ALK, DIC, NO3"
+        bgc_rows[0]["use_vars"].value = "ALK, DIC, NO3, CHL, Fe"
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -8155,7 +8180,7 @@ class TestForgeBlueprintWizard:
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         bgc_items = w2.config.forcing.boundary.bgc_sources
-        assert bgc_items and bgc_items[0].use_vars == ["ALK", "DIC", "NO3"]
+        assert bgc_items and bgc_items[0].use_vars == ["ALK", "DIC", "NO3", "CHL", "Fe"]
 
     def test_ic_bgc_constants_source_round_trips_through_load(self, tmp_path):
         """A `name="constants"` IC-BGC row's constants mapping must survive save/load."""
@@ -8168,7 +8193,7 @@ class TestForgeBlueprintWizard:
         fe._add("ic_bgc")
         row = fe._rows["ic_bgc"][-1]
         row["name"].value = "constants"
-        row["constants"].value = "Fe=3.0e-3, ALK=2300"
+        row["constants"].value = "Fe=3.0e-3, ALK=2300, CHL=0.3"
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -8177,6 +8202,7 @@ class TestForgeBlueprintWizard:
         assert w1.config.forcing.initial_conditions.bgc_sources[0].source.constants == {
             "Fe": 3.0e-3,
             "ALK": 2300.0,
+            "CHL": 0.3,
         }
 
         w2 = self._wizard()
@@ -8184,13 +8210,18 @@ class TestForgeBlueprintWizard:
         w2._on_load_path(None)
         bgc_sources = w2.config.forcing.initial_conditions.bgc_sources
         assert bgc_sources[0].source.name == "constants"
-        assert bgc_sources[0].source.constants == {"Fe": 3.0e-3, "ALK": 2300.0}
+        assert bgc_sources[0].source.constants == {
+            "Fe": 3.0e-3,
+            "ALK": 2300.0,
+            "CHL": 0.3,
+        }
         from cstar.wizard.wizard import _parse_constants
 
         fe2 = w2._forcing_editor
         assert _parse_constants(fe2._rows["ic_bgc"][0]["constants"].value) == {
             "Fe": 3.0e-3,
             "ALK": 2300.0,
+            "CHL": 0.3,
         }
 
     def test_ic_bgc_esper_source_round_trips_through_load(self, tmp_path):
@@ -8210,6 +8241,13 @@ class TestForgeBlueprintWizard:
         row["esper_method"].value = "mixed"
         row["esper_equation"].value = "16"
         row["esper_salinity_conditioning"].value = True
+        row["use_vars"].value = "ALK, DIC, NO3, PO4, SiO3, O2"
+        # MARBL needs a CHL and Fe source beside ESPER (check_forcing_coverage)
+        fe._add("ic_bgc")
+        companion = fe._rows["ic_bgc"][-1]
+        companion["name"].value = "constants"
+        companion["constants"].value = "CHL=0.3, Fe=6e-4"
+        companion["use_vars"].value = "CHL, Fe"
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -9499,7 +9537,6 @@ class TestSaveModifiedSpecsToCatalog:
         if not rows:
             pytest.skip("bundled forcing spec has no boundary bgc source to flag")
         row = rows[0]
-        row["name"].value = "ESPER"
         row["_serialize_dask"] = True
         wiz._rebuild()
 
@@ -10459,3 +10496,96 @@ def test_every_surface_item_field_is_inherited_or_per_product():
     }
     decided = set(BLEND_FALLBACK_INHERITED_FIELDS) | per_product | {"blend"}
     assert decided == set(SurfaceForcingItem.model_fields)
+
+
+# ---------------------------------------------------------------------------
+# check_forcing_coverage at the resolver and in process_forge_blueprint
+# ---------------------------------------------------------------------------
+class TestForcingCoverageCallSites:
+    """The resolver and ``process_forge_blueprint`` refuse MARBL without MARBL code,
+    open sides without a boundary block, and MARBL source sets with no CHL or Fe
+    provider (the rules themselves are in ``test_forcing_coverage.py``).
+    """
+
+    @staticmethod
+    def _without_boundary(name: str) -> dict:
+        data = copy.deepcopy(_CATALOG.forcing_data(name))
+        del data["forcing"]["boundary"]
+        return data
+
+    def test_resolver_refuses_esper_only_initial_conditions(self):
+        data = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-esper"))
+        data["initial_conditions"]["bgc_sources"] = [{"source": {"name": "ESPER"}}]
+        with pytest.raises(ValueError, match=r"initial_conditions\.bgc_sources"):
+            _build(model_path=_MODEL_PATH_ROMS0150, forcing_inputs=data)
+
+    def test_resolver_refuses_a_marbl_override_without_bgc_mode_marbl(self):
+        # On 0.15, check_marbl_bgc_inputs would also refuse the physics-only
+        # sources; this check runs first, so the message names the real fix.
+        with pytest.raises(ValueError, match=r"cppdefs\.marbl is on") as exc:
+            _build(
+                model_path=_MODEL_PATH_ROMS0150,
+                bgc_mode="none",
+                forcing_inputs=_CATALOG.forcing_data("glorys-era5-physics"),
+                compile_time_overrides={"cppdefs": {"marbl": True}},
+            )
+        assert "have no BGC sources" not in str(exc.value)
+
+    def test_resolver_refuses_open_sides_without_a_boundary_block(self):
+        with pytest.raises(ValueError, match="no boundary block"):
+            _build(
+                bgc_mode="none",
+                forcing_inputs=self._without_boundary("glorys-era5-physics"),
+            )
+
+    def test_resolver_accepts_a_child_without_a_boundary_block(self):
+        cfg = _build(
+            grid_kwargs_parent=_PARENT_GRID_KWARGS,
+            forcing_inputs=self._without_boundary("glorys-era5-unified"),
+        )
+        assert cfg.domain.is_child is True
+        assert cfg.forcing.boundary is None
+
+    @pytest.mark.parametrize("name", _CATALOG.forcing_names)
+    def test_every_bundled_forcing_spec_resolves(self, name):
+        data = _CATALOG.forcing_data(name)
+        has_bgc = bool((data.get("initial_conditions") or {}).get("bgc_sources"))
+        _build(
+            model_path=_MODEL_PATH_ROMS0150,
+            bgc_mode="marbl" if has_bgc else "none",
+            forcing_inputs=data,
+        )
+
+    @pytest.mark.parametrize("path", _shipped_blueprint_paths(), ids=lambda p: p.name)
+    def test_every_shipped_blueprint_passes(self, path):
+        from cstar.applications.forge.namelist_model import check_forcing_coverage
+
+        cfg = ForgeBlueprint.from_yaml(path)
+        check_forcing_coverage(
+            cfg.forcing,
+            cppdefs=cfg.model_settings.get("cppdefs") or {},
+            marbl_code=cfg.code.marbl is not None,
+            open_boundaries=cfg.domain.open_boundaries.model_dump(),
+            is_child=cfg.domain.is_child,
+        )
+
+    def test_process_forge_blueprint_refuses_marbl_without_marbl_code(self):
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        cfg = _build(model_path=_MODEL_PATH_ROMS0150)
+        cfg.code = cfg.code.model_copy(update={"marbl": None})
+        with pytest.raises(ValueError, match="invalid values") as exc:
+            process_forge_blueprint(cfg, executor_factory=_FakeBuilder)
+        assert "cppdefs.marbl is on" in str(exc.value)
+
+    def test_process_forge_blueprint_refuses_esper_only_boundary(self):
+        from cstar.applications.forge.blueprint import BgcSourceItem, SourceSpec
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        cfg = _build(model_path=_MODEL_PATH_ROMS0150)
+        cfg.forcing.boundary.bgc_sources = [
+            BgcSourceItem(source=SourceSpec(name="ESPER"))
+        ]
+        with pytest.raises(ValueError, match="invalid values") as exc:
+            process_forge_blueprint(cfg, executor_factory=_FakeBuilder)
+        assert "forcing.boundary.bgc_sources (ESPER)" in str(exc.value)

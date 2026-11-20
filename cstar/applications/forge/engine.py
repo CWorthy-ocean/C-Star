@@ -44,6 +44,7 @@ from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenanc
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     check_cdr_releases,
+    check_forcing_coverage,
     check_marbl_bgc_inputs,
     validate_run_time_sections,
 )
@@ -473,6 +474,13 @@ def process_forge_blueprint(
             roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
         problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
         try:
+            check_forcing_coverage(
+                cfg.forcing,
+                cppdefs=cfg.model_settings.get("cppdefs") or {},
+                marbl_code=cfg.code.marbl is not None,
+                open_boundaries=cfg.domain.open_boundaries.model_dump(),
+                is_child=cfg.domain.is_child,
+            )
             check_marbl_bgc_inputs(
                 cfg.forcing,
                 open_boundaries=cfg.domain.open_boundaries.model_dump(),
