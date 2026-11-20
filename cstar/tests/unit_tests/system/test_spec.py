@@ -19,6 +19,7 @@ from cstar.system.scheduler import (
     PBSScheduler,
     SlurmPartition,
     SlurmQOS,
+    SlurmScheduler,
     _cpus_per_node_via_sinfo,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
@@ -397,6 +398,32 @@ def test_partition_capped_by_qos_asks_sinfo_by_partition_name() -> None:
     assert "show qos qicx " in sacctmgr
     assert "--partition=icx" in sinfo
     assert "qicx" not in sinfo
+
+
+def test_request_gpus_reaches_the_gpu_nodes() -> None:
+    """`request_gpus` defaults to true and false reaches the built `GpuNodes`."""
+    gpu = {"gpus_per_node": 4, "queue": "batch"}
+    default = SystemSpec.model_validate(_slurm(gpu_nodes=gpu)).scheduler
+    off = SystemSpec.model_validate(
+        _slurm(gpu_nodes={**gpu, "request_gpus": False})
+    ).scheduler
+    assert default is not None and off is not None
+
+    assert default.build("").gpu.request_gpus is True  # type: ignore[union-attr]
+    assert off.build("").gpu.request_gpus is False  # type: ignore[union-attr]
+
+
+def test_upper_case_account_reaches_the_slurm_scheduler() -> None:
+    """`upper_case_account` defaults to false and reaches the built scheduler."""
+    default = SystemSpec.model_validate(_slurm()).scheduler
+    on = SystemSpec.model_validate(_slurm(upper_case_account=True)).scheduler
+    assert default is not None and on is not None
+
+    built_default, built_on = default.build(""), on.build("")
+    assert isinstance(built_default, SlurmScheduler)
+    assert isinstance(built_on, SlurmScheduler)
+    assert built_default.account_name("tg-abc123") == "tg-abc123"
+    assert built_on.account_name("tg-abc123") == "TG-ABC123"
 
 
 def test_pbs_scheduler_builds() -> None:

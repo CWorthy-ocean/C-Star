@@ -84,6 +84,12 @@
                     "description": "Whether the scheduler refuses a GPU job that names no account.",
                     "title": "Account Required",
                     "type": "boolean"
+                },
+                "request_gpus": {
+                    "default": true,
+                    "description": "Whether a GPU job asks the scheduler for its GPUs (SLURM `--gpus-per-node`,\nPBS `ngpus=`); false where the GPU nodes define no GPU resource and a job\nreaches them through its queue alone.",
+                    "title": "Request Gpus",
+                    "type": "boolean"
                 }
             },
             "required": [
@@ -333,6 +339,12 @@
                     "default": false,
                     "description": "Whether a job must state its nodes and tasks per node, not only its CPUs.",
                     "title": "Requires Task Distribution",
+                    "type": "boolean"
+                },
+                "upper_case_account": {
+                    "default": false,
+                    "description": "Whether the site knows accounts only in upper case (TACC's submit filter\nrefuses `tg-abc123`, the lower-case name `sacctmgr` lists, and wants\n`TG-ABC123`); C-Star then submits the account in upper case.",
+                    "title": "Upper Case Account",
                     "type": "boolean"
                 }
             },

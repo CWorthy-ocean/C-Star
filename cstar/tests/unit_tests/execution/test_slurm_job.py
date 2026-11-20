@@ -298,6 +298,49 @@ class TestSlurmJob:
         assert "#SBATCH --gpus-per-node=2" in lines
         assert "#SBATCH --ntasks-per-node=2" in lines
 
+    def test_script_gpu_job_without_gres_omits_gpus_per_node(self):
+        """Where the GPU nodes are reached by partition alone, the layout stays
+        and no `--gpus-per-node` is written.
+        """
+        scheduler = self._gpu_scheduler(
+            [SlurmQOS(name="regular", query_name="regular")],
+            gpu=GpuNodes(4, "regular", {}, 64, request_gpus=False),
+        )
+        job = SlurmJob(
+            **self.common_job_params
+            | {"scheduler": scheduler, "queue_name": "", "cpus": 8, "gpus": 8}
+        )
+
+        lines = job.script.split("\n")
+        assert not any("--gpus-per-node" in line for line in lines)
+        assert "#SBATCH --nodes=2" in lines
+        assert "#SBATCH --ntasks-per-node=4" in lines
+
+    @pytest.mark.parametrize(
+        ("upper_case", "expected"), [(True, "TG-ABC123"), (False, "tg-abc123")]
+    )
+    def test_script_writes_the_account_the_scheduler_wants(
+        self, upper_case: bool, expected: str
+    ):
+        """An upper-case site gets `TG-ABC123` from `tg-abc123`; others are
+        unchanged.
+        """
+        queues: list[Queue] = [SlurmQOS(name="regular", query_name="regular")]
+        scheduler = SlurmScheduler(
+            queues=queues,
+            primary_queue_name="regular",
+            requires_task_distribution=False,
+            max_cpus_per_node=64,
+            upper_case_account=upper_case,
+        )
+        job = SlurmJob(
+            **self.common_job_params
+            | {"scheduler": scheduler, "queue_name": "", "account_key": "tg-abc123"}
+        )
+
+        assert f"#SBATCH --account={expected}" in job.script.split("\n")
+        assert job.account_key == "tg-abc123"
+
     def test_script_gpu_job_spans_nodes_uniformly(self):
         """Eight GPUs on 4-GPU nodes take two nodes, with the same tasks and GPUs
         on each.
