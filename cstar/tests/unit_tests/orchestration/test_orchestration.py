@@ -1,6 +1,7 @@
 import os
 import typing as t
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -314,6 +315,129 @@ async def test_process_node_refuses_relaunch(
         await orchestrator.process_node("first")
 
     launch.assert_not_awaited()
+
+
+def _scripted_launcher(
+    outcomes: Mapping[str, Status],
+) -> tuple[mock.AsyncMock, mock.AsyncMock]:
+    """Create `launch` and `cancel` doubles for a launcher.
+
+    `launch` returns a task whose status is the outcome scripted for the step
+    (Running by default); `cancel` marks the task it is given as Cancelled, as
+    a launcher does when the cancellation is accepted.
+
+    Parameters
+    ----------
+    outcomes : Mapping[str, Status]
+        The status each named step reports when it is launched.
+    """
+
+    async def launch(
+        step: LiveStep, dependencies: list[ProcessHandle], *, run_uuid: str
+    ) -> Task[ProcessHandle]:
+        handle = ProcessHandle(
+            pid=f"job-{step.name}",
+            name=step.name,
+            run_id="r",
+            status=outcomes.get(step.name, Status.Running),
+        )
+        return Task(step=step, handle=handle)
+
+    async def cancel(item: Task[ProcessHandle]) -> Task[ProcessHandle]:
+        item.status = Status.Cancelled
+        return item
+
+    return mock.AsyncMock(side_effect=launch), mock.AsyncMock(side_effect=cancel)
+
+
+def _launched(launch: mock.AsyncMock) -> list[str]:
+    """Return the names of the steps passed to a `launch` double, in call order."""
+    return [c.args[0].name for c in launch.await_args_list]
+
+
+async def test_run_cancels_in_progress_siblings_of_a_failed_step(
+    diamond_workplan: Workplan,
+) -> None:
+    """Verify a step that fails at launch stops the plan: the steps launched
+    beside it that are still in progress are cancelled and recorded as such,
+    and nothing downstream is launched on later passes.
+    """
+    planner = Planner(diamond_workplan)
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
+    launch, cancel = _scripted_launcher({"d-01": Status.Failed})
+
+    with (
+        mock.patch.object(LocalLauncher, "launch", launch),
+        mock.patch.object(LocalLauncher, "cancel", cancel),
+    ):
+        first_pass = await orchestrator.run()
+        second_pass = await orchestrator.run()
+
+        assert first_pass == {"d-00": Status.Running}
+        assert second_pass == {"d-01": Status.Failed, "d-02": Status.Cancelled}
+
+        cancel.assert_awaited_once()
+        assert cancel.await_args is not None
+        assert cancel.await_args.args[0].step.name == "d-02"
+        assert planner.retrieve("d-02", KEY_STATUS) == Status.Cancelled
+
+        # the cancelled sibling ends the traversal
+        assert orchestrator.get_open_nodes() is None
+        await orchestrator.run()
+
+    assert sorted(_launched(launch)) == ["d-00", "d-01", "d-02"]
+    assert planner.retrieve("d-03", KEY_TASK) is None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "A step that fails at launch with no in-progress sibling is stored as "
+        "Done (the deliberate unconditional Done in update_planner_state), so "
+        "nothing records the failure and the next pass launches its dependents."
+    ),
+)
+async def test_run_stops_after_a_lone_failed_step(diamond_workplan: Workplan) -> None:
+    """Verify a step that fails at launch stops the plan even when nothing
+    else is running beside it to cancel.
+    """
+    planner = Planner(diamond_workplan)
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
+    launch, cancel = _scripted_launcher({"d-00": Status.Failed})
+
+    with (
+        mock.patch.object(LocalLauncher, "launch", launch),
+        mock.patch.object(LocalLauncher, "cancel", cancel),
+    ):
+        assert await orchestrator.run() == {"d-00": Status.Failed}
+        await orchestrator.run()
+
+    assert _launched(launch) == ["d-00"]
+    cancel.assert_not_awaited()
+
+
+async def test_run_waits_for_every_upstream_step(diamond_workplan: Workplan) -> None:
+    """Verify a step with two upstream steps is not open while one of them is
+    still unsubmitted, even though the other is running.
+    """
+    planner = Planner(diamond_workplan)
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
+    for name, status in (("d-00", Status.Done), ("d-01", Status.Running)):
+        step = planner.retrieve(name, KEY_STEP)
+        assert step is not None
+        handle = ProcessHandle(pid=f"job-{name}", name=name, run_id="r", status=status)
+        planner.store(name, KEY_TASK, Task(step=step, handle=handle))
+        planner.store(name, KEY_STATUS, status)
+
+    assert orchestrator.get_open_nodes() == {"d-02": Status.Unsubmitted}
+
+    launch, _ = _scripted_launcher({})
+    with mock.patch.object(LocalLauncher, "launch", launch):
+        assert await orchestrator.run() == {"d-02": Status.Running}
+
+    assert _launched(launch) == ["d-02"]
+    assert [d.pid for d in launch.await_args_list[0].args[1]] == ["job-d-00"]
 
 
 def test_live_step_blueprint_anchors_relative_locations(

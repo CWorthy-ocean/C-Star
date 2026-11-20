@@ -39,6 +39,40 @@ async def test_deep_check_valid_workplan(
     launcher_factory.assert_not_called()
 
 
+async def test_deep_check_requires_declared_runtime_vars(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a declared runtime variable that is not supplied is reported as
+    missing, before any step is resolved.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    wp = Workplan(
+        name="deep-check-runtime-vars",
+        description="A workplan declaring a runtime variable.",
+        runtime_vars=["alpha"],
+        steps=[
+            Step(
+                name="Say Hello",
+                application="hello_world",
+                blueprint=hello_world_bp_path,
+            )
+        ],
+    )
+
+    launcher_factory = mock.Mock()
+
+    transformed, problems = await deep_check(wp, None, launcher_factory)
+
+    assert transformed is None
+    assert len(problems) == 1
+    assert "missing keys: alpha" in problems[0]
+    launcher_factory.assert_not_called()
+
+
 async def test_deep_check_reports_unknown_directive(
     hello_world_bp_path: Path,
 ) -> None:
