@@ -4054,6 +4054,10 @@ class TestGoldenNamelist:
                 if cdr_lite
                 else patch("cstar.applications.forge.input_generator.rt.CDRForcing")
             ) as mock_cdr,
+            # the grid is a mock: no release positions to check it against
+            patch(
+                "cstar.applications.forge.input_generator.check_cdr_release_positions"
+            ),
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},

@@ -398,7 +398,8 @@ older ROMS stops on a key it doesn't know.
   and raises if it was switched on, since that release can't honor it.
 
 Rules that span sections (the CDR-LiTE switches, ``bgc_mode``, CDR forcing without
-MARBL, upscaled CDR) are ``check_*`` functions in ``namelist_model.py``, each called
+MARBL, upscaled CDR, CDR releases against the run) are ``check_*`` functions in
+``namelist_model.py``, each called
 by the resolver, ``validate_run_time_sections`` and ``configure_build``.
 ``bgc_mode`` (``marbl``, ``none`` or ``cdr_lite``) is stored only as the
 ``marbl``/``cdr_lite`` cppdefs and read back with ``bgc_mode_from_cppdefs``. In

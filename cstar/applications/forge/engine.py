@@ -43,6 +43,7 @@ from typing import (
 from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
+    check_cdr_releases,
     check_marbl_bgc_inputs,
     validate_run_time_sections,
 )
@@ -478,6 +479,17 @@ def process_forge_blueprint(
                 is_child=cfg.domain.is_child,
                 marbl=(cfg.model_settings.get("cppdefs") or {}).get("marbl", False),
                 roms_ref=roms_ref,
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+        try:
+            check_cdr_releases(
+                cfg.cdr.cdr_forcing,
+                start_date=cfg.run.start_date,
+                end_date=cfg.run.end_date,
+                time_interpolation=(cfg.model_settings.get("cdr_frc") or {}).get(
+                    "time_interpolation"
+                ),
             )
         except ValueError as exc:
             problems.append(str(exc))
