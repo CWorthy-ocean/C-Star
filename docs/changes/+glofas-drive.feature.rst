@@ -1,2 +1,2 @@
-Forge downloads the preprocessed GloFAS river dataset (with RIVR2O river concentrations) from Google Drive when a blueprint uses the ``GLOFAS`` river source, the same way it downloads the unified BGC climatology, instead of requiring you to stage it by hand.
-- The file is staged as ``<source_data>/GLOFAS/glofas_v4_rivers_daily_w_rivr2o_v1.nc``; a hand-staged ``glofas_v4_rivers_daily_w_rivr2o.nc`` is no longer used and is reported as stale until you delete it.
+Forge downloads the preprocessed GloFAS river dataset from Google Drive when a blueprint uses the ``GLOFAS`` river source, instead of requiring you to stage it by hand.
+- It is saved as ``<source_data>/GLOFAS/glofas_v4_rivers_daily_w_rivr2o_v1.nc``; a hand-staged ``glofas_v4_rivers_daily_w_rivr2o.nc`` is no longer used.
