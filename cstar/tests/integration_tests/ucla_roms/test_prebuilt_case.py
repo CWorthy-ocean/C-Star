@@ -7,7 +7,6 @@ minutes.
 """
 
 import re
-import shutil
 import typing as t
 from collections.abc import Callable
 from pathlib import Path
@@ -22,18 +21,8 @@ RUN_TIMEOUT = 25 * 60
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 # joined outputs end in the timestamp; per-processor pieces add a rank after it
 PARTITIONED_OUTPUT = re.compile(r"\.\d{14}\.\d+\.nc$")
-MISSING_TOOLS = [
-    tool
-    for tool, found in {
-        "mpirun": shutil.which("mpirun"),
-        "mpifort or gfortran": shutil.which("mpifort") or shutil.which("gfortran"),
-    }.items()
-    if not found
-]
 
-pytestmark = pytest.mark.skipif(
-    bool(MISSING_TOOLS), reason=f"ROMS toolchain missing: {', '.join(MISSING_TOOLS)}"
-)
+pytestmark = pytest.mark.requires_tools("mpirun", "mpifort or gfortran")
 
 
 def test_prebuilt_case_runs_with_partitioned_inputs(

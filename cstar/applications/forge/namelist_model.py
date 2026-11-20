@@ -25,10 +25,12 @@ is imported here; that is the reusable read/edit/write schema.
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
 import warnings
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
@@ -104,8 +106,14 @@ from cstar.roms.precheck import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Iterable, Mapping, Sequence
-    from datetime import datetime
+    from collections.abc import (
+        Callable,
+        Collection,
+        Container,
+        Iterable,
+        Mapping,
+        Sequence,
+    )
 
     from cstar.applications.forge.blueprint import Forcing
 
@@ -179,9 +187,21 @@ def _misspelled_keys_message(offenders: Sequence[str]) -> str:
 # "pending", not a configured default.
 # ===========================================================================
 class _SettingsSection(BaseModel):
-    # extra="ignore": settings sections carry metadata keys the namelist drops
-    # (sst_vname, cdb_min/max, diag_prec, nbgc_flx, cdr_*_vname, ...).
+    # extra="ignore": settings sections carry keys the namelist drops (each
+    # section's _carried_keys) and keys of other tiers (_other_tier_keys);
+    # check_settings_keys reports any other key before generation.
     model_config = ConfigDict(extra="ignore")
+
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        """Keys Forge's settings carry in this section that no namelist key reads.
+
+        ModelSpecs, the resolver's baselines and stored blueprints hold them
+        (``nbgc_flx``, the ``*_vname``/``*_tname`` file-variable names, ...);
+        ``extra="ignore"`` drops them, and :func:`check_settings_keys` accepts
+        them, so a blueprint written by any C-Star release still processes.
+        """
+        return ()
 
     @classmethod
     def _other_tier_keys(cls) -> Iterable[str]:
@@ -215,11 +235,12 @@ def _settings_spellings(
     """``(spellings, accepted)`` for :func:`_misspelled_keys` on ``cls``.
 
     ``accepted`` holds the keys ``cls`` reads as written -- field names,
-    validation-alias choices -- plus :meth:`~_SettingsSection._other_tier_keys`;
+    validation-alias choices -- plus :meth:`~_SettingsSection._other_tier_keys`
+    and :meth:`~_SettingsSection._carried_keys`;
     ``spellings`` maps each of those, and each field's ``serialization_alias``,
     casefolded, to the name to suggest.
     """
-    accepted = set(cls._other_tier_keys())
+    accepted = {*cls._other_tier_keys(), *cls._carried_keys()}
     spellings = {key.casefold(): key for key in accepted}
     for name, info in cls.model_fields.items():
         aliases = getattr(info.validation_alias, "choices", [info.validation_alias])
@@ -229,6 +250,104 @@ def _settings_spellings(
             if spelling:
                 spellings[spelling.casefold()] = name
     return spellings, frozenset(accepted)
+
+
+# Every key a Forge cppdefs.opt.j2 template has read: the vocabulary of the
+# ``cppdefs`` section, which has no settings model. A ModelSpec may pin an older
+# template commit, so a key leaves this set only when no release can read it.
+CPPDEFS_KEYS: frozenset[str] = frozenset(
+    {
+        "auto_tiling",
+        "cdr_forcing",
+        "cdr_lite",
+        "co2_tvarying",
+        "diagnostics",
+        "do_upscale",
+        "marbl",
+        "nhy_forcing",
+        "nox_forcing",
+        "obc_east",
+        "obc_north",
+        "obc_south",
+        "obc_west",
+        "parabolic_splines",
+        "sal_restore",
+        "sponge_tune",
+        "tides",
+        "upstream_ts_land_curv",
+        "use_pio",
+    }
+)
+
+
+def _unknown_keys(
+    section: str | None,
+    keys: Iterable[Any],
+    accepted: Collection[str],
+    spellings: Mapping[str, str],
+) -> list[str]:
+    """``<section>.<key>``, with the nearest accepted name when one is close, for
+    each of ``keys`` that is neither in ``accepted`` nor a case variant of a name
+    in ``spellings`` (casefolded spelling -> name), which
+    :func:`_misspelled_keys` reports instead.
+    """
+    prefix = f"{section}." if section else ""
+    offenders = []
+    for key in keys:
+        if not isinstance(key, str) or key in accepted or key.casefold() in spellings:
+            continue
+        folded = {name.casefold(): name for name in sorted(accepted)}
+        near = [
+            folded[match]
+            for match in difflib.get_close_matches(key.casefold(), folded, n=1)
+        ]
+        offenders.append(
+            f"{prefix}{key}" + (f" (did you mean {prefix}{near[0]}?)" if near else "")
+        )
+    return offenders
+
+
+def unknown_settings_keys(
+    settings: Mapping[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> list[str]:
+    """Every key of a (possibly partial) settings dict that ``settings_cls``, the
+    tier of the pinned ucla-roms release, does not know, each with the nearest
+    known name when one is close.
+
+    A section or key another tier models is known here (its version gate reports a
+    request the pinned release cannot honor), as are the keys Forge writes but no
+    namelist key reads (:meth:`_SettingsSection._carried_keys`), the legacy section
+    names :func:`normalize_legacy_sections` renames, and :data:`CPPDEFS_KEYS`.
+    Keys inside a section the tier does not model are not checked: pruning drops
+    the section. Case variants are left to :func:`_misspelled_keys`.
+    """
+    spellings, accepted = _settings_spellings(settings_cls)
+    top = {*accepted, "cppdefs", *_LEGACY_SECTION_RENAMES}
+    offenders = _unknown_keys(None, settings, top, spellings)
+    for name, section in settings.items():
+        if not isinstance(section, dict):
+            continue
+        if name == "cppdefs":
+            offenders += _unknown_keys(name, section, CPPDEFS_KEYS, {})
+            continue
+        info = settings_cls.model_fields.get(name)
+        cfg = info.annotation if info is not None else None
+        if isinstance(cfg, type) and issubclass(cfg, _SettingsSection):
+            section_spellings, section_accepted = _settings_spellings(cfg)
+            offenders += _unknown_keys(
+                name, section, section_accepted, section_spellings
+            )
+    return offenders
+
+
+def check_settings_keys(
+    settings: Mapping[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> None:
+    """Raise ``ValueError`` naming every :func:`unknown_settings_keys` offender."""
+    if offenders := unknown_settings_keys(settings, settings_cls):
+        raise ValueError(
+            f"Forge would ignore these unknown settings keys: {', '.join(offenders)}."
+        )
 
 
 class TitleCfg(_SettingsSection):
@@ -280,6 +399,11 @@ class _ParamCfgCommon(_SettingsSection):
     nt_passive: int
     ntrc_bio: int = Field(serialization_alias="nt_bgc")
 
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        # The resolver writes the shared-memory tiling; ucla-roms hardcodes it.
+        return ("nsub_x", "nsub_e")
+
 
 class ParamCfg(_ParamCfgCommon):
     """``param`` settings for ucla-roms < 0.4.0, which has no CDR tracer counts."""
@@ -322,6 +446,57 @@ class ParamCfgV0_4_0(_ParamCfgCommon):
 
     nt_cdr_oae: int = Field(default=0, ge=0)
     nt_cdr_dor: int = Field(default=0, ge=0)
+
+
+def _edge_tile_width(points: int, tiles: int) -> int:
+    """Width of the narrower edge tile when ucla-roms splits ``points`` grid points
+    into ``tiles`` MPI tiles (``mpi_setup`` in ``roms_mpi.F90``, unchanged from
+    0.3.0 to 0.15.0): every tile gets ``ceil(points / tiles)`` points, and the
+    surplus is taken from the first tile (half, rounded down) and the last (the
+    rest).
+    """
+    width = -(-points // tiles)
+    surplus = tiles * width - points
+    return points if tiles == 1 else width - (surplus + 1) // 2
+
+
+def check_tile_sizes(param: Mapping[str, Any], *, auto_tiling: bool) -> None:
+    """Raise ``ValueError`` if ``param.np_xi``/``np_eta`` split ``llm``/``mmm``
+    into an edge tile with no grid points (:func:`_edge_tile_width`), naming the
+    most tiles that work. Under ``auto_tiling`` ROMS chooses the tiles from the
+    land mask, and the namelist values are placeholders, so nothing is checked.
+
+    Only a tile with no points is refused: that is the case the ucla-roms source
+    shows cannot run. A tile narrower than the two-point halo is not.
+    """
+    if auto_tiling:
+        return
+    problems = []
+    for axis, points_key, tiles_key, field in (
+        ("xi", "llm", "np_xi", "n_procs_x"),
+        ("eta", "mmm", "np_eta", "n_procs_y"),
+    ):
+        try:
+            points, tiles = int(param[points_key]), int(param[tiles_key])
+        except (KeyError, TypeError, ValueError):
+            continue  # absent or malformed: nothing to check, or reported elsewhere
+        if points < 1 or tiles < 1 or _edge_tile_width(points, tiles) >= 1:
+            continue
+        best = max(
+            n
+            for n in range(1, min(tiles, points) + 1)
+            if _edge_tile_width(points, n) >= 1
+        )
+        problems.append(
+            f"param.{tiles_key}={tiles} (partitioning.{field}) cannot split the "
+            f"{points} {axis} points (param.{points_key}): ucla-roms gives every "
+            f"tile {-(-points // tiles)} "
+            "and takes the surplus from the first and last tile, which leaves an "
+            f"edge tile with {_edge_tile_width(points, tiles)}. The largest "
+            f"{tiles_key} up to {tiles} that works is {best}."
+        )
+    if problems:
+        raise ValueError(" ".join(problems))
 
 
 def n_tracers_from_param(param: dict[str, Any]) -> int:
@@ -531,6 +706,10 @@ class RiverFrcCfg(_SettingsSection):
     river_source: bool
     analytical: bool = Field(serialization_alias="river_analytical")
     nriv: int
+
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        return ("rvol_vname", "rvol_tname", "rtrc_vname", "rtrc_tname")
 
 
 class TidesCfg(_SettingsSection):
@@ -853,6 +1032,12 @@ class SpongeTuneCfg(_SettingsSection):
     nrpf: int = Field(serialization_alias="nrpf_sponge")
     output_period: float = Field(serialization_alias="output_period_sponge")
 
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        return tuple(
+            f"pflx_{edge}_{kind}name" for edge in "wesn" for kind in ("v", "t")
+        )
+
 
 class CalcPflxCfg(_SettingsSection):
     calc_pflx: bool
@@ -893,6 +1078,10 @@ class BgcCfg(_SettingsSection):
     nrpf_avg_dia: int = Field(serialization_alias="nrpf_bgc_avg_dia")
     xco2air_default: float
 
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        return ("nbgc_flx",)
+
 
 class CdrFrcCfg(_SettingsSection):
     cdr_source: bool
@@ -907,6 +1096,21 @@ class CdrFrcCfg(_SettingsSection):
     time_interpolation: bool = Field(serialization_alias="cdr_time_interpolation")
     relocate_to_wet_pts: bool = Field(serialization_alias="cdr_relocate_to_wet_pts")
     cdr_volume: bool
+
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        return (
+            *(
+                f"cdr{kind}_{part}name"
+                for kind in ("vol", "trc", "flx")
+                for part in "vt"
+            ),
+            "cdr_loc_lon",
+            "cdr_loc_lat",
+            "cdr_loc_dep",
+            "cdr_scl_hor",
+            "cdr_scl_vrt",
+        )
 
 
 # MARBL diagnostics ucla-roms' cdr_output module looks up by name with no
@@ -1162,6 +1366,175 @@ def check_upscaled_cdr_lite_tracer_counts(param: Mapping[str, Any]) -> None:
         "matching the child's CDR-lite tracers (one nt_cdr_oae per "
         "CDR_OAE_ALK<n>/CDR_OAE_DIC<n> pair, one nt_cdr_dor per CDR_DOR_DIC<n>)."
     )
+
+
+_DATETIME_ADAPTER: TypeAdapter[datetime] = TypeAdapter(datetime)
+
+
+def _cdr_time(value: Any, label: str, problems: list[str]) -> datetime | None:
+    """``value`` parsed as roms-tools parses a CDR time (pydantic), as a naive UTC
+    datetime so it compares with the run window's naive dates.
+
+    ``None`` for an unset value; an unparseable one is added to ``problems``.
+    """
+    if value is None:
+        return None
+    try:
+        parsed = _DATETIME_ADAPTER.validate_python(value)
+    except ValidationError:
+        problems.append(f"{label} {value!r} is not a date and time")
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _cdr_releases(cdr_forcing: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    """The release dicts of a roms-tools ``CDRForcing`` kwargs dict."""
+    releases = (cdr_forcing or {}).get("releases")
+    return list(releases) if isinstance(releases, (list, tuple)) else []
+
+
+def _release_time_interpolation(release: Mapping[str, Any]) -> bool | None:
+    """A release's ``time_interpolation`` as roms-tools reads it (absent is its
+    default ``False``); ``None`` for a value that is not a boolean.
+    """
+    try:
+        return _BOOL_ADAPTER.validate_python(release.get("time_interpolation", False))
+    except ValidationError:
+        return None
+
+
+def cdr_releases_time_interpolation(
+    cdr_forcing: Mapping[str, Any] | None,
+) -> bool | None:
+    """The ``time_interpolation`` every release of a roms-tools ``CDRForcing``
+    kwargs dict shares, a release without the key counting as roms-tools'
+    default ``False``.
+
+    ``None`` when there are no releases, they disagree, or one is not a boolean,
+    all of which :func:`check_cdr_releases` refuses.
+    """
+    values = {_release_time_interpolation(r) for r in _cdr_releases(cdr_forcing)}
+    return values.pop() if len(values) == 1 else None
+
+
+def check_cdr_releases(
+    cdr_forcing: Mapping[str, Any] | None,
+    *,
+    start_date: datetime,
+    end_date: datetime,
+    time_interpolation: bool | None = None,
+) -> None:
+    """Reject a CDR forcing whose window, release times or interpolation do not fit
+    the run.
+
+    ``cdr_forcing`` is the roms-tools ``CDRForcing`` kwargs dict of the "simple" and
+    "yaml" CDR modes (``CdrSpec.cdr_forcing``); ``None``, as in the other modes,
+    checks nothing. Refused:
+
+    * a CDR window (``start_time``/``end_time``) that starts after the run starts
+      or ends before it ends: ucla-roms stops at start-up, or mid-run, when the CDR
+      file has no record at or past the model time. An unset bound is not checked:
+      nothing fills one in, and roms-tools refuses a forcing without it.
+    * a release whose ``times`` all fall outside the run: the first at or after the
+      run end, or the last before the run start (a window that moved after the
+      release was written, or a mistyped date). A release without times spans the
+      whole CDR window.
+    * releases that disagree on ``time_interpolation``, which roms-tools refuses.
+    * when ``time_interpolation`` (the namelist's ``cdr_frc.time_interpolation``)
+      is given, releases whose common value differs from it. ucla-roms reads only
+      the namelist flag, so ROMS would run interpolated releases as a step
+      function held one record late, or step releases as ramps, unlike the file
+      roms-tools wrote and accounted.
+
+    The resolver, ``process_forge_blueprint`` and ``configure_build`` call this.
+
+    Raises ``ValueError`` naming every problem and every offending release.
+    """
+    if cdr_forcing is None:
+        return
+    problems: list[str] = []
+    run_start = _cdr_time(start_date, "the run start", problems)
+    run_end = _cdr_time(end_date, "the run end", problems)
+    cdr_start = _cdr_time(
+        cdr_forcing.get("start_time"), "cdr_forcing.start_time", problems
+    )
+    cdr_end = _cdr_time(cdr_forcing.get("end_time"), "cdr_forcing.end_time", problems)
+    if cdr_start is not None and run_start is not None and cdr_start > run_start:
+        problems.append(
+            f"the CDR window starts at {cdr_start} (cdr_forcing.start_time), after "
+            f"the run starts at {run_start}; ROMS stops at start-up"
+        )
+    if cdr_end is not None and run_end is not None and cdr_end < run_end:
+        problems.append(
+            f"the CDR window ends at {cdr_end} (cdr_forcing.end_time), before the "
+            f"run ends at {run_end}; ROMS stops when the run passes it"
+        )
+
+    releases = _cdr_releases(cdr_forcing)
+    interpolated: list[tuple[str, bool]] = []
+    for index, release in enumerate(releases):
+        name = str(release.get("name", f"#{index}"))
+        interp = _release_time_interpolation(release)
+        if interp is None:
+            problems.append(
+                f"release {name!r}: time_interpolation "
+                f"{release.get('time_interpolation')!r} is not true or false"
+            )
+        else:
+            interpolated.append((name, interp))
+        raw_times = release.get("times") or []
+        if not isinstance(raw_times, (list, tuple)):
+            problems.append(f"release {name!r}: times {raw_times!r} is not a list")
+            continue
+        times = [
+            t
+            for value in raw_times
+            if (t := _cdr_time(value, f"release {name!r}: time", problems)) is not None
+        ]
+        if not times or run_start is None or run_end is None:
+            continue
+        first, last = min(times), max(times)
+        if first >= run_end:
+            problems.append(
+                f"release {name!r}: its times ({first} to {last}) start at or after "
+                f"the run ends at {run_end}"
+            )
+        elif last < run_start:
+            problems.append(
+                f"release {name!r}: its times ({first} to {last}) end before the "
+                f"run starts at {run_start}"
+            )
+
+    values = {interp for _, interp in interpolated}
+    if len(values) > 1:
+        on = sorted(name for name, interp in interpolated if interp)
+        problems.append(
+            "the releases disagree on time_interpolation (true for "
+            f"{', '.join(on)}, false for the rest); roms-tools needs one value for "
+            "all of them"
+        )
+    elif (
+        len(values) == 1
+        and time_interpolation is not None
+        and (common := values.pop())
+        != _BOOL_ADAPTER.validate_python(time_interpolation)
+    ):
+        problems.append(
+            f"cdr_frc.time_interpolation is {str(time_interpolation).lower()} but "
+            f"the releases set time_interpolation: {str(common).lower()}; ROMS reads "
+            f"only cdr_frc.time_interpolation, so it would run the releases "
+            f"{'as steps' if common else 'interpolated'}, unlike the CDR file "
+            f"roms-tools wrote. Set cdr_frc.time_interpolation to "
+            f"{str(common).lower()}, or change the releases"
+        )
+
+    if problems:
+        raise ValueError(
+            f"The CDR forcing does not fit the run ({start_date} to {end_date}):\n  - "
+            + "\n  - ".join(problems)
+        )
 
 
 # ucla-roms release from which a river forcing file may leave out the CDR tracer
@@ -1779,6 +2152,10 @@ class _SurfFluxCfgCommon(_SettingsSection):
     output_period: float = Field(serialization_alias="output_period_sflx")
     nrpf: int = Field(serialization_alias="nrpf_sflx")
 
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        return ("sss_vname", "sss_tname", "sst_vname", "sst_tname")
+
 
 class SurfFluxCfg(_SurfFluxCfgCommon):
     """``surf_flux`` settings for ucla-roms < 0.13.0, which reads ``wrt_rstflx``
@@ -1840,6 +2217,20 @@ class PipeFrcCfg(_SettingsSection):
     pipe_source: bool
     p_analytical: bool
     npip: int
+
+
+def check_pipe_forcing(pipe_frc: Mapping[str, Any]) -> None:
+    """Raise ``ValueError`` if ``pipe_frc.pipe_source`` is on.
+
+    Forge generates no pipe forcing file, so ucla-roms stops at initialisation
+    looking for the pipe variables. ``p_analytical`` is no way out: it runs the
+    example pipe in ucla-roms' ``ana_pipe_frc.h``, which a Forge build cannot edit.
+    """
+    if _flag_requested(pipe_frc.get("pipe_source")):
+        raise ValueError(
+            "pipe_frc.pipe_source is on, but Forge generates no pipe forcing, so "
+            "ROMS would stop at initialisation. Turn pipe_frc.pipe_source off."
+        )
 
 
 class _ParticlesCfgCommon(_SettingsSection):
@@ -1981,6 +2372,11 @@ class _MarblBgcCfgCommon(_SettingsSection):
     marbl_tracers_to_write: list[str] | str
     marbl_diagnostics_to_write: list[str] | str
     marbl_timestep: float
+
+    @classmethod
+    def _carried_keys(cls) -> Iterable[str]:
+        # Written by cstar-forge blueprints (forge_blueprint_version 3).
+        return ("marbl_timestep_ratio",)
 
 
 class MarblBgcCfg(_MarblBgcCfgCommon):
@@ -2751,6 +3147,41 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     return namelist_cls(**kwargs)
 
 
+def settings_support_problems(
+    settings: Mapping[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> list[str]:
+    """Settings a Forge build cannot honor, found before any input is generated:
+    unknown keys (:func:`check_settings_keys`), pipe forcing
+    (:func:`check_pipe_forcing`) and tiles with no grid points
+    (:func:`check_tile_sizes`). Each message is one list entry.
+    """
+    problems = []
+    try:
+        check_settings_keys(settings, settings_cls)
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
+        check_pipe_forcing(settings.get("pipe_frc") or {})
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
+        auto_tiling = (settings.get("cppdefs") or {}).get("auto_tiling")
+        check_tile_sizes(
+            settings.get("param") or {}, auto_tiling=_flag_requested(auto_tiling)
+        )
+    except ValueError as exc:
+        problems.append(str(exc))
+    return problems
+
+
+def check_settings_supported(
+    settings: Mapping[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> None:
+    """Raise ``ValueError`` listing every :func:`settings_support_problems` entry."""
+    if problems := settings_support_problems(settings, settings_cls):
+        raise ValueError("\n".join(problems))
+
+
 def validate_run_time_sections(
     settings: dict, roms_ref: str | None = None
 ) -> list[str]:
@@ -2760,12 +3191,13 @@ def validate_run_time_sections(
 
     Unlike ``RunTimeSettings.model_validate``, this does NOT require every section —
     it checks only the sections that are present, so it works on a ``ForgeBlueprint``'s
-    flat ``model_settings`` (which omits the processing-filled sections). Keys with no
-    run-time-settings counterpart (e.g. ``cppdefs``, a compile-time section) are
-    skipped; one naming a section only up to case (``Marbl_bgc``) is reported, as a
-    misspelled key within a section is. Use it for fail-fast feedback on hand-edited /
-    loaded configs, where the inner values are otherwise opaque (``model_settings`` is
-    ``Dict[str, Any]``).
+    flat ``model_settings`` (which omits the processing-filled sections). An unknown
+    section or key, ``cppdefs`` included, is reported with the nearest valid name
+    (:func:`unknown_settings_keys`), and one naming a section or key only up to case
+    (``Marbl_bgc``) as a misspelling; so are the other settings a Forge build cannot
+    honor (:func:`settings_support_problems`). Use it for fail-fast feedback on
+    hand-edited / loaded configs, where the inner values are otherwise opaque
+    (``model_settings`` is ``Dict[str, Any]``).
 
     Parameters
     ----------
@@ -2892,6 +3324,7 @@ def validate_run_time_sections(
         errors.append(str(exc))
     except ValidationError:
         pass  # a malformed section is already reported by the loop above
+    errors += settings_support_problems(settings, settings_cls)
     return errors
 
 

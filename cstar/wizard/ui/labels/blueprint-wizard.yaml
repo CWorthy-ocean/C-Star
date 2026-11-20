@@ -487,7 +487,7 @@ fields:
   ic.ic_flex_time:
     label: Flexible start time
     symbol: allow_flex_time
-    hint: Allows a ±24-hour search window when looking for the requested initial time in the source dataset.
+    hint: When the source has no record at the start date, uses its first record in the following 24 hours as the state at the start date. The run still starts at the start date.
   ic.ic_validate:
     label: Validate initial conditions
     hint: Runs roms-tools' post-construction validation (NaN-at-wet-point checks).

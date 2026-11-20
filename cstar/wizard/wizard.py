@@ -113,10 +113,16 @@ from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection
 
 WIZARD_TOOL: Final[str] = "wizard"
 """The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
+# What the Download links say while they wait (see _refresh_download_links).
+_DOWNLOAD_WAITS_FOR_BOUNDARIES: Final[str] = (
+    "The download is ready once the open boundaries are derived from the grid: "
+    "press Derive from grid in the Grid section, set the boundaries by hand, or "
+    "save the blueprint."
+)
 
 # ===========================================================================
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
@@ -2563,22 +2569,28 @@ def _parse_constants(text: str) -> dict[str, float]:
     """Parse the constants-mapping textbox: comma- or newline-separated ``key=value``
     pairs (e.g. ``"Fe=3.0e-3, ALK=2300"``) into ``{"Fe": 0.003, "ALK": 2300.0}``.
 
-    Malformed/blank pairs are dropped silently (best-effort, matches ``_parse_options``
-    -- the raw text stays in the widget either way, nothing is lost until it's fixed).
+    Blank parts (a trailing comma, an empty line) are skipped. Raises ``ValueError``
+    naming every other part that is not ``key=number``, so a typo stops the blueprint
+    instead of removing that tracer from it.
     """
     out: dict[str, float] = {}
+    bad: list[str] = []
     for part in re.split(r"[,\n]", text or ""):
         part = part.strip()
-        if not part or "=" not in part:
+        if not part:
             continue
         k, _, v = part.partition("=")
         k, v = k.strip(), v.strip()
-        if not k or not v:
-            continue
         try:
+            if not k:
+                raise ValueError(part)
             out[k] = float(v)
         except ValueError:
-            continue
+            bad.append(part)
+    if bad:
+        raise ValueError(
+            "cannot read " + ", ".join(repr(p) for p in bad) + " (write key=number)"
+        )
     return out
 
 
@@ -2646,18 +2658,45 @@ _OPTIONS_PLACEHOLDER = (
 def _parse_options(text: str) -> dict[str, Any]:
     """Parse the per-item `options` JSON editor into a dict.
 
-    Empty/whitespace → ``{}``. Invalid JSON or a non-object → ``{}`` (the raw text
-    stays in the widget, so nothing is lost — it simply isn't emitted into the spec
-    until it parses to an object). Values are forwarded verbatim to the rt constructor.
+    Empty/whitespace → ``{}``. Raises ``ValueError`` for invalid JSON or JSON that is
+    not an object, so a requested option is never silently left out. Values are
+    forwarded verbatim to the rt constructor.
     """
     text = (text or "").strip()
     if not text:
         return {}
     try:
         parsed = json.loads(text)
-    except (ValueError, TypeError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"invalid JSON ({exc.msg}, line {exc.lineno} column {exc.colno})"
+        ) from None
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"must be a JSON object ({{...}}), not {type(parsed).__name__}"
+        )
+    return parsed
+
+
+def _parse_field(parser: Callable[[str], Any], text: str, where: str) -> Any:
+    """``parser(text)``, with ``where`` (the field's place in the wizard) put in
+    front of a ``ValueError`` so the status names the box to fix.
+    """
+    try:
+        return parser(text)
+    except ValueError as exc:
+        raise ValueError(f"{where}: {exc}") from None
+
+
+# Item and section fields that have no widget. A loaded value is carried and
+# written back unchanged (see ``_carried_fields``), so editing a blueprint in the
+# wizard never drops it.
+_CARRIED_FIELDS = ("prefill_kwargs", "extrap_kwargs")
+
+
+def _carried_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """The :data:`_CARRIED_FIELDS` that ``item`` sets, copied."""
+    return {k: copy.deepcopy(item[k]) for k in _CARRIED_FIELDS if item.get(k)}
 
 
 def _parse_blend_m(text: str) -> float | str | None:
@@ -2793,6 +2832,74 @@ def _stage_uploaded_netcdf(filename: str, content: bytes) -> Path:
     dest = dest_dir / filename
     dest.write_bytes(content)
     return dest
+
+
+def _run_time_label(value: datetime) -> str:
+    """A run datetime for the status bar: the date, with the time when it is not
+    midnight (a loaded nested run starts at 06:00).
+    """
+    if value.time() == datetime.min.time():
+        return value.date().isoformat()
+    return value.isoformat(sep=" ", timespec="minutes")
+
+
+def _run_time_iso(value: datetime) -> str:
+    """A run datetime as a DomainSpec writes it: the date alone at midnight, else
+    the full ISO-8601 datetime.
+    """
+    if value.time() == datetime.min.time():
+        return value.date().isoformat()
+    return value.isoformat()
+
+
+def _iso_time(value: Any) -> Any:
+    """``value`` as an ISO-8601 string when it is a date, a datetime or text
+    that reads as one; anything else unchanged.
+    """
+    if isinstance(value, date) and not isinstance(value, datetime):
+        value = datetime.combine(value, datetime.min.time())
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).isoformat()
+        except ValueError:
+            return value
+    return value
+
+
+def _cdr_times_as_iso(cdr_forcing: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a ``CDRForcing`` kwargs dict with its times as ISO-8601 text,
+    so a dict read from YAML (datetimes) compares equal to a compiled one.
+    """
+    out = copy.deepcopy(cdr_forcing)
+    for key in ("start_time", "end_time"):
+        if key in out:
+            out[key] = _iso_time(out[key])
+    for release in out.get("releases") or []:
+        if isinstance(release, dict) and isinstance(release.get("times"), list):
+            release["times"] = [_iso_time(t) for t in release["times"]]
+    return out
+
+
+def _cdr_simple_kept_reason(cdr_forcing: dict[str, Any]) -> str:
+    """What a CDR forcing has beyond one release at a constant ALK flux, for the
+    simple panel's note ("2 releases, a DIC flux").
+    """
+    releases = [r for r in cdr_forcing.get("releases") or [] if isinstance(r, dict)]
+    reasons = []
+    if len(releases) != 1:
+        reasons.append(f"{len(releases)} releases")
+    fluxes = [r.get("tracer_fluxes") or {} for r in releases]
+    if others := sorted({t for f in fluxes for t in f} - {"ALK"}):
+        reasons.append(f"a flux of {', '.join(others)}")
+    if any(
+        isinstance(v, list) and any(x != v[0] for x in v)
+        for f in fluxes
+        for v in f.values()
+    ):
+        reasons.append("a flux that changes in time")
+    return ", ".join(reasons) or "settings these fields do not set"
 
 
 def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
@@ -3062,6 +3169,7 @@ class _ForcingEditor:
         # written back only while the box is checked: the section refuses it with
         # `groom: False`, and re-checking the box brings it back.
         self._ic_groom_settings = copy.deepcopy(ic.get("groom_settings") or {})
+        self._ic_carried = _carried_fields(ic)
         _ic_prefill_val = str(ic.get("prefill") or "")
         if _ic_prefill_val not in _PREFILL_OPTS:
             _ic_prefill_val = ""
@@ -3258,6 +3366,7 @@ class _ForcingEditor:
         self._boundary_groom_settings = copy.deepcopy(
             boundary_block.get("groom_settings") or {}
         )
+        self._boundary_carried = _carried_fields(boundary_block)
         for _w in (
             self.boundary_name,
             self.boundary_layout,
@@ -3918,6 +4027,9 @@ class _ForcingEditor:
         # wizard round-trips the field instead of silently dropping it.
         if cat in ("ic_bgc", "boundary_bgc") and item.get("serialize_dask"):
             w["_serialize_dask"] = True
+        # Same reason: `prefill_kwargs`/`extrap_kwargs` have no widget.
+        if carried := _carried_fields(item):
+            w["_carried"] = carried
         if cat == "surface":
             # Carried like `_serialize_dask` (and for the same reason: after the
             # observe loop, since neither is a widget): the blend fallback's
@@ -4130,7 +4242,12 @@ class _ForcingEditor:
         source and target panels' defaults differ (see ``self.ic_bgc_interp``/
         ``self.boundary_bgc_interp``).
         """
-        items = [self._gather_item(from_cat, w) for w in self._rows[from_cat]]
+        try:
+            items = [self._gather_item(from_cat, w) for w in self._rows[from_cat]]
+        except ValueError:
+            # A box the editor cannot read: copy nothing; the status names it.
+            self.on_change()
+            return
         self._set_rows(to_cat, items)
         from_attr = _DEFAULT_INTERP_ATTR[from_cat]
         to_attr = _DEFAULT_INTERP_ATTR[to_cat]
@@ -4194,7 +4311,12 @@ class _ForcingEditor:
         ):  # blank = derive default path; a 'constants' source takes no path
             src["path"] = w["path"].value.strip()
         if "constants" in w and name_val == "constants":  # {"key": float, ...}
-            constants = _parse_constants(w["constants"].value)
+            constants = _parse_field(
+                _parse_constants,
+                w["constants"].value,
+                f"{self._row_label(cat, w)}, "
+                f"{_row_desc('constants', 'constants', colon=False)}",
+            )
             if constants:
                 src["constants"] = constants
         if (
@@ -4318,11 +4440,27 @@ class _ForcingEditor:
             item["coast_snap_buffer_km"] = float(w["coast_snap_buffer_km"].value)
         if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != 20:
             item["domain_edge_buffer"] = int(w["domain_edge_buffer"].value)
-        if "options" in w:  # advanced passthrough; omit when empty/unparseable
-            opts = _parse_options(w["options"].value)
+        item.update(copy.deepcopy(w.get("_carried") or {}))
+        if "options" in w:  # advanced passthrough; omit when empty
+            opts = _parse_field(
+                _parse_options,
+                w["options"].value,
+                f"{self._row_label(cat, w)}, "
+                f"{_row_desc('options', 'options', colon=False)}",
+            )
             if opts:
                 item["options"] = opts
         return item
+
+    def _row_label(self, cat: str, w: dict[str, Any]) -> str:
+        """Where row ``w`` of ``cat`` sits, as the editor shows it
+        ("Surface forcing, row 2"), for a message about one of its boxes.
+        """
+        title = _CATEGORY_TITLES.get(cat, cat)
+        for n, row in enumerate(self._rows.get(cat, []), start=1):
+            if row is w:
+                return f"{title}, row {n}"
+        return title
 
     def gather(self) -> dict[str, Any]:
         forcing: dict[str, list[dict[str, Any]] | dict[str, Any] | None] = {
@@ -4367,7 +4505,13 @@ class _ForcingEditor:
         ic_blend = _parse_blend_m(self.ic_bottom_fill_blend_m.value)
         if ic_blend is not None:  # blank = leave unset (roms-tools' default)
             ic["bottom_fill_blend_m"] = ic_blend
-        ic_opts = _parse_options(self.ic_options.value)
+        ic.update(copy.deepcopy(self._ic_carried))
+        ic_opts = _parse_field(
+            _parse_options,
+            self.ic_options.value,
+            f"{_CATEGORY_TITLES['initial_conditions']}, "
+            f"{label_for('ic.ic_options', default='options').label}",
+        )
         if ic_opts:
             ic["options"] = ic_opts
 
@@ -4414,7 +4558,13 @@ class _ForcingEditor:
             boundary_blend = _parse_blend_m(self.boundary_bottom_fill_blend_m.value)
             if boundary_blend is not None:
                 boundary["bottom_fill_blend_m"] = boundary_blend
-            boundary_opts = _parse_options(self.boundary_options.value)
+            boundary.update(copy.deepcopy(self._boundary_carried))
+            boundary_opts = _parse_field(
+                _parse_options,
+                self.boundary_options.value,
+                f"{_CATEGORY_TITLES['boundary']}, "
+                f"{label_for('boundary.boundary_options', default='options').label}",
+            )
             if boundary_opts:
                 boundary["options"] = boundary_opts
 
@@ -4699,6 +4849,46 @@ def _nested_topo_kwargs(source_value: str, path_value: str) -> dict[str, str]:
         out["topography_source"] = source_value
     if path_value.strip():
         out["topography_path"] = path_value.strip()
+    return out
+
+
+# The grid_kwargs keys the main grid's widgets leave out, each with the value
+# that leaves it out (``_base_grid_kwargs`` writes them only when they differ).
+_GRID_KWARGS_LEFT_OUT: Final[dict[str, Any]] = {
+    "hmin": 5.0,
+    "close_narrow_channels": False,
+    "mask_shapefile": None,
+}
+# The keys of a parent's or child's grid_kwargs that its topography widgets set
+# (see _nested_topo_kwargs); the geometry keys come from its grid boxes.
+_NESTED_TOPO_KEYS: Final = ("topography_source", "topography_path")
+
+
+def _merge_loaded_kwargs(
+    loaded: dict[str, Any],
+    gathered: dict[str, Any],
+    owned: Collection[str],
+    left_out: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A grid_kwargs dict read from the widgets (``gathered``) laid over the one
+    last loaded into them (``loaded``, from a blueprint or a DomainSpec).
+
+    Widgets cannot hold every key a file may carry (a parent's ``hmin``, a
+    ``verbose`` flag), so a key no widget sets (not in ``owned``) is kept as
+    loaded. A key the widgets own but left out (``left_out`` maps it to the
+    value that leaves it out) keeps its loaded spelling while the widget still
+    shows that value -- a file's explicit ``hmin: 5.0`` -- and is dropped once
+    the widget shows something else. Loaded keys keep their order.
+    """
+    left_out = left_out or {}
+    out: dict[str, Any] = {}
+    for k, v in loaded.items():
+        if k in gathered:
+            out[k] = gathered[k]
+        elif k not in owned or (k in left_out and v == left_out[k]):
+            out[k] = copy.deepcopy(v)
+    for k, v in gathered.items():
+        out.setdefault(k, v)
     return out
 
 
@@ -5128,14 +5318,14 @@ class ForgeBlueprintWizard:
         )
         # --- grid extended options ---
         self.hmin = W.FloatText(
-            value=5.0,
+            value=_GRID_KWARGS_LEFT_OUT["hmin"],
             description="hmin (m):",
             style={"description_width": "90px"},
             layout=W.Layout(width="200px"),
             tooltip=_tip("grid", "hmin"),
         )
         self.close_narrow_chk = W.Checkbox(
-            value=False,
+            value=_GRID_KWARGS_LEFT_OUT["close_narrow_channels"],
             description="close narrow channels",
             indent=False,
             tooltip=_tip("grid", "close_narrow_channels"),
@@ -5412,8 +5602,40 @@ class ForgeBlueprintWizard:
         self.cdr_simple_end = W.DatePicker(
             description="End:", style={"description_width": "170px"}
         )
+        self._cdr_simple_fields = (
+            self.cdr_simple_name,
+            self.cdr_simple_lat,
+            self.cdr_simple_lon,
+            self.cdr_simple_depth,
+            self.cdr_simple_hsc,
+            self.cdr_simple_vsc,
+            self.cdr_simple_flux,
+            self.cdr_simple_start,
+            self.cdr_simple_end,
+        )
+        # A loaded "simple" CDR forcing these fields cannot show (several
+        # releases, a flux ramp, another tracer, a time of day): written back
+        # unchanged, with the fields locked, until the user replaces it (see
+        # _populate_cdr_simple).
+        self._cdr_simple_loaded: dict[str, Any] | None = None
+        # The values entering "simple" mode seeded into the fields (see
+        # _apply_cdr_mode); a field still showing its seed follows the grid
+        # center and the run window (see _reseed_cdr_simple).
+        self._cdr_simple_seeded: dict[str, Any] = {}
+        self.cdr_simple_note = W.HTML("")
+        self.cdr_simple_replace_btn = W.Button(
+            description="Edit as one release",
+            icon="pencil",
+            layout=W.Layout(width="auto", display="none"),
+            tooltip=(
+                "Replace the loaded CDR forcing with one release at a constant "
+                "ALK flux, taken from its first release, and unlock the fields."
+            ),
+        )
         self.cdr_simple_box = W.VBox(
             [
+                self.cdr_simple_note,
+                self.cdr_simple_replace_btn,
                 self.cdr_simple_name,
                 _cdr_lat_row,
                 _cdr_lon_row,
@@ -5622,6 +5844,15 @@ class ForgeBlueprintWizard:
         self._v_sponge_touched = False
         self._boundaries_touched = False
         self._boundaries_derived = False
+        # What the widgets cannot hold of the last loaded blueprint or DomainSpec,
+        # written back on save: the grid_kwargs of "grid", "parent" and "child"
+        # (see _merge_loaded_kwargs) and the run datetimes, whose time of day the
+        # date pickers drop (see _run_datetime).
+        self._loaded_grid_kwargs: dict[str, dict[str, Any]] = {}
+        self._loaded_run_times: dict[str, datetime] = {}
+        # The composition names of the last loaded blueprint that this catalog
+        # lacks, for the load status (see _set_load_status).
+        self._load_unknown_specs: list[str] = []
 
         self.derived = W.HTML("")
         self.validation = W.HTML("")
@@ -5818,18 +6049,9 @@ class ForgeBlueprintWizard:
         self.cdr_plot_btn.on_click(self._on_cdr_plot_generate)
         self.cdr_plot_type_dd.observe(self._on_cdr_plot_option_change, names="value")
         self.cdr_plot_release_dd.observe(self._on_cdr_plot_option_change, names="value")
-        for w in (
-            self.cdr_simple_name,
-            self.cdr_simple_lat,
-            self.cdr_simple_lon,
-            self.cdr_simple_depth,
-            self.cdr_simple_hsc,
-            self.cdr_simple_vsc,
-            self.cdr_simple_flux,
-            self.cdr_simple_start,
-            self.cdr_simple_end,
-        ):
+        for w in self._cdr_simple_fields:
             w.observe(self._rebuild, names="value")
+        self.cdr_simple_replace_btn.on_click(self._on_cdr_simple_replace)
         self.model_dd.observe(self._on_model_change, names="value")
         self.show_archived_models.observe(self._on_show_archived_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
@@ -6334,6 +6556,9 @@ class ForgeBlueprintWizard:
         gk = data.get("grid_kwargs", {}) or {}
         with self._suspend():
             self.nest_enable.value = True
+            # The child spec's own grid_kwargs (its hmin, its channel closing)
+            # describe the child, so they go with it (see _nested_grid_kwargs).
+            self._set_loaded_grid_kwargs("child", gk)
             for k, w in self.child_w.items():
                 if k in gk:
                     w.value = gk[k]
@@ -6353,6 +6578,7 @@ class ForgeBlueprintWizard:
         gk = data.get("grid_kwargs", {}) or {}
         with self._suspend():
             self.parent_enable.value = True
+            self._set_loaded_grid_kwargs("parent", gk)
             for k, w in self.parent_w.items():
                 if k in gk:
                     w.value = gk[k]
@@ -6586,10 +6812,14 @@ class ForgeBlueprintWizard:
             return
         old_default = self._default_forcing_spec(change["old"])
         new_default = self._default_forcing_spec(change["new"])
+        try:
+            forcing_modified = self._forcing_modified()
+        except ValueError:  # a box the editor cannot read counts as an edit
+            forcing_modified = True
         if (
             self.forcing_dd.value == old_default
             and new_default != old_default
-            and not self._forcing_modified()
+            and not forcing_modified
         ):
             self.forcing_dd.value = new_default  # _on_forcing_spec rebuilds
         else:
@@ -6903,10 +7133,20 @@ class ForgeBlueprintWizard:
         was_parented = self.parent_enable.value
         with self._suspend():
             self.grid_name.value = data.get("grid_name", name)
+            self._set_loaded_grid_kwargs("grid", gk)
             for k, w in self.grid_w.items():
                 if k in gk:
                     w.value = gk[k]
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
+            # The grid_kwargs keys with their own widgets (as _populate_from).
+            self.hmin.value = float(gk.get("hmin", _GRID_KWARGS_LEFT_OUT["hmin"]))
+            self.close_narrow_chk.value = bool(
+                gk.get(
+                    "close_narrow_channels",
+                    _GRID_KWARGS_LEFT_OUT["close_narrow_channels"],
+                )
+            )
+            self.mask_shapefile.value = str(gk.get("mask_shapefile") or "")
             # Domain-derived properties: a picked catalog Domain replaces the
             # current grid entirely, so reset touched/derived state first, then
             # restore only what the saved DomainSpec actually carries --
@@ -6949,9 +7189,14 @@ class ForgeBlueprintWizard:
             if saved_n_cores is not None:
                 self.n_cores.value = int(saved_n_cores)
             self._sync_auto_tiling()
-            for key, picker in (("start_time", self.start), ("end_time", self.end)):
+            for key, run_key, picker in (
+                ("start_time", "start", self.start),
+                ("end_time", "end", self.end),
+            ):
                 if data.get(key):
-                    picker.value = datetime.fromisoformat(str(data[key])).date()
+                    when = datetime.fromisoformat(str(data[key]))
+                    picker.value = when.date()
+                    self._loaded_run_times[run_key] = when
             # model_name in a DomainSpec is provenance (the model in use when the
             # domain was saved), not a preference: picking a domain must not
             # override the user's Model selection, so it is deliberately NOT
@@ -6963,6 +7208,7 @@ class ForgeBlueprintWizard:
             # from a DomainSpec (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
             child = data.get("grid_kwargs_child")
+            self._set_loaded_grid_kwargs("child", child)
             self.nest_enable.value = child is not None
             if child:
                 for k, w in self.child_w.items():
@@ -6978,6 +7224,7 @@ class ForgeBlueprintWizard:
             # Parent: mirrors the child block above, reading grid_kwargs_parent
             # (only present if the spec was saved with a parent grid active).
             parent = data.get("grid_kwargs_parent")
+            self._set_loaded_grid_kwargs("parent", parent)
             self.parent_enable.value = parent is not None
             if parent:
                 for k, w in self.parent_w.items():
@@ -7059,8 +7306,8 @@ class ForgeBlueprintWizard:
             "description": self.description.value,
             "model_name": self.model_dd.value,
             "grid_name": self.grid_name.value,
-            "start_time": self.start.value.isoformat(),
-            "end_time": self.end.value.isoformat(),
+            "start_time": _run_time_iso(self._run_datetime("start", self.start.value)),
+            "end_time": _run_time_iso(self._run_datetime("end", self.end.value)),
             "grid_kwargs": kw["grid_kwargs"],
             "partitioning": kw["partitioning"],
             "topography_source": self.topo_source.value,
@@ -7182,6 +7429,15 @@ class ForgeBlueprintWizard:
                 f" &nbsp;<span style='color:#b00'>⚠ {len(loaded_problems)} invalid "
                 "settings value(s) in the file</span>"
             )
+        if self._load_unknown_specs:
+            # The settings still come from the file; only the recorded name
+            # changes to the spec the dropdown shows.
+            msg += (
+                " &nbsp;<span style='color:#b58900'>⚠ not in this catalog, saved "
+                "under the spec selected instead: "
+                + html.escape(", ".join(self._load_unknown_specs))
+                + "</span>"
+            )
         self.load_status.value = msg
         self._load_status_is_error = False
 
@@ -7259,6 +7515,9 @@ class ForgeBlueprintWizard:
             self.cdr_file_path.value = ""
             self.cdr_file_upload.value = ()
             self.cdr_file_status.value = ""
+        if old_mode == "simple" and mode != "simple":
+            self._keep_cdr_simple(None)
+            self._cdr_simple_seeded = {}
         self._cdr_mode_active = mode
 
         self.cdr_simple_box.layout.display = "" if mode == "simple" else "none"
@@ -7278,8 +7537,8 @@ class ForgeBlueprintWizard:
             self.cdr_file_status.value = _CDR_FILE_HINT
 
         if mode == "simple" and old_mode != "simple":
-            # Seed from the grid center / run window at the moment of activation
-            # only -- no live re-sync afterward (see the "simple" panel spec).
+            # Seed from the grid center / run window; a field the user leaves
+            # alone keeps following them (see _reseed_cdr_simple).
             with self._suspend():
                 self.cdr_simple_lat.value = float(self.grid_w["center_lat"].value)
                 self.cdr_simple_lon.value = float(self.grid_w["center_lon"].value)
@@ -7287,6 +7546,10 @@ class ForgeBlueprintWizard:
                     self.cdr_simple_start.value = self.start.value
                 if self.end.value is not None:
                     self.cdr_simple_end.value = self.end.value
+            self._cdr_simple_seeded = {
+                key: widget.value
+                for key, widget in self._cdr_simple_seed_targets().items()
+            }
 
         self._invalidate_cdr_plot_cache()
         self._rebuild()
@@ -7371,25 +7634,33 @@ class ForgeBlueprintWizard:
         }
 
     def _simple_cdr_forcing_dict(self) -> dict[str, Any]:
+        """The "simple" mode's ``cdr_forcing``: a loaded one the panel cannot
+        show, unchanged (see ``_populate_cdr_simple``), else the panel compiled
+        (see ``_compile_simple_cdr``).
+        """
+        if self._cdr_simple_loaded is not None:
+            return copy.deepcopy(self._cdr_simple_loaded)
+        return self._compile_simple_cdr()
+
+    def _compile_simple_cdr(self) -> dict[str, Any]:
         """Compile the "simple" panel into a roms-tools ``CDRForcing`` kwargs
         dict: a single tracer-perturbation release, a flat two-point ALK pulse
         (the same static flux at both the run's start and end) -- see the CDR
         Overhaul plan's "simple mode compile" note. Values are ISO-8601 strings
         (not ``datetime`` objects) so the dict stays YAML/JSON-serializable on
         the blueprint; both ``rt.CDRForcing`` (pydantic) and ``CdrSpec`` parse
-        an ISO string back into a datetime on their own.
+        an ISO string back into a datetime on their own. A date the run shares
+        takes the run's time of day (see ``_run_datetime``).
         """
         start = self.cdr_simple_start.value or self.start.value
         end = self.cdr_simple_end.value or self.end.value
         start_iso = (
-            datetime.combine(start, datetime.min.time()).isoformat()
+            self._run_datetime("start", start).isoformat()
             if start is not None
             else None
         )
         end_iso = (
-            datetime.combine(end, datetime.min.time()).isoformat()
-            if end is not None
-            else None
+            self._run_datetime("end", end).isoformat() if end is not None else None
         )
         flux = float(self.cdr_simple_flux.value)
         return {
@@ -7413,7 +7684,9 @@ class ForgeBlueprintWizard:
     def _populate_cdr_simple(self, cdr_forcing: dict[str, Any]) -> None:
         """Reverse-derive the "simple" panel's widget values from a compiled CDR
         forcing dict (the shape ``_simple_cdr_forcing_dict`` produces) -- the
-        load-back half of "simple" mode's round trip.
+        load-back half of "simple" mode's round trip. A dict the fields would
+        not compile back to unchanged is kept as loaded instead (see
+        ``_keep_cdr_simple``), with the fields showing its first release.
         """
         releases = cdr_forcing.get("releases") or []
         release = releases[0] if releases else {}
@@ -7435,6 +7708,88 @@ class ForgeBlueprintWizard:
                 self.cdr_simple_end.value = datetime.fromisoformat(
                     str(times[-1])
                 ).date()
+        # A loaded release is the user's, not a seed to move with the grid.
+        self._cdr_simple_seeded = {}
+
+        # The fields hold one release at a constant ALK flux; anything else
+        # (a second release, a ramp, DIC, a time of day) is kept as loaded. Both
+        # sides are compared as resolved: under cdr_lite a saved release carries
+        # the tracer_set the resolver gave it.
+        def resolved(forcing: dict[str, Any]) -> dict[str, Any]:
+            selection = {"mode": "simple", "cdr_forcing": forcing}
+            try:
+                forcing = self._resolved_cdr_dict(
+                    {**selection, "cdr_forcing_file": None}
+                )["cdr_forcing"]
+            except ValueError:  # e.g. a volume release under cdr_lite
+                pass
+            return _cdr_times_as_iso(forcing)
+
+        shown = resolved(self._compile_simple_cdr())
+        self._keep_cdr_simple(None if resolved(cdr_forcing) == shown else cdr_forcing)
+
+    def _keep_cdr_simple(self, cdr_forcing: dict[str, Any] | None) -> None:
+        """Keep ``cdr_forcing`` as the "simple" mode's forcing, unchanged, and
+        lock the panel's fields with a note saying why; ``None`` unlocks them.
+        """
+        self._cdr_simple_loaded = copy.deepcopy(cdr_forcing)
+        kept = cdr_forcing is not None
+        for widget in self._cdr_simple_fields:
+            widget.disabled = kept
+        self.cdr_simple_replace_btn.layout.display = "" if kept else "none"
+        self.cdr_simple_note.value = (
+            components.banner(
+                "warn",
+                "<b>Kept as loaded.</b> This CDR forcing has "
+                f"{html.escape(_cdr_simple_kept_reason(cdr_forcing))}, which the "
+                "fields below cannot show; it is saved unchanged. "
+                "<b>Edit as one release</b> replaces it with its first release at "
+                "a constant ALK flux.",
+            )
+            if cdr_forcing is not None
+            else ""
+        )
+
+    def _on_cdr_simple_replace(self, _btn) -> None:
+        """Handle "Edit as one release": drop the kept CDR forcing for what the
+        fields show.
+        """
+        self._keep_cdr_simple(None)
+        self._rebuild()
+
+    def _cdr_simple_seed_targets(self) -> dict[str, Any]:
+        """The simple CDR fields that entering "simple" mode seeds, by key."""
+        return {
+            "lat": self.cdr_simple_lat,
+            "lon": self.cdr_simple_lon,
+            "start": self.cdr_simple_start,
+            "end": self.cdr_simple_end,
+        }
+
+    def _reseed_cdr_simple(self) -> None:
+        """Move each simple CDR field that still shows its seed to the current
+        grid center or run window, so moving either does not leave the release
+        behind. A field the user edited, a kept or loaded release, and another
+        CDR mode are left alone.
+        """
+        if self.cdr_mode_dd.value != "simple" or self._cdr_simple_loaded is not None:
+            return
+        now = {
+            "lat": float(self.grid_w["center_lat"].value),
+            "lon": float(self.grid_w["center_lon"].value),
+            "start": self.start.value,
+            "end": self.end.value,
+        }
+        with self._suspend():
+            for key, widget in self._cdr_simple_seed_targets().items():
+                if (
+                    key in self._cdr_simple_seeded
+                    and widget.value == self._cdr_simple_seeded[key]
+                    and now[key] is not None
+                    and now[key] != widget.value
+                ):
+                    widget.value = now[key]
+                    self._cdr_simple_seeded[key] = now[key]
 
     # ---- CDR forcing upload ----------------------------------------------------
     def _on_cdr_upload(self, change):
@@ -7881,6 +8236,7 @@ class ForgeBlueprintWizard:
         """
         # Before any re-resolve below, so the first rebuilt config carries it.
         self._carried_provenance = cfg.provenance
+        self._load_unknown_specs = []
         # The file's values are the user's: no wizard default goes over them.
         self._wizard_default_keys = set()
         # The file's own pinned ucla-roms ref selects the schema variant it was
@@ -7898,6 +8254,8 @@ class ForgeBlueprintWizard:
                 self.show_archived_models.value = True
             if cfg.composition.model.name in self._dd_values(self.model_dd):
                 self.model_dd.value = cfg.composition.model.name
+            elif cfg.composition.model.name:
+                self._load_unknown_specs.append(f"model '{cfg.composition.model.name}'")
             self.grid_name.value = cfg.domain.grid_name
             self.description.value = cfg.description
             self.name.value = cfg.name
@@ -7909,12 +8267,23 @@ class ForgeBlueprintWizard:
             self.start.value = cfg.run.start_date.date()
             self.end.value = cfg.run.end_date.date()
             self.model_ref_date.value = cfg.run.model_reference_date.date()
+            self._loaded_run_times = {
+                "start": cfg.run.start_date,
+                "end": cfg.run.end_date,
+                "model_reference_date": cfg.run.model_reference_date,
+            }
             gk = cfg.domain.grid_kwargs
+            self._set_loaded_grid_kwargs("grid", gk)
             for k, w in self.grid_w.items():
                 if k in gk:
                     w.value = gk[k]
-            self.hmin.value = float(gk.get("hmin", 5.0))
-            self.close_narrow_chk.value = bool(gk.get("close_narrow_channels", False))
+            self.hmin.value = float(gk.get("hmin", _GRID_KWARGS_LEFT_OUT["hmin"]))
+            self.close_narrow_chk.value = bool(
+                gk.get(
+                    "close_narrow_channels",
+                    _GRID_KWARGS_LEFT_OUT["close_narrow_channels"],
+                )
+            )
             self.mask_shapefile.value = str(gk.get("mask_shapefile") or "")
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
             for d, w in self.bnd.items():
@@ -8046,6 +8415,8 @@ class ForgeBlueprintWizard:
                 self.forcing_dd.value = fname
             elif _forcing_values:
                 self.forcing_dd.value = _forcing_values[0]
+                if fname:
+                    self._load_unknown_specs.append(f"forcing '{fname}'")
             self._build_forcing_editor(self._sources_to_inputs(cfg))
             if self.parent_enable.value:
                 # A loaded file may (inconsistently) carry boundary forcing for a
@@ -8072,6 +8443,8 @@ class ForgeBlueprintWizard:
                 self.output_dd.value = oname
             elif _output_values:
                 self.output_dd.value = _output_values[0]
+                if oname:
+                    self._load_unknown_specs.append(f"output '{oname}'")
             # CDR spec selection: unlike forcing/output, "<custom>" (no catalog
             # entry) is a normal, common state (mode="none" is the default) --
             # fall back to "<custom>"/no seed rather than the first catalog
@@ -8112,7 +8485,8 @@ class ForgeBlueprintWizard:
         ``{}`` while a user-provided grid file is attached: it forbids the
         generation-geometry keys alongside it
         (``Domain._grid_file_excludes_generation_geometry``), so ``grid_file=``/
-        ``grid=`` carry the grid instead.
+        ``grid=`` carry the grid instead. Otherwise laid over the grid_kwargs last
+        loaded into the widgets, so a loaded key with no widget survives a save.
         """
         gk: dict[str, Any] = {}
         if self._grid_file is not None:
@@ -8125,13 +8499,48 @@ class ForgeBlueprintWizard:
             for k in _SCOORD:
                 gk[k] = float(self.grid_w[k].value)
         # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
-        if self.hmin.value != 5.0:
+        if self.hmin.value != _GRID_KWARGS_LEFT_OUT["hmin"]:
             gk["hmin"] = float(self.hmin.value)
         if self.close_narrow_chk.value:
             gk["close_narrow_channels"] = True
         if self.mask_shapefile.value.strip():
             gk["mask_shapefile"] = self.mask_shapefile.value.strip()
-        return gk
+        return _merge_loaded_kwargs(
+            self._loaded_grid_kwargs.get("grid", {}),
+            gk,
+            owned={*self.grid_w, *_GRID_KWARGS_LEFT_OUT},
+            left_out=_GRID_KWARGS_LEFT_OUT,
+        )
+
+    def _nested_grid_kwargs(self, which: str) -> dict[str, Any]:
+        """``which`` in ("parent", "child"): that grid's generation kwargs, read
+        from its widgets and laid over the grid_kwargs last loaded into them. A
+        parent's ``hmin`` or ``close_narrow_channels`` has no widget here, and the
+        child is aligned to a parent rebuilt from exactly these kwargs.
+        """
+        boxes = getattr(self, f"{which}_w")
+        gk: dict[str, Any] = {}
+        for k in _GRID_INT:
+            gk[k] = int(boxes[k].value)
+        for k in _GRID_FLOAT + _SCOORD:
+            gk[k] = float(boxes[k].value)
+        gk.update(
+            _nested_topo_kwargs(
+                getattr(self, f"{which}_topo_source").value,
+                getattr(self, f"{which}_topo_path").value,
+            )
+        )
+        return _merge_loaded_kwargs(
+            self._loaded_grid_kwargs.get(which, {}),
+            gk,
+            owned={*boxes, *_NESTED_TOPO_KEYS},
+        )
+
+    def _set_loaded_grid_kwargs(self, which: str, gk: dict[str, Any] | None) -> None:
+        """Record ``gk`` as the grid_kwargs just loaded into ``which``'s widgets
+        ("grid", "parent" or "child"); see :func:`_merge_loaded_kwargs`.
+        """
+        self._loaded_grid_kwargs[which] = copy.deepcopy(dict(gk or {}))
 
     def _attached_grid(self) -> Any:
         """The attached grid file's loaded ``roms_tools.Grid``, or ``None`` when no
@@ -8153,6 +8562,17 @@ class ForgeBlueprintWizard:
             )
         return None
 
+    def _run_datetime(self, key: str, day: date) -> datetime:
+        """The datetime for run date picker ``key`` ("start", "end",
+        "model_reference_date") showing ``day``: the time of day last loaded into
+        it while it still shows the loaded date (the pickers hold whole days, and
+        a nested run starts at 06:00), otherwise midnight.
+        """
+        loaded = self._loaded_run_times.get(key)
+        if loaded is not None and loaded.date() == day:
+            return loaded
+        return datetime.combine(day, datetime.min.time())
+
     def _gather(self) -> dict[str, Any]:
         kw = dict(
             model_path=self.catalog.model_path(self.model_dd.value),
@@ -8167,8 +8587,8 @@ class ForgeBlueprintWizard:
                     "n_procs_y": int(self.npy.value),
                 }
             ),
-            start_date=datetime.combine(self.start.value, datetime.min.time()),
-            end_date=datetime.combine(self.end.value, datetime.min.time()),
+            start_date=self._run_datetime("start", self.start.value),
+            end_date=self._run_datetime("end", self.end.value),
             description=self.description.value,
             # Untouched: always pass None so the resolver recomputes a fresh default
             # (self.name.value may still hold the *previous* rebuild's backfilled
@@ -8199,10 +8619,10 @@ class ForgeBlueprintWizard:
             kw["roms_ref"] = self.roms_ref.value.strip()
         if self.marbl_ref.value.strip():
             kw["marbl_ref"] = self.marbl_ref.value.strip()
-        if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
-            kw["model_reference_date"] = datetime.combine(
-                self.model_ref_date.value, datetime.min.time()
-            )
+        if self.model_ref_date.value:
+            ref = self._run_datetime("model_reference_date", self.model_ref_date.value)
+            if ref != datetime(2000, 1, 1):
+                kw["model_reference_date"] = ref
         if self._grid_file is not None:
             kw["grid_file"] = self._grid_file
             # Pass the already-loaded grid through to skip re-reading/re-hashing
@@ -8215,32 +8635,12 @@ class ForgeBlueprintWizard:
                 kw["grid"] = self._grid_file_grid
         is_parent, is_child = self._nesting_role()
         if is_parent:
-            ck: dict[str, Any] = {}
-            for k in _GRID_INT:
-                ck[k] = int(self.child_w[k].value)
-            for k in _GRID_FLOAT + _SCOORD:
-                ck[k] = float(self.child_w[k].value)
-            ck.update(
-                _nested_topo_kwargs(
-                    self.child_topo_source.value, self.child_topo_path.value
-                )
-            )
-            kw["grid_kwargs_child"] = ck
+            kw["grid_kwargs_child"] = self._nested_grid_kwargs("child")
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
         if is_child:
-            pk: dict[str, Any] = {}
-            for k in _GRID_INT:
-                pk[k] = int(self.parent_w[k].value)
-            for k in _GRID_FLOAT + _SCOORD:
-                pk[k] = float(self.parent_w[k].value)
-            pk.update(
-                _nested_topo_kwargs(
-                    self.parent_topo_source.value, self.parent_topo_path.value
-                )
-            )
-            kw["grid_kwargs_parent"] = pk
+            kw["grid_kwargs_parent"] = self._nested_grid_kwargs("parent")
         # forcing/output are always required now (no more model-default fallback).
         if self._forcing_editor is None:
             raise RuntimeError("_gather called before the forcing editor was built")
@@ -8262,6 +8662,7 @@ class ForgeBlueprintWizard:
     def _populate_nesting(self, cfg: ForgeBlueprint):
         """Set the nesting widgets from a loaded config (called inside _suspend)."""
         child = cfg.domain.grid_kwargs_child
+        self._set_loaded_grid_kwargs("child", child)
         self.nest_enable.value = child is not None
         if child:
             for k, w in self.child_w.items():
@@ -8281,6 +8682,7 @@ class ForgeBlueprintWizard:
             cfg.domain.nesting_include_pressure_fluxes
         )
         parent = cfg.domain.grid_kwargs_parent
+        self._set_loaded_grid_kwargs("parent", parent)
         self.parent_enable.value = parent is not None
         if parent:
             for k, w in self.parent_w.items():
@@ -8389,6 +8791,7 @@ class ForgeBlueprintWizard:
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
             return
+        self._reseed_cdr_simple()
         # CDR plot cache: _rebuild() is the one hook that reliably fires for
         # every CDR-panel edit, every mode switch, and every grid-geometry edit
         # (see _invalidate_cdr_plot_cache's own docstring for why this spot was
@@ -8705,7 +9108,8 @@ class ForgeBlueprintWizard:
             summary = (
                 f"Model <b>{model_name}</b> &middot; "
                 f"Domain <b>{domain_label}</b> ({cfg.composition.domain.origin}) "
-                f"&middot; Run <b>{self.start.value} &rarr; {self.end.value}</b>"
+                f"&middot; Run <b>{_run_time_label(cfg.run.start_date)} &rarr; "
+                f"{_run_time_label(cfg.run.end_date)}</b>"
             )
             status_chip = components.chip("● Valid", "ok")
         else:
@@ -8780,7 +9184,23 @@ class ForgeBlueprintWizard:
         carried (that is `_save_config`'s job). A ``cfg`` that is already stamped,
         as the config just saved is, comes back from ``stamp_provenance`` as it is,
         so its links hand out exactly the file that was written.
+
+        While the open boundaries are the provisional checkbox defaults (neither
+        touched nor derived from the grid), the links are withheld: Save and Run
+        derive them first (`_ensure_boundaries_derived`), but a link has no click
+        hook to do that, and building a grid on every rebuild would stall typing.
         """
+        if not self._boundaries_touched and not self._boundaries_derived:
+            self.download_link.value = (
+                "<span class='forge-dl-off' style='color:#b58900' "
+                f'title="{html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}">'
+                "⬇ Derive boundaries to download</span>"
+            )
+            self.download_link_review.value = (
+                f"<span style='color:#b58900'>⚠ "
+                f"{html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}</span>"
+            )
+            return
         download_cfg = cfg.stamp_provenance(WIZARD_TOOL)
         self.download_link.value = self._download_html(
             download_cfg, caption="Download blueprint"
@@ -8925,9 +9345,8 @@ class ForgeBlueprintWizard:
         The passive browser download link (a plain data-URI anchor, regenerated
         on every ``_rebuild``) has no click-time Python hook to apply this to --
         forcing a grid build on every edit would reintroduce the UI-stall this
-        design explicitly avoids. Its freshness is only as good as the last
-        explicit derive/rebuild; ``derive_status`` surfaces that instead of
-        shipping it silently.
+        design explicitly avoids. ``_refresh_download_links`` withholds it
+        instead until the boundaries are touched or derived.
         """
         if self._boundaries_touched or self._boundaries_derived:
             return True
@@ -8976,37 +9395,27 @@ class ForgeBlueprintWizard:
             import matplotlib.pyplot as plt
             from roms_tools import Grid, plot_nesting
 
-            gk: dict[str, Any] = {}
-            for k in _GRID_INT:
-                gk[k] = int(self.grid_w[k].value)
-            for k in _GRID_FLOAT:
-                gk[k] = float(self.grid_w[k].value)
-            if self.scoord_chk.value:
-                for k in _SCOORD:
-                    gk[k] = float(self.grid_w[k].value)
-            if self.hmin.value != 5.0:
-                gk["hmin"] = float(self.hmin.value)
-            if self.close_narrow_chk.value:
-                gk["close_narrow_channels"] = True
-            if self.mask_shapefile.value.strip():
-                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+            # This grid as Derive and the grid plot build it: an attached grid
+            # file, or the kwargs a save writes with its topography resolved for
+            # this machine.
+            this_grid = self._build_grid_from_widgets()
+            note_self = (
+                "" if self._grid_file is not None else self._grid_build_topo_note
+            )
 
-            ck: dict[str, Any] = {}
-            for k in _GRID_INT:
-                ck[k] = int(self.child_w[k].value)
-            for k in _GRID_FLOAT + _SCOORD:
-                ck[k] = float(self.child_w[k].value)
+            ck = {
+                k: v
+                for k, v in self._nested_grid_kwargs("child").items()
+                if k not in _NESTED_TOPO_KEYS
+            }
 
-            gk_topo, note_self = self._this_grid_plot_topography()
-            if gk_topo is not None:
-                gk["topography_source"] = gk_topo
             ck_topo, note_child = self._nested_plot_topography("child")
             if ck_topo is not None:
                 ck["topography_source"] = ck_topo
 
             plt.ioff()
             try:
-                parent = Grid(**gk)
+                parent = this_grid
                 child = Grid(**ck)
                 # plot_nesting calls plt.show() internally (no way to suppress it,
                 # no return value); under Jupyter's inline backend that renders-
@@ -9050,26 +9459,11 @@ class ForgeBlueprintWizard:
             import matplotlib.pyplot as plt
             from roms_tools import Grid, plot_nesting
 
-            gk: dict[str, Any] = {}
-            for k in _GRID_INT:
-                gk[k] = int(self.grid_w[k].value)
-            for k in _GRID_FLOAT:
-                gk[k] = float(self.grid_w[k].value)
-            if self.scoord_chk.value:
-                for k in _SCOORD:
-                    gk[k] = float(self.grid_w[k].value)
-            if self.hmin.value != 5.0:
-                gk["hmin"] = float(self.hmin.value)
-            if self.close_narrow_chk.value:
-                gk["close_narrow_channels"] = True
-            if self.mask_shapefile.value.strip():
-                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
-
-            pk: dict[str, Any] = {}
-            for k in _GRID_INT:
-                pk[k] = int(self.parent_w[k].value)
-            for k in _GRID_FLOAT + _SCOORD:
-                pk[k] = float(self.parent_w[k].value)
+            pk = {
+                k: v
+                for k, v in self._nested_grid_kwargs("parent").items()
+                if k not in _NESTED_TOPO_KEYS
+            }
 
             # Each grid is built with ITS topography where the file is available
             # on this machine (mirrors the executor's per-grid resolution), so a
@@ -9078,14 +9472,17 @@ class ForgeBlueprintWizard:
             pk_topo, note_parent = self._nested_plot_topography("parent")
             if pk_topo is not None:
                 pk["topography_source"] = pk_topo
-            gk_topo, note_self = self._this_grid_plot_topography()
-            if gk_topo is not None:
-                gk["topography_source"] = gk_topo
 
             plt.ioff()
             try:
                 parent = Grid(**pk)
-                this_grid = Grid(**gk)
+                # This grid as Derive and the grid plot build it: an attached
+                # grid file, or the kwargs a save writes with its topography
+                # resolved for this machine.
+                this_grid = self._build_grid_from_widgets()
+                note_self = (
+                    "" if self._grid_file is not None else self._grid_build_topo_note
+                )
                 # See _on_nest_plot for why plt.show() is neutralized here.
                 _real_show, plt.show = plt.show, lambda *a, **k: None
                 try:

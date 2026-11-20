@@ -725,7 +725,7 @@ class ROMSSimulation(Simulation):
             filter(None, [getattr(i, "start_date", None) for i in inp])
         )
         end_dates: list[datetime] = list(
-            filter(None, [getattr(i, "start_date", None) for i in inp])
+            filter(None, [getattr(i, "end_date", None) for i in inp])
         )
         for i in inp:
             # check it either matches bounds of simulation OR another InputDataset:

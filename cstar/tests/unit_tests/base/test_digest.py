@@ -153,6 +153,30 @@ class TestHashNetcdfContents:
         ds2.to_netcdf(p2)
         assert hash_netcdf_contents(p2) != h1
 
+    def test_changing_global_attr_changes_digest(self, tmp_path):
+        ds = _numeric_dataset()
+        p1 = tmp_path / "a.nc"
+        ds.to_netcdf(p1)
+
+        ds2 = ds.copy(deep=True)
+        ds2.attrs["title"] = "another dataset"
+        p2 = tmp_path / "b.nc"
+        ds2.to_netcdf(p2)
+        assert hash_netcdf_contents(p2) != hash_netcdf_contents(p1)
+
+    def test_renaming_a_dimension_changes_digest(self, tmp_path):
+        """Same variables, shapes and values; only a dimension name differs."""
+        ds = _numeric_dataset()
+        p1 = tmp_path / "a.nc"
+        ds.to_netcdf(p1)
+
+        ds2 = ds.rename_dims({"x": "xi_rho"})
+        assert ds2["temp"].shape == ds["temp"].shape
+        assert set(ds2.variables) == set(ds.variables)
+        p2 = tmp_path / "b.nc"
+        ds2.to_netcdf(p2)
+        assert hash_netcdf_contents(p2) != hash_netcdf_contents(p1)
+
     def test_survives_netcdf3_reencoding(self, tmp_path):
         ds = _numeric_dataset()
         p_nc4 = tmp_path / "a_nc4.nc"

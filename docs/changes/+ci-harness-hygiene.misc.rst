@@ -1,0 +1,1 @@
+Make the integration tiers fail under CI when a tool they need is missing, keep a developer's ``CSTAR_*``, ``PROJECT`` and scratch variables out of the e2e tests, and stop the integration workflows from replacing conda's binary packages.

@@ -16,7 +16,6 @@ ParallelIO four times, so it takes tens of minutes.
 
 import json
 import re
-import shutil
 import subprocess
 import typing as t
 from collections.abc import Callable, Sequence
@@ -124,19 +123,7 @@ ERROR_CONTEXT_LINES = 20
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 TIMESTAMP = re.compile(r"^\d{14}$")
 PRODUCT_HEADINGS = ("Products missing", "Products whose size", "Products whose content")
-MISSING_TOOLS = [
-    tool
-    for tool, found in {
-        "nccopy": shutil.which("nccopy"),
-        "mpirun": shutil.which("mpirun"),
-        "mpifort or gfortran": shutil.which("mpifort") or shutil.which("gfortran"),
-    }.items()
-    if not found
-]
-
-pytestmark = pytest.mark.skipif(
-    bool(MISSING_TOOLS), reason=f"ROMS toolchain missing: {', '.join(MISSING_TOOLS)}"
-)
+pytestmark = pytest.mark.requires_tools("nccopy", "mpirun", "mpifort or gfortran")
 
 
 @dataclass(frozen=True)

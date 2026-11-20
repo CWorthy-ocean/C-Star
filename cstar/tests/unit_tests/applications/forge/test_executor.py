@@ -4054,6 +4054,10 @@ class TestGoldenNamelist:
                 if cdr_lite
                 else patch("cstar.applications.forge.input_generator.rt.CDRForcing")
             ) as mock_cdr,
+            # the grid is a mock: no release positions to check it against
+            patch(
+                "cstar.applications.forge.input_generator.check_cdr_release_positions"
+            ),
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
@@ -6225,3 +6229,62 @@ class TestOnlyInputsReuseIsIdempotent:
             "A second full run against a working_dir that already has all "
             "inputs must re-derive a byte-identical B_{name}.yaml."
         )
+
+
+class TestConfigureBuildRefusesUnsupportedSettings:
+    """``configure_build`` is the net for a blueprint that reaches it unvalidated:
+    unknown keys, pipe forcing and tiles with no grid points are refused there
+    too, before any template is rendered, both when the stored ``model_settings``
+    carry them and when they arrive as overrides only (a wizard edit after
+    generation), where the run-time merge would otherwise refuse an unknown
+    section without suggesting the intended one.
+    """
+
+    _GRID_KWARGS: ClassVar[dict] = TestGoldenNamelist._GRID_KWARGS
+    _BOUNDARIES: ClassVar[dict] = TestGoldenNamelist._BOUNDARIES
+    _PARTITIONING: ClassVar[dict] = TestGoldenNamelist._PARTITIONING
+    _touch_save = staticmethod(TestGoldenNamelist._touch_save)
+    _touch_save_list = staticmethod(TestGoldenNamelist._touch_save_list)
+    _mock_source_data = staticmethod(TestGoldenNamelist._mock_source_data)
+    _generate_inputs_no_cdr_forcing = TestGoldenNamelist._generate_inputs_no_cdr_forcing
+    _configure_build_for = TestGoldenNamelist._configure_build_for
+
+    @pytest.mark.parametrize(
+        ("edit", "pattern"),
+        [
+            ({"botom_drag": {"rdrg": 0.0}}, r"botom_drag \(did you mean bottom_drag"),
+            (
+                {"ocean_vars": {"wrt_fiel_his": True}},
+                r"ocean_vars\.wrt_fiel_his \(did you mean ocean_vars\.wrt_file_his",
+            ),
+            ({"pipe_frc": {"pipe_source": True}}, r"pipe_frc\.pipe_source is on"),
+        ],
+    )
+    @pytest.mark.parametrize("stored", [True, False], ids=["stored", "override"])
+    def test_refused(self, mock_grid, tmp_path, edit, pattern, stored):
+        if stored:
+            cfg, builder = self._generate_inputs_no_cdr_forcing(
+                mock_grid, tmp_path, stored_model_settings=edit
+            )
+        else:
+            cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+            for section, value in edit.items():
+                cfg.model_settings.setdefault(section, {}).update(value)
+        with pytest.raises(ValueError, match=pattern):
+            self._configure_build_for(cfg, builder)
+
+    def test_misspelled_cppdef_refused(self, mock_grid, tmp_path):
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cppdefs"]["diagnostic"] = True
+        with pytest.raises(ValueError, match=r"cppdefs\.diagnostic \(did you mean"):
+            self._configure_build_for(cfg, builder)
+
+    def test_too_many_tiles_refused(self, mock_grid, tmp_path):
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, param_overrides={"np_xi": 16}
+        )
+        with pytest.raises(
+            ValueError,
+            match=r"param\.np_xi=16 \(partitioning\.n_procs_x\) cannot split the 6 xi",
+        ):
+            self._configure_build_for(cfg, builder)

@@ -11,7 +11,6 @@ diff, and commit it. Regenerate one case's golden with ``-k "golden and <case>"`
 
 import os
 import re
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,10 +49,7 @@ if TYPE_CHECKING:
     from cstar.applications.forge.engine import ForgeBlueprintExecutor
     from cstar.roms.namelist import RomsNamelistBase
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("nccopy") is None,
-    reason="nccopy is required to convert use_pio inputs to CDF-5",
-)
+pytestmark = pytest.mark.requires_tools("nccopy")  # converts use_pio inputs to CDF-5
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CDF5_MAGIC = b"CDF\x05"

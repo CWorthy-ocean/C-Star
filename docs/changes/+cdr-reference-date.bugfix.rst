@@ -1,0 +1,1 @@
+Forge writes the CDR forcing's ``cdr_time`` relative to the run's ``model_reference_date`` instead of 2000-01-01, so a run with CDR releases and another reference date is no longer refused after the ROMS build.
