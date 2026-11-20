@@ -2031,6 +2031,22 @@ class Directive(Transform[LiveStep], t.Protocol):
         """
         return ()
 
+    def verify(self, step: LiveStep) -> None:
+        """Check the step once every directive has been applied to it.
+
+        `DirectiveConfig.apply_directives` calls this on each directive after
+        applying all of them, before the run starts, so a check sees the
+        blueprint the run will use whatever order the directives are listed in
+        (e.g. the `start_date` a later `continue-from` sets) and the files of
+        upstream steps, which exist by then. Default: nothing to check.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step with every directive applied.
+        """
+        return
+
     @property
     def workplan(self) -> LiveWorkplan:
         """Return the live workplan.
@@ -2182,8 +2198,9 @@ class DirectiveConfig(BaseModel):
         directive_uri: str,
         blueprint_uri: str,
     ) -> str:
-        """Apply the specified directives to the blueprint and
-        return the path to the final, transformed blueprint.
+        """Apply the specified directives to the blueprint, let each directive
+        check the result (`Directive.verify`), and return the path to the final,
+        transformed blueprint.
 
         Parameters
         ----------
@@ -2247,6 +2264,9 @@ class DirectiveConfig(BaseModel):
             ]
             for transform in transforms:
                 step = transform(step)[0]
+
+            for transform in transforms:
+                transform.verify(step)
 
         return str(step.blueprint_path)
 

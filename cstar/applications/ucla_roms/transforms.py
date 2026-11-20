@@ -36,6 +36,7 @@ from cstar.orchestration.transforms import (
     lookup_step,
 )
 from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_REMEDY
 from cstar.roms.outputs import (
     EXTRACT_ROLE,
     OUTPUT_ROOT_NAME,
@@ -45,6 +46,7 @@ from cstar.roms.outputs import (
     TimestampedOutputFile,
     warn_on_restart_start_date_mismatch,
 )
+from cstar.roms.source_coverage import check_source_coverage
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveWorkplan
@@ -451,6 +453,13 @@ SOURCE_KEY_STEP: t.Final[str] = "step"
 """Directive config key naming another workplan step as the content source."""
 SOURCE_DELIMITER: t.Final[str] = ";"
 """Delimiter separating multiple sources in a directive's `path`/`step` value."""
+_SOURCE_COVERAGE_REMEDY: t.Final[str] = (
+    f"List every segment of the source, separated by `{SOURCE_DELIMITER}` (e.g. "
+    f"`{SOURCE_KEY_STEP}: parent_1{SOURCE_DELIMITER}parent_2{SOURCE_DELIMITER}"
+    f"parent_3`, or `{SOURCE_KEY_PATH}:` with one output directory per segment), "
+    "and make sure the source runs cover the step's start_date to end_date."
+)
+"""How to fix directive sources that do not cover the step, appended to the refusal."""
 
 _OutputFileT = t.TypeVar("_OutputFileT", bound=TimestampedOutputFile)
 
@@ -604,6 +613,55 @@ def collect_output_files(
         deduped.setdefault(file.path.resolve(), file)
 
     return list(deduped.values())
+
+
+def verify_source_coverage(
+    directive: str,
+    files: Sequence[TimestampedOutputFile],
+    time_variable: str,
+    label: str,
+    step: LiveStep,
+    *,
+    missing_hint: str = "",
+) -> None:
+    """Refuse the files a directive supplies when they do not cover the step's run.
+
+    For a directive's `verify`: it runs once every directive has been applied,
+    so the run window is the one ROMS will use (a `continue-from` listed after
+    the directive sets `start_date`), and the files of the upstream steps the
+    directive names exist. See `check_source_coverage` for the rules.
+
+    Parameters
+    ----------
+    directive : str
+        The directive's key, for messages.
+    files : Sequence[TimestampedOutputFile]
+        The files the directive supplied.
+    time_variable : str
+        The time variable ROMS reads the files' records by.
+    label : str
+        What the files hold, for messages, e.g. "boundary".
+    step : LiveStep
+        The step with every directive applied.
+    missing_hint : str
+        Advice appended when a file lacks `time_variable`.
+
+    Raises
+    ------
+    CstarError
+        If the files leave a gap, do not span the step's `start_date` to
+        `end_date`, or cannot be read.
+    """
+    runtime = t.cast("UclaRomsBlueprint", step.blueprint).runtime_params
+    check_source_coverage(
+        files,
+        time_variable,
+        runtime.start_date,
+        runtime.end_date,
+        source=f"the `{directive}` {label} files",
+        remedy=_SOURCE_COVERAGE_REMEDY,
+        missing_hint=missing_hint,
+    )
 
 
 class ContinuanceDirective(OverrideDirective):
@@ -923,9 +981,15 @@ class NestingDirective(OverrideDirective):
     would set `initial_conditions`. Both deprecated keys are announced by
     `deprecated` at check and schedule time and again where the directive is
     applied, and stop working in 0.20.0.
+
+    Before the run starts, `verify` refuses boundary files whose records leave
+    a gap or do not span the step's `start_date` to `end_date`.
     """
 
     REPLACE_LISTS = True
+
+    _boundary_files: list[BoundaryFile]
+    """The boundary files `_generate_overrides` collected, for `verify`."""
 
     KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for the boundary forcing."""
@@ -1138,7 +1202,7 @@ class NestingDirective(OverrideDirective):
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
 
-        boundary_files = collect_output_files(
+        self._boundary_files = collect_output_files(
             BoundaryFile,
             ArtifactKind.boundary_forcing,
             self._config.get(self.KEY_PATH) or self._config.get(self.KEY_BRY_PATH),
@@ -1147,7 +1211,7 @@ class NestingDirective(OverrideDirective):
             role=EXTRACT_ROLE,
         )
 
-        overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
+        overrides = BoundaryFileTrxAdapter.adapt(self._boundary_files)
 
         if rst_path := self._config.get(self.KEY_RST_PATH):
             rst_search_path = Path(rst_path)
@@ -1158,6 +1222,29 @@ class NestingDirective(OverrideDirective):
                 raise ValueError(msg)
 
         return overrides
+
+    @t.override
+    def verify(self, step: LiveStep) -> None:
+        """Refuse boundary files that leave a gap or do not span the step's run.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step with every directive applied.
+
+        Raises
+        ------
+        CstarError
+            If the boundary files leave a gap, do not span the step's
+            `start_date` to `end_date`, or cannot be read.
+        """
+        verify_source_coverage(
+            self.key(),
+            self._boundary_files,
+            BoundaryFile.TIME_VARIABLE,
+            BoundaryFile.LABEL,
+            step,
+        )
 
     @t.override
     @staticmethod
@@ -1193,10 +1280,15 @@ class CarbonateSensitivityDirective(OverrideDirective):
     `;` (surrounding whitespace ignored); the `_cdrgas` files from every listed
     source are combined, in the order given, and every listed source must
     contain such files. The producing step must be a MARBL run whose namelist
-    sets `do_cdr_gas_exch_output` for ROMS to write them.
+    sets `do_cdr_gas_exch_output` for ROMS to write them. Before the run starts,
+    `verify` refuses files whose records leave a gap or do not span the step's
+    `start_date` to `end_date`.
     """
 
     REPLACE_LISTS = True
+
+    _files: list[CarbonateSensitivityFile]
+    """The `_cdrgas` files `_generate_overrides` collected, for `verify`."""
 
     KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for the carbonate sensitivities."""
@@ -1316,7 +1408,7 @@ class CarbonateSensitivityDirective(OverrideDirective):
             raise NotImplementedError("; ".join(problems))
 
         try:
-            files = collect_output_files(
+            self._files = collect_output_files(
                 CarbonateSensitivityFile,
                 ArtifactKind.gas_exchange,
                 self._config.get(self.KEY_PATH),
@@ -1326,7 +1418,31 @@ class CarbonateSensitivityDirective(OverrideDirective):
         except FileNotFoundError as err:
             raise FileNotFoundError(f"{err} {_CDR_GAS_OUTPUT_HINT}") from err
 
-        return CarbonateSensitivityTrxAdapter.adapt(files)
+        return CarbonateSensitivityTrxAdapter.adapt(self._files)
+
+    @t.override
+    def verify(self, step: LiveStep) -> None:
+        """Refuse `_cdrgas` files that leave a gap or do not span the step's run.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step with every directive applied.
+
+        Raises
+        ------
+        CstarError
+            If the files leave a gap, do not span the step's `start_date` to
+            `end_date`, lack the forcing time variable, or cannot be read.
+        """
+        verify_source_coverage(
+            self.key(),
+            self._files,
+            CarbonateSensitivityFile.TIME_VARIABLE,
+            CarbonateSensitivityFile.LABEL,
+            step,
+            missing_hint=CARBONATE_SENSITIVITY_REMEDY,
+        )
 
     @t.override
     @staticmethod

@@ -680,6 +680,9 @@ class BoundaryFile(TimestampedOutputFile):
     SUFFIX: t.ClassVar[str] = "_bry"
     """A unique suffix found in the name of boundary files"""
     LABEL: t.ClassVar[str] = "boundary"
+    TIME_VARIABLE: t.ClassVar[str] = "bry_time"
+    """The time variable of a ROMS boundary extraction, which a child run reads
+    as its boundary forcing time: days since the parent's reference date."""
     PATTERN_BRY: t.ClassVar[str]
     """A regex identifying full boundary or partitioned files (alias of `PATTERN`)."""
 
@@ -696,6 +699,9 @@ class CarbonateSensitivityFile(TimestampedOutputFile):
     SUFFIX: t.ClassVar[str] = "_cdrgas"
     """A unique suffix found in the name of carbonate sensitivity files"""
     LABEL: t.ClassVar[str] = "carbonate sensitivity"
+    TIME_VARIABLE: t.ClassVar[str] = "ddic_dco2_time"
+    """The time variable a CDR-LiTE run reads with `ddic_dco2` (days since the
+    reference date; `ddic_dalk_time` holds the same values)."""
 
 
 class CdrOutputFile(TimestampedOutputFile):
