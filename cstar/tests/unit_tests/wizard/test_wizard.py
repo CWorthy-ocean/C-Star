@@ -2387,11 +2387,11 @@ class TestBgcModeSettings:
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.15-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.16-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.15-default"
+    assert wiz.model_dd.value == "roms-marbl-0.16-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -2412,15 +2412,15 @@ def test_model_dd_hides_archived_specs_by_default():
     assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
         archived
     )
-    assert wiz.model_dd.value == "roms-marbl-0.15-default"
+    assert wiz.model_dd.value == "roms-marbl-0.16-default"
 
     wiz.show_archived_models.value = True
     assert wiz._dd_values(wiz.model_dd) == list(wiz.catalog.model_names)
-    assert wiz.model_dd.value == "roms-marbl-0.15-default"
+    assert wiz.model_dd.value == "roms-marbl-0.16-default"
     labels = {value: label for label, value in wiz.model_dd.options}
     for name in archived:
         assert labels[name] == f"{name} (bundled, archived)"
-    assert labels["roms-marbl-0.15-default"] == "roms-marbl-0.15-default (bundled)"
+    assert labels["roms-marbl-0.16-default"] == "roms-marbl-0.16-default (bundled)"
 
     wiz.show_archived_models.value = False
     assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
@@ -3776,11 +3776,11 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.15-default``) is pinned to
-    ucla-roms ``0.15.0`` -- the newest registered schema boundary, which both
+    """The default catalog model (``roms-marbl-0.16-default``) is pinned to
+    ucla-roms ``0.16.0`` -- the newest registered schema boundary, which both
     the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_15_0``), not the legacy one. This is an
+    (currently ``RunTimeSettingsV0_16_0``), not the legacy one. This is an
     intentional behavior change from before this ref-awareness was added (the
     editor used to hardcode legacy ``RunTimeSettings``) -- it pins that the
     wizard now agrees with what the executor will actually write. (The tests in tests/test_forge_blueprint.py
@@ -3791,7 +3791,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_15_0
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_16_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -4429,6 +4429,10 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
             "roms-marbl-0.15-default",
             {"cdr_carbonate_sensitivity_time_interpolation": True},
         ),
+        (
+            "roms-marbl-0.16-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
@@ -4922,6 +4926,28 @@ def test_off_list_fs_mode_neither_crashes_the_build_nor_the_sync():
         wiz.config is None
         or wiz.config.model_settings["implicit_fs"]["fs_mode"] == "Implicit"
     )
+
+
+def test_pio_direct_read_dropdown_built_for_the_0_16_model():
+    """``pio_direct_read`` (ucla-roms >= 0.16.0) is a dropdown in the Parallel I/O
+    section next to ``pio_stride``, defaulting to ``on``.
+    """
+    wiz = _implicit_fs_wizard("roms-marbl-0.16-default")
+    assert wiz.config is not None
+    assert wiz.config.model_settings["pio_settings"]["pio_direct_read"] == "on"
+    assert ("pio_settings", "pio_stride") in wiz.editor._widgets
+    widget, base = wiz.editor._widgets[("pio_settings", "pio_direct_read")]
+    assert base is str
+    assert widget.options == ("on", "off", "verify")
+    assert widget.value == "on"
+    assert "pio_settings" in wiz.editor._pane_sections["Physics & subgrid tuning"]
+
+
+def test_pio_direct_read_absent_for_the_0_15_model():
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    assert wiz.config is not None
+    assert "pio_direct_read" not in wiz.config.model_settings["pio_settings"]
+    assert ("pio_settings", "pio_direct_read") not in wiz.editor._widgets
 
 
 def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):

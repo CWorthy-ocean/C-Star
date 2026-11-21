@@ -774,6 +774,10 @@ fields:
     label: PIO stride
     symbol: pio_stride
     hint: "Number of MPI ranks per I/O task. Blank: one I/O task per node, set by C-Star at launch."
+  settings.pio_settings.pio_direct_read:
+    label: Read grid and initial files directly
+    symbol: pio_direct_read
+    hint: "On: read with O_DIRECT, same results. Off: through PIO, for file systems that reject O_DIRECT. Verify: both ways, reporting differences."
   settings.blk_frc.interp_frc:
     label: Interpolate from coarser grid
     symbol: interp_frc
