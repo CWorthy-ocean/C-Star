@@ -2616,3 +2616,158 @@ def test_shell_stack_carries_the_class_the_css_targets():
 
     shell = AppShell([("A", W.HTML("a")), ("B", W.HTML("b"))])
     assert "forge-stack" in shell.stack._dom_classes
+
+
+# ---------------------------------------------------------------------------
+# GPU sizing
+# ---------------------------------------------------------------------------
+_GPU_BP = (
+    Path(wb.__file__).parents[1]
+    / "catalog"
+    / "bundled"
+    / "blueprints"
+    / "ucla_roms_gpu"
+    / "wales-toy-gpu.yaml"
+)
+_GPU_SLURM = {"num_cpus": 5, "num_gpus": 4, "num_nodes": 1}
+
+
+@pytest.fixture
+def gpu_bp(tmp_path: Path) -> Path:
+    """A readable ucla_roms_gpu blueprint (tiling 2x2, one node, one writer)."""
+    path = tmp_path / "gpu.yaml"
+    shutil.copy(_GPU_BP, path)
+    return path
+
+
+def test_gpu_blueprint_facts_carry_compute_needs(gpu_bp, roms_bp, tmp_path):
+    facts = wb.blueprint_facts(gpu_bp)
+    assert facts is not None
+    assert facts.application == "ucla_roms_gpu"
+    assert facts.compute_needs is not None
+    assert facts.compute_needs.tasks == 5
+    assert facts.compute_needs.gpu_tasks == 4
+    assert facts.compute_needs.nodes == 1
+    assert facts.cpus_needed == 5
+    assert facts.use_pio is None
+    cpu = wb.blueprint_facts(roms_bp)
+    assert cpu is not None and cpu.cpus_needed == 128
+    assert cpu.compute_needs is not None and cpu.compute_needs.gpu_tasks == 0
+
+    raw = yaml.safe_load(gpu_bp.read_text())
+    raw["tiling"]["n_procs_x"] = 0
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(yaml.safe_dump(raw))
+    broken = wb.blueprint_facts(bad)
+    assert broken is not None and broken.compute_needs is None
+
+
+def test_gpu_path_step_prefills_and_gathers_gpu_sizing(page, gpu_bp):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "run", gpu_bp)
+    assert pane.application.value == "ucla_roms_gpu"
+    assert (pane.num_cpus.value, pane.num_gpus.value, pane.num_nodes.value) == (5, 4, 1)
+    assert page.draft.steps[0].compute_overrides == {"slurm": _GPU_SLURM}
+
+
+def test_a_typed_gpu_count_survives_a_source_change(page, gpu_bp, roms_bp):
+    pane = page.panes[0]
+    _path_step(pane, "run", gpu_bp)
+    pane.num_gpus.value = 2  # the user's value
+    pane.path.value = str(roms_bp)
+    assert pane.num_gpus.value == 2
+    assert pane.num_cpus.value == 5  # untouched by the source change as well
+
+
+def test_a_prefilled_gpu_count_is_replaced_by_a_cpu_source(page, gpu_bp, roms_bp):
+    pane = page.panes[0]
+    _path_step(pane, "run", gpu_bp)
+    pane.path.value = str(roms_bp)
+    assert (pane.num_cpus.value, pane.num_gpus.value, pane.num_nodes.value) == (
+        128,
+        0,
+        0,
+    )
+
+
+def test_gpu_sizing_round_trips_through_load_and_gather(page, gpu_bp, tmp_path):
+    path = tmp_path / "gpu-wp.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "gpu",
+                "description": "d",
+                "state": "draft",
+                "steps": [
+                    {
+                        "name": "run",
+                        "application": "ucla_roms_gpu",
+                        "blueprint": str(gpu_bp),
+                        "compute_overrides": {
+                            "slurm": {"num_cpus": 6, "num_gpus": 4, "num_nodes": 2}
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    page._load_from_path(str(path))
+    pane = page.panes[0]
+    assert (pane.num_cpus.value, pane.num_gpus.value, pane.num_nodes.value) == (6, 4, 2)
+    assert pane.gather().compute_overrides == {
+        "slurm": {"num_cpus": 6, "num_gpus": 4, "num_nodes": 2}
+    }
+
+
+def test_deferred_step_predicting_gpus_is_prefilled_and_checked(page, monkeypatch):
+    real = wb.emitted_for
+
+    def gpu_emitted(path, application):
+        emitted = real(path, application)
+        if emitted is None:
+            return None
+        return emitted.model_copy(
+            update={
+                "application": "ucla_roms_gpu",
+                "compute_needs": wb.ComputeNeeds(tasks=5, gpu_tasks=4, nodes=1),
+            }
+        )
+
+    monkeypatch.setattr(wb, "emitted_for", gpu_emitted)
+    _name_page(page)
+    producer = page.panes[0]
+    producer.name.value = "forge"
+    producer.source.value = wb.SOURCE_CATALOG_FORGE
+    producer.catalog_forge.value = _FORGE_BP
+    run = page.add_step("run")
+    run.source.value = wb.SOURCE_DEFERRED
+    run.producer.value = "forge"
+    assert run.application.value == "ucla_roms_gpu"
+    assert (run.num_cpus.value, run.num_gpus.value, run.num_nodes.value) == (5, 4, 1)
+    assert page.draft.steps[1].compute_overrides == {"slurm": _GPU_SLURM}
+    assert page._drift_problems() == []
+
+    run.num_gpus.value = 0
+    lines = page._drift_problems()
+    assert len(lines) == 1
+    assert "num_gpus is 0" in lines[0] and "the step would get no GPUs" in lines[0]
+
+
+def test_chunk_recipe_from_a_gpu_blueprint_carries_gpu_overrides(
+    page, gpu_bp, tmp_path
+):
+    page._delete(page.panes[0])
+    _name_page(page)
+    page.chunk_base.kind.value = wb.SOURCE_PATH
+    page.chunk_base.path.value = str(gpu_bp)
+    start = page.chunk_start.value
+    assert start
+    page.chunk_end.value = str(datetime.fromisoformat(start) + timedelta(days=2)).split(
+        " "
+    )[0]
+    page.chunk_btn.click()
+    steps = page.draft.steps
+    assert steps
+    assert all(s.application == "ucla_roms_gpu" for s in steps)
+    assert steps[0].compute_overrides == {"slurm": _GPU_SLURM}

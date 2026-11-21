@@ -44,6 +44,8 @@ from cstar.applications.ucla_roms.transforms import (
     ContinuanceDirective,
     NestingDirective,
 )
+from cstar.applications.ucla_roms_gpu.models import APP_NAME as UCLA_ROMS_GPU
+from cstar.applications.ucla_roms_gpu.models import TilingParameterSet
 from cstar.applications.upscaler import APP_NAME as UPSCALER
 from cstar.base.application_names import canonical_application
 from cstar.base.utils import deep_merge, slugify
@@ -59,6 +61,7 @@ from cstar.orchestration.launch.slurm import SlurmComputeSpec, SlurmLauncher
 from cstar.orchestration.models import (
     BLUEPRINT_METADATA_FIELDS,
     RUN_ALIAS_SEPARATOR,
+    ComputeNeeds,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     RunRef,
@@ -237,9 +240,14 @@ class BlueprintFacts:
     application: str = ""
     start_date: datetime | None = None
     end_date: datetime | None = None
-    cpus_needed: int = 0
+    compute_needs: ComputeNeeds | None = None
     use_pio: bool | None = None
     roms_ref: str | None = None
+
+    @property
+    def cpus_needed(self) -> int:
+        """The CPU count the run needs (``compute_needs.tasks``), 0 when unknown."""
+        return self.compute_needs.tasks if self.compute_needs else 0
 
 
 @functools.lru_cache(maxsize=128)
@@ -256,20 +264,33 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
         value = raw.get(name)
         return value if isinstance(value, dict) else {}
 
+    application = canonical_application(str(raw.get("application", "")))
     partitioning = _section("partitioning")
-    cpus = partitioning.get("n_cores")
-    if not cpus:
-        nx, ny = partitioning.get("n_procs_x"), partitioning.get("n_procs_y")
-        cpus = nx * ny if isinstance(nx, int) and isinstance(ny, int) else 0
+    compute_needs: ComputeNeeds | None = None
+    use_pio = None
+    if application == UCLA_ROMS_GPU:
+        try:
+            compute_needs = TilingParameterSet.model_validate(
+                _section("tiling")
+            ).compute_needs
+        except ValueError:
+            compute_needs = None
+    else:
+        cpus = partitioning.get("n_cores")
+        if not cpus:
+            nx, ny = partitioning.get("n_procs_x"), partitioning.get("n_procs_y")
+            cpus = nx * ny if isinstance(nx, int) and isinstance(ny, int) else 0
+        if isinstance(cpus, int) and cpus > 0:
+            compute_needs = ComputeNeeds(tasks=cpus)
+        use_pio = partitioning.get("use_pio")
     roms = _section("code").get("roms")
     roms = roms if isinstance(roms, dict) else {}
     runtime = _section("runtime_params")
-    use_pio = partitioning.get("use_pio")
     return BlueprintFacts(
-        application=canonical_application(str(raw.get("application", ""))),
+        application=application,
         start_date=_as_datetime(runtime.get("start_date")),
         end_date=_as_datetime(runtime.get("end_date")),
-        cpus_needed=int(cpus) if isinstance(cpus, int) else 0,
+        compute_needs=compute_needs,
         use_pio=use_pio if isinstance(use_pio, bool) else None,
         roms_ref=str(roms.get("commit") or roms.get("branch") or "") or None,
     )
@@ -795,7 +816,7 @@ class _StepPane:
         self._uploaded_path = ""
         self._current_path = ""
         self._cpus_touched = False
-        self._cpus_prefilled = 0
+        self._prefilled: dict[str, int] = {}
         self._app_fallback: str = UCLA_ROMS
         self._form_app = ""
         self._form: dict[str, tuple[Any, type, Any]] = {}
@@ -880,6 +901,8 @@ class _StepPane:
         self.max_walltime = text(placeholder="HH:MM:SS")
         self.queue_name = text()
         self.account_name = text()
+        self.num_gpus = W.IntText(value=0, layout=W.Layout(width="140px"))
+        self.num_nodes = W.IntText(value=0, layout=W.Layout(width="140px"))
         self.cpus_per_node = W.IntText(value=0, layout=W.Layout(width="140px"))
         self.local_walltime = text(placeholder="HH:MM:SS")
 
@@ -918,7 +941,8 @@ class _StepPane:
             self.local_walltime,
         ):
             widget.observe(self._changed, names="value")
-        self.num_cpus.observe(self._on_cpus, names="value")
+        for widget in self._sizing_widgets.values():
+            widget.observe(self._on_cpus, names="value")
         self.name.observe(self._on_name, names="value")
         self.source.observe(self._on_blueprint_change, names="value")
         for widget in (
@@ -1002,6 +1026,8 @@ class _StepPane:
                     W,
                     "step.compute",
                     row("num_cpus", self.num_cpus),
+                    row("num_gpus", self.num_gpus),
+                    row("num_nodes", self.num_nodes),
                     row("max_walltime", self.max_walltime),
                     row("queue_name", self.queue_name),
                     row("account_name", self.account_name),
@@ -1071,9 +1097,21 @@ class _StepPane:
             self.page._rename_refs(old, new)
         self._changed()
 
+    @property
+    def _sizing_widgets(self) -> dict[str, Any]:
+        """The widgets a blueprint's compute needs prefill, by SLURM override key."""
+        return {
+            "num_cpus": self.num_cpus,
+            "num_gpus": self.num_gpus,
+            "num_nodes": self.num_nodes,
+        }
+
     def _on_cpus(self, _change: Any) -> None:
         # a value the pane prefilled itself is not a user edit
-        if not self.page.is_suspended and self.num_cpus.value != self._cpus_prefilled:
+        if not self.page.is_suspended and any(
+            widget.value != self._prefilled.get(key, 0)
+            for key, widget in self._sizing_widgets.items()
+        ):
             self._cpus_touched = True
         self._changed()
 
@@ -1186,32 +1224,38 @@ class _StepPane:
         self.application.disabled = bool(derived)
 
     def _prefill(self) -> None:
-        """Prefill ``num_cpus`` from the blueprint (or the predicted emitted one).
+        """Prefill the sizing widgets from the blueprint (or the predicted emitted one).
 
         A value the pane prefilled earlier is replaced when the source changes;
         a value the user typed is kept.
         """
-        if self._cpus_touched or (
-            self.num_cpus.value and self.num_cpus.value != self._cpus_prefilled
+        widgets = self._sizing_widgets
+        if self._cpus_touched or any(
+            widget.value and widget.value != self._prefilled.get(key, 0)
+            for key, widget in widgets.items()
         ):
             return
-        cpus = 0
+        needs: ComputeNeeds | None = None
         if self.source.value == SOURCE_DEFERRED:
             emitted = self.page.emitted_for_token(self.producer.value)
             if emitted is not None:
-                cpus = emitted.cpus_needed
+                needs = emitted.compute_needs
                 if not self.filename.value:
                     self.filename.value = emitted.filename
                 if self.app == UCLA_ROMS or self.app not in APPLICATIONS:
+                    _add_option(self.application, emitted.application)
                     self.application.value = emitted.application
         elif facts := self.facts():
-            cpus = facts.cpus_needed
+            needs = facts.compute_needs
+        overrides = needs.slurm_overrides() if needs else {}
         # write the new prediction, or clear a stale one when the new source
         # predicts nothing; a user-typed value never reaches this point
-        if cpus != self.num_cpus.value:
-            with self.page.suspended():
-                self.num_cpus.value = cpus
-        self._cpus_prefilled = cpus
+        prefilled = {key: int(overrides.get(key, 0)) for key in widgets}
+        with self.page.suspended():
+            for key, widget in widgets.items():
+                if prefilled[key] != widget.value:
+                    widget.value = prefilled[key]
+        self._prefilled = prefilled
 
     def _sync(self) -> None:
         """Show what applies to the source/application; refresh derived widgets."""
@@ -1284,7 +1328,8 @@ class _StepPane:
         ):
             _show(widget, slurm)
         _show(self.local_walltime, not slurm)
-        _show(self.num_cpus, slurm)
+        for widget in self._sizing_widgets.values():
+            _show(widget, slurm)
         self.locked_deps.value = (
             "<span class='forge-hint'>implied: "
             + ", ".join(f"<code>{_esc(d)}</code>" for d in self.implied)
@@ -1680,7 +1725,7 @@ class _StepPane:
         slurm = {
             key: value
             for key, value in (
-                ("num_cpus", self.num_cpus.value or None),
+                *((key, w.value or None) for key, w in self._sizing_widgets.items()),
                 ("max_walltime", self.max_walltime.value.strip()),
                 ("queue_name", self.queue_name.value.strip()),
                 ("account_name", self.account_name.value.strip()),
@@ -1902,7 +1947,7 @@ class _StepPane:
         """Show the modelled compute overrides; keep the rest as written."""
         rest: dict[str, Any] = copy.deepcopy(dict(step.compute_overrides))
         for key, widget in (
-            ("num_cpus", self.num_cpus),
+            *self._sizing_widgets.items(),
             ("cpus_per_node", self.cpus_per_node),
         ):
             value = _pop_path(rest, "slurm", key)
@@ -2104,27 +2149,27 @@ class _BaseChooser:
             emitted = emitted_for(path, FORGE)
             if emitted is None:
                 raise ValueError(f"cannot read a forge blueprint at {path!r}")
-            names = page.unique_names(FORGE, UCLA_ROMS)
+            names = page.unique_names(FORGE, emitted.application)
             forge, run = forge_then_run(
                 Path(path), emitted, names=(names[0], names[1])
             ).steps
             return run, [forge]
-        if app != UCLA_ROMS:
+        if app not in (UCLA_ROMS, UCLA_ROMS_GPU):
             raise ValueError(
                 f"the base blueprint is a {app!r} blueprint; time recipes need "
-                "ucla_roms (or forge, which generates one)"
+                "ucla_roms or ucla_roms_gpu (or forge, which generates one)"
             )
         facts = blueprint_facts(path)
         compute = (
-            {"slurm": {"num_cpus": facts.cpus_needed}}
-            if facts is not None and facts.cpus_needed
+            {"slurm": facts.compute_needs.slurm_overrides()}
+            if facts is not None and facts.compute_needs
             else {}
         )
         name = page.unique_names(blueprint_stem(path))[0]
         return (
             Step(
                 name=name,
-                application=UCLA_ROMS,
+                application=app,
                 blueprint=path,
                 compute_overrides=compute,
             ),
@@ -3612,17 +3657,29 @@ class WorkplanBuilderPage:
         self.diagnostics.value = "".join(parts)
 
     def _drift_problems(self) -> list[str]:
-        """Deferred steps whose ``num_cpus`` differs from the producer's prediction."""
+        """Deferred steps whose sizing differs from the producer's prediction."""
         lines: list[str] = []
         for pane in self.panes:
             if pane.source.value != SOURCE_DEFERRED or not pane.num_cpus.value:
                 continue
             emitted = self.emitted_for_token(pane.producer.value)
-            if emitted is not None and emitted.cpus_needed != pane.num_cpus.value:
+            if emitted is None:
+                continue
+            predicted = emitted.compute_needs.slurm_overrides()
+            who = f"step {pane.name.value.strip()!r}"
+            for key, widget in pane._sizing_widgets.items():
+                want = int(predicted.get(key, 0))
+                # a node count the producer leaves open is the user's to choose
+                if widget.value == want or (key == "num_nodes" and not want):
+                    continue
+                note = (
+                    "; the step would get no GPUs"
+                    if key == "num_gpus" and not widget.value
+                    else ""
+                )
                 lines.append(
-                    f"step {pane.name.value.strip()!r}: num_cpus is "
-                    f"{pane.num_cpus.value} but {pane.producer.value!r} is predicted "
-                    f"to emit a blueprint needing {emitted.cpus_needed}"
+                    f"{who}: {key} is {widget.value} but {pane.producer.value!r} "
+                    f"is predicted to emit a blueprint needing {want}{note}"
                 )
         return lines
 
