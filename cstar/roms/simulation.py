@@ -99,9 +99,9 @@ from cstar.roms.input_dataset import (
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
+    first_piece_with_records,
     missing_carbonate_sensitivity_variables,
     netcdf_dimension_size,
-    netcdf_time_ranges,
 )
 from cstar.roms.namelist import (
     RomsNamelistBase,
@@ -556,6 +556,8 @@ class ROMSSimulation(Simulation):
         # forcing-window trim: each source file is read once per launch
         self._file_times_memo: dict[str, FileTimes | None] = {}
         self._window_memo: tuple[tuple[object, ...], frozenset[int]] | None = None
+        # the partition of a partitioned source that held records, by dataset label
+        self._preferred_piece: dict[str, int] = {}
 
     @classmethod
     def _check_compile_time_code(
@@ -839,33 +841,59 @@ class ROMSSimulation(Simulation):
     def _dataset_file_times(self, inp: ROMSInputDataset) -> FileTimes | None:
         """Read the time span of a dataset's local source file, once per location.
 
-        The source is read, never the staged copy, and for a partitioned source
-        only piece 0 (all pieces carry the same records). A remote source is
-        never read.
+        The source is read, never the staged copy. Every piece of a partitioned
+        source carries the same records except that a rank without boundary
+        points writes none, so pieces are tried (from the one that held records
+        for the last dataset of this kind) until one has records. A remote
+        source is never read.
         """
-        source = self._first_source(inp)
-        location = source.location
-        if location not in self._file_times_memo:
-            if source.classification is not SourceClassification.LOCAL_BINARY_FILE:
-                return None  # remote sources are never read
-            if not Path(location).is_file():
-                # e.g. an upstream step's output not written yet: ask again later
-                return None
-            self._file_times_memo[location] = read_file_times(Path(location))
-        return self._file_times_memo[location]
+        sources = self._source_pieces(inp)
+        location = sources[0].location
+        if location in self._file_times_memo:
+            return self._file_times_memo[location]
+        if any(
+            s.classification is not SourceClassification.LOCAL_BINARY_FILE
+            for s in sources
+        ):
+            return None  # remote sources are never read
+        if self._awaits_local_file(inp):
+            # e.g. an upstream step's output not written yet: ask again later
+            return None
+        paths = [Path(s.location) for s in sources]
+        if len(paths) == 1:
+            times = read_file_times(paths[0])
+        else:
+            times, index, _ = first_piece_with_records(
+                paths,
+                read_file_times,
+                lambda ft: True,
+                self._preferred_piece.get(inp.label),
+            )
+            if index is not None:
+                self._preferred_piece[inp.label] = index
+        self._file_times_memo[location] = times
+        return times
 
     @staticmethod
-    def _first_source(inp: ROMSInputDataset) -> SourceData:
+    def _source_pieces(inp: ROMSInputDataset) -> list[SourceData]:
+        """The dataset's source files: its partition pieces, or its one source."""
         return (
-            inp.partitioned_source.sources[0] if inp.source_partitioning else inp.source
+            list(inp.partitioned_source.sources)
+            if inp.source_partitioning
+            else [inp.source]
         )
 
     def _awaits_local_file(self, inp: ROMSInputDataset) -> bool:
-        """Whether a dataset's local source file does not exist yet."""
-        source = self._first_source(inp)
+        """Whether a dataset's local source file does not exist yet.
+
+        Only the first piece of a partitioned source is checked: its pieces are
+        written together, and one stat per dataset keeps this cheap when a run
+        lists hundreds of files of hundreds of pieces each.
+        """
+        first = self._source_pieces(inp)[0]
         return (
-            source.classification is SourceClassification.LOCAL_BINARY_FILE
-            and not Path(source.location).is_file()
+            first.classification is SourceClassification.LOCAL_BINARY_FILE
+            and not Path(first.location).is_file()
         )
 
     def _roms_start(self) -> datetime | None:
@@ -1997,7 +2025,10 @@ class ROMSSimulation(Simulation):
         paths = [Path(g.source.location).resolve() for g in group]
         if len(set(paths)) != len(paths):
             return False
-        ranges = [netcdf_time_ranges(p) for p in paths]
+        times = [self._dataset_file_times(g) for g in group]
+        if any(t is None for t in times):
+            return False
+        ranges = [t.raw_spans for t in times if t is not None]
         for earlier, later in pairwise(ranges):
             shared = earlier.keys() & later.keys()
             if not shared or any(earlier[v][1] > later[v][0] for v in shared):
@@ -3148,8 +3179,13 @@ class ROMSSimulation(Simulation):
         if not staged:
             return
 
-        if all(self._dataset_file_times(inp) is None for inp in staged):
-            return  # nothing readable to check, so no namelist needed either
+        if not any(
+            (t := self._dataset_file_times(inp)) is not None
+            and t.placeable
+            and not t.cyclic
+            for inp in staged
+        ):
+            return  # nothing placeable to check, so no namelist needed either
 
         nml, schema, chosen_by = self._read_raw_namelist()
         nml = self._layer_namelist_overrides(nml, schema, chosen_by)

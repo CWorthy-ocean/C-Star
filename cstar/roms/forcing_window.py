@@ -10,18 +10,29 @@ variables whose files do not cover the window.
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from cstar.roms.input_dataset import recorded_reference_date
+from cstar.roms.input_dataset import is_cyclic, recorded_reference_date
 from cstar.roms.source_coverage import RECORD_TIME_TOLERANCE
 
 if TYPE_CHECKING:
     import xarray as xr
 
-NON_FORCING_TIME_NAMES: Final = frozenset({"ocean_time", "abs_time"})
-"""Time variables ucla-roms never uses as a forcing time: ``ocean_time`` is in
-seconds and ``abs_time`` in hours since 1900."""
+NON_FORCING_TIME_NAMES: Final = frozenset(
+    {
+        "ocean_time",
+        "abs_time",
+        "avg_begin_time",
+        "avg_end_time",
+        "roms_time",
+        "scrum_time",
+    }
+)
+"""Time variables ucla-roms writes for its outputs or initial conditions (in
+seconds, or hours since 1900 for ``abs_time``) and never reads as a forcing
+time."""
 
 
 @dataclass(frozen=True)
@@ -30,19 +41,46 @@ class FileTimes:
 
     variables: frozenset[str]
     """The forcing variables the file holds (not time variables)."""
-    spans: Mapping[str, tuple[datetime, datetime]]
-    """The (first, last) record of each forcing time variable, by name."""
+    raw_spans: Mapping[str, tuple[float, float]]
+    """The first and last value of each forcing time variable as stored (days
+    since the file's reference date), by name."""
+    reference: datetime | None
+    """The reference date the file records, None if it records none."""
     cyclic: bool
     """Whether the file is a climatology that ROMS repeats every cycle."""
 
+    @cached_property
+    def spans(self) -> Mapping[str, tuple[datetime, datetime]]:
+        """The (first, last) record of each forcing time variable as absolute
+        datetimes; empty without a reference date, and leaving out a variable
+        whose values do not fit a datetime.
+        """
+        spans: dict[str, tuple[datetime, datetime]] = {}
+        if self.reference is None:
+            return spans
+        for name, (lo, hi) in self.raw_spans.items():
+            try:
+                spans[name] = (
+                    self.reference + timedelta(days=lo),
+                    self.reference + timedelta(days=hi),
+                )
+            except OverflowError:
+                continue
+        return spans
+
+    @property
+    def placeable(self) -> bool:
+        """Whether the records can be placed in time."""
+        return bool(self.spans)
+
     @property
     def first(self) -> datetime:
-        """The earliest first record over the file's forcing time variables."""
+        """The earliest first record (only meaningful when `placeable`)."""
         return min(first for first, _ in self.spans.values())
 
     @property
     def last(self) -> datetime:
-        """The latest last record over the file's forcing time variables."""
+        """The latest last record (only meaningful when `placeable`)."""
         return max(last for _, last in self.spans.values())
 
 
@@ -62,6 +100,11 @@ class UncoveredSpan:
     """Whether even the earliest record comes after the start of the run."""
     early_end: bool
     """Whether even the latest record comes before the end of the run."""
+
+
+def _unknown(t: FileTimes | None) -> bool:
+    """Whether a file's records cannot be placed in time, so it is always kept."""
+    return t is None or t.cyclic or not t.placeable
 
 
 def _is_time_name(name: str) -> bool:
@@ -108,8 +151,9 @@ def read_file_times(path: Path) -> FileTimes | None:
     Returns
     -------
     FileTimes or None
-        None if the file cannot be read, records no reference date, or has no
-        forcing time variable (e.g. tidal forcing).
+        None if the file cannot be read or has no forcing time variable (e.g.
+        tidal forcing). A file that records no reference date is returned with
+        `reference` None.
     """
     # Lazy import: only needed when a run is set up
     import xarray as xr
@@ -122,9 +166,7 @@ def read_file_times(path: Path) -> FileTimes | None:
             create_default_indexes=False,
         ) as ds:
             recorded = recorded_reference_date(ds)
-            if recorded is None:
-                return None
-
+            cyclic = is_cyclic(ds)
             time_dims: set[object] = set()
             raw_spans: dict[str, tuple[float, float]] = {}
             for name, var in ds.variables.items():
@@ -145,17 +187,15 @@ def read_file_times(path: Path) -> FileTimes | None:
                 and var.ndim >= 1
                 and var.dims[0] in time_dims
             )
-            spans = {
-                name: (
-                    recorded.date + timedelta(days=lo),
-                    recorded.date + timedelta(days=hi),
-                )
-                for name, (lo, hi) in raw_spans.items()
-            }
     except Exception:
         # not netCDF, missing or corrupt: the run cannot be placed among its records
         return None
-    return FileTimes(variables=variables, spans=spans, cyclic=recorded.cyclic)
+    return FileTimes(
+        variables=variables,
+        raw_spans=raw_spans,
+        reference=None if recorded is None else recorded.date,
+        cyclic=cyclic,
+    )
 
 
 def _cyclic_variables(times: Sequence[FileTimes | None]) -> frozenset[str]:
@@ -169,7 +209,7 @@ def _holders(
 ) -> dict[str, list[int]]:
     holders: dict[str, list[int]] = {}
     for i, t in enumerate(times):
-        if t is None or t.cyclic:
+        if t is None or _unknown(t):
             continue
         for v in t.variables - set(skip):
             holders.setdefault(v, []).append(i)
@@ -196,7 +236,7 @@ def files_in_window(
     into ``[L, H]`` keeps a superset of what ROMS reads. Files are only dropped,
     never reordered. ROMS reads each variable against one of the file's time
     variables and we cannot tell which, so each time-variable name is bracketed
-    separately and the bound that is safe for all of them is used. Unreadable and cyclic files are always kept, and a variable
+    separately and the bound that is safe for all of them is used. Unreadable, cyclic and unplaceable files are always kept, and a variable
     held by a cyclic file is never trimmed.
 
     Parameters
@@ -241,10 +281,7 @@ def files_in_window(
                 needed.add(i)
 
     held = {i for indices in holders.values() for i in indices}
-    return [
-        t is None or t.cyclic or i in needed or i not in held
-        for i, t in enumerate(times)
-    ]
+    return [_unknown(t) or i in needed or i not in held for i, t in enumerate(times)]
 
 
 def uncovered_variables(
@@ -256,8 +293,12 @@ def uncovered_variables(
 ) -> list[UncoveredSpan]:
     """Find forcing variables whose files do not cover ``[start, end]``.
 
-    A variable is skipped when a file of the same kind could not be read, since
-    that file might hold it and ROMS could then complete the run.
+    A variable is skipped when a file of the same kind could not be read (that
+    file might hold it, and ROMS could then complete the run), when a file that
+    records no usable reference date holds it (its records cannot be placed),
+    or when a cyclic file holds it (ROMS wraps those records). A cyclic or
+    unplaceable file does not stop the other variables of its kind being
+    checked: a Forge kind holds a BGC climatology beside its physics files.
 
     Parameters
     ----------
@@ -279,7 +320,13 @@ def uncovered_variables(
         One entry per distinct set of files and span, ordered by first file.
     """
     unreadable_kinds = {k for t, k in zip(times, kinds, strict=True) if t is None}
-    holders = _holders(times, _cyclic_variables(times) | set(ignore))
+    unplaced = frozenset(
+        v
+        for t in times
+        if t is not None and not t.cyclic and not t.placeable
+        for v in t.variables
+    )
+    holders = _holders(times, _cyclic_variables(times) | unplaced | set(ignore))
 
     groups: dict[tuple[tuple[int, ...], datetime, datetime, bool, bool], list[str]] = {}
     for v, indices in holders.items():

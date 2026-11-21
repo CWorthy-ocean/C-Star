@@ -6419,8 +6419,8 @@ class TestSameNamedInputs:
     ):
         """Files whose times overlap are refused, naming both locations."""
         T = self.T
-        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[T - 1, T + 1])
-        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[T, T + 2])
+        a = self._write(tmp_path / "a" / self.NAME, ddic_dco2_time=[T - 1, T + 1])
+        b = self._write(tmp_path / "b" / self.NAME, ddic_dco2_time=[T, T + 2])
         sim = self._sim(
             stub_romssimulation,
             ROMSCarbonateSensitivity(location=a),
@@ -6481,7 +6481,7 @@ class TestSameNamedInputs:
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path
     ):
         """Without a shared time variable there is nothing to order the files by."""
-        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[1.0, 2.0])
+        a = self._write(tmp_path / "a" / self.NAME, ddic_dco2_time=[1.0, 2.0])
         b = self._write(tmp_path / "b" / self.NAME, bry_time=[3.0, 4.0])
         sim = self._sim(
             stub_romssimulation,
@@ -6498,7 +6498,7 @@ class TestSameNamedInputs:
         """A staged input already called `<stem>_2.nc` pushes the rename to `_3`."""
         earlier, later = self._chain(tmp_path)
         taken = self._write(
-            tmp_path / "c" / "output_cdrgas.20120219000000_2.nc", ocean_time=[0.0]
+            tmp_path / "c" / "output_cdrgas.20120219000000_2.nc", ddic_dco2_time=[0.0]
         )
         sim = self._sim(
             stub_romssimulation,
@@ -6513,10 +6513,10 @@ class TestSameNamedInputs:
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path
     ):
         """One error lists every shared name that cannot be resolved."""
-        a1 = self._write(tmp_path / "a1" / "one.nc", ocean_time=[1.0])
-        a2 = self._write(tmp_path / "a2" / "one.nc", ocean_time=[0.0])
-        b1 = self._write(tmp_path / "b1" / "two.nc", ocean_time=[1.0])
-        b2 = self._write(tmp_path / "b2" / "two.nc", ocean_time=[0.0])
+        a1 = self._write(tmp_path / "a1" / "one.nc", ddic_dco2_time=[1.0])
+        a2 = self._write(tmp_path / "a2" / "one.nc", ddic_dco2_time=[0.0])
+        b1 = self._write(tmp_path / "b1" / "two.nc", ddic_dco2_time=[1.0])
+        b2 = self._write(tmp_path / "b2" / "two.nc", ddic_dco2_time=[0.0])
         sim = self._sim(
             stub_romssimulation,
             *(ROMSCarbonateSensitivity(location=x) for x in (a1, a2, b1, b2)),
@@ -6542,8 +6542,8 @@ class TestSameNamedInputs:
     ):
         """An unresolvable name stops `setup(clobber=True)` before it deletes anything."""
         T = self.T
-        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[T - 1, T + 1])
-        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[T, T + 2])
+        a = self._write(tmp_path / "a" / self.NAME, ddic_dco2_time=[T - 1, T + 1])
+        b = self._write(tmp_path / "b" / self.NAME, ddic_dco2_time=[T, T + 2])
         sim = self._sim(
             stub_romssimulation,
             ROMSCarbonateSensitivity(location=a),
@@ -6627,8 +6627,8 @@ class TestSameNamedInputs:
         tmp_path: Path,
     ):
         """On resume, a name clash is reported and every input is still checked."""
-        a = self._write(tmp_path / "a" / self.NAME, ocean_time=[0.0, 2.0])
-        b = self._write(tmp_path / "b" / self.NAME, ocean_time=[1.0, 3.0])
+        a = self._write(tmp_path / "a" / self.NAME, ddic_dco2_time=[0.0, 2.0])
+        b = self._write(tmp_path / "b" / self.NAME, ddic_dco2_time=[1.0, 3.0])
         sim = self._sim(
             stub_romssimulation,
             ROMSCarbonateSensitivity(location=a),
@@ -6872,6 +6872,80 @@ class TestForcingWindow:
         assert [c.args[0] for c in reader.call_args_list] == [Path(piece0)]
         assert times is not None
         assert times.first == datetime(2025, 2, 1)
+
+    def _pieces(
+        self, directory: Path, stem: str, with_records: tuple[bool, bool]
+    ) -> ROMSSurfaceForcing:
+        """A two-piece partitioned dataset; a piece without records is empty."""
+        directory.mkdir(parents=True, exist_ok=True)
+        locations = []
+        for i, has in enumerate(with_records):
+            path = directory / f"{stem}.{i}.nc"
+            if has:
+                self._write(path, 31, 59)
+            else:
+                xr.Dataset(
+                    {
+                        "time": ("time", np.array([], dtype=float)),
+                        "data": (("time", "b"), np.zeros((0, 2))),
+                    },
+                    attrs={"model_reference_date": "2025-01-01 00:00:00"},
+                ).to_netcdf(path)
+            locations.append(str(path))
+        return ROMSSurfaceForcing(
+            location=locations[0], source_np_xi=2, source_np_eta=1
+        )
+
+    def test_partitioned_source_skips_a_piece_without_records(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Piece 0 has no records (a rank without boundary points): piece 1 is
+        read, the next dataset of the kind starts there, and the trim applies.
+        """
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        locations = self._files(tmp_path)
+        sim = self._sim(stub_romssimulation, [locations[0], locations[2]], 40, 50)
+        first = self._pieces(tmp_path / "p", "f", (False, True))
+        second = self._pieces(tmp_path / "q", "g", (False, True))
+        sim.surface_forcing = [
+            sim.surface_forcing[0],
+            first,
+            second,
+            sim.surface_forcing[1],
+        ]
+
+        with mock.patch(
+            "cstar.roms.simulation.read_file_times", wraps=read_file_times
+        ) as reader:
+            times = sim._dataset_file_times(first)
+            assert times is not None
+            assert times.first == datetime(2025, 2, 1)
+            sim._dataset_file_times(second)
+            names = self._names(sim)
+        calls = [c.args[0].name for c in reader.call_args_list]
+        assert calls[:3] == ["f.0.nc", "f.1.nc", "g.1.nc"]
+        assert "g.0.nc" not in calls
+        # first and second hold the same records, so the bracket keeps both
+        assert "f0.nc" not in names and "f2.nc" not in names
+        assert names == ["f.0.nc", "g.0.nc"]
+
+    def test_partitioned_source_without_records_is_kept(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """When no piece has records the dataset is unknown and kept."""
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+        locations = self._files(tmp_path)
+        sim = self._sim(stub_romssimulation, locations, 40, 50)
+        empty = self._pieces(tmp_path / "e", "e", (False, False))
+        sim.surface_forcing = [*sim.surface_forcing, empty]
+        assert sim._dataset_file_times(empty) is None
+        assert self._names(sim) == ["f1.nc", "e.0.nc"]
 
     def test_each_file_is_read_once(
         self,

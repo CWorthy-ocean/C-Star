@@ -19,6 +19,17 @@ REF = datetime(2000, 1, 1)
 D0 = datetime(2020, 1, 1)
 
 
+def _file(
+    variables: frozenset[str],
+    spans: dict[str, tuple[datetime, datetime]],
+    cyclic: bool = False,
+) -> FileTimes:
+    """Build a FileTimes from absolute spans (stored relative to 2020-01-01)."""
+    day = timedelta(days=1)
+    raw = {n: ((a - D0) / day, (b - D0) / day) for n, (a, b) in spans.items()}
+    return FileTimes(variables, raw, D0, cyclic)
+
+
 def d(n: float) -> datetime:
     """Return the datetime `n` days after 2020-01-01."""
     return D0 + timedelta(days=n)
@@ -26,13 +37,11 @@ def d(n: float) -> datetime:
 
 def ft(first: float, last: float, *variables: str, cyclic: bool = False) -> FileTimes:
     """Build a FileTimes spanning day `first` to day `last`."""
-    return FileTimes(
-        frozenset(variables or ("a",)), {"time": (d(first), d(last))}, cyclic
-    )
+    return _file(frozenset(variables or ("a",)), {"time": (d(first), d(last))}, cyclic)
 
 
 def _abs(first: datetime, last: datetime) -> FileTimes:
-    return FileTimes(frozenset("a"), {"time": (first, last)}, False)
+    return _file(frozenset("a"), {"time": (first, last)}, False)
 
 
 def monthly(n: int = 6, *variables: str) -> list[FileTimes]:
@@ -166,7 +175,7 @@ class TestFilesInWindowStreams:
 
     def test_file_without_variables_kept(self) -> None:
         """A file with no forcing variables is kept."""
-        empty = FileTimes(frozenset(), {"time": (d(0), d(1))}, False)
+        empty = _file(frozenset(), {"time": (d(0), d(1))}, False)
         assert files_in_window([empty], d(100), d(101)) == [True]
 
 
@@ -175,8 +184,8 @@ class TestFilesInWindowTimeVariables:
 
     def test_second_time_variable_does_not_hide_bracket(self) -> None:
         """A record on another time variable must not drop the bracketing file."""
-        f0 = FileTimes(frozenset({"v"}), {"tv": (d(0), d(12))}, False)
-        f1 = FileTimes(
+        f0 = _file(frozenset({"v"}), {"tv": (d(0), d(12))}, False)
+        f1 = _file(
             frozenset({"v"}), {"tv": (d(30), d(40)), "tw": (d(15), d(35))}, False
         )
         assert files_in_window([f0, f1], d(22), d(35)) == [True, True]
@@ -186,7 +195,7 @@ class TestFilesInWindowTimeVariables:
         half = timedelta(minutes=30)
 
         def month(a: float, b: float) -> FileTimes:
-            return FileTimes(
+            return _file(
                 frozenset({"uwnd"}),
                 {"time": (d(a), d(b)), "rad_time": (d(a) - half, d(b) - half)},
                 False,
@@ -204,7 +213,7 @@ class TestUncoveredVariables:
     def test_one_covering_time_variable_is_enough(self) -> None:
         """`time` covers the window although `rad_time` ends 30 min early."""
         half = timedelta(minutes=30)
-        f = FileTimes(
+        f = _file(
             frozenset({"v"}),
             {"time": (d(0), d(20)), "rad_time": (d(0) - half, d(20) - half)},
             False,
@@ -213,7 +222,7 @@ class TestUncoveredVariables:
 
     def test_mixed_shortfall_is_refused_without_flags(self) -> None:
         """Each time variable falls short on a different side: refuse, no side named."""
-        f = FileTimes(
+        f = _file(
             frozenset({"v"}),
             {"a": (d(5), d(30)), "b": (d(0), d(10))},
             False,
@@ -241,6 +250,23 @@ class TestUncoveredVariables:
         """A variable held by a cyclic file is not checked."""
         times = [ft(5, 6, "a"), ft(0, 364, "a", cyclic=True)]
         assert uncovered_variables(times, ["s", "s"], d(0), d(20)) == []
+
+    def test_cyclic_file_does_not_hide_its_kind(self) -> None:
+        """A BGC climatology beside the physics files of one kind (as Forge
+        writes them) leaves the physics variables checked.
+        """
+        times = [ft(5, 6, "uwnd"), ft(0, 364, "dust", cyclic=True)]
+        got = uncovered_variables(times, ["surface", "surface"], d(0), d(20))
+        assert got == [UncoveredSpan((0,), ("uwnd",), d(5), d(6), True, True)]
+
+    def test_unplaceable_file_skips_only_its_variables(self) -> None:
+        """A file with no reference date cannot be placed: the variables it
+        holds are not checked, the rest of its kind still are.
+        """
+        unplaced = FileTimes(frozenset({"a"}), {"time": (0.0, 1.0)}, None, False)
+        times = [ft(5, 6, "a"), unplaced, ft(5, 6, "b")]
+        got = uncovered_variables(times, ["s", "s", "s"], d(0), d(20))
+        assert got == [UncoveredSpan((2,), ("b",), d(5), d(6), True, True)]
 
     def test_ignore_honoured(self) -> None:
         """Ignored variables are not checked."""
@@ -316,12 +342,11 @@ class TestReadFileTimes:
         got = read_file_times(_write(tmp_path / "s.nc", ds))
         assert got == FileTimes(
             frozenset({"uwnd"}),
-            {
-                "time": (REF + timedelta(days=100), REF + timedelta(days=102)),
-                "rad_time": (REF + timedelta(days=100.5), REF + timedelta(days=102.5)),
-            },
+            {"time": (100.0, 102.0), "rad_time": (100.5, 102.5)},
+            REF,
             False,
         )
+        assert got.placeable
         assert got.first == REF + timedelta(days=100)
         assert got.last == REF + timedelta(days=102.5)
 
@@ -341,9 +366,69 @@ class TestReadFileTimes:
         got = read_file_times(_write(tmp_path / "c.nc", ds))
         assert got == FileTimes(
             frozenset({"ddic_dco2"}),
-            {"ddic_dco2_time": (datetime(2012, 1, 11), datetime(2012, 1, 21))},
+            {"ddic_dco2_time": (10.0, 20.0)},
+            datetime(2012, 1, 1),
             False,
         )
+        assert got.spans == {
+            "ddic_dco2_time": (datetime(2012, 1, 11), datetime(2012, 1, 21))
+        }
+
+    def test_real_cdrgas_file(self, tmp_path: Path) -> None:
+        """Output times in seconds are not forcing times and do not sink the file."""
+        ds = xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    [3.8e8, 3.9e8],
+                    {"long_name": "Time since 2012/01/01"},
+                ),
+                "ddic_dco2_time": ("time", [10.0, 20.0]),
+                "ddic_dalk_time": ("time", [10.5, 20.5]),
+                "avg_begin_time": ("time", [3.8e8, 3.85e8]),
+                "avg_end_time": ("time", [3.85e8, 3.9e8]),
+                "ddic_dco2": (("time", "eta_rho", "xi_rho"), np.zeros((2, 2, 2))),
+            }
+        )
+        got = read_file_times(_write(tmp_path / "c.nc", ds))
+        assert got is not None
+        assert set(got.raw_spans) == {"ddic_dco2_time", "ddic_dalk_time"}
+        assert got.variables == {"ddic_dco2"}
+
+    def test_overflowing_time_variable_is_left_out(self, tmp_path: Path) -> None:
+        """A variable whose values do not fit a datetime is dropped from `spans` only."""
+        ds = xr.Dataset(
+            {
+                "river_time": (
+                    "time",
+                    [1.0, 2.0],
+                    {"long_name": "relative time: days since 2012-01-01"},
+                ),
+                "weird_time": ("time", [3.8e8, 3.9e8]),
+                "v": (("time",), np.zeros(2)),
+            }
+        )
+        got = read_file_times(_write(tmp_path / "o.nc", ds))
+        assert got is not None
+        assert set(got.raw_spans) == {"river_time", "weird_time"}
+        assert set(got.spans) == {"river_time"}
+
+    def test_only_non_empty_1d_numeric_time_variables(self, tmp_path: Path) -> None:
+        """Empty, 2-D and misnamed variables are not forcing times (replaces the
+        old `netcdf_time_ranges` test).
+        """
+        ds = xr.Dataset(
+            {
+                "ddic_dco2_time": ("u", np.array([5, 6])),
+                "empty_time": ("e", np.array([], dtype=float)),
+                "grid_time": (("t", "x"), np.zeros((3, 2))),
+                "data": (("u", "x"), np.zeros((2, 2))),
+            }
+        )
+        got = read_file_times(_write(tmp_path / "f.nc", ds))
+        assert got is not None
+        assert got.raw_spans == {"ddic_dco2_time": (5.0, 6.0)}
+        assert got.variables == {"data"}
 
     def test_boundary_like(self, tmp_path: Path) -> None:
         """A `bry_time` dimension carries its variables."""
@@ -400,11 +485,16 @@ class TestReadFileTimes:
         assert got.last == datetime(2012, 1, 6)
 
     def test_no_reference_date(self, tmp_path: Path) -> None:
-        """Without a recorded reference date the file cannot be placed."""
+        """Without a recorded reference date the file is read but cannot be placed."""
         ds = xr.Dataset(
             {"time": ("time", [1.0]), "a": (("time", "x"), np.zeros((1, 1)))}
         )
-        assert read_file_times(_write(tmp_path / "n.nc", ds)) is None
+        got = read_file_times(_write(tmp_path / "n.nc", ds))
+        assert got is not None
+        assert got.reference is None
+        assert not got.placeable
+        assert got.raw_spans == {"time": (1.0, 1.0)}
+        assert files_in_window([got, got], D0, D0) == [True, True]
 
     def test_no_time_variable(self, tmp_path: Path) -> None:
         """A tidal-like file has no forcing time."""
