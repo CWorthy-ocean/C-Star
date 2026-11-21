@@ -16,7 +16,6 @@ grid_kwargs:
   hc: 250.0
   theta_s: 6.0
   theta_b: 6.0
-  verbose: true
   hmin: 5.0
 open_boundaries:
   south: true

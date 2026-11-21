@@ -194,6 +194,12 @@ _GRID_LABELS = {
     "self": "grid (domain.grid_kwargs)",
     "child": "child grid (domain.grid_kwargs_child)",
 }
+# rt.Grid keywords the executor passes itself. A copy in a grid_kwargs dict (a
+# DomainSpec or blueprint saved with ``verbose: true``) is dropped rather than
+# passed twice: roms-tools' verbosity is a runtime diagnostic, set for every
+# roms-tools call by the executor's ``verbose`` flag (``cstar forge run
+# --verbose``), not part of the grid.
+_EXECUTOR_GRID_KWARGS = frozenset({"verbose"})
 
 
 def _describe_grid_kwargs(gk: dict[str, Any]) -> str:
@@ -532,9 +538,20 @@ class ForgeExecutor(BaseModel):
         than the grid the user previewed. Without the label the user is left
         checking the wrong grid against the wrong dataset's coverage.
         """
+        ignored = sorted(_EXECUTOR_GRID_KWARGS & grid_kwargs.keys())
+        if ignored:
+            log.debug(
+                "Grid(%s): ignoring %s in grid_kwargs; the executor's verbose=%s wins",
+                label,
+                ", ".join(ignored),
+                self.verbose,
+            )
+        build_kwargs = {
+            k: v for k, v in grid_kwargs.items() if k not in _EXECUTOR_GRID_KWARGS
+        }
         with mem_log(f"Grid({label})", enabled=self.verbose):
             try:
-                return rt.Grid(**grid_kwargs, verbose=self.verbose)
+                return rt.Grid(**build_kwargs, verbose=self.verbose)
             except ValueError as exc:
                 if _TOPO_NAN_MARKER not in str(exc):
                     raise
