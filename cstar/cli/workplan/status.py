@@ -117,7 +117,8 @@ def status(
         log.debug("A file of the run was not found", exc_info=True)
         typer.echo(f"Unable to show the status of run {run.run_id!r}: {ex}", err=True)
     except (CstarError, CstarExpectationFailed, CstarAdaptationError) as ex:
-        # such as a workplan naming a scheduler this machine lacks
+        # such as a workplan naming a scheduler this machine lacks; one line now,
+        # with the exit code these errors had as a traceback
         log.debug("The status of the run could not be read", exc_info=True)
         typer.echo(f"Unable to show the status of run {run.run_id!r}: {ex}", err=True)
         raise typer.Exit(1) from ex

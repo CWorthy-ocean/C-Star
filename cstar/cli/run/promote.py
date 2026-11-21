@@ -214,7 +214,8 @@ def _directory_source(target: str) -> PromoteSource:
     Raises
     ------
     typer.BadParameter
-        Raised when the path is not a directory holding a run manifest.
+        Raised when the path is not a directory holding a run manifest, or the
+        run's tracking record cannot be read.
     """
     root, location = _directory_location(target)
     # a move must follow the record of a run tracked here

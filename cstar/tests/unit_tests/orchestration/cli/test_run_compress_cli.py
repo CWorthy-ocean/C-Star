@@ -174,3 +174,45 @@ def test_a_run_attached_read_only_is_refused_by_its_directory(
     assert result.exit_code == EXIT_BAD_ARGS, result.output
     assert "read-only" in flatten_cli_output(result.output + result.stderr)
     assert not (built.root / "compress").exists()
+
+
+def test_a_scheduler_that_cannot_be_queried_leaves_the_run_as_recorded(
+    submitted: t.Callable[..., BuiltRun], flatten_cli_output: t.Callable[[str], str]
+) -> None:
+    """Verify a refresh that fails, such as `sacct` erroring, is a warning, and
+    compress goes on with the manifest as last recorded instead of a traceback.
+    """
+    built = submitted()
+
+    with mock.patch(
+        "cstar.cli.run.shared.load_run_state",
+        mock.AsyncMock(side_effect=RuntimeError("sacct: error: no route to host")),
+    ):
+        result = compress(built.run_id)
+
+    output = flatten_cli_output(result.output + result.stderr)
+    assert result.exit_code == EXIT_BAD_ARGS, output
+    assert isinstance(result.exception, SystemExit)
+    assert "the manifest was not refreshed: sacct: error: no route to host" in output
+    assert f"has not finished: step '{STEP}' is Submitted" in output
+
+
+def test_a_run_whose_tracking_record_cannot_be_read_is_refused_by_its_directory(
+    submitted: t.Callable[..., BuiltRun], flatten_cli_output: t.Callable[[str], str]
+) -> None:
+    """Verify a run named by its directory whose record cannot be read is refused
+    in one line: whether the run may be written is not known.
+    """
+    built = submitted()
+
+    with mock.patch.object(
+        TrackingRepository,
+        "get_workplan_run_sync",
+        side_effect=ValueError("not a valid run record"),
+    ):
+        result = compress(str(built.root))
+
+    output = flatten_cli_output(result.output + result.stderr)
+    assert result.exit_code == EXIT_BAD_ARGS, output
+    assert f"The tracking record of run '{built.run_id}' cannot be read" in output
+    assert not (built.root / "compress").exists()
