@@ -10,16 +10,18 @@ import shutil
 import typing as t
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.cli.run import app as app_run
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.index import run_uri
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
     AttemptStatus,
@@ -539,6 +541,50 @@ def test_move_of_a_run_tracked_live_drops_its_sentinels(
     assert record.sentinels == set()
     assert record.attached is True
     assert not record.live
+
+
+def test_move_of_a_live_run_refreshes_without_the_settings_a_launch_needs(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify a run whose manifest still shows its step submitted is refreshed
+    from its sentinel and moved, though the launcher would refuse a launch (the
+    SLURM account is unset): the refresh only reads statuses.
+    """
+    built = elsewhere(finished=False)
+    assert invoke("attach", str(built.root)).exit_code == 0
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    (entry,) = manifest.steps
+    entry.status = Status.Submitted.name
+    entry.job_id = "123"
+    write_run_manifest(built.root, manifest)
+
+    sentinel = StateRepository.sentinel_path(STEP, run_id=built.run_id)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    handle = ProcessHandle(pid="1", name=STEP, run_id=built.run_id, status=Status.Done)
+    assert serialize(sentinel, handle)
+
+    def go_live(run: WorkplanRun) -> None:
+        run.attached = False
+        run.sentinels = {sentinel}
+
+    TrackingRepository().update_workplan_run_sync(built.run_id, go_live)
+    unset = CstarExpectationFailed(
+        "Unable to load environment variables required by the system: "
+        "CSTAR_SLURM_ACCOUNT"
+    )
+
+    with mock.patch.object(LocalLauncher, "check_preconditions", side_effect=unset):
+        result = invoke("promote", built.run_id, "--mode", "move")
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "was not refreshed" not in result.stderr
+    moved = project_runs / built.run_id
+    assert not built.root.exists()
+    refreshed = read_run_manifest(moved)
+    assert refreshed is not None
+    assert refreshed.attempts[-1].finished_at is not None
+    assert refreshed.steps[0].status == Status.Done.name
 
 
 def test_move_of_a_run_with_a_step_still_in_flight_keeps_that_sentinel(

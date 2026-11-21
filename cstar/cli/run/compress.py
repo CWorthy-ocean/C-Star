@@ -37,7 +37,11 @@ from cstar.applications.core import ArtifactKind, get_application
 from cstar.base.exceptions import CstarError
 from cstar.base.netcdf_compress import VERIFIED_RECORDS, matches_any
 from cstar.cli.common import try_get_from_ctxmap
-from cstar.cli.run.shared import resolve_by_handle
+from cstar.cli.run.shared import (
+    refresh_tracked_manifest,
+    resolve_by_handle,
+    tracked_record_of,
+)
 from cstar.cli.workplan.shared import HELP_RUN_HANDLE, KEY_RUN
 from cstar.entrypoint.utils import (
     ARG_BLUEPRINT,
@@ -52,8 +56,14 @@ from cstar.entrypoint.utils import (
     ARG_WORKERS_HELP,
     ARG_YES,
 )
-from cstar.orchestration.manifest import fold_step_records, read_run_manifest
+from cstar.orchestration.index import read_run_location
+from cstar.orchestration.manifest import (
+    RunManifest,
+    fold_step_records,
+    read_run_manifest,
+)
 from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.orchestration import LiveWorkplan, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import WorkplanRun, require_writable
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
@@ -305,8 +315,19 @@ def _job_settings(
     return slurm
 
 
-def _resolve_run(context: typer.Context, target: str) -> Path:
-    """The run directory of a run handle; a tracked run must be writable.
+def _resolve_run(
+    context: typer.Context, target: str
+) -> tuple[Path, WorkplanRun | None]:
+    """The run directory of a run handle, and the run's record when it is tracked here.
+
+    A run tracked here is found by its directory too, and must be writable
+    however it is named.
+
+    Returns
+    -------
+    tuple[Path, WorkplanRun | None]
+        The run directory, resolved, and the run's tracking record, or `None`
+        when this machine does not track the run.
 
     Raises
     ------
@@ -314,26 +335,75 @@ def _resolve_run(context: typer.Context, target: str) -> Path:
         Raised when the handle names no run, or the run is attached read-only.
     """
 
-    def tracked(run: WorkplanRun) -> Path:
+    def tracked(run: WorkplanRun) -> tuple[Path, WorkplanRun | None]:
         if not run.output_path.is_dir():
             msg = f"The directory recorded for run {run.run_id!r} does not exist: {run.output_path}"
             raise typer.BadParameter(msg)
-        return run.output_path
+        return run.output_path, run
 
-    root = resolve_by_handle(
+    def directory(path: str) -> tuple[Path, WorkplanRun | None]:
+        root = Path(path).expanduser()
+        try:
+            location = read_run_location(root)
+        except CstarError:
+            return root, None  # not a run: reading its manifest says so
+        return root, tracked_record_of(root, location)
+
+    def indexed(path: str) -> tuple[Path, WorkplanRun | None]:
+        return Path(path), None
+
+    root, found = resolve_by_handle(
         context,
         target,
         verb=COMMAND_COMPRESS,
-        directory=Path,
+        directory=directory,
         tracked=tracked,
-        indexed=Path,
+        indexed=indexed,
     )
-    if run := try_get_from_ctxmap(context, KEY_RUN, WorkplanRun):
+    record = try_get_from_ctxmap(context, KEY_RUN, WorkplanRun) or found
+    if record is not None:
         try:
-            require_writable(run, action=COMMAND_COMPRESS)
+            require_writable(record, action=COMMAND_COMPRESS)
         except CstarError as ex:
             raise typer.BadParameter(str(ex)) from ex
-    return root.expanduser().resolve()
+    return root.expanduser().resolve(), record
+
+
+def _refresh(root: Path, run: WorkplanRun) -> None:
+    """Refresh the manifest of a run scheduled here, as `cstar run status` does.
+
+    Under `cstar workplan submit` nothing records a step's end in the manifest,
+    so a finished run can still show a step as submitted and its attempt open
+    until the statuses are read. A run whose transformed workplan does not load
+    is read as last recorded, with a warning.
+    """
+    workplan_path = run.try_trx_workplan_path()
+    workplan = (
+        LiveWorkplan.try_load(workplan_path, tolerant=True) if workplan_path else None
+    )
+    if workplan is None:
+        where = str(workplan_path) if workplan_path else f"of run {run.run_id!r}"
+        typer.echo(
+            "Warning: the manifest was not refreshed: unable to load the "
+            f"transformed workplan {where}",
+            err=True,
+        )
+        return
+    refresh_tracked_manifest(root, run.run_id, workplan)
+
+
+def _unfinished(manifest: RunManifest) -> str:
+    """The refusal for a run whose latest attempt is open, naming the steps not ended."""
+    terminal = {state.name for state in Status.terminal_states()}
+    steps = ", ".join(
+        f"step {entry.name!r} is {entry.status}"
+        if entry.status
+        else f"step {entry.name!r} has no status yet"
+        for entry in manifest.steps
+        if entry.status not in terminal
+    )
+    msg = f"the latest attempt of {manifest.run_id!r} has not finished"
+    return f"{msg}: {steps}" if steps else msg
 
 
 @app.command(name=COMMAND_COMPRESS, help=HELP_LONG, short_help=HELP_SHORT)
@@ -356,7 +426,9 @@ def compress(
     """Compress the data files of a finished run in place."""
     if submit and now:
         raise typer.BadParameter(f"{ARG_SUBMIT} cannot be combined with {ARG_NOW}")
-    root = _resolve_run(context, run)
+    root, record = _resolve_run(context, run)
+    if record is not None and record.live:
+        _refresh(root, record)
     manifest = read_run_manifest(root)
     if manifest is None:
         raise typer.BadParameter(
@@ -366,9 +438,7 @@ def compress(
     # that launched nothing, which the manifest on disk still shows as open
     fold_step_records(manifest, root)
     if manifest.attempts and manifest.attempts[-1].finished_at is None:
-        raise typer.BadParameter(
-            f"the latest attempt of {manifest.run_id!r} has not finished"
-        )
+        raise typer.BadParameter(_unfinished(manifest))
 
     typer.echo(f"Reading the headers of the data files of {manifest.run_id!r}...")
     detector = FileTypeDetector()

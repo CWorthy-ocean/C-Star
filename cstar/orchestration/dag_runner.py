@@ -247,7 +247,10 @@ def get_status_detail_map(
 
 
 def get_launcher(
-    workplan: Workplan | None = None, *, force_local: bool = False
+    workplan: Workplan | None = None,
+    *,
+    force_local: bool = False,
+    for_launch: bool = True,
 ) -> Launcher[t.Any]:
     """Get the appropriate launcher for the workplan and current environment.
 
@@ -265,6 +268,11 @@ def get_launcher(
     force_local : bool
         Use the local launcher even when the system has a scheduler, as
         required by the sentinels of a pre-run (which are local processes).
+    for_launch : bool
+        Whether steps will be launched with it, so what a launch needs (see
+        `Launcher.check_preconditions`, such as the account setting the system
+        requires) is checked. `False` for a launcher that only reads the
+        statuses of steps already launched.
 
     Returns
     -------
@@ -274,7 +282,7 @@ def get_launcher(
     ------
     CstarExpectationFailed
         If the workplan requests the SLURM launcher on a system whose scheduler is
-        not SLURM, or that has none.
+        not SLURM, or that has none; or, for a launch, if what it needs is missing.
     CstarAdaptationError
         If the workplan's `compute_environment` is invalid.
     """
@@ -320,7 +328,8 @@ def get_launcher(
     else:
         launcher = LocalLauncher()
 
-    launcher.check_preconditions(workplan)
+    if for_launch:
+        launcher.check_preconditions(workplan)
     return launcher
 
 

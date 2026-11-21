@@ -4264,6 +4264,26 @@ def test_get_launcher_local_checks_preconditions(tmp_path: Path) -> None:
     check.assert_called_once_with(wp)
 
 
+@pytest.mark.parametrize("launcher", ["slurm", "local"])
+def test_get_launcher_for_a_status_read_skips_the_preconditions(
+    tmp_path: Path, launcher: str
+) -> None:
+    """Reading statuses asks for none of what a launch needs, such as the account."""
+    wp = _env_workplan(tmp_path, {"launcher": launcher})
+    cls = SlurmLauncher if launcher == "slurm" else LocalLauncher
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock(family=SCHEDULER_SLURM)),
+        ),
+        mock.patch.object(cls, "check_preconditions") as check,
+    ):
+        assert type(get_launcher(wp, for_launch=False)) is cls
+
+    check.assert_not_called()
+
+
 def test_get_launcher_force_local_wins_over_slurm(tmp_path: Path) -> None:
     """Verify `force_local` beats the workplan's request for slurm."""
     wp = _env_workplan(tmp_path, {"launcher": "slurm"})

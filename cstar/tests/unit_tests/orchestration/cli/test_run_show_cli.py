@@ -12,11 +12,13 @@ from click.testing import Result
 from rich.console import Console
 from typer.testing import CliRunner
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
 from cstar.cli.run.show import COMMAND_SHOW, _duration
 from cstar.entrypoint.utils import ARG_FORMAT, ARG_NO_REFRESH
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.index import run_uri
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     Attempt,
@@ -226,9 +228,9 @@ def test_a_run_id_refreshes_the_manifest(run: FakeRun) -> None:
     write_record(run)
 
     with (
-        mock.patch("cstar.cli.run.show.get_launcher"),
+        mock.patch("cstar.cli.run.shared.get_launcher"),
         mock.patch(
-            "cstar.cli.run.show.load_run_state",
+            "cstar.cli.run.shared.load_run_state",
             mock.AsyncMock(return_value=DagStatus({STEP: Status.Done})),
         ),
     ):
@@ -245,11 +247,61 @@ def test_a_run_id_refreshes_the_manifest(run: FakeRun) -> None:
     assert entry.record is not None
 
 
+def test_a_run_id_refreshes_without_the_settings_a_launch_needs(run: FakeRun) -> None:
+    """Verify showing a tracked run only reads its statuses: a launcher that
+    would refuse a launch (the SLURM account is unset) still refreshes it.
+    """
+    write_record(run)
+    unset = CstarExpectationFailed(
+        "Unable to load environment variables required by the system: "
+        "CSTAR_SLURM_ACCOUNT"
+    )
+
+    with (
+        mock.patch.object(LocalLauncher, "check_preconditions", side_effect=unset),
+        mock.patch(
+            "cstar.cli.run.shared.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({STEP: Status.Done})),
+        ),
+    ):
+        result = invoke(RUN_ID, record=run.record)
+
+    assert result.exit_code == 0, result.output
+    assert "was not refreshed" not in result.stderr
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    assert manifest.observed_at is not None
+    entry = manifest.step(STEP)
+    assert entry is not None
+    assert entry.status == Status.Done.name
+
+
+def test_a_run_whose_launcher_cannot_be_chosen_is_shown_as_recorded(
+    run: FakeRun,
+) -> None:
+    """Verify a launcher this machine lacks is a warning, not a traceback: the
+    run is shown by its manifest as last recorded.
+    """
+    with mock.patch(
+        "cstar.cli.run.shared.get_launcher",
+        side_effect=CstarExpectationFailed("system 'x' has no scheduler"),
+    ):
+        result = invoke(RUN_ID, record=run.record)
+
+    assert result.exit_code == 0, result.output
+    assert "Warning: the manifest was not refreshed" in result.stderr
+    assert "has no scheduler" in result.stderr
+    assert STEP in result.stdout
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    assert manifest.observed_at is None
+
+
 def test_no_refresh_leaves_the_manifest_alone(run: FakeRun) -> None:
     """Verify `--no-refresh` neither polls the scheduler nor writes."""
     write_record(run)
 
-    with mock.patch("cstar.cli.run.show.load_run_state") as mock_load:
+    with mock.patch("cstar.cli.run.shared.load_run_state") as mock_load:
         result = invoke(RUN_ID, ARG_NO_REFRESH, record=run.record)
 
     assert result.exit_code == 0, result.output
@@ -349,7 +401,7 @@ def test_a_tracked_run_without_a_manifest(run: FakeRun) -> None:
     """Verify a run that predates the manifest is reported, and not polled."""
     (run.root / RUN_MANIFEST_NAME).unlink()
 
-    with mock.patch("cstar.cli.run.show.load_run_state") as mock_load:
+    with mock.patch("cstar.cli.run.shared.load_run_state") as mock_load:
         result = invoke(RUN_ID, record=run.record)
 
     assert result.exit_code == 1
@@ -535,9 +587,9 @@ def observed() -> t.Iterator[Observed]:
     """Replace what refreshing the manifest of a tracked run reaches for."""
     status = mock.AsyncMock(return_value=DagStatus({}))
     with (
-        mock.patch("cstar.cli.run.show.get_launcher"),
-        mock.patch("cstar.cli.run.show.load_run_state", status),
-        mock.patch("cstar.cli.run.show.refresh_run_manifest") as refresh_manifest,
+        mock.patch("cstar.cli.run.shared.get_launcher"),
+        mock.patch("cstar.cli.run.shared.load_run_state", status),
+        mock.patch("cstar.cli.run.shared.refresh_run_manifest") as refresh_manifest,
     ):
         yield Observed(status, refresh_manifest)
 
@@ -599,9 +651,9 @@ def test_the_uuid_of_a_tracked_run_refreshes_it(run: FakeRun) -> None:
     write_record(run)
 
     with (
-        mock.patch("cstar.cli.run.show.get_launcher"),
+        mock.patch("cstar.cli.run.shared.get_launcher"),
         mock.patch(
-            "cstar.cli.run.show.load_run_state",
+            "cstar.cli.run.shared.load_run_state",
             mock.AsyncMock(return_value=DagStatus({STEP: Status.Done})),
         ),
     ):

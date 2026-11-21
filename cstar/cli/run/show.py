@@ -1,4 +1,3 @@
-import asyncio
 import os
 import typing as t
 from dataclasses import dataclass
@@ -17,7 +16,7 @@ from cstar.cli.common import (
     refuse_workplan_file,
     set_ctxmap,
 )
-from cstar.cli.run.shared import resolve_by_handle
+from cstar.cli.run.shared import refresh_tracked_manifest, resolve_by_handle
 from cstar.cli.workplan.shared import KEY_RUN, list_runs
 from cstar.entrypoint.utils import (
     ARG_FORMAT,
@@ -26,11 +25,6 @@ from cstar.entrypoint.utils import (
     ARG_NO_REFRESH_HELP,
 )
 from cstar.execution.file_system import JobFileSystemManager
-from cstar.orchestration.dag_runner import (
-    get_launcher,
-    load_run_state,
-    refresh_run_manifest,
-)
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     RunManifest,
@@ -383,9 +377,8 @@ def show(
                 err=True,
             )
         else:
-            launcher = get_launcher(workplan, force_local=workplan.pre_run)
-            status = asyncio.run(load_run_state(resolved.run_id, launcher))
-            manifest = refresh_run_manifest(root, resolved.run_id, status) or manifest
+            refreshed = refresh_tracked_manifest(root, resolved.run_id, workplan)
+            manifest = refreshed or manifest
 
     if format == "yaml":
         typer.echo(dump_yaml(manifest))
