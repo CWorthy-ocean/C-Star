@@ -19,6 +19,7 @@ import fsspec
 import pytest
 import yaml
 
+from cstar.applications.forge.models import ModelSpec
 from cstar.base.deprecation import CstarDeprecationWarning
 from cstar.catalog.domain_catalog import (
     _DEFAULT_CATALOG_ROOT,
@@ -1270,6 +1271,40 @@ def _write_model(root: Path, name: str, text: str | None = None, **extra) -> Pat
         text = yaml.safe_dump({**base, **extra})
     path.write_text(text)
     return path
+
+
+class TestModelApplications:
+    def test_bundled_gpu_spec_is_the_only_gpu_model(self):
+        applications = DomainCatalog(read_only=True).model_applications
+        default = ModelSpec.model_fields["application"].default
+        assert applications["roms-marbl-gpu-0.1.3-default"] == "ucla_roms_gpu"
+        assert applications["roms-marbl-0.15-default"] == default
+        assert [n for n, a in applications.items() if a != default] == [
+            "roms-marbl-gpu-0.1.3-default"
+        ]
+        assert sorted(applications) == DomainCatalog(read_only=True).model_names
+
+    def test_specs_are_read_once_and_the_cache_follows_a_registration(
+        self, isolated_catalog, tmp_path
+    ):
+        real = DomainCatalog.load_model_spec
+        with patch.object(
+            DomainCatalog, "load_model_spec", autospec=True, side_effect=real
+        ) as load:
+            first = isolated_catalog.model_applications
+            assert isolated_catalog.model_applications == first
+        assert load.call_count == len(first)
+        new_spec = _write_model(
+            tmp_path / "src", "my-gpu-model", application="ucla_roms_gpu"
+        )
+        isolated_catalog.register_model(new_spec)
+        assert isolated_catalog.model_applications["my-gpu-model"] == "ucla_roms_gpu"
+
+    def test_unreadable_spec_is_left_out(self, tmp_path):
+        _write_model(tmp_path, "good")
+        _write_model(tmp_path, "broken", text="not: [valid")
+        catalog = DomainCatalog(catalog_root=tmp_path, suppress_validation=True)
+        assert list(catalog.model_applications) == ["good"]
 
 
 class TestArchivedModelNames:

@@ -383,6 +383,7 @@ class DomainCatalog:
             CatalogSpecKind, tuple[list[tuple[str, Path]], list[tuple[str, Path]]]
         ] = {}
         self._archived_model_names: list[str] | None = None
+        self._model_applications: dict[str, str] | None = None
         # application -> entry name -> blueprints/<application>/<name>.yaml file
         self._blueprints: dict[str, dict[str, Path]] = {}
         # (application, name, file) for entries found in a legacy layout
@@ -546,6 +547,7 @@ class DomainCatalog:
         self._legacy_specs[kind] = (found, ignored)
         if kind == "ModelSpec":
             self._archived_model_names = None
+            self._model_applications = None
 
     def _warn_legacy_specs(self) -> None:
         """Announce, in one warning, every spec the scan found in a legacy layout."""
@@ -819,6 +821,25 @@ class DomainCatalog:
                     logger.debug("Could not read model spec '%s': %s", name, exc)
             self._archived_model_names = archived
         return list(self._archived_model_names)
+
+    @property
+    def model_applications(self) -> dict[str, str]:
+        """Return each model name's ``application`` (``ucla_roms`` or ``ucla_roms_gpu``).
+
+        Read like :attr:`archived_model_names`: lazily, one spec read per model,
+        cached until the next model scan. A spec that declares no application has
+        ``ModelSpec``'s default; an unreadable spec is left out, so it still fails
+        loudly when selected.
+        """
+        if self._model_applications is None:
+            applications = {}
+            for name in self.model_names:
+                try:
+                    applications[name] = self.load_model_spec(name).application
+                except Exception as exc:
+                    logger.debug("Could not read model spec '%s': %s", name, exc)
+            self._model_applications = applications
+        return dict(self._model_applications)
 
     @property
     def domain_names(self) -> list[str]:
@@ -1639,6 +1660,15 @@ class LayeredCatalog:
             for n in self.model_names
             if n in self._store_for("model", n).archived_model_names
         )
+
+    @property
+    def model_applications(self) -> dict[str, str]:
+        applications: dict[str, str] = {}
+        for n in self.model_names:
+            store_applications = self._store_for("model", n).model_applications
+            if n in store_applications:
+                applications[n] = store_applications[n]
+        return applications
 
     @property
     def domain_names(self) -> list[str]:
