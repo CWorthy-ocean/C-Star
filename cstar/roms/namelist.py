@@ -39,9 +39,12 @@ subclasses:
 - :class:`RomsNamelistV0_14_0` — the schema for ucla-roms **>= 0.14.0, < 0.15.0**.
   Adds ``wrt_avg_temp``/``wrt_avg_salt`` to ``&TS_OUTPUT_SETTINGS`` (write ``temp`` and
   ``salt`` to the averages file; ucla-roms PR #413), on top of 0.13.0.
-- :class:`RomsNamelistV0_15_0` — the schema for ucla-roms **>= 0.15.0**. Adds the
-  optional ``&IMPLICIT_FS`` group (the barotropic scheme: split-explicit or
-  implicit free surface), on top of 0.14.0.
+- :class:`RomsNamelistV0_15_0` — the schema for ucla-roms **>= 0.15.0, < 0.16.0**.
+  Adds the optional ``&IMPLICIT_FS`` group (the barotropic scheme: split-explicit
+  or implicit free surface), on top of 0.14.0.
+- :class:`RomsNamelistV0_16_0` — the schema for ucla-roms **>= 0.16.0**. Adds
+  ``pio_direct_read`` to ``&PIO_SETTINGS`` (how the grid and initial/restart files
+  are read; ucla-roms PR #462), on top of 0.15.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -233,6 +236,30 @@ class PioSettings(_NmlGroup):
     with the ranks on one node, so that each node has one I/O task. A key absent
     from the file keeps the default of 1.
     """
+
+
+PioDirectRead = Literal["on", "off", "verify"]
+"""The read modes `pio_direct_read` offers (ucla-roms `&PIO_SETTINGS`), named once."""
+
+PIO_DIRECT_READ_ON: Final[PioDirectRead] = "on"
+"""The ucla-roms default: read directly where the file allows, else through PIO."""
+
+PIO_DIRECT_READ_OFF: Final[PioDirectRead] = "off"
+"""Read through PIO."""
+
+
+class PioSettingsV0_16_0(PioSettings):
+    """``&PIO_SETTINGS`` for ucla-roms >= 0.16.0: adds ``pio_direct_read``
+    (ucla-roms PR #462). Its default is the Fortran initializer (``'on'``), so a
+    namelist without the key reads the files directly, where releases before
+    0.16.0 read them through PIO (``'off'``). It is read only in PARALLEL_IO
+    builds.
+    """
+
+    pio_direct_read: PioDirectRead = Field(default=PIO_DIRECT_READ_ON)
+    """Read the grid and initial/restart files directly with O_DIRECT when they are
+    classic netCDF (CDF-1, CDF-2, CDF-5): 'on', 'off' (read through PIO), or
+    'verify' (read both ways, report values that differ, run on PIO's values)"""
 
 
 FsMode = Literal["split", "implicit"]
@@ -1071,9 +1098,10 @@ class RomsNamelistBase(BaseModel):
     the sponge tracer diffusivity ``v_sponge_trc``, or
     :class:`RomsNamelistV0_14_0` for ucla-roms >= 0.14.0, < 0.15.0, which adds
     the averages-file switches ``wrt_avg_temp`` and ``wrt_avg_salt``, or
-    :class:`RomsNamelistV0_15_0` for ucla-roms >= 0.15.0, which adds
-    ``&IMPLICIT_FS``) or select one automatically with
-    :func:`namelist_schema_for_ref`.
+    :class:`RomsNamelistV0_15_0` for ucla-roms >= 0.15.0, < 0.16.0, which adds
+    ``&IMPLICIT_FS``, or :class:`RomsNamelistV0_16_0` for ucla-roms >= 0.16.0,
+    which adds ``pio_direct_read`` to ``&PIO_SETTINGS``) or select one
+    automatically with :func:`namelist_schema_for_ref`.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -1383,7 +1411,7 @@ class RomsNamelistV0_14_0(RomsNamelistV0_13_0):
 
 
 class RomsNamelistV0_15_0(RomsNamelistV0_14_0):
-    """The ROMS namelist schema for ucla-roms >= 0.15.0.
+    """The ROMS namelist schema for ucla-roms >= 0.15.0, < 0.16.0.
 
     Adds `&IMPLICIT_FS` (see :class:`ImplicitFsSettings`) on top of the 0.14.0
     schema. It is always written. Earlier releases never read the group (ROMS
@@ -1393,6 +1421,17 @@ class RomsNamelistV0_15_0(RomsNamelistV0_14_0):
     """
 
     implicit_fs: ImplicitFsSettings = Field(default_factory=ImplicitFsSettings)
+
+
+class RomsNamelistV0_16_0(RomsNamelistV0_15_0):
+    """The ROMS namelist schema for ucla-roms >= 0.16.0.
+
+    Adds `pio_direct_read` to `&PIO_SETTINGS` (see :class:`PioSettingsV0_16_0`) on
+    top of the 0.15.0 schema. It is always written, which is why earlier releases
+    (which stop on unknown keys in that group) keep the 0.15.0 schema.
+    """
+
+    pio_settings: PioSettingsV0_16_0 = Field(default_factory=PioSettingsV0_16_0)
 
 
 # ---- Schema version selection ----
@@ -1409,19 +1448,20 @@ UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
 UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
 UCLA_ROMS_0_14_0: Final[tuple[int, int, int]] = (0, 14, 0)
 UCLA_ROMS_0_15_0: Final[tuple[int, int, int]] = (0, 15, 0)
+UCLA_ROMS_0_16_0: Final[tuple[int, int, int]] = (0, 16, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.16.0):
+# Recipe for the next breaking namelist release (e.g. 0.17.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_16_0: Final[tuple[int, int, int]] = (0, 16, 0)
+#        UCLA_ROMS_0_17_0: Final[tuple[int, int, int]] = (0, 17, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_15_0, UCLA_ROMS_0_16_0, RomsNamelistV0_15_0),
+#        (UCLA_ROMS_0_16_0, UCLA_ROMS_0_17_0, RomsNamelistV0_16_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_16_0, None, RomsNamelistV0_16_0),
+#        (UCLA_ROMS_0_17_0, None, RomsNamelistV0_17_0),
 #   4. Bump NEWEST_KNOWN_UCLA_ROMS (below) to the new release.
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
@@ -1439,7 +1479,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
     (UCLA_ROMS_0_13_0, UCLA_ROMS_0_14_0, RomsNamelistV0_13_0),
     (UCLA_ROMS_0_14_0, UCLA_ROMS_0_15_0, RomsNamelistV0_14_0),
-    (UCLA_ROMS_0_15_0, None, RomsNamelistV0_15_0),
+    (UCLA_ROMS_0_15_0, UCLA_ROMS_0_16_0, RomsNamelistV0_15_0),
+    (UCLA_ROMS_0_16_0, None, RomsNamelistV0_16_0),
 )
 
 # The newest ucla-roms release whose namelist C-Star has been checked against.
@@ -1448,7 +1489,7 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
 # with every new tier (recipe step 4 above) and also for a release that changes
 # no namelist key (a patch release such as 0.12.1), once checked. Never below the last entry's
 # lower bound.
-NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_15_0
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_16_0
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:

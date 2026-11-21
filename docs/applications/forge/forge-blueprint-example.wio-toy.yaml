@@ -281,6 +281,7 @@ model_settings:
     nsub_e: 1
   pio_settings:
     pio_stride: 1
+    pio_direct_read: 'on'
   bgc:
     nbgc_flx: 2
     interp_frc: 0
@@ -542,7 +543,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.15.0
+    commit: 0.16.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -572,7 +573,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.15-default
+    name: roms-marbl-0.16-default
     origin: catalog
     modified: false
   domain:
@@ -607,5 +608,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:fdf2e310d7b3bc8e109d0e163c02b4c6e287d313ad27770373a21be844f85941
+  content_hash: bp-v2:29dfac88b7f65ad73a9902294a5edcf74414314966226dd9791385872555bc54
   notes: null

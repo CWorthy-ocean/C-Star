@@ -219,6 +219,7 @@
 /
 
 &pio_settings
+    pio_direct_read = 'on'
     pio_stride = ,
 /
 

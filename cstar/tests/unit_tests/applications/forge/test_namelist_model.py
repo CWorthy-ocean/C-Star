@@ -43,6 +43,8 @@ from cstar.applications.forge.namelist_model import (
     ImplicitFsCfg,
     MarblBgcCfg,
     MarblBgcCfgV0_11_0,
+    PioSettingsCfg,
+    PioSettingsCfgV0_16_0,
     RunTimeSettings,
     RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
@@ -54,6 +56,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_13_0,
     RunTimeSettingsV0_14_0,
     RunTimeSettingsV0_15_0,
+    RunTimeSettingsV0_16_0,
     TsOutputCfg,
     TsOutputCfgV0_14_0,
     VSpongeCfg,
@@ -93,7 +96,9 @@ from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
     NEWEST_KNOWN_UCLA_ROMS,
     UCLA_ROMS_0_14_0,
+    UCLA_ROMS_0_16_0,
     ImplicitFsSettings,
+    PioSettingsV0_16_0,
     RomsNamelist,
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
@@ -103,6 +108,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
     RomsNamelistV0_15_0,
+    RomsNamelistV0_16_0,
     format_roms_version,
     release_ref_for_remote,
 )
@@ -120,6 +126,7 @@ _ALL_SETTINGS_TIERS = (
     RunTimeSettingsV0_13_0,
     RunTimeSettingsV0_14_0,
     RunTimeSettingsV0_15_0,
+    RunTimeSettingsV0_16_0,
 )
 
 
@@ -1214,9 +1221,15 @@ def test_run_time_settings_for_ref_0_14_0_up_to_0_15_0_selects_v0_14_0(recwarn):
     assert len(recwarn) == 0
 
 
-def test_run_time_settings_for_ref_0_15_0_and_later_selects_v0_15_0(recwarn):
-    for ref in ("0.15.0", "v0.15.0"):
+def test_run_time_settings_for_ref_0_15_0_up_to_0_16_0_selects_v0_15_0(recwarn):
+    for ref in ("0.15.0", "v0.15.0", "0.15.9"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_15_0
+    assert len(recwarn) == 0
+
+
+def test_run_time_settings_for_ref_0_16_0_and_later_selects_v0_16_0(recwarn):
+    for ref in ("0.16.0", "v0.16.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_16_0
     assert len(recwarn) == 0
 
 
@@ -1239,12 +1252,12 @@ def test_run_time_settings_for_ref_newer_than_known_release_warns(ref):
     """
     with pytest.warns(UserWarning) as record:
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_15_0
+    assert cls is RunTimeSettingsV0_16_0
     assert len(record) == 1
     message = str(record[0].message)
     assert f"ucla-roms release {ref} is {_NEWER_THAN_KNOWN}" in message
     assert f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)})" in message
-    assert RomsNamelistV0_15_0.__name__ in message
+    assert RomsNamelistV0_16_0.__name__ in message
 
 
 def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
@@ -1260,7 +1273,7 @@ def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
         UserWarning, match=f"release {_NEWER_TAG} is {_NEWER_THAN_KNOWN}"
     ):
         cls = run_time_settings_for_ref(ref)
-    assert cls is RunTimeSettingsV0_15_0
+    assert cls is RunTimeSettingsV0_16_0
 
 
 def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
@@ -1272,13 +1285,13 @@ def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
         write_roms_namelist(
             _populated_rt_dict(), tmp_path, n_tracers=34, roms_ref=_NEWER_TAG
         )
-    RomsNamelistV0_15_0.read(tmp_path / "namelist.nml")
+    RomsNamelistV0_16_0.read(tmp_path / "namelist.nml")
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_15_0
+    assert cls is RunTimeSettingsV0_16_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -1287,7 +1300,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_15_0
+    assert cls is RunTimeSettingsV0_16_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -1443,6 +1456,7 @@ def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
         RunTimeSettingsV0_13_0,
         RunTimeSettingsV0_14_0,
         RunTimeSettingsV0_15_0,
+        RunTimeSettingsV0_16_0,
     ],
 )
 def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
@@ -1730,7 +1744,7 @@ def test_forge_writes_time_interpolation_cstar_reads_it(tmp_path):
 # ---------------------------------------------------------------------------
 # ucla-roms >= 0.13.0: RunTimeSettingsV0_13_0 (tracer diffusivity of the sponge)
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-4])
 @pytest.mark.parametrize("requested", [0.0, 400.0, "0", "not-a-number", float("nan")])
 def test_pre_0_13_0_tiers_reject_a_requested_v_sponge_trc(settings_cls, requested):
     """ucla-roms < 0.13.0 gives tracers ``v_sponge``: ``extra="ignore"`` would
@@ -1849,7 +1863,7 @@ def _ts_output(**switches):
     return {**default_catalog.output_data("standard")["ts_output"], **switches}
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
 @pytest.mark.parametrize("key", _AVG_TS_KEYS)
 @pytest.mark.parametrize("requested", [True, "true", 1, "not-a-bool"])
 def test_pre_0_14_0_tiers_reject_a_requested_avg_ts_key(settings_cls, key, requested):
@@ -1865,7 +1879,7 @@ def test_pre_0_14_0_tiers_reject_a_requested_avg_ts_key(settings_cls, key, reque
         TypeAdapter(annotation).validate_python(_ts_output(**{key: requested}))
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
 def test_pre_0_14_0_tiers_name_every_requested_avg_ts_key_in_one_error(settings_cls):
     annotation = settings_cls.model_fields["ts_output"].annotation
     with pytest.raises(ValidationError) as excinfo:
@@ -1887,7 +1901,7 @@ def test_avg_ts_rejection_names_the_version_from_the_constant():
         TsOutputCfg.model_validate(_ts_output(wrt_avg_temp=True))
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-2])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
 @pytest.mark.parametrize("off", [False, "false", 0, None])
 def test_pre_0_14_0_tiers_drop_a_switched_off_avg_ts_key(settings_cls, off):
     """A shared spec may carry the keys switched off: they pass and are dropped."""
@@ -2091,6 +2105,139 @@ def test_forge_writes_implicit_fs_cstar_reads_it(tmp_path):
     write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.15.0")
     back = RomsNamelistV0_15_0.read(tmp_path / "namelist.nml")
     assert back.implicit_fs.fs_mode == "implicit"
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.16.0: RunTimeSettingsV0_16_0 (pio_direct_read in &PIO_SETTINGS)
+# ---------------------------------------------------------------------------
+# The tiers whose namelist has &PIO_SETTINGS (0.6.0 on) but not the 0.16.0 key.
+_PRE_0_16_0_PIO_TIERS = _ALL_SETTINGS_TIERS[
+    _ALL_SETTINGS_TIERS.index(RunTimeSettingsV0_6_0) : _ALL_SETTINGS_TIERS.index(
+        RunTimeSettingsV0_16_0
+    )
+]
+
+
+def _with_pio_direct_read(value):
+    d = _populated_rt_dict()
+    d["pio_settings"] = {"pio_stride": 1, "pio_direct_read": value}
+    return d
+
+
+@pytest.mark.parametrize("settings_cls", _PRE_0_16_0_PIO_TIERS)
+@pytest.mark.parametrize("requested", ["verify", "garbage", "Off"])
+def test_pre_0_16_0_tiers_reject_a_requested_pio_direct_read(settings_cls, requested):
+    """ucla-roms < 0.16.0 reads the grid and initial files through PIO only:
+    ``extra="ignore"`` would drop a request for ``verify``, so it is refused,
+    naming the release that reads it. A garbage or mis-cased value is no read
+    mode at all.
+    """
+    with pytest.raises(
+        ValidationError,
+        match=r"pio_settings\.pio_direct_read=.* requires ucla-roms >= 0\.16\.0",
+    ):
+        settings_cls.model_validate(_with_pio_direct_read(requested))
+
+
+@pytest.mark.parametrize("absent", ["on", "off", None, "missing"])
+def test_pre_0_16_0_tiers_drop_a_pio_direct_read_ending_in_pio(absent):
+    """Unset, ``on`` or ``off`` all end in a read through PIO on these releases:
+    it passes (a shared spec may carry it) and is dropped, so the built namelist
+    has no such key.
+    """
+    d = _populated_rt_dict()
+    d["pio_settings"] = {"pio_stride": 1}
+    if absent != "missing":
+        d["pio_settings"]["pio_direct_read"] = absent
+    rt = RunTimeSettingsV0_15_0.model_validate(d)
+    assert isinstance(rt.pio_settings, PioSettingsCfg)
+    assert "pio_direct_read" not in rt.pio_settings.model_dump()
+
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_15_0
+    assert "pio_direct_read" not in nml.to_f90nml_dict()["pio_settings"]
+
+
+def test_pio_direct_read_rejection_names_the_version_from_the_constant():
+    """The message formats ``UCLA_ROMS_0_16_0``, never a literal."""
+    version = ".".join(map(str, UCLA_ROMS_0_16_0))
+    with pytest.raises(ValidationError, match=rf"requires ucla-roms >= {version}"):
+        PioSettingsCfg.model_validate({"pio_direct_read": "verify"})
+
+
+@pytest.mark.parametrize("value", ["on", "off", "verify"])
+def test_build_namelist_v0_16_0_writes_pio_direct_read(tmp_path, value):
+    """RunTimeSettingsV0_16_0 builds ``RomsNamelistV0_16_0`` and writes the key
+    into ``&pio_settings``.
+    """
+    rt = RunTimeSettingsV0_16_0.model_validate(_with_pio_direct_read(value))
+    assert isinstance(rt.pio_settings, PioSettingsCfgV0_16_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_16_0
+    assert nml.pio_settings.pio_direct_read == value
+    assert nml.pio_settings.pio_stride == 1
+
+    nml.write(tmp_path / "namelist.nml")
+    assert f"pio_direct_read = '{value}'" in (tmp_path / "namelist.nml").read_text()
+
+
+def test_run_time_settings_v0_16_0_defaults_pio_direct_read_when_omitted(tmp_path):
+    """A settings dict without the key (or the section) validates to ``on``, the
+    ucla-roms initializer, and the namelist carries it.
+    """
+    d = _populated_rt_dict()
+    d["pio_settings"] = {"pio_stride": 1}
+    rt = RunTimeSettingsV0_16_0.model_validate(d)
+    assert rt.pio_settings.pio_direct_read == "on"
+    d.pop("pio_settings")
+    rt = RunTimeSettingsV0_16_0.model_validate(d)
+    assert rt.pio_settings.pio_direct_read == "on"
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.to_f90nml_dict()["pio_settings"]["pio_direct_read"] == "on"
+
+
+@pytest.mark.parametrize("bad", ["On", "true", "", "direct"])
+def test_pio_settings_cfg_v0_16_0_rejects_values_ucla_roms_stops_on(bad):
+    with pytest.raises(ValidationError):
+        PioSettingsCfgV0_16_0(pio_direct_read=bad)
+
+
+def test_pio_settings_cfg_defaults_equal_the_namelist_group_defaults():
+    """The Forge section and the C-Star group each carry the Fortran initializers;
+    they must agree.
+    """
+    assert PioSettingsCfgV0_16_0().model_dump() == PioSettingsV0_16_0().model_dump()
+
+
+def test_pio_settings_cfg_tiers_differ_by_the_read_mode_key():
+    old = set(PioSettingsCfg.model_fields)
+    assert set(PioSettingsCfgV0_16_0.model_fields) - old == {"pio_direct_read"}
+    assert old <= set(PioSettingsCfgV0_16_0.model_fields)
+
+
+@pytest.mark.parametrize(
+    "settings_cls", [RunTimeSettingsV0_15_0, RunTimeSettingsV0_16_0]
+)
+def test_misspelled_pio_direct_read_is_rejected_on_every_tier(settings_cls):
+    """Settings keys are lowercase; a case variant would be dropped by
+    ``extra="ignore"`` on the old tier, so it fails there like a field's own.
+    """
+    d = _populated_rt_dict()
+    d["pio_settings"] = {"pio_stride": 1, "PIO_DIRECT_READ": "on"}
+    with pytest.raises(
+        ValidationError, match=r"PIO_DIRECT_READ \(did you mean pio_direct_read\?\)"
+    ):
+        settings_cls.model_validate(d)
+
+
+def test_forge_writes_pio_direct_read_cstar_reads_it(tmp_path):
+    """``write_roms_namelist`` for a 0.16.0 pin writes a namelist the C-Star schema
+    for that release reads back, key included.
+    """
+    d = _with_pio_direct_read("verify")
+    write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.16.0")
+    back = RomsNamelistV0_16_0.read(tmp_path / "namelist.nml")
+    assert back.pio_settings.pio_direct_read == "verify"
 
 
 # ---------------------------------------------------------------------------
@@ -2668,7 +2815,7 @@ def test_prune_stays_silent_for_switched_off_sections():
 
 
 def test_gated_section_switches_are_fields_of_their_sections():
-    cls = RunTimeSettingsV0_15_0
+    cls = RunTimeSettingsV0_16_0
     for section, flag in _GATED_SECTION_SWITCHES.items():
         assert flag in cls.model_fields[section].annotation.model_fields
 
@@ -2849,7 +2996,7 @@ def _surf_flux(**switches):
     return {**default_catalog.output_data("daily-restarts")["surf_flux"], **switches}
 
 
-@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-3])
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-4])
 def test_pre_0_13_0_tiers_reject_wrt_rstflx(settings_cls):
     """ucla-roms < 0.13.0 reads ``wrt_rstflx`` but writes no restoring flux."""
     annotation = settings_cls.model_fields["surf_flux"].annotation

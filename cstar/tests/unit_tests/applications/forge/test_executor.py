@@ -89,6 +89,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
     RomsNamelistV0_15_0,
+    RomsNamelistV0_16_0,
 )
 from cstar.system.scheduler import SCHEDULER_PBS, SCHEDULER_SLURM
 
@@ -150,6 +151,11 @@ _MODEL_PATH_ROMS0140 = (
 # the versioned-namelist golden test below.
 _MODEL_PATH_ROMS0150 = (
     _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.15-default.yaml"
+)
+# ucla-roms >= 0.16.0 ModelSpec (adds pio_direct_read to &PIO_SETTINGS) -- used by
+# the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0160 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.16-default.yaml"
 )
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
@@ -4843,8 +4849,8 @@ class TestGoldenNamelist:
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
         roms050 and not roms060 and not roms070 and not roms090 and not
-        roms0110 and not roms0120 and not roms0130 and not roms0140 and not roms0150"``,
-        which would
+        roms0110 and not roms0120 and not roms0130 and not roms0140 and not
+        roms0150 and not roms0160"``, which would
         otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
@@ -5135,6 +5141,34 @@ class TestGoldenNamelist:
         nml = RomsNamelistV0_15_0.read(namelist_path)
         assert nml.implicit_fs.fs_mode == "split"
         assert nml.implicit_fs.fs_nsub == 2
+
+    def test_golden_namelist_test_tiny_roms0160(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.16-default`` ModelSpec (ucla-roms >= 0.16.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_16_0``/
+        ``RomsNamelistV0_16_0`` end to end.
+
+        The one schema-visible difference from the roms0150 golden is
+        ``pio_direct_read`` in ``&pio_settings``, always written (here ``on``).
+
+        Test name note: contains ``roms0160`` so the legacy golden's ``-k``
+        selector (``... and not roms0160``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_PATH_ROMS0160,
+            "golden_namelist_test-tiny-roms0160.nml",
+        )
+
+        pio_settings = normalized.split("&pio_settings")[1].split("/", 1)[0]
+        assert "pio_direct_read = 'on'" in pio_settings
+
+        # Read back through the 0.16 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms0160.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_16_0.read(namelist_path)
+        assert nml.pio_settings.pio_direct_read == "on"
 
     @staticmethod
     def _cdrgas_sources(directory: Path) -> list[Path]:

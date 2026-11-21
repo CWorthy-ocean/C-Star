@@ -47,7 +47,10 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.input_generator import netcdf_basename
 from cstar.applications.forge.migration import migrate_forge_blueprint_data
-from cstar.applications.forge.namelist_model import validate_run_time_sections
+from cstar.applications.forge.namelist_model import (
+    run_time_settings_for_ref,
+    validate_run_time_sections,
+)
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
@@ -122,6 +125,11 @@ _MODEL_PATH_ROMS0140 = (
 # the versioned-namelist golden test below.
 _MODEL_PATH_ROMS0150 = (
     _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.15-default.yaml"
+)
+# ucla-roms >= 0.16.0 ModelSpec (adds pio_direct_read to &PIO_SETTINGS) -- used by
+# the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0160 = (
+    _BUNDLED_CATALOG / "specs" / "ModelSpec" / "roms-marbl-0.16-default.yaml"
 )
 _GRID_KWARGS = dict(
     nx=6,
@@ -2682,6 +2690,35 @@ def test_golden_model_settings_test_tiny_roms0150():
     )
 
 
+def test_golden_model_settings_test_tiny_roms0160():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.16-default`` ModelSpec
+    (ucla-roms >= 0.16.0), resolved from the same test-tiny domain/forcing/output
+    setup as ``test_golden_model_settings_test_tiny_roms0150``.
+
+    The fixture differs from that one by ``pio_settings.pio_direct_read`` (``on``).
+    Regenerate the fixture with ``json.dumps(cfg.model_settings, indent=2,
+    sort_keys=True, default=str)`` plus a trailing newline, from
+    ``_build(model_path=_MODEL_PATH_ROMS0160)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0160.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_path=_MODEL_PATH_ROMS0160)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.16-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0160.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
 def test_resolver_0_13_model_spec_carries_v_sponge_trc_beside_the_derived_v_sponge():
     """v_sponge stays domain-owned (derived from the grid spacing); v_sponge_trc is
     the ModelSpec's, and is not derived.
@@ -2791,6 +2828,21 @@ def test_shared_pio_dev_spec_passes_a_pre_0_13_0_pin():
     )
     assert cfg.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
     assert validate_run_time_sections(cfg.model_settings, roms_ref="0.12.0") == []
+
+
+def test_shared_pio_dev_spec_passes_a_pre_0_16_0_pin():
+    """``pio-dev`` carries ``pio_direct_read: 'on'``, which an older release reads
+    through PIO anyway: the key is dropped without complaint.
+    """
+    cfg = _build(
+        model_path=_BUNDLED_CATALOG / "specs" / "ModelSpec" / "pio-dev.yaml",
+        roms_ref="0.15.0",
+    )
+    assert cfg.model_settings["pio_settings"]["pio_direct_read"] == "on"
+    assert validate_run_time_sections(cfg.model_settings, roms_ref="0.15.0") == []
+    section = run_time_settings_for_ref("0.15.0").model_fields["pio_settings"]
+    pio = section.annotation.model_validate(cfg.model_settings["pio_settings"])
+    assert "pio_direct_read" not in pio.model_dump()
 
 
 _CONSTANT_FE_ON = {"marbl_bgc": {"use_constant_fe": True}}
@@ -4321,6 +4373,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.13-default",
         "roms-marbl-0.14-default",
         "roms-marbl-0.15-default",
+        "roms-marbl-0.16-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -6618,6 +6671,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.13-default", True),
         ("roms-marbl-0.14-default", True),
         ("roms-marbl-0.15-default", True),
+        ("roms-marbl-0.16-default", True),
         ("pio-dev", True),
     ],
 )
@@ -6730,7 +6784,7 @@ def test_committed_example_validates():
     if not example.exists():
         pytest.skip("example file not present")
     cfg = ForgeBlueprint.from_yaml(example)
-    assert cfg.composition.model.name == "roms-marbl-0.15-default"
+    assert cfg.composition.model.name == "roms-marbl-0.16-default"
     assert cfg.composition.model.origin == "catalog"
 
 

@@ -21,10 +21,10 @@ from cstar.roms.file_system import BUILD_RECORD_NAME, ROMS_EXECUTABLE_NAME
 from cstar.roms.input_dataset import ROMSInputDataset, ROMSPartitioning
 from cstar.roms.namelist import (
     NAMELIST_SCHEMA_REGISTRY,
-    UCLA_ROMS_0_15_0,
+    UCLA_ROMS_0_16_0,
     CdrLiteSettingsV0_12_0,
     RomsNamelistV0_11_0,
-    RomsNamelistV0_15_0,
+    RomsNamelistV0_16_0,
     namelist_schema_for_ref,
 )
 from cstar.roms.simulation import ROMSSimulation
@@ -32,14 +32,14 @@ from cstar.system.manager import registered_context
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-UCLA_ROMS_NEXT = (0, 16, 0)
+UCLA_ROMS_NEXT = (0, 17, 0)
 
 
 class _CdrLiteSettingsNext(CdrLiteSettingsV0_12_0):
     cdr_next_release_switch: bool = Field(default=True)
 
 
-class _RomsNamelistNext(RomsNamelistV0_15_0):
+class _RomsNamelistNext(RomsNamelistV0_16_0):
     """A schema for a ucla-roms release after the newest one C-Star has, adding
     one always-written key, as a C-Star upgrade would.
     """
@@ -51,7 +51,7 @@ class _RomsNamelistNext(RomsNamelistV0_15_0):
 
 REGISTRY_WITH_NEXT_TIER = (
     *NAMELIST_SCHEMA_REGISTRY[:-1],
-    (UCLA_ROMS_0_15_0, UCLA_ROMS_NEXT, RomsNamelistV0_15_0),
+    (UCLA_ROMS_0_16_0, UCLA_ROMS_NEXT, RomsNamelistV0_16_0),
     (UCLA_ROMS_NEXT, None, _RomsNamelistNext),
 )
 
@@ -82,7 +82,7 @@ def _write_record(sim: ROMSSimulation, content: str) -> None:
 @pytest.fixture
 def staged_sim(stub_romssimulation: ROMSSimulation) -> Iterator[ROMSSimulation]:
     """`stub_romssimulation` with a working directory a previous attempt staged,
-    built and partitioned, its runtime namelist a real 0.15.0 one, and the
+    built and partitioned, its runtime namelist a real 0.16.0 one, and the
     codebase and linkage checks of `attach()` patched out.
     """
     sim = stub_romssimulation
@@ -98,7 +98,7 @@ def staged_sim(stub_romssimulation: ROMSSimulation) -> Iterator[ROMSSimulation]:
         for f in code.source:
             (target / f.basename).write_text("x")
     (sim.fs_manager.runtime_code_dir / sim._namelist_file).write_text(
-        (FIXTURES / "example_namelist_v0_15_0.nml").read_text()
+        (FIXTURES / "example_namelist_v0_16_0.nml").read_text()
     )
     (sim.fs_manager.compile_time_code_dir / ROMS_EXECUTABLE_NAME).write_text("binary")
 
@@ -221,12 +221,12 @@ def test_a_failed_record_write_warns_and_leaves_no_stale_record(
 def test_resume_writes_the_recorded_schema_after_a_newer_one_is_added(
     staged_sim: ROMSSimulation, registry_with_next_tier, tmp_path: Path
 ):
-    """A branch pin built under 0.15.0's schema resumes with it, though this
+    """A branch pin built under 0.16.0's schema resumes with it, though this
     C-Star would now select a newer one, and the written namelist lacks the
     newer schema's key.
     """
     sim = staged_sim
-    _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_15_0"}))
+    _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_16_0"}))
     with pytest.warns(UserWarning, match="not a release tag"):
         assert namelist_schema_for_ref(sim.codebase.source.checkout_target) is (
             _RomsNamelistNext
@@ -235,7 +235,7 @@ def test_resume_writes_the_recorded_schema_after_a_newer_one_is_added(
     sim.attach()
     nml = sim.roms_runtime_settings
 
-    assert type(nml) is RomsNamelistV0_15_0
+    assert type(nml) is RomsNamelistV0_16_0
     written = tmp_path / "roms.nml"
     nml.write(written)
     assert "implicit_fs" in written.read_text()
@@ -301,9 +301,9 @@ def test_resume_refuses_a_schema_this_cstar_does_not_have(
     rebuild, and drops the schema an earlier attach adopted.
     """
     sim = staged_sim
-    _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_15_0"}))
+    _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_16_0"}))
     sim.attach()
-    assert sim._namelist_schema is RomsNamelistV0_15_0
+    assert sim._namelist_schema is RomsNamelistV0_16_0
     _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_99_0"}))
 
     with pytest.raises(CstarExpectationFailed) as exc_info:

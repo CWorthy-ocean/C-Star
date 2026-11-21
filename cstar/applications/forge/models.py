@@ -125,7 +125,7 @@ class ModelSpec(BaseModel):
     Parameters
     ----------
     name : str
-        Logical name of the model (e.g., "roms-marbl-0.15-default").
+        Logical name of the model (e.g., "roms-marbl-0.16-default").
     description : str, optional
         Human-readable one-liner for catalogs/wizard display.
     code : ModelCode

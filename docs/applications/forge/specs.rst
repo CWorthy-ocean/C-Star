@@ -153,11 +153,15 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.15-default`` (ucla-roms 0.15.0) is the wizard's default. It can run
-the barotropic mode with an implicit free surface: set ``implicit_fs.fs_mode`` to
-``implicit`` (in the wizard, under Advanced settings, Physics & subgrid tuning).
-``split``, the default, keeps the split-explicit scheme. Older
-``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.14-default``
+``roms-marbl-0.16-default`` (ucla-roms 0.16.0) is the wizard's default. With
+ParallelIO it reads the grid and initial files directly, which shortens start-up on
+large domains: ``pio_settings.pio_direct_read`` is ``on`` (``off`` reads through
+ParallelIO, ``verify`` reads both ways and reports differing values; in the wizard,
+under Advanced settings, Physics & subgrid tuning, Parallel I/O). Older
+``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.15-default``
+stays for ucla-roms 0.15.0, to reproduce 0.15.0 answers: 0.16.0 changes the 3-D
+results, the averages files and the vertical velocity output;
+``roms-marbl-0.14-default``
 stays for ucla-roms 0.14.0, whose extracted child-boundary data hold u, v and
 tracers one parent time step older than 0.15.0's;
 ``roms-marbl-0.13-default``
@@ -173,7 +177,7 @@ constant-iron option;
 ``roms-marbl-0.9-default`` stays for ucla-roms 0.9.1, which predates the
 ``cdr_lite`` mode's minimum), and ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled. The bundled domains and the example
-blueprint use ``roms-marbl-0.15-default``.
+blueprint use ``roms-marbl-0.16-default``.
 
 ``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and
 ``cson_roms-marbl_v0.1`` are marked ``archived: true``. They remain
@@ -182,7 +186,7 @@ dropdown lists them only when "Show archived" is checked (loading a blueprint
 that uses one checks the box for you). ``archived`` works the same way in a
 spec of your own catalog.
 
-.. literalinclude:: ../../../cstar/catalog/bundled/specs/ModelSpec/roms-marbl-0.15-default.yaml
+.. literalinclude:: ../../../cstar/catalog/bundled/specs/ModelSpec/roms-marbl-0.16-default.yaml
    :language: yaml
    :lines: 1-36
 

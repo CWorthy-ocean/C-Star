@@ -47,14 +47,18 @@ from pydantic import (
 from cstar.roms.namelist import (
     FS_MODE_SPLIT,
     NAMELIST_SCHEMA_REGISTRY,
+    PIO_DIRECT_READ_OFF,
+    PIO_DIRECT_READ_ON,
     UCLA_ROMS_0_11_0,
     UCLA_ROMS_0_12_0,
     UCLA_ROMS_0_13_0,
     UCLA_ROMS_0_14_0,
+    UCLA_ROMS_0_16_0,
     ForcingFiles,
     FsMode,
     Gamma2Settings,
     LateralViscSettings,
+    PioDirectRead,
     Rho0Settings,
     RomsNamelist,
     RomsNamelistBase,
@@ -68,6 +72,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
     RomsNamelistV0_15_0,
+    RomsNamelistV0_16_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -655,13 +660,73 @@ def check_bgc_tracer_count(param: dict[str, Any], *, bgc_mode_is_marbl: bool) ->
         )
 
 
-class PioSettingsCfg(_SettingsSection):
+class _PioSettingsCfgCommon(_SettingsSection):
     # Deliberate default (like ExtractDataCfg.extract_root_name above): blueprints
     # saved before &PIO_SETTINGS existed bypass the resolver and hit
     # model_validate directly, so the Pydantic default is what keeps them valid.
     # None renders as an empty namelist value (``pio_stride = ,``); C-Star sets it
     # at launch to the ranks on one node (``ROMSSimulation._fill_pio_stride``).
     pio_stride: int | None = Field(default=1, ge=1)
+
+
+def _pio_direct_read_requested(value: Any) -> bool:
+    """Whether a ``pio_settings.pio_direct_read`` value asks for more than an older
+    release can do.
+
+    An older release reads the grid and initial files through PIO. That is what
+    ``'off'`` asks for, and what ``'on'`` ends in wherever a direct read is not
+    possible (0.16 itself falls back to PIO for files it cannot read directly,
+    with the same results bit for bit), so ``None``, ``'on'`` and ``'off'`` are
+    not requested. ``'verify'`` (a comparison of the two reads, which an older
+    release cannot make) and any value that is not a read mode are requested.
+    """
+    return value not in (None, PIO_DIRECT_READ_ON, PIO_DIRECT_READ_OFF)
+
+
+class PioSettingsCfg(_PioSettingsCfgCommon):
+    """``pio_settings`` for ucla-roms < 0.16.0, which reads the grid and initial
+    files through PIO.
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # PioSettingsCfgV0_16_0's read mode: _reject_pio_direct_read is its gate.
+        return ("pio_direct_read",)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_pio_direct_read(cls, data: Any) -> Any:
+        """Fail loudly on a ``pio_direct_read`` this release cannot honor rather
+        than letting ``extra="ignore"`` drop it. An unset, ``'on'`` or ``'off'``
+        value ends in a read through PIO here, so it passes (a shared spec may
+        carry it) and is dropped; ``'verify'`` and a non-mode value are refused.
+        """
+        if isinstance(data, dict) and _pio_direct_read_requested(
+            data.get("pio_direct_read")
+        ):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_16_0)
+            raise ValueError(
+                f"pio_settings.pio_direct_read={data['pio_direct_read']!r} requires "
+                f"ucla-roms >= {version}; the pinned ucla-roms release reads the "
+                "grid and initial files through PIO only. Use "
+                f"{PIO_DIRECT_READ_ON!r} or {PIO_DIRECT_READ_OFF!r} (both read "
+                "through PIO there), or pin a newer release."
+            )
+        return data
+
+
+class PioSettingsCfgV0_16_0(_PioSettingsCfgCommon):
+    """``pio_settings`` for ucla-roms >= 0.16.0: adds ``pio_direct_read``, how the
+    grid and initial/restart files are read: ``'on'`` directly with O_DIRECT when
+    they are classic netCDF, ``'off'`` through PIO, ``'verify'`` both ways with
+    a report of differing values. It is read only in PARALLEL_IO builds.
+
+    Deliberate default (like :class:`VSpongeCfgV0_13_0`): blueprints and
+    ModelSpecs written before the key existed bypass the resolver and hit
+    ``model_validate`` directly; the value is the ucla-roms one.
+    """
+
+    pio_direct_read: PioDirectRead = Field(default=PIO_DIRECT_READ_ON)
 
 
 class ImplicitFsCfg(_SettingsSection):
@@ -2691,8 +2756,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     :class:`RunTimeSettingsV0_13_0`), ``ts_output`` as the pre-0.14.0
     :class:`TsOutputCfg` (retyped by :class:`RunTimeSettingsV0_14_0`), and
     version-varying sections that some schemas lack entirely (``pio_settings``, added by
-    :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
-    added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
+    :class:`RunTimeSettingsV0_6_0` and retyped by :class:`RunTimeSettingsV0_16_0`;
+    ``cdr_lite_output``/``cdr_gas_exch_output``, added by
+    :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
     :class:`RunTimeSettingsV0_9_0` and retyped by :class:`RunTimeSettingsV0_12_0`;
     ``implicit_fs``, added by :class:`RunTimeSettingsV0_15_0`)
     are simply absent here; use
@@ -2705,8 +2771,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.11.0 <= ucla-roms < 0.12.0), :class:`RunTimeSettingsV0_12_0`
     (0.12.0 <= ucla-roms < 0.13.0), :class:`RunTimeSettingsV0_13_0`
     (0.13.0 <= ucla-roms < 0.14.0), :class:`RunTimeSettingsV0_14_0`
-    (0.14.0 <= ucla-roms < 0.15.0), or :class:`RunTimeSettingsV0_15_0`
-    (>= 0.15.0), or select one with :func:`run_time_settings_for_ref`.
+    (0.14.0 <= ucla-roms < 0.15.0), :class:`RunTimeSettingsV0_15_0`
+    (0.15.0 <= ucla-roms < 0.16.0), or :class:`RunTimeSettingsV0_16_0`
+    (>= 0.16.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -2909,7 +2976,8 @@ class RunTimeSettingsV0_14_0(RunTimeSettingsV0_13_0):
 
 
 class RunTimeSettingsV0_15_0(RunTimeSettingsV0_14_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.15.0, typed + validated.
+    """Forge's run-time settings dict for 0.15.0 <= ucla-roms < 0.16.0, typed +
+    validated.
 
     Mirrors C-Star's ``RomsNamelistV0_15_0(RomsNamelistV0_14_0)``. Adds
     ``implicit_fs`` (:class:`ImplicitFsCfg`, ``&IMPLICIT_FS``) with its defaults
@@ -2917,6 +2985,18 @@ class RunTimeSettingsV0_15_0(RunTimeSettingsV0_14_0):
     """
 
     implicit_fs: ImplicitFsCfg = Field(default_factory=ImplicitFsCfg)
+
+
+class RunTimeSettingsV0_16_0(RunTimeSettingsV0_15_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.16.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_16_0(RomsNamelistV0_15_0)``. Retypes
+    ``pio_settings`` as :class:`PioSettingsCfgV0_16_0`, which adds
+    ``pio_direct_read`` with its default (``'on'``), so a blueprint saved before
+    the key existed still validates.
+    """
+
+    pio_settings: PioSettingsCfgV0_16_0 = Field(default_factory=PioSettingsCfgV0_16_0)
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -2935,6 +3015,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_13_0: RunTimeSettingsV0_13_0,
     RomsNamelistV0_14_0: RunTimeSettingsV0_14_0,
     RomsNamelistV0_15_0: RunTimeSettingsV0_15_0,
+    RomsNamelistV0_16_0: RunTimeSettingsV0_16_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -3148,7 +3229,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_12_0` for 0.12.0 <= ucla-roms < 0.13.0;
         :class:`RunTimeSettingsV0_13_0` for 0.13.0 <= ucla-roms < 0.14.0;
         :class:`RunTimeSettingsV0_14_0` for 0.14.0 <= ucla-roms < 0.15.0;
-        :class:`RunTimeSettingsV0_15_0` for ucla-roms >= 0.15.0.
+        :class:`RunTimeSettingsV0_15_0` for 0.15.0 <= ucla-roms < 0.16.0;
+        :class:`RunTimeSettingsV0_16_0` for ucla-roms >= 0.16.0.
 
     Warns
     -----
