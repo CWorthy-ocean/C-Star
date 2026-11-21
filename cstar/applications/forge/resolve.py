@@ -32,7 +32,7 @@ import logging
 import math
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any, Final, get_args
 
 import yaml
 
@@ -70,10 +70,12 @@ from cstar.applications.forge.engine import (
     check_derived_overrides,
     known_derived_values,
 )
+from cstar.applications.forge.models import ModelSpec
 
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
 from cstar.applications.forge.namelist_model import (
+    GPU_PRECHECK_SECTIONS,
     BgcMode,
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
@@ -99,6 +101,7 @@ from cstar.applications.forge.namelist_model import (
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
+    namelist_ref_for_application,
     normalize_legacy_sections,
     online_carbonate_sensitivity_requested,
     output_precheck_applies_to,
@@ -116,10 +119,14 @@ from cstar.applications.forge.source_registry import (
     resolve_source,
     snapshot_applies,
 )
+from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP_NAME
 from cstar.base.utils import netcdf_format
 from cstar.roms.namelist import is_commit_hash, roms_version_from_ref
 from cstar.roms.precheck import (
     AVERAGES_END_ON_MARBL_STEP_MIN_ROMS,
+    check_gpu_features,
+    check_gpu_ignored_settings,
+    gpu_feature_warnings,
     is_whole_multiple,
     marbl_step,
 )
@@ -131,6 +138,13 @@ if TYPE_CHECKING:
     from cstar.roms.outputs import CarbonateSensitivityFile
 
 log = logging.getLogger(__name__)
+
+GPU_FORCING_SPEC: Final = "glorys-era5-unified-no-restoring"
+"""The bundled ForcingSpec for the experimental ``ucla_roms_gpu`` target: the default
+forcing without its surface restoring, which roms-marbl-gpu v0.1.3-beta reads only
+through GPU-only switches C-Star cannot write yet."""
+
+_MODEL_SPEC_APPLICATION_DEFAULT: Final = ModelSpec.model_fields["application"].default
 
 # Default repo serving the render templates: this repository, whose bundled copy
 # lives at `cstar/additional_files/templates/forge/`. Every bundled ModelSpec pins
@@ -795,6 +809,8 @@ def build_forge_blueprint(
     C-Star's: ``n_procs_x``/``n_procs_y`` are nulled under ``auto_tiling``).
     ``n_procs_x``/``n_procs_y`` are required only when ``auto_tiling`` is off, and
     ``n_cores`` is rejected when it is off.
+    ``partitioning["nodes"]``/``["writers_per_node"]`` are for a ``ucla_roms_gpu``
+    ModelSpec only: the emitted blueprint's ``tiling.nodes``/``writers_per_node``.
 
     ``cdr`` is the full CDR-forcing selection (a :class:`CdrSpec` or an
     equivalent dict, e.g. a catalog CDR-spec entry's data), covering all five
@@ -1091,6 +1107,15 @@ def build_forge_blueprint(
     # resolve it to its release (release_ref_for_remote), re-prune, and set the
     # upscaled cdr_nz_chd below.
     effective_roms_ref = str(pinned_roms_ref) if pinned_roms_ref is not None else None
+    # The application the blueprint runs with (the ModelSpec's own default when the
+    # spec does not say). A GPU spec keys the tier and every version gate below on
+    # the ucla-roms release whose namelist its roms-marbl-gpu pin reads; code.roms
+    # keeps the roms-marbl-gpu pin itself.
+    application = model.get("application", _MODEL_SPEC_APPLICATION_DEFAULT)
+    if effective_roms_ref is not None:
+        effective_roms_ref = namelist_ref_for_application(
+            application, effective_roms_ref
+        )
     # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
     # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)
     # override it. Generation later overwrites the presence/count leaves for real
@@ -1503,6 +1528,14 @@ def build_forge_blueprint(
                     keys=exc.keys,
                 ) from exc
             raise
+    if application == GPU_APP_NAME:
+        _check_gpu_target(
+            settings,
+            settings_cls,
+            surface_items=surface_items,
+            compile_time_overrides=compile_time_overrides,
+            marbl_ref=marbl_ref,
+        )
     # Averaged MARBL streams vs the MARBL timestep (ucla-roms >= 0.13.0's
     # check_avg_ends_on_marbl_step, precheck.F90): checked after do_cdr_output
     # and dt are final, before any generation.
@@ -1642,6 +1675,7 @@ def build_forge_blueprint(
         bgc_mode=bgc_mode,
         roms_ref=roms_ref,
         marbl_ref=marbl_ref,
+        application=application,
     )
 
     if auto_tiling:
@@ -1653,6 +1687,7 @@ def build_forge_blueprint(
         default_n_procs = npx * npy
     default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
     bp = ForgeBlueprint(
+        emitted_application=application,
         name=name or default_name,
         description=description,
         run=RunWindow(
@@ -1680,6 +1715,10 @@ def build_forge_blueprint(
                 n_procs_y=npy if not auto_tiling else None,
                 auto_tiling=auto_tiling,
                 n_cores=n_cores,
+                # GPU only; the ForgeBlueprint validator refuses them for the CPU
+                # application.
+                nodes=partitioning.get("nodes"),
+                writers_per_node=partitioning.get("writers_per_node"),
             ),
             grid_kwargs_child=grid_kwargs_child,
             grid_kwargs_parent=grid_kwargs_parent,
@@ -1751,7 +1790,83 @@ def resolver_warnings(cfg: ForgeBlueprint, *, roms_ref: str | None) -> list[str]
         marbl=bool(cppdefs.get("marbl")),
         roms_ref=roms_ref,
     )
-    return [message] if message else []
+    messages = [message] if message else []
+    if cfg.emitted_application == GPU_APP_NAME:
+        messages.extend(_gpu_feature_messages(cfg.model_settings, roms_ref=roms_ref))
+    return messages
+
+
+def _gpu_feature_messages(
+    settings: dict[str, Any], *, roms_ref: str | None
+) -> list[str]:
+    """The roms-marbl-gpu warn switches `settings` turns on, each prefixed so the
+    reader sees they come from the GPU model.
+    """
+    canonical = canonical_output_sections_for_precheck(
+        settings,
+        run_time_settings_for_ref(roms_ref),
+        sections=GPU_PRECHECK_SECTIONS,
+    )
+    return [
+        f"roms-marbl-gpu ignores {line}" for line in gpu_feature_warnings(canonical)
+    ]
+
+
+def _check_gpu_target(
+    settings: dict[str, Any],
+    settings_cls: type[Any],
+    *,
+    surface_items: Sequence[Any],
+    compile_time_overrides: dict[str, Any] | None,
+    marbl_ref: str | None,
+) -> None:
+    """Refuse, before any input is generated, what a ``ucla_roms_gpu`` build cannot
+    take from Forge (the GPU target is experimental).
+
+    One ``ValueError`` lists every problem found in the ForcingSpec, the compile-time
+    switches and ``marbl_ref``; then the namelist switches roms-marbl-gpu stops on or
+    ignores (Rules F and F2, on the canonical groups the tier writes) raise
+    ``NamelistConsistencyError``. The ForgeBlueprint validator refuses PIO, auto
+    tiling and nesting for GPU, and ``namelist_ref_for_application`` (the effective
+    ref) a roms-marbl-gpu release older than C-Star supports, so none of that is
+    checked here.
+    """
+    problems: list[str] = []
+    if any(
+        isinstance(it, dict)
+        and (it.get("type") == "restoring" or it.get("restoring_forces"))
+        for it in surface_items
+    ):
+        problems.append(
+            "the forcing has surface restoring, which roms-marbl-gpu reads only "
+            "through GPU-only &surf_frc_settings switches C-Star cannot write yet; "
+            f"use the ForcingSpec {GPU_FORCING_SPEC!r}, which has none"
+        )
+    cppdefs = settings["cppdefs"]
+    if cppdefs.get("sal_restore"):
+        problems.append(
+            "cppdefs.sal_restore is on, and roms-marbl-gpu has no such switch"
+        )
+    if compile_time_overrides:
+        problems.append(
+            "compile_time_overrides are set, and a roms-marbl-gpu build has no "
+            "compile-time switches to override"
+        )
+    if marbl_ref:
+        problems.append(
+            "marbl_ref is set, and MARBL is the roms-marbl-gpu submodule, not a "
+            "separate checkout"
+        )
+    if problems:
+        raise ValueError(
+            "This run cannot use the experimental roms-marbl-gpu target:\n  - "
+            + "\n  - ".join(problems)
+        )
+    canonical = canonical_output_sections_for_precheck(
+        settings, settings_cls, sections=GPU_PRECHECK_SECTIONS
+    )
+    check_gpu_features(canonical, warn=False)
+    check_gpu_ignored_settings(canonical)
 
 
 def _build_forcing(
@@ -1944,6 +2059,7 @@ def _build_code(
     bgc_mode: str = "marbl",
     roms_ref: str | None = None,
     marbl_ref: str | None = None,
+    application: str = _MODEL_SPEC_APPLICATION_DEFAULT,
 ) -> Code:
     code_block = model.get("code", {}) or {}
 
@@ -1992,8 +2108,10 @@ def _build_code(
         # store the override in `commit` and clear `branch` to satisfy C-Star's
         # "exactly one of commit/branch" validator.
         roms = CodeRepo(location=roms.location, commit=roms_ref, branch=None)
+    # MARBL and ParallelIO are submodules of roms-marbl-gpu, not separate checkouts.
+    separate_checkouts = application != GPU_APP_NAME
     pio = None
-    if use_pio:
+    if use_pio and separate_checkouts:
         pio = _repo("pio")
         if pio is None:
             raise ValueError(
@@ -2001,7 +2119,7 @@ def _build_code(
                 "(Forge pins codebases for reproducibility)"
             )
     marbl = None
-    if bgc_mode == "marbl":
+    if bgc_mode == "marbl" and separate_checkouts:
         marbl = _repo("marbl")
         if marbl is None:
             raise ValueError(

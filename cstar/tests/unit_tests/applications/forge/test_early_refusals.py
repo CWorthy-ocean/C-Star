@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 import cstar.catalog
 from cstar.applications.forge.blueprint import ForgeBlueprint, RunWindow
+from cstar.applications.forge.models import load_models_yaml
 from cstar.applications.forge.namelist_model import (
     CPPDEFS_KEYS,
     check_tile_sizes,
@@ -27,7 +28,8 @@ from cstar.applications.forge.namelist_model import (
     unknown_settings_keys,
     validate_run_time_sections,
 )
-from cstar.applications.forge.resolve import build_forge_blueprint
+from cstar.applications.forge.resolve import GPU_FORCING_SPEC, build_forge_blueprint
+from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP_NAME
 from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import release_ref_for_remote
 
@@ -333,7 +335,17 @@ class TestShippedFiles:
     )
     @pytest.mark.parametrize("output", ["standard", "daily-restarts"])
     def test_model_spec_resolves(self, model: str, output: str) -> None:
-        _resolve(model, output_settings=default_catalog.output_data(output))
+        # A GPU spec refuses the default forcing's surface restoring.
+        gpu = (
+            load_models_yaml(default_catalog.model_path(model), model).application
+            == GPU_APP_NAME
+        )
+        forcing = GPU_FORCING_SPEC if gpu else "glorys-era5-unified"
+        _resolve(
+            model,
+            output_settings=default_catalog.output_data(output),
+            forcing_inputs=default_catalog.forcing_data(forcing),
+        )
 
     def test_cppdefs_keys_cover_the_template(self) -> None:
         """Every ``cppdefs.<key>`` the bundled template reads is a known key."""
