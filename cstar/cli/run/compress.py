@@ -362,11 +362,13 @@ def compress(
         raise typer.BadParameter(
             f"{str(root)!r} holds no run manifest (cstar-run.yaml)"
         )
+    # folding closes an attempt whose steps are all terminal, such as a re-entry
+    # that launched nothing, which the manifest on disk still shows as open
+    fold_step_records(manifest, root)
     if manifest.attempts and manifest.attempts[-1].finished_at is None:
         raise typer.BadParameter(
             f"the latest attempt of {manifest.run_id!r} has not finished"
         )
-    fold_step_records(manifest, root)
 
     typer.echo(f"Reading the headers of the data files of {manifest.run_id!r}...")
     detector = FileTypeDetector()
