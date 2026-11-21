@@ -90,7 +90,7 @@ from cstar.orchestration.serialization import (
     model_to_yaml,
 )
 from cstar.orchestration.transforms import PLACEHOLDER_RE, mustache
-from cstar.roms.namelist import namelist_schema_for_ref
+from cstar.roms.namelist import namelist_release_for_gpu_ref, namelist_schema_for_ref
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
 from cstar.wizard.ui import components
@@ -242,7 +242,10 @@ class BlueprintFacts:
     end_date: datetime | None = None
     compute_needs: ComputeNeeds | None = None
     use_pio: bool | None = None
-    roms_ref: str | None = None
+    namelist_ref: str | None = None
+    """The ucla-roms ref whose namelist vocabulary the blueprint's namelist uses: its
+    ``code.roms`` pin, or for ``ucla_roms_gpu`` the ucla-roms release that
+    roms-marbl-gpu pin reads."""
 
     @property
     def cpus_needed(self) -> int:
@@ -266,9 +269,18 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
 
     application = canonical_application(str(raw.get("application", "")))
     partitioning = _section("partitioning")
+    roms = _section("code").get("roms")
+    roms = roms if isinstance(roms, dict) else {}
+    namelist_ref = str(roms.get("commit") or roms.get("branch") or "") or None
     compute_needs: ComputeNeeds | None = None
     use_pio = None
     if application == UCLA_ROMS_GPU:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            try:
+                namelist_ref = namelist_release_for_gpu_ref(namelist_ref)
+            except ValueError:
+                namelist_ref = None
         try:
             compute_needs = TilingParameterSet.model_validate(
                 _section("tiling")
@@ -283,8 +295,6 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
         if isinstance(cpus, int) and cpus > 0:
             compute_needs = ComputeNeeds(tasks=cpus)
         use_pio = partitioning.get("use_pio")
-    roms = _section("code").get("roms")
-    roms = roms if isinstance(roms, dict) else {}
     runtime = _section("runtime_params")
     return BlueprintFacts(
         application=application,
@@ -292,7 +302,7 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
         end_date=_as_datetime(runtime.get("end_date")),
         compute_needs=compute_needs,
         use_pio=use_pio if isinstance(use_pio, bool) else None,
-        roms_ref=str(roms.get("commit") or roms.get("branch") or "") or None,
+        namelist_ref=namelist_ref,
     )
 
 
@@ -1270,8 +1280,8 @@ class _StepPane:
         self.refresh_choices()
 
         facts = self.facts()
-        if (facts.roms_ref if facts else None) != self._schema_ref:
-            self._schema_ref = facts.roms_ref if facts else None
+        if (facts.namelist_ref if facts else None) != self._schema_ref:
+            self._schema_ref = facts.namelist_ref if facts else None
             for row in self._rows:
                 row.refresh_sections()
         roms = app == UCLA_ROMS

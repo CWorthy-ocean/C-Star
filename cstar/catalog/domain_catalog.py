@@ -1403,9 +1403,9 @@ class DomainCatalog:
         }
         # Written only when not the default, so a saved CPU spec has no such line.
         if (application := base.get("application")) is not None:
-            from cstar.applications.forge.models import ModelSpec
+            from cstar.applications.forge.blueprint import DEFAULT_EMITTED_APPLICATION
 
-            if application != ModelSpec.model_fields["application"].default:
+            if application != DEFAULT_EMITTED_APPLICATION:
                 data["application"] = application
         self._write_spec("ModelSpec", name, data)
 
