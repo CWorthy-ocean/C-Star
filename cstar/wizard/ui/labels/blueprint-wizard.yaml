@@ -244,6 +244,10 @@ fields:
     label: From a file
   upload:
     label: Upload blueprint file
+  application_tb:
+    label: Runs on
+    experimental: true
+    hint: CPU runs ucla-roms. GPU runs roms-marbl-gpu, which is experimental, takes no ParallelIO or nesting, and cannot restore surface values.
   model_dd:
     label: Model preset
     required: true
@@ -281,6 +285,14 @@ fields:
     symbol: n_procs_y
     required: true
     hint: Number of MPI tiles in the y-direction (north–south).
+  nodes:
+    label: Nodes
+    symbol: nodes
+    hint: Number of nodes the run spans. Each holds n_procs_x × n_procs_y ÷ nodes tiles, so it needs at least that many GPUs.
+  writers_per_node:
+    label: Writer ranks per node
+    symbol: writers_per_node
+    hint: Ranks on each node that write the output files while the GPUs compute. One per node suits most runs.
   use_pio_chk:
     label: Write output with ParallelIO (PIO)
     hint: 'Builds ROMS against the ParallelIO library: inputs are written as classic-format (CDF-5) netCDF and ROMS reads/writes joined files.'
