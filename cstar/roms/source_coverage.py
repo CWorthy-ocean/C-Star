@@ -22,7 +22,11 @@ from pathlib import Path
 
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
-from cstar.roms.input_dataset import TimeAxis, read_time_axis
+from cstar.roms.input_dataset import (
+    TimeAxis,
+    first_piece_with_records,
+    read_time_axis,
+)
 
 if t.TYPE_CHECKING:
     from cstar.roms.outputs import TimestampedOutputFile
@@ -116,6 +120,11 @@ def _read(path: Path, variable: str) -> TimeAxis | None:
         raise CstarError(msg) from err
 
 
+def _has_records(axis: TimeAxis | None) -> bool:
+    """Whether a time axis was read and holds any record."""
+    return axis is not None and bool(axis.values)
+
+
 def _read_whole_file(
     pieces: Sequence["TimestampedOutputFile"],
     variable: str,
@@ -158,13 +167,19 @@ def _read_whole_file(
             raise CstarError(msg)
         return _FileRecords(path, axis), preferred
 
-    has_variable = False
-    for piece in sorted(pieces, key=lambda p: p.partition != preferred):
-        if (axis := _read(piece.path, variable)) is None:
-            continue
-        has_variable = True
-        if axis.values:
-            return _FileRecords(piece.path, axis), piece.partition
+    paths = [piece.path for piece in pieces]
+    preferred_index = next(
+        (i for i, piece in enumerate(pieces) if piece.partition == preferred), None
+    )
+
+    def read(path: Path) -> TimeAxis | None:
+        return _read(path, variable)
+
+    axis, index, has_variable = first_piece_with_records(
+        paths, read, _has_records, preferred_index
+    )
+    if axis is not None and index is not None:
+        return _FileRecords(paths[index], axis), pieces[index].partition
     if not has_variable:
         msg = (
             f"No piece of {pieces[0].path.parent / pieces[0].path.name.rsplit('.', 2)[0]}"

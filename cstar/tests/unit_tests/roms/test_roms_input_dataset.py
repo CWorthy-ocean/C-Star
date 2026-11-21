@@ -1239,22 +1239,28 @@ class TestROMSCarbonateSensitivity:
         ]
 
 
-def test_netcdf_time_ranges_reads_only_1d_numeric_time_variables(tmp_path: Path):
-    """Only non-empty 1-D numeric variables named `*time` are reported."""
-    from cstar.roms.input_dataset import netcdf_time_ranges
+def test_first_piece_with_records_tries_preferred_then_the_rest():
+    """The preferred piece is read first, then the others in order, until one has records."""
+    from cstar.roms.input_dataset import first_piece_with_records
 
-    path = tmp_path / "f.nc"
-    xr.Dataset(
-        {
-            "ocean_time": ("t", np.array([3.0, 1.0, 2.0])),
-            "DDIC_dco2_Time": ("u", np.array([5, 6])),
-            "empty_time": ("e", np.array([], dtype=float)),
-            "grid_time": (("t", "x"), np.zeros((3, 2))),
-            "data": (("t", "x"), np.zeros((3, 2))),
-        }
-    ).to_netcdf(path)
+    pieces = [Path(f"f.{i}.nc") for i in range(4)]
+    records = {1: [1.0], 2: [], 3: [3.0]}
+    seen: list[int] = []
 
-    assert netcdf_time_ranges(path) == {
-        "ocean_time": (1.0, 3.0),
-        "DDIC_dco2_Time": (5.0, 6.0),
-    }
+    def read(path: Path) -> list[float] | None:
+        i = int(path.name.split(".")[1])
+        seen.append(i)
+        return records.get(i)
+
+    assert first_piece_with_records(pieces, read, bool, preferred=3) == ([3.0], 3, True)
+    assert seen == [3]
+    seen.clear()
+    assert first_piece_with_records(pieces, read, bool) == ([1.0], 1, True)
+    assert seen == [0, 1]
+    seen.clear()
+    assert first_piece_with_records(pieces[:1] + pieces[2:3], read, bool) == (
+        None,
+        None,
+        True,
+    )
+    assert first_piece_with_records(pieces[:1], read, bool) == (None, None, False)

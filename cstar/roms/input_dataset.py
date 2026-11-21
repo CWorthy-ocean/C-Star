@@ -3,10 +3,10 @@ import re
 import shutil
 import tempfile
 from abc import ABC
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final, TypeVar
 
 from cstar.base.input_dataset import InputDataset
 from cstar.base.utils import (
@@ -177,10 +177,21 @@ def read_model_reference_date(path: Path) -> RecordedReferenceDate | None:
     import xarray as xr
 
     with xr.open_dataset(path, decode_times=False) as ds:
-        return _recorded_reference_date(ds)
+        return recorded_reference_date(ds)
 
 
-def _recorded_reference_date(ds: "xr.Dataset") -> RecordedReferenceDate | None:
+def is_cyclic(ds: "xr.Dataset") -> bool:
+    """Whether an open dataset is a cyclic (climatological) roms-tools forcing file.
+
+    True when the global attribute ``climatology`` is the string ``"True"`` or
+    any variable carries a ``cycle_length`` attribute. Only attributes are read.
+    """
+    return str(ds.attrs.get("climatology", "")).strip().casefold() == "true" or any(
+        "cycle_length" in var.attrs for var in ds.variables.values()
+    )
+
+
+def recorded_reference_date(ds: "xr.Dataset") -> RecordedReferenceDate | None:
     """Read the model reference date recorded in an open dataset's attributes.
 
     See `read_model_reference_date` for where files record it. Only attributes
@@ -195,9 +206,7 @@ def _recorded_reference_date(ds: "xr.Dataset") -> RecordedReferenceDate | None:
     -------
     RecordedReferenceDate or None
     """
-    cyclic = str(ds.attrs.get("climatology", "")).strip().casefold() == "true" or any(
-        "cycle_length" in var.attrs for var in ds.variables.values()
-    )
+    cyclic = is_cyclic(ds)
 
     if (raw := ds.attrs.get("model_reference_date")) is not None:
         try:
@@ -276,8 +285,55 @@ def read_time_axis(path: Path, variable: str) -> TimeAxis | None:
         raw = np.asarray(ds.variables[variable].values, dtype=float).ravel()
         return TimeAxis(
             values=tuple(float(v) for v in raw[np.isfinite(raw)]),
-            reference=_recorded_reference_date(ds),
+            reference=recorded_reference_date(ds),
         )
+
+
+R = TypeVar("R")
+
+
+def first_piece_with_records(
+    pieces: Sequence[Path],
+    read: Callable[[Path], R | None],
+    has_records: Callable[[R], bool],
+    preferred: int | None = None,
+) -> tuple[R | None, int | None, bool]:
+    """Read the pieces of a partitioned file until one holds records.
+
+    Every piece of a partitioned ROMS file carries the same records, except that
+    a rank without points of a boundary extraction writes none. So the piece at
+    `preferred` (the one that held records last time) is read first, then the
+    others in order, stopping at the first result `has_records` accepts.
+
+    Parameters
+    ----------
+    pieces : Sequence[Path]
+        The pieces in partition order.
+    read : Callable[[Path], R | None]
+        Reads one piece; None if the piece lacks what is read.
+    has_records : Callable[[R], bool]
+        Whether a read result holds records.
+    preferred : int or None
+        The index into `pieces` to try first.
+
+    Returns
+    -------
+    tuple[R | None, int | None, bool]
+        The accepted result and its index (None, None if no piece holds
+        records), and whether any piece returned a non-None result.
+    """
+    order = list(range(len(pieces)))
+    if preferred is not None and 0 <= preferred < len(pieces):
+        order.remove(preferred)
+        order.insert(0, preferred)
+    any_read = False
+    for i in order:
+        if (result := read(pieces[i])) is None:
+            continue
+        any_read = True
+        if has_records(result):
+            return result, i, True
+    return None, None, any_read
 
 
 class ROMSInputDataset(InputDataset, ABC):
@@ -287,6 +343,8 @@ class ROMSInputDataset(InputDataset, ABC):
 
     partitionable: bool = True
     """Set to False if the input dataset should not be partitioned."""
+    label: ClassVar[str] = "input"
+    """What this kind of dataset is called in log and error messages."""
 
     def __init__(
         self,
@@ -849,17 +907,26 @@ class ROMSInitialConditions(ROMSInputDataset):
 class ROMSTidalForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model tidal forcing files."""
 
+    label: ClassVar[str] = "tidal forcing"
+    """What this dataset is called in log and error messages."""
+
 
 class ROMSBoundaryForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model boundary condition
     files.
     """
 
+    label: ClassVar[str] = "boundary forcing"
+    """What this dataset is called in log and error messages."""
+
 
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files.
     """
+
+    label: ClassVar[str] = "surface forcing"
+    """What this dataset is called in log and error messages."""
 
 
 CARBONATE_SENSITIVITY_VARIABLES: Final[tuple[str, ...]] = (
@@ -923,34 +990,6 @@ def netcdf_variable_names(path: Path) -> set[str]:
         return {str(name) for name in ds.variables}
 
 
-def netcdf_time_ranges(path: Path) -> dict[str, tuple[float, float]]:
-    """Return the (min, max) of every time variable of the netCDF file at `path`.
-
-    A time variable is a non-empty, 1-D numeric variable whose name ends with
-    "time" (e.g. `ocean_time`, `ddic_dco2_time`), keyed by name. Only those
-    variables are loaded, never the data variables.
-    """
-    # Lazy import: only needed when this check runs
-    import numpy as np
-    import xarray as xr
-
-    ranges: dict[str, tuple[float, float]] = {}
-    with xr.open_dataset(
-        path, decode_cf=False, decode_times=False, create_default_indexes=False
-    ) as ds:
-        for name, var in ds.variables.items():
-            key = str(name)
-            if (
-                key.lower().endswith("time")
-                and var.ndim == 1
-                and var.size > 0
-                and np.issubdtype(var.dtype, np.number)
-            ):
-                values = var.values
-                ranges[key] = (float(values.min()), float(values.max()))
-    return ranges
-
-
 class ROMSCarbonateSensitivity(ROMSInputDataset):
     """Carbonate sensitivity forcing for a CDR-LiTE (ucla-roms >= 0.9.0) build.
 
@@ -959,9 +998,15 @@ class ROMSCarbonateSensitivity(ROMSInputDataset):
     UCLA-ROMS run with MARBL.
     """
 
+    label: ClassVar[str] = "carbonate sensitivity"
+    """What this dataset is called in log and error messages."""
+
 
 class ROMSRiverForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for river forcing files."""
+
+    label: ClassVar[str] = "river forcing"
+    """What this dataset is called in log and error messages."""
 
 
 class ROMSForcingCorrections(ROMSInputDataset):
@@ -969,6 +1014,9 @@ class ROMSForcingCorrections(ROMSInputDataset):
 
     These are used by older ROMS configurations, and included in C-Star to support them.
     """
+
+    label: ClassVar[str] = "forcing correction"
+    """What this dataset is called in log and error messages."""
 
 
 class ROMSCdrForcing(ROMSInputDataset):
