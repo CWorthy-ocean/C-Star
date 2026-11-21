@@ -1,4 +1,4 @@
-schema_version: 2.0.0
+schema_version: 2.1.0
 description: ucla-roms main + PIO enabled
 bgc_mode: marbl
 use_pio: true

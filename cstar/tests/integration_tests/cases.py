@@ -41,6 +41,8 @@ class ForgeCase:
     run_time_overrides: dict[str, Any] | None = None
     bgc_mode: BgcMode = "marbl"
     cdr: dict[str, Any] | None = None
+    model_spec: str = MODEL_SPEC
+    """The bundled ModelSpec to resolve with; a GPU spec targets ``ucla_roms_gpu``."""
 
 
 CDR_LITE_FORCING: dict[str, Any] = {
@@ -109,4 +111,11 @@ FORGE_CASES = {
         cdr={"mode": "simple", "cdr_forcing": CDR_LITE_FORCING},
     ),
     "blend": ForgeCase("na-test-8x8", "test-glorys-era5-blend"),
+    # experimental: roms-marbl-gpu; the ForcingSpec has no restoring item, which the
+    # GPU model cannot run
+    "gpu": ForgeCase(
+        "na-test-8x8",
+        "test-glorys-era5-unified",
+        model_spec="roms-marbl-gpu-0.1.3-default",
+    ),
 }

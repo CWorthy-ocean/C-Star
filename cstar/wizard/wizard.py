@@ -41,6 +41,7 @@ from pydantic import BaseModel
 
 from cstar.applications.forge.blueprint import (
     DEFAULT_APPLICATION,
+    DEFAULT_EMITTED_APPLICATION,
     REGIONAL_PHYSICS_SURFACE_SOURCES,
     BgcBoundarySource,
     BgcInitialConditionsSource,
@@ -86,12 +87,14 @@ from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     cdr_tracer_role,
     namelist_field_for,
+    namelist_ref_for_application,
     namelist_schema_for,
     run_time_settings_for_ref,
     validate_run_time_sections,
     version_gated_section_names,
 )
 from cstar.applications.forge.resolve import (
+    GPU_FORCING_SPEC,
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
@@ -99,11 +102,14 @@ from cstar.applications.forge.resolve import (
     extract_output_settings,
     find_carbonate_sensitivity_files,
     force_switches_without_input_off,
+    has_surface_restoring,
     load_model_spec_data,
     read_cdr_forcing_yaml,
     resolver_warnings,
     with_cdr_lite_tracer_set,
 )
+from cstar.applications.ucla_roms_gpu.models import APP_NAME as _GPU_APPLICATION
+from cstar.applications.ucla_roms_gpu.models import TilingParameterSet
 from cstar.base.digest import hash_netcdf_contents, short_digest
 from cstar.base.env import (
     is_bundled_catalog_entry,
@@ -4944,6 +4950,16 @@ class _ForcingEditor:
 # catalog but is no longer the default.
 _DEFAULT_MODEL = "roms-marbl-0.16-default"
 
+# The same for the experimental GPU target (the "Runs on" toggle's GPU side).
+_DEFAULT_GPU_MODEL = "roms-marbl-gpu-0.1.3-default"
+
+# What a ModelSpec that declares no application runs on (the toggle's CPU side).
+_CPU_APPLICATION: Final[str] = DEFAULT_EMITTED_APPLICATION
+
+# The GPU-only ``Partitioning`` keys: gathered only for the GPU target, kept out
+# of a saved DomainSpec (which has no such fields).
+_GPU_PARTITIONING_KEYS: Final = ("nodes", "writers_per_node")
+
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the
 # ucla-roms >= 0.5.0 check_output_divides_rst precheck; 'standard' is kept
@@ -5209,6 +5225,13 @@ class ForgeBlueprintWizard:
             ),
             layout=W.Layout(width="auto"),
         )
+        # What the selected model runs on: derived from its ModelSpec (see
+        # _sync_application), never stored apart from it. Experimental.
+        self.application_tb = W.ToggleButtons(
+            options=[("CPU", _CPU_APPLICATION), ("GPU", _GPU_APPLICATION)],
+            value=_CPU_APPLICATION,
+            tooltip="CPU runs ucla-roms; GPU runs roms-marbl-gpu (experimental).",
+        )
         self.model_dd = W.Dropdown(
             options=self._model_dd_options(),
             description="Model:",
@@ -5319,6 +5342,20 @@ class ForgeBlueprintWizard:
             layout=W.Layout(width="200px"),
             tooltip=_tip("domain", "npy"),
         )
+        self.nodes = W.IntText(
+            value=TilingParameterSet.model_fields["nodes"].default,
+            description="nodes:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px", display="none"),
+            tooltip="Number of nodes the GPU run spans.",
+        )
+        self.writers_per_node = W.IntText(
+            value=TilingParameterSet.model_fields["writers_per_node"].default,
+            description="writers:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px", display="none"),
+            tooltip="Writer ranks on each node, which write the output files.",
+        )
         self.use_pio_chk = W.Checkbox(
             value=False,
             description="use ParallelIO (PIO)",
@@ -5369,6 +5406,9 @@ class ForgeBlueprintWizard:
             indent=False,
             tooltip=_tip("nesting", "nest_enable"),
         )
+        self._grid_widgets_locked = False
+        self.nesting_gpu_note = components.banner_widget(W, "info", "")
+        self.nesting_gpu_note.layout.display = "none"
         self.nest_help = W.HTML(
             "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
             "This will enable the extract_data module and output boundary info "
@@ -6233,9 +6273,8 @@ class ForgeBlueprintWizard:
         self.marbl_ref.value = self._model_default_marbl_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
-        self._sync_marbl_ref_visibility()
+        self._sync_application()
         self._sync_carbonate_sensitivity_visibility()
-        self._sync_auto_tiling()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         if self._forcing_editor is None:
             raise RuntimeError("_build_forcing_editor did not set _forcing_editor")
@@ -6281,6 +6320,7 @@ class ForgeBlueprintWizard:
         self.cdr_simple_replace_btn.on_click(self._on_cdr_simple_replace)
         self.model_dd.observe(self._on_model_change, names="value")
         self.show_archived_models.observe(self._on_show_archived_change, names="value")
+        self.application_tb.observe(self._on_application_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
         self.bgc_dd.observe(self._sync_co2_visibility, names="value")
@@ -6303,6 +6343,8 @@ class ForgeBlueprintWizard:
             self.scoord_chk,
             self.npx,
             self.npy,
+            self.nodes,
+            self.writers_per_node,
             self.use_pio_chk,
             self.auto_tiling_chk,
             self.n_cores,
@@ -6417,11 +6459,19 @@ class ForgeBlueprintWizard:
     def _visible_model_names(
         self, archived: Collection[str], selected: str | None = None
     ) -> list[str]:
-        """Catalog models ``model_dd`` lists: all of them when "Show archived"
-        is checked, otherwise the non-*archived* ones plus *selected* (so
-        unchecking never drops the current choice).
+        """Catalog models ``model_dd`` lists, of the application ``application_tb``
+        shows: all of them when "Show archived" is checked, otherwise the
+        non-*archived* ones plus *selected* (so unchecking never drops the current
+        choice).
         """
-        names = list(self.catalog.model_names)
+        applications = self.catalog.model_applications
+        names = [
+            n
+            for n in self.catalog.model_names
+            # a spec that cannot be read is listed with the default application,
+            # so selecting it still reports why it cannot be read
+            if applications.get(n, _CPU_APPLICATION) == self.application_tb.value
+        ]
         if self.show_archived_models.value:
             return names
         return [n for n in names if n not in archived or n == selected]
@@ -6439,7 +6489,8 @@ class ForgeBlueprintWizard:
         with self._suspend():
             selected = self.model_dd.value
             self.model_dd.options = self._model_dd_options(selected)
-            self.model_dd.value = selected
+            if selected in self._dd_values(self.model_dd):
+                self.model_dd.value = selected
 
     @staticmethod
     def _dd_values(dd) -> list:
@@ -6501,10 +6552,10 @@ class ForgeBlueprintWizard:
             self.mask_shapefile,
             self.topo_source,
             self.topo_path,
-            self.nest_enable,
-            self.parent_enable,
         ):
             w.disabled = locked
+        self._grid_widgets_locked = locked
+        self._sync_nesting_enabled()
         self.grid_lock_banner.layout.display = "" if locked else "none"
 
     def _populate_grid_widgets_from_grid(self, grid: Any) -> None:
@@ -6733,7 +6784,9 @@ class ForgeBlueprintWizard:
 
     def _sync_marbl_ref_visibility(self, _change=None):
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
-        self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
+        # (the GPU model carries MARBL as a submodule, so it has no ref of its own)
+        shown = self.bgc_dd.value == "marbl" and not self._is_gpu()
+        self.marbl_ref.layout.display = "" if shown else "none"
 
     def _sync_carbonate_sensitivity_visibility(self, _change=None):
         # The carbonate sensitivity group and the CDR panel's hint only matter in
@@ -6761,7 +6814,7 @@ class ForgeBlueprintWizard:
             self.n_cores.value = int(self.npx.value) * int(self.npy.value)
         self.npx.disabled = on
         self.npy.disabled = on
-        self.n_cores.layout.display = "" if on else "none"
+        self.n_cores.layout.display = "" if on and not self._is_gpu() else "none"
         if on:
             self.use_pio_chk.value = True
         self.use_pio_chk.disabled = on
@@ -6780,7 +6833,104 @@ class ForgeBlueprintWizard:
         self.marbl_ref.value = self._model_default_marbl_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
+        self._sync_application()
         self._rebuild()
+
+    def _is_gpu(self) -> bool:
+        """Whether the selected model runs on the GPU target."""
+        return self.application_tb.value == _GPU_APPLICATION
+
+    def _sync_application(self, application: str | None = None) -> None:
+        """Make everything that depends on the application agree with it: the
+        ``application_tb`` value (by default derived from the selected ModelSpec),
+        the models ``model_dd`` lists, and which Model/Run widgets apply. The one
+        place the wizard branches on the application, besides the switch handler and
+        ``_gather``; called from the model-change handler, the loads and at start.
+        """
+        if application is None:
+            application = self._model_spec_declared()["application"]
+        gpu = application == _GPU_APPLICATION
+        with self._suspend():
+            self.application_tb.value = application
+            selected = self.model_dd.value
+            self.model_dd.options = self._model_dd_options(selected)
+            if selected in self._dd_values(self.model_dd):
+                self.model_dd.value = selected
+        # PIO and auto tiling do not exist on the GPU model; its ranks come from
+        # n_procs_x/y plus nodes and writers per node.
+        self.use_pio_chk.layout.display = "none" if gpu else ""
+        self.auto_tiling_chk.layout.display = "none" if gpu else ""
+        self.nodes.layout.display = "" if gpu else "none"
+        self.writers_per_node.layout.display = "" if gpu else "none"
+        self._sync_marbl_ref_visibility()
+        self._sync_auto_tiling()
+        self._sync_nesting_enabled()
+
+    def _sync_nesting_enabled(self) -> None:
+        """Enable the nesting checkboxes unless a grid file locks them or the GPU
+        model, which has no nesting, is selected (a loaded nesting choice stays as
+        it is, so the blueprint check reports it).
+        """
+        gpu = self._is_gpu()
+        for w in (self.nest_enable, self.parent_enable):
+            w.disabled = self._grid_widgets_locked or gpu
+        ref = self.roms_ref.value.strip() or self._model_default_roms_ref()
+        self.nesting_gpu_note.value = components.banner(
+            "info",
+            "Nesting is not available on the GPU model (roms-marbl-gpu"
+            + (f" {html.escape(ref)}" if ref else "")
+            + ").",
+        )
+        self.nesting_gpu_note.layout.display = "" if gpu else "none"
+
+    def _on_application_change(self, change) -> None:
+        """The user flipped "Runs on": select that application's default model.
+
+        A CPU to GPU switch also seeds the tiling the GPU model needs and swaps a
+        forcing with surface restoring (which the GPU model cannot do) for the
+        bundled one without. A load never comes here: it sets the toggle through
+        ``_sync_application`` under ``_suspend``.
+        """
+        if getattr(self, "_suspended", False):
+            return
+        application = change["new"]
+        gpu = application == _GPU_APPLICATION
+        if gpu:
+            # the GPU model has no nesting, and its controls are disabled on GPU,
+            # so a nesting choice made on CPU could not be undone there
+            self.nest_enable.value = False
+            self.parent_enable.value = False
+        self._sync_application(application)
+        names = self._dd_values(self.model_dd)
+        preferred = _DEFAULT_GPU_MODEL if gpu else _DEFAULT_MODEL
+        target = preferred if preferred in names else (names[0] if names else None)
+        if gpu:
+            self.auto_tiling_chk.value = False
+            self.npx.value = self.npy.value = 2
+            self.nodes.value = TilingParameterSet.model_fields["nodes"].default
+            self.writers_per_node.value = TilingParameterSet.model_fields[
+                "writers_per_node"
+            ].default
+            self._swap_restoring_forcing()
+        if target is None:
+            self._rebuild()
+            return
+        with self._suspend():
+            self.model_dd.value = target
+        self._on_model_change(None)
+
+    def _swap_restoring_forcing(self) -> None:
+        """Select the bundled no-restoring ForcingSpec when the selected one has a
+        surface restoring item (and the editor still matches it, so no edit is lost).
+        """
+        if self._forcing_modified():
+            return
+        data = self.catalog.forcing_data(self.forcing_dd.value)
+        surface = (data.get("forcing") or {}).get("surface") or []
+        if has_surface_restoring(surface) and GPU_FORCING_SPEC in self._dd_values(
+            self.forcing_dd
+        ):
+            self.forcing_dd.value = GPU_FORCING_SPEC
 
     def _on_editor_edit(self, section, field):
         # a user edit in the advanced editor -> record as an override (vs composed)
@@ -6946,7 +7096,7 @@ class ForgeBlueprintWizard:
     # ---- forcing spec -------------------------------------------------------
     def _model_spec_declared(self) -> dict[str, Any]:
         """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
-        ``use_pio``.
+        ``use_pio``/``application``.
 
         Single re-parse of the ModelSpec file backing ``_model_default_*`` below and
         the spec-deviation check in ``_rebuild`` -- both need the same
@@ -6962,6 +7112,7 @@ class ForgeBlueprintWizard:
                 "marbl_ref": marbl.get("commit") or marbl.get("branch") or "",
                 "bgc_mode": model.get("bgc_mode", "marbl"),
                 "use_pio": bool(model.get("use_pio", False)),
+                "application": model.get("application", _CPU_APPLICATION),
             }
         except Exception:
             return {
@@ -6969,6 +7120,7 @@ class ForgeBlueprintWizard:
                 "marbl_ref": "",
                 "bgc_mode": "marbl",
                 "use_pio": False,
+                "application": _CPU_APPLICATION,
             }
 
     def _model_default_roms_ref(self) -> str:
@@ -6997,7 +7149,16 @@ class ForgeBlueprintWizard:
         ``run_time_settings_for_ref`` fall back to the legacy schema instead of
         warning on an empty ref.
         """
-        return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
+        ref = self.roms_ref.value.strip() or self._model_default_roms_ref() or None
+        # A GPU ref is read in the namelist vocabulary of the ucla-roms release it
+        # follows. Called on every rebuild, so its warning is dropped; a ref it
+        # cannot place is the resolver's to report.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            try:
+                return namelist_ref_for_application(self.application_tb.value, ref)
+            except ValueError:
+                return None
 
     def _default_forcing_spec(self, bgc_mode: str) -> str | None:
         """The ForcingSpec preselected for *bgc_mode*: the named bundled default
@@ -7236,7 +7397,15 @@ class ForgeBlueprintWizard:
                     kw["v_sponge"] = d["v_sponge"]
                 if d.get("dt") is not None:
                     kw["dt"] = d["dt"]
-                kw["partitioning"] = d.get("partitioning", {})
+                # (a DomainSpec carries no GPU keys: the live ones stay)
+                kw["partitioning"] = {
+                    **d.get("partitioning", {}),
+                    **{
+                        k: v
+                        for k, v in kw["partitioning"].items()
+                        if k in _GPU_PARTITIONING_KEYS
+                    },
+                }
                 kw["topography_source"] = d.get("topography_source", "ETOPO5")
                 kw.pop("topography_path", None)
                 if d.get("topography_path"):
@@ -7591,7 +7760,11 @@ class ForgeBlueprintWizard:
             "start_time": _run_time_iso(self._run_datetime("start", self.start.value)),
             "end_time": _run_time_iso(self._run_datetime("end", self.end.value)),
             "grid_kwargs": kw["grid_kwargs"],
-            "partitioning": kw["partitioning"],
+            "partitioning": {
+                k: v
+                for k, v in kw["partitioning"].items()
+                if k not in _GPU_PARTITIONING_KEYS
+            },
             "topography_source": self.topo_source.value,
         }
         # v_sponge/open_boundaries: included only when the user has touched
@@ -8523,12 +8696,28 @@ class ForgeBlueprintWizard:
         # model's default. Computed once here and reused below when seeding
         # self.roms_ref, so the two never drift apart.
         stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
-        loaded_problems = validate_run_time_sections(
-            cfg.model_settings, roms_ref=stored_ref or None
-        )
+        # A GPU file's ref pins roms-marbl-gpu: its settings are checked in the
+        # vocabulary of the ucla-roms release that ref reads.
+        try:
+            schema_ref = namelist_ref_for_application(
+                cfg.emitted_application, stored_ref or None
+            )
+        except ValueError as exc:
+            loaded_problems = [str(exc)]
+        else:
+            loaded_problems = validate_run_time_sections(
+                cfg.model_settings, roms_ref=schema_ref
+            )
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
+            # The toggle first: model_dd lists only its application's specs. A spec
+            # the catalog lacks has no application to read, so the file's decides.
+            self._sync_application(
+                self.catalog.model_applications.get(
+                    cfg.composition.model.name, cfg.emitted_application
+                )
+            )
             if cfg.composition.model.name in self.catalog.archived_model_names:
                 self.show_archived_models.value = True
             if cfg.composition.model.name in self._dd_values(self.model_dd):
@@ -8590,6 +8779,15 @@ class ForgeBlueprintWizard:
             self.use_pio_chk.value = bool(
                 (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
             )
+            for key in _GPU_PARTITIONING_KEYS:
+                # unset in the file: the GPU tiling's own default, never the
+                # previous load's value
+                loaded = getattr(cfg.domain.partitioning, key)
+                getattr(self, key).value = (
+                    loaded
+                    if loaded is not None
+                    else TilingParameterSet.model_fields[key].default
+                )
             self.auto_tiling_chk.value = cfg.domain.partitioning.auto_tiling
             loaded_n_cores = cfg.domain.partitioning.n_cores
             if loaded_n_cores is not None:
@@ -8854,19 +9052,25 @@ class ForgeBlueprintWizard:
         return datetime.combine(day, datetime.min.time())
 
     def _gather(self) -> dict[str, Any]:
+        partitioning: dict[str, Any] = (
+            {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
+            if self.auto_tiling_chk.value
+            else {
+                "n_procs_x": int(self.npx.value),
+                "n_procs_y": int(self.npy.value),
+            }
+        )
+        if self._is_gpu():
+            partitioning.update(
+                nodes=int(self.nodes.value),
+                writers_per_node=int(self.writers_per_node.value),
+            )
         kw = dict(
             model_path=self.catalog.model_path(self.model_dd.value),
             grid_name=self.grid_name.value,
             grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
-            partitioning=(
-                {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
-                if self.auto_tiling_chk.value
-                else {
-                    "n_procs_x": int(self.npx.value),
-                    "n_procs_y": int(self.npy.value),
-                }
-            ),
+            partitioning=partitioning,
             start_date=self._run_datetime("start", self.start.value),
             end_date=self._run_datetime("end", self.end.value),
             description=self.description.value,
@@ -9952,7 +10156,11 @@ class ForgeBlueprintWizard:
             base_settings = load_model_spec_data(base_path)["model"].get(
                 "model_settings", {}
             )
-            if not self.config.model_settings["cppdefs"].get("marbl", False):
+            if "cppdefs" not in base_settings:
+                # A model without a compile-time template (the GPU one) has no
+                # cppdefs section to save; the resolver derives the flags it needs.
+                owned.pop("cppdefs", None)
+            if not self.config.model_settings.get("cppdefs", {}).get("marbl", False):
                 # The resolver zeroes ntrc_bio for a run without MARBL; keep the
                 # base model's MARBL tracer count so the saved spec still works
                 # when bgc_mode is switched back to "marbl".
@@ -10328,6 +10536,7 @@ class ForgeBlueprintWizard:
         model_card = components.card(
             W,
             "model",
+            components.field_row(W, "application_tb", self.application_tb),
             components.field_row(
                 W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
             ),
@@ -10509,7 +10718,7 @@ class ForgeBlueprintWizard:
             default_title="Parent grid",
         )
         nesting_accordion = W.Accordion(
-            children=[W.VBox([child_section, parent_section])],
+            children=[W.VBox([self.nesting_gpu_note, child_section, parent_section])],
             selected_index=None,
         )
         nesting_accordion.set_title(0, section_for("grid.nesting").title)
@@ -10568,6 +10777,10 @@ class ForgeBlueprintWizard:
                     [
                         components.field_row(W, "npx", self.npx),
                         components.field_row(W, "npy", self.npy),
+                        components.field_row(W, "nodes", self.nodes),
+                        components.field_row(
+                            W, "writers_per_node", self.writers_per_node
+                        ),
                         components.field_row(W, "n_cores", self.n_cores),
                         components.field_row(
                             W, "auto_tiling_chk", self.auto_tiling_chk

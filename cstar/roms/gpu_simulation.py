@@ -67,7 +67,12 @@ from cstar.roms.gpu_layout import (
 )
 from cstar.roms.input_dataset import netcdf_variable_names
 from cstar.roms.namelist import gpu_namelist_schema_for_ref
-from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
+from cstar.roms.precheck import (
+    GPU_RESTORING_DATA,
+    check_gpu_array_sizes,
+    check_gpu_features,
+    check_gpu_ignored_settings,
+)
 from cstar.roms.simulation import IOLayout, ROMSSimulation
 from cstar.system.manager import get_sysmgr
 
@@ -107,18 +112,6 @@ roms-marbl-gpu v0.1.3-beta)."""
 GPU_BUILD_RECORD_KEY: Final = "gpu_build"
 """The entry of the build record that holds the `GpuBuildKey` the executable was
 built for."""
-
-GPU_RESTORING_DATA: Final[tuple[tuple[str, str, str], ...]] = (
-    ("sss", "sflx_corr", "SFLX_CORR"),
-    ("sst", "qcorrection", "QCORRECTION"),
-    ("sDIC", "cflx_corr", "CFLX_CORR"),
-    ("sALK", "cflx_corr", "CFLX_CORR"),
-)
-"""Surface restoring data roms-marbl-gpu v0.1.3-beta looks for in the forcing files
-(`warn_unused_restoring`, `src/host/frc_io.F90`), as (variable, the GPU-only
-`&surf_frc_settings` switch that uses it, the ucla-roms cpp key the switch stands
-in for). The names are case-sensitive: a flux file's upper-case `SST` and `SSS` are
-not restoring data."""
 
 
 def fortran_double_literal(value: float) -> str:
@@ -714,11 +707,13 @@ class ROMSGpuSimulation(ROMSSimulation):
         ------
         NamelistConsistencyError
             If the namelist switches on a feature the GPU model does not have,
-            gives a GPU-model array more values than the model reads, has an
-            output stream whose rollover does not divide the restart period, or
-            names a file too long for the model to read.
+            sets a value it reads and ignores (Rule F2), gives a GPU-model array
+            more values than the model reads, has an output stream whose
+            rollover does not divide the restart period, or names a file too
+            long for the model to read.
         """
         check_gpu_features(nml)
+        check_gpu_ignored_settings(nml)
         check_gpu_array_sizes(nml)
         super()._check_runtime_settings(nml)
 

@@ -9,14 +9,20 @@ ForcingSpec, which has exactly one bgc source on both initial_conditions and
 forcing.boundary) rather than duplicating it here.
 """
 
-from test_forge_blueprint import _build
+from test_forge_blueprint import _build, _gpu_data
 
+from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import (
     BgcInterpMethod,
     BgcSourceItem,
+    ForgeBlueprint,
     SourceSpec,
 )
-from cstar.applications.forge.engine import sources_to_forcing_override
+from cstar.applications.forge.engine import (
+    forge_blueprint_to_builder_kwargs,
+    sources_to_forcing_override,
+)
+from cstar.orchestration.manifest import ArtifactKind
 
 
 def test_bgc_source_item_fields_reach_forcing_override():
@@ -260,3 +266,54 @@ def test_plain_items_have_no_blend_key_in_the_override():
         *ov["forcing"]["river"],
     ]
     assert all("blend" not in item for item in items)
+
+
+def test_cpu_builder_kwargs_have_no_gpu_keys():
+    kwargs = forge_blueprint_to_builder_kwargs(_build())
+
+    assert kwargs["emitted_application"] == "ucla_roms"
+    assert kwargs["tiling"] is None
+    assert "nodes" not in kwargs["partitioning"]
+
+
+def test_gpu_builder_kwargs_carry_the_tiling_not_the_gpu_partitioning_keys():
+    cfg = ForgeBlueprint.model_validate(_gpu_data(nodes=1, writers_per_node=2))
+    kwargs = forge_blueprint_to_builder_kwargs(cfg)
+
+    assert kwargs["emitted_application"] == "ucla_roms_gpu"
+    assert kwargs["tiling"] == cfg.tiling
+    assert (kwargs["tiling"].nodes, kwargs["tiling"].writers_per_node) == (1, 2)
+    assert "nodes" not in kwargs["partitioning"]
+    assert "writers_per_node" not in kwargs["partitioning"]
+
+
+def test_gpu_emitted_blueprint_is_described_by_the_tiling():
+    cfg = ForgeBlueprint.model_validate(_gpu_data(nodes=1, writers_per_node=1))
+    emitted = ForgeApplication().emitted_blueprint(cfg)
+
+    assert emitted.application == "ucla_roms_gpu"
+    assert emitted.compute_needs == cfg.tiling.compute_needs
+    assert emitted.compute_needs.gpu_tasks == (
+        cfg.domain.partitioning.n_procs_x * cfg.domain.partitioning.n_procs_y
+    )
+    assert emitted.compute_needs.nodes == 1
+    assert emitted.use_pio is False
+
+
+def _cppdefs_roles(cfg):
+    return [
+        spec
+        for spec in ForgeApplication().artifacts(cfg)
+        if spec.metadata.get("role") == "cppdefs"
+    ]
+
+
+def test_gpu_artifacts_declare_no_cppdefs_but_cpu_artifacts_do():
+    gpu = ForgeBlueprint.model_validate(_gpu_data())
+
+    assert _cppdefs_roles(gpu) == []
+    assert any(
+        s.kind == ArtifactKind.emitted_blueprint
+        for s in ForgeApplication().artifacts(gpu)
+    )
+    assert len(_cppdefs_roles(_build())) == 1

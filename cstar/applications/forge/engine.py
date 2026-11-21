@@ -42,6 +42,7 @@ from typing import (
 
 from cstar.applications.forge.blueprint import (
     CoarseGridMode,
+    Code,
     ForgeBlueprint,
     SurfaceType,
     emitted_provenance,
@@ -51,8 +52,10 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_releases,
     check_forcing_coverage,
     check_marbl_bgc_inputs,
+    namelist_ref_for_application,
     validate_run_time_sections,
 )
+from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP_NAME
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.roms.namelist import release_ref_for_remote
 
@@ -395,6 +398,16 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     return out
 
 
+def builds_marbl(code: Code, application: str) -> bool:
+    """Whether a build from `code` for `application` includes the MARBL library.
+
+    The ``ucla_roms`` build compiles the ``code.marbl`` repository; the
+    ``ucla_roms_gpu`` build carries MARBL as a submodule of its own repository
+    and lists none.
+    """
+    return code.marbl is not None or application == GPU_APP_NAME
+
+
 def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Map a ``ForgeBlueprint``'s atomic inputs to ``ForgeExecutor`` constructor kwargs.
 
@@ -415,10 +428,14 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         # ForgeExecutor construction time (auto_tiling requires use_pio) --
         # forge's own Partitioning model doesn't carry use_pio, so inject it
         # here from the reviewed model_settings' cppdefs section.
+        # (The cstar PartitioningParameterSet forbids the GPU-only layout keys,
+        # which travel on ``tiling``.)
         partitioning={
-            **cfg.domain.partitioning.model_dump(),
+            **cfg.domain.partitioning.model_dump(exclude={"nodes", "writers_per_node"}),
             "use_pio": cfg.use_pio,
         },
+        emitted_application=cfg.emitted_application,
+        tiling=cfg.tiling,
         start_time=cfg.run.start_date,
         end_time=cfg.run.end_date,
         # CDR now lives on the blueprint's own top-level `cdr` section (CdrSpec),
@@ -608,12 +625,13 @@ def process_forge_blueprint(
         roms_ref = cfg.code.roms.commit or cfg.code.roms.branch
         if roms_ref:
             roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
+        roms_ref = namelist_ref_for_application(cfg.emitted_application, roms_ref)
         problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
         try:
             check_forcing_coverage(
                 cfg.forcing,
                 cppdefs=cfg.model_settings.get("cppdefs") or {},
-                marbl_code=cfg.code.marbl is not None,
+                marbl_code=builds_marbl(cfg.code, cfg.emitted_application),
                 open_boundaries=cfg.domain.open_boundaries.model_dump(),
                 is_child=cfg.domain.is_child,
             )
