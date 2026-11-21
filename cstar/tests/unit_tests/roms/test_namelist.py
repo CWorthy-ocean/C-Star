@@ -38,7 +38,9 @@ from cstar.roms.namelist import (
     RomsNamelistV0_16_0,
     TsOutputSettingsV0_14_0,
     VSpongeSettingsV0_13_0,
+    _parse_gpu_release,
     _parse_semver,
+    check_supported_gpu_release,
     format_roms_version,
     is_commit_hash,
     namelist_schema_for_ref,
@@ -291,8 +293,15 @@ def test_bundled_model_specs_pin_known_releases(spec: Path):
     """Adopting a ucla-roms release as a bundled ModelSpec bumps
     `NEWEST_KNOWN_UCLA_ROMS`, so the shipped models never warn.
     """
-    roms = yaml.safe_load(spec.read_text())["code"]["roms"]
-    version = _parse_semver(str(roms.get("commit") or roms.get("branch")))
+    data = yaml.safe_load(spec.read_text())
+    roms = data["code"]["roms"]
+    ref = str(roms.get("commit") or roms.get("branch"))
+    if data.get("application") == "ucla_roms_gpu":
+        version = _parse_gpu_release(ref)
+        assert version is not None, f"{spec.stem} pins no roms-marbl-gpu release: {ref}"
+        check_supported_gpu_release(version, ref)
+        return
+    version = _parse_semver(ref)
     if version is not None:
         assert version <= NEWEST_KNOWN_UCLA_ROMS
 

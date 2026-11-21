@@ -34,7 +34,7 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 SPEC_SCHEMA_VERSIONS: t.Final[Mapping[str, str]] = {
-    "ModelSpec": "2.0.0",
+    "ModelSpec": "2.1.0",
     "DomainSpec": "1.0.0",
     "ForcingSpec": "2.0.0",
     "OutputSpec": "2.0.0",
@@ -181,6 +181,10 @@ def migrate_spec(
         dumped = {**deepcopy(original), KEY_APP: kind, KEY_SV: found}
         migrated = migration.migrate(dumped, migration.plan(dumped)).migrated
         content = {k: v for k, v in migrated.items() if k not in (KEY_APP, KEY_SV)}
+        if KEY_APP in original:
+            # A ModelSpec's own `application` key shares the planner's name;
+            # the planner's value was only a stand-in, so keep the file's.
+            content[KEY_APP] = original[KEY_APP]
 
     if kind in _STRICT_KINDS and (
         unknown := sorted(set(content) - known_spec_keys(kind))

@@ -13,13 +13,18 @@ forcing -- see test_models_comprehensive.py::TestModelSpec/TestLoadModelsYaml fo
 the current ModelSpec/ModelCode/ModelTemplates coverage.)
 """
 
+from pathlib import Path
+
 import pytest
+import yaml
 from pydantic import ValidationError
 
+import cstar.catalog
 from cstar.applications.forge.models import (
     BgcSourceItem,
     BoundaryForcing,
     InitialConditionsInput,
+    ModelSpec,
     RiverForcingItem,
     SourceSpec,
     SurfaceForcingItem,
@@ -289,3 +294,55 @@ class TestRiverForcingItem:
         with pytest.raises(ValidationError) as exc_info:
             RiverForcingItem(include_bgc=True)
         assert "source" in str(exc_info.value).lower()
+
+
+_BUNDLED_MODELS = (
+    Path(cstar.catalog.__file__).parent / "bundled" / "specs" / "ModelSpec"
+)
+
+
+def test_bundled_gpu_model_spec_targets_the_gpu_application():
+    data = yaml.safe_load(
+        (_BUNDLED_MODELS / "roms-marbl-gpu-0.1.3-default.yaml").read_text()
+    )
+    data.pop("schema_version")
+
+    spec = ModelSpec(name="roms-marbl-gpu-0.1.3-default", **data)
+
+    assert spec.application == "ucla_roms_gpu"
+    assert spec.description is not None and spec.description.startswith("Experimental:")
+    assert "cppdefs" not in spec.model_settings
+    assert "pio_settings" not in spec.model_settings
+    assert spec.code.marbl is None and spec.code.pio is None
+    assert spec.code.templates_compile_time.files == []
+
+
+def test_cpu_model_spec_application_defaults_to_ucla_roms():
+    data = yaml.safe_load(
+        (_BUNDLED_MODELS / "roms-marbl-0.15-default.yaml").read_text()
+    )
+    data.pop("schema_version")
+
+    assert ModelSpec(name="x", **data).application == "ucla_roms"
+
+
+def test_model_writer_writes_application_only_when_not_default(tmp_path):
+    import shutil
+
+    from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+    shutil.copytree(_DEFAULT_CATALOG_ROOT, tmp_path / "catalog")
+    catalog = DomainCatalog(catalog_root=tmp_path / "catalog")
+    settings = {"param": {"nt_passive": 0}}
+    cpu = _BUNDLED_MODELS / "roms-marbl-0.15-default.yaml"
+    gpu = _BUNDLED_MODELS / "roms-marbl-gpu-0.1.3-default.yaml"
+
+    catalog.register_model_from_settings("my-cpu", settings, cpu)
+    catalog.register_model_from_settings("my-gpu", settings, gpu)
+
+    written = tmp_path / "catalog" / "specs" / "ModelSpec"
+    assert "application" not in yaml.safe_load((written / "my-cpu.yaml").read_text())
+    assert (
+        yaml.safe_load((written / "my-gpu.yaml").read_text())["application"]
+        == "ucla_roms_gpu"
+    )

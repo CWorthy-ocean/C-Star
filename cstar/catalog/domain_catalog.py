@@ -1380,6 +1380,12 @@ class DomainCatalog:
             "code": code,
             "model_settings": model_settings,
         }
+        # Written only when not the default, so a saved CPU spec has no such line.
+        if (application := base.get("application")) is not None:
+            from cstar.applications.forge.models import ModelSpec
+
+            if application != ModelSpec.model_fields["application"].default:
+                data["application"] = application
         self._write_spec("ModelSpec", name, data)
 
     def copy_domain(self, domain_name: str, catalog: DomainCatalog) -> None:
