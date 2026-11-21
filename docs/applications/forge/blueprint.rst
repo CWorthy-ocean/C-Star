@@ -128,6 +128,14 @@ Checking validity
 
    cstar blueprint check forge_blueprint.yaml
 
+Besides the schema, this runs the settings checks Forge runs before it stages
+any data, and lists every problem it finds:
+
+.. code-block:: console
+
+   The blueprint `wio-toy-example` has invalid values:
+     Forge would ignore these unknown settings keys: botom_drag (did you mean bottom_drag?).
+
 Processing
 ----------
 

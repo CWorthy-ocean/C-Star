@@ -8,7 +8,10 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
+import cstar
+import cstar.catalog
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_PROJECT_HOME,
@@ -21,6 +24,72 @@ from cstar.tests.unit_tests.orchestration.manifest_runs import (
 )
 
 _ANSI_CODES = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+_DOCS = Path(cstar.__file__).parent.parent / "docs"
+_BUNDLED_FORGE = (
+    Path(cstar.catalog.__file__).parent / "bundled" / "blueprints" / "forge"
+)
+
+_SHIPPED_FORGE_BLUEPRINTS = sorted(
+    [
+        *_BUNDLED_FORGE.glob("*.yaml"),
+        *_DOCS.rglob("forge_*.yaml"),
+        *_DOCS.rglob("forge-blueprint-*.yaml"),
+    ]
+)
+"""The forge blueprints C-Star ships for users to check and run."""
+
+
+@pytest.fixture(
+    params=_SHIPPED_FORGE_BLUEPRINTS,
+    ids=[path.name for path in _SHIPPED_FORGE_BLUEPRINTS],
+)
+def shipped_forge_blueprint(request: pytest.FixtureRequest) -> Path:
+    """Each forge blueprint C-Star ships, bundled or in the docs."""
+    return t.cast("Path", request.param)
+
+
+def _misspelled_section(data: dict[str, t.Any]) -> None:
+    data["model_settings"]["botom_drag"] = {"rdrg2": 1.0e-3}
+
+
+def _cdr_window_ends_early(data: dict[str, t.Any]) -> None:
+    data["cdr"]["cdr_forcing"]["end_time"] = "2012-01-04T00:00:00"
+
+
+FORGE_REFUSALS: dict[str, tuple[Path, Callable[[dict[str, t.Any]], None], str]] = {
+    "misspelled section": (
+        _BUNDLED_FORGE / "wio-toy-example.yaml",
+        _misspelled_section,
+        "botom_drag (did you mean bottom_drag?)",
+    ),
+    "CDR window ends before the run": (
+        _DOCS / "tutorials" / "forge_blueprint_wio_release.yaml",
+        _cdr_window_ends_early,
+        "the CDR window ends at 2012-01-04 00:00:00 (cdr_forcing.end_time), before "
+        "the run ends",
+    ),
+}
+"""A shipped forge blueprint, an edit Forge refuses, and the text naming it."""
+
+
+@pytest.fixture(params=sorted(FORGE_REFUSALS))
+def refused_forge_blueprint(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> tuple[Path, str]:
+    """Write a schema-valid forge blueprint that Forge refuses before any data.
+
+    Returns
+    -------
+    tuple[Path, str]
+        The blueprint file and the text the refusal must contain.
+    """
+    source, edit, expected = FORGE_REFUSALS[request.param]
+    data = yaml.safe_load(source.read_text())
+    edit(data)
+    path = tmp_path / source.name
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    return path, expected
 
 
 class FakeEntryPoint:

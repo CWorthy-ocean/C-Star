@@ -1,3 +1,9 @@
+import typing as t
+
+if t.TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 class CstarError(Exception):
     """Base class for all Cstar exceptions."""
 
@@ -41,3 +47,17 @@ class CatalogLocationError(CstarError, ValueError):
     cannot use as given; a `ValueError` too, as callers caught before it had a
     type of its own.
     """
+
+
+class InvalidForgeBlueprintError(BlueprintError, ValueError):
+    """A forge blueprint whose settings Forge refuses before staging any data; a
+    `ValueError` too, as callers caught before it had a type of its own.
+    """
+
+    def __init__(self, problems: "Sequence[str]") -> None:
+        """Initialize the error from the problems that refuse the blueprint."""
+        self.problems = list(problems)
+        super().__init__(
+            "forge_blueprint has invalid values (fix before processing):\n  "
+            + "\n  ".join(self.problems)
+        )

@@ -523,6 +523,25 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
         """
         return None
 
+    def blueprint_problems(self, blueprint: TBlueprint) -> Sequence[str]:
+        """Name the problems that would refuse `blueprint` before its run starts.
+
+        `cstar blueprint check` reports them after the schema passes. Only
+        what the blueprint itself decides is checked: no data is staged or
+        generated.
+
+        Parameters
+        ----------
+        blueprint : TBlueprint
+            A blueprint that passed schema validation.
+
+        Returns
+        -------
+        Sequence[str]
+            One message per problem; empty when the application finds none.
+        """
+        return ()
+
     def artifacts(self, blueprint: TBlueprint) -> Sequence[ArtifactSpec]:
         """Declare the products a run of the blueprint leaves in its working directory.
 

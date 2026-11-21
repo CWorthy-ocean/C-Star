@@ -9,6 +9,7 @@ import typer
 from typer.testing import CliRunner
 
 import cstar.cli.forge as cli
+from cstar.applications.forge.host import HostPaths
 
 runner = CliRunner()
 
@@ -137,6 +138,52 @@ class TestRun:
         with patch("cstar.applications.forge.runtime.run_blueprint", return_value=3):
             result = runner.invoke(cli.app, ["run", "bp.yaml"])
         assert result.exit_code == 3
+
+    def test_invalid_values_are_refused_in_one_error_before_any_work(
+        self, refused_forge_blueprint, tmp_path
+    ):
+        """The settings checks refuse the blueprint through the real ``run_blueprint``
+        and ``process_forge_blueprint``, as an error without a traceback, before
+        an executor that would stage data exists.
+        """
+        path, expected = refused_forge_blueprint
+        host = HostPaths(
+            working_dir=tmp_path / "wd", source_data_cache=tmp_path, system="test"
+        )
+        with (
+            patch("cstar.applications.forge.runtime.config.ensure_data_dirs"),
+            patch(
+                "cstar.applications.forge.runtime.config.resolve_host",
+                return_value=host,
+            ),
+            # force=True would strip the root logger's handlers (pytest's own)
+            patch("cstar.applications.forge.runtime.logging.basicConfig"),
+            patch(
+                "cstar.applications.forge.engine._default_executor_factory",
+                side_effect=AssertionError(
+                    "the refused blueprint reached the executor"
+                ),
+            ) as factory,
+        ):
+            result = runner.invoke(cli.app, ["run", str(path)])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "Error: forge_blueprint has invalid values" in result.stderr
+        assert expected in result.stderr
+        assert "Traceback" not in result.output
+        factory.assert_not_called()
+
+    def test_other_failures_keep_their_traceback(self):
+        """Only the blueprint's invalid values become a one-line error."""
+        with patch(
+            "cstar.applications.forge.runtime.run_blueprint",
+            side_effect=ValueError("roms-tools failed"),
+        ):
+            result = runner.invoke(cli.app, ["run", "bp.yaml"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, ValueError)
 
 
 class TestWizard:

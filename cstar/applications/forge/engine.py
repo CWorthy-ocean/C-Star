@@ -54,6 +54,7 @@ from cstar.applications.forge.namelist_model import (
     validate_run_time_sections,
 )
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.exceptions import InvalidForgeBlueprintError
 from cstar.roms.namelist import release_ref_for_remote
 
 if TYPE_CHECKING:
@@ -496,6 +497,64 @@ def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
     return cfg.integrity_problem()
 
 
+def blueprint_problems(cfg: ForgeBlueprint) -> list[str]:
+    """The settings problems that refuse ``cfg`` before any source data is staged.
+
+    Validates ``model_settings`` against the run-time schema of the pinned ucla-roms
+    release, then runs :func:`check_forcing_coverage`, :func:`check_marbl_bgc_inputs`,
+    :func:`check_cdr_releases` and :func:`check_derived_overrides`. Each reads only
+    the blueprint; the checks that need source data or the grid run later, during
+    generation. A commit-hash ``code.roms`` pin is first resolved to its release tag
+    (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone of
+    ``code.roms.location``), as the ucla_roms step resolves it.
+
+    ``process_forge_blueprint`` raises :class:`InvalidForgeBlueprintError` on these,
+    and ``cstar blueprint check`` reports them.
+
+    Returns
+    -------
+    list[str]
+        One message per problem; empty when the blueprint can be processed.
+    """
+    roms_ref = cfg.code.roms.commit or cfg.code.roms.branch
+    if roms_ref:
+        roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
+    problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
+    try:
+        check_forcing_coverage(
+            cfg.forcing,
+            cppdefs=cfg.model_settings.get("cppdefs") or {},
+            marbl_code=cfg.code.marbl is not None,
+            open_boundaries=cfg.domain.open_boundaries.model_dump(),
+            is_child=cfg.domain.is_child,
+        )
+        check_marbl_bgc_inputs(
+            cfg.forcing,
+            open_boundaries=cfg.domain.open_boundaries.model_dump(),
+            is_child=cfg.domain.is_child,
+            marbl=(cfg.model_settings.get("cppdefs") or {}).get("marbl", False),
+            roms_ref=roms_ref,
+        )
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
+        check_cdr_releases(
+            cfg.cdr.cdr_forcing,
+            start_date=cfg.run.start_date,
+            end_date=cfg.run.end_date,
+            time_interpolation=(cfg.model_settings.get("cdr_frc") or {}).get(
+                "time_interpolation"
+            ),
+        )
+    except ValueError as exc:
+        problems.append(str(exc))
+    try:
+        check_derived_overrides(cfg.composition.overrides, known_derived_values(cfg))
+    except ValueError as exc:
+        problems.append(str(exc))
+    return problems
+
+
 def _default_executor_factory(
     cfg: ForgeBlueprint, host: HostPaths | None = None, verbose: bool = False
 ) -> ForgeBlueprintExecutor:
@@ -548,11 +607,9 @@ def process_forge_blueprint(
         paths. When ``None``, the host line is not logged and no working directory
         is recorded.
     validate :
-        If True (default), fail fast — validate the config's ``model_settings``
-        against the run-time schema *before* any downloads/generation. A
-        commit-hash ``code.roms`` pin is first resolved to its release tag
-        (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone
-        of ``code.roms.location``), as the ucla_roms step resolves it.
+        If True (default), fail fast: raise :class:`InvalidForgeBlueprintError`
+        naming every :func:`blueprint_problems` problem *before* any
+        downloads/generation.
     executor_factory :
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
@@ -604,50 +661,8 @@ def process_forge_blueprint(
     if integrity:
         logger.warning(integrity)
 
-    if validate:
-        roms_ref = cfg.code.roms.commit or cfg.code.roms.branch
-        if roms_ref:
-            roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
-        problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
-        try:
-            check_forcing_coverage(
-                cfg.forcing,
-                cppdefs=cfg.model_settings.get("cppdefs") or {},
-                marbl_code=cfg.code.marbl is not None,
-                open_boundaries=cfg.domain.open_boundaries.model_dump(),
-                is_child=cfg.domain.is_child,
-            )
-            check_marbl_bgc_inputs(
-                cfg.forcing,
-                open_boundaries=cfg.domain.open_boundaries.model_dump(),
-                is_child=cfg.domain.is_child,
-                marbl=(cfg.model_settings.get("cppdefs") or {}).get("marbl", False),
-                roms_ref=roms_ref,
-            )
-        except ValueError as exc:
-            problems.append(str(exc))
-        try:
-            check_cdr_releases(
-                cfg.cdr.cdr_forcing,
-                start_date=cfg.run.start_date,
-                end_date=cfg.run.end_date,
-                time_interpolation=(cfg.model_settings.get("cdr_frc") or {}).get(
-                    "time_interpolation"
-                ),
-            )
-        except ValueError as exc:
-            problems.append(str(exc))
-        try:
-            check_derived_overrides(
-                cfg.composition.overrides, known_derived_values(cfg)
-            )
-        except ValueError as exc:
-            problems.append(str(exc))
-        if problems:
-            raise ValueError(
-                "forge_blueprint has invalid values (fix before processing):\n  "
-                + "\n  ".join(problems)
-            )
+    if validate and (problems := blueprint_problems(cfg)):
+        raise InvalidForgeBlueprintError(problems)
 
     resolved_only = None
     if only_inputs is not None:

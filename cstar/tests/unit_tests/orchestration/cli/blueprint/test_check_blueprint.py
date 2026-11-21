@@ -110,6 +110,34 @@ def test_blueprint_valid_input(
     )
 
 
+def test_blueprint_check_accepts_shipped_forge_blueprints(
+    shipped_forge_blueprint: Path,
+) -> None:
+    """Forge's settings checks pass every forge blueprint C-Star ships."""
+    result = CliRunner().invoke(app, [str(shipped_forge_blueprint)], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert "is valid" in result.stdout
+
+
+def test_blueprint_check_runs_forge_settings_checks(
+    refused_forge_blueprint: tuple[Path, str],
+) -> None:
+    """A forge blueprint that passes the schema but that `cstar forge run` refuses
+    is reported as a listed error, without a traceback.
+    """
+    path, expected = refused_forge_blueprint
+
+    result = CliRunner().invoke(app, [str(path)], color=False)
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "has invalid values:" in result.stderr
+    assert expected in result.stderr
+    assert "is valid" not in result.stdout
+    assert "Traceback" not in result.output
+
+
 @pytest.mark.parametrize(
     ("start_removal", "end_removal"),
     [
