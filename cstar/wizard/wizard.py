@@ -41,6 +41,7 @@ from pydantic import BaseModel
 
 from cstar.applications.forge.blueprint import (
     DEFAULT_APPLICATION,
+    DEFAULT_EMITTED_APPLICATION,
     REGIONAL_PHYSICS_SURFACE_SOURCES,
     BgcBoundarySource,
     BgcInitialConditionsSource,
@@ -77,7 +78,6 @@ from cstar.applications.forge.blueprint import (
     TidalForcingItem,
     TidalSource,
 )
-from cstar.applications.forge.models import ModelSpec
 from cstar.applications.forge.namelist_model import (
     CDR_OUTPUT_SECTIONS,
     FS_MODE_SPLIT,
@@ -102,6 +102,7 @@ from cstar.applications.forge.resolve import (
     extract_output_settings,
     find_carbonate_sensitivity_files,
     force_switches_without_input_off,
+    has_surface_restoring,
     load_model_spec_data,
     read_cdr_forcing_yaml,
     resolver_warnings,
@@ -4953,7 +4954,7 @@ _DEFAULT_MODEL = "roms-marbl-0.16-default"
 _DEFAULT_GPU_MODEL = "roms-marbl-gpu-0.1.3-default"
 
 # What a ModelSpec that declares no application runs on (the toggle's CPU side).
-_CPU_APPLICATION: Final[str] = ModelSpec.model_fields["application"].default
+_CPU_APPLICATION: Final[str] = DEFAULT_EMITTED_APPLICATION
 
 # The GPU-only ``Partitioning`` keys: gathered only for the GPU target, kept out
 # of a saved DomainSpec (which has no such fields).
@@ -6467,7 +6468,9 @@ class ForgeBlueprintWizard:
         names = [
             n
             for n in self.catalog.model_names
-            if applications.get(n) == self.application_tb.value
+            # a spec that cannot be read is listed with the default application,
+            # so selecting it still reports why it cannot be read
+            if applications.get(n, _CPU_APPLICATION) == self.application_tb.value
         ]
         if self.show_archived_models.value:
             return names
@@ -6892,6 +6895,11 @@ class ForgeBlueprintWizard:
             return
         application = change["new"]
         gpu = application == _GPU_APPLICATION
+        if gpu:
+            # the GPU model has no nesting, and its controls are disabled on GPU,
+            # so a nesting choice made on CPU could not be undone there
+            self.nest_enable.value = False
+            self.parent_enable.value = False
         self._sync_application(application)
         names = self._dd_values(self.model_dd)
         preferred = _DEFAULT_GPU_MODEL if gpu else _DEFAULT_MODEL
@@ -6919,12 +6927,9 @@ class ForgeBlueprintWizard:
             return
         data = self.catalog.forcing_data(self.forcing_dd.value)
         surface = (data.get("forcing") or {}).get("surface") or []
-        restores = any(
-            item.get("type") == SurfaceType.RESTORING.value
-            or item.get("restoring_forces")
-            for item in surface
-        )
-        if restores and GPU_FORCING_SPEC in self._dd_values(self.forcing_dd):
+        if has_surface_restoring(surface) and GPU_FORCING_SPEC in self._dd_values(
+            self.forcing_dd
+        ):
             self.forcing_dd.value = GPU_FORCING_SPEC
 
     def _on_editor_edit(self, section, field):
@@ -8691,9 +8696,18 @@ class ForgeBlueprintWizard:
         # model's default. Computed once here and reused below when seeding
         # self.roms_ref, so the two never drift apart.
         stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
-        loaded_problems = validate_run_time_sections(
-            cfg.model_settings, roms_ref=stored_ref or None
-        )
+        # A GPU file's ref pins roms-marbl-gpu: its settings are checked in the
+        # vocabulary of the ucla-roms release that ref reads.
+        try:
+            schema_ref = namelist_ref_for_application(
+                cfg.emitted_application, stored_ref or None
+            )
+        except ValueError as exc:
+            loaded_problems = [str(exc)]
+        else:
+            loaded_problems = validate_run_time_sections(
+                cfg.model_settings, roms_ref=schema_ref
+            )
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
@@ -8766,8 +8780,14 @@ class ForgeBlueprintWizard:
                 (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
             )
             for key in _GPU_PARTITIONING_KEYS:
-                if (loaded := getattr(cfg.domain.partitioning, key)) is not None:
-                    getattr(self, key).value = loaded
+                # unset in the file: the GPU tiling's own default, never the
+                # previous load's value
+                loaded = getattr(cfg.domain.partitioning, key)
+                getattr(self, key).value = (
+                    loaded
+                    if loaded is not None
+                    else TilingParameterSet.model_fields[key].default
+                )
             self.auto_tiling_chk.value = cfg.domain.partitioning.auto_tiling
             loaded_n_cores = cfg.domain.partitioning.n_cores
             if loaded_n_cores is not None:

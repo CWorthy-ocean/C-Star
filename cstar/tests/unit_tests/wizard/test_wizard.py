@@ -8356,6 +8356,68 @@ class TestSwitchingTheTarget:
         assert set(wiz._gather()["partitioning"]) == {"n_procs_x", "n_procs_y"}
 
 
+class TestReviewedGpuStates:
+    def test_switching_to_gpu_clears_nesting(self):
+        wiz = ForgeBlueprintWizard()
+        _short_run(wiz)
+        wiz.nest_enable.value = True
+        wiz.application_tb.value = _GPU_APP
+        assert not wiz.nest_enable.value
+        assert not wiz.parent_enable.value
+        assert wiz.nest_enable.disabled
+
+    def test_a_spec_that_cannot_be_read_stays_listed(self, monkeypatch):
+        wiz = ForgeBlueprintWizard()
+        readable = dict(wiz.catalog.model_applications)
+        hidden = next(n for n, a in readable.items() if a != _GPU_APP)
+        readable.pop(hidden)
+        monkeypatch.setattr(
+            type(wiz.catalog),
+            "model_applications",
+            property(lambda _self: dict(readable)),
+        )
+        wiz.show_archived_models.value = True
+        assert hidden in wiz._visible_model_names(archived=())
+
+    def test_a_load_without_nodes_resets_them_to_the_tiling_default(self, tmp_path):
+        from cstar.applications.ucla_roms_gpu.models import TilingParameterSet
+
+        first = _gpu_wizard()
+        first.nodes.value, first.writers_per_node.value = 2, 3
+        first._rebuild()
+        assert first.config is not None, first.derived.value
+        with_nodes = tmp_path / "with_nodes.yaml"
+        first.config.to_yaml(with_nodes)
+
+        second = _gpu_wizard()
+        second._rebuild()
+        assert second.config is not None, second.derived.value
+        without = second.config.model_copy(
+            update={
+                "domain": second.config.domain.model_copy(
+                    update={
+                        "partitioning": second.config.domain.partitioning.model_copy(
+                            update={"nodes": None, "writers_per_node": None}
+                        )
+                    }
+                )
+            }
+        )
+        without_nodes = tmp_path / "without_nodes.yaml"
+        without.to_yaml(without_nodes)
+
+        wiz = ForgeBlueprintWizard()
+        wiz.load_path.value = str(with_nodes)
+        wiz._on_load_path(None)
+        assert (wiz.nodes.value, wiz.writers_per_node.value) == (2, 3)
+        wiz.load_path.value = str(without_nodes)
+        wiz._on_load_path(None)
+        assert (wiz.nodes.value, wiz.writers_per_node.value) == (
+            TilingParameterSet.model_fields["nodes"].default,
+            TilingParameterSet.model_fields["writers_per_node"].default,
+        )
+
+
 class TestGpuLoadAndSave:
     def test_load_back_restores_the_toggle_model_and_tiling_without_a_forcing_swap(
         self, tmp_path

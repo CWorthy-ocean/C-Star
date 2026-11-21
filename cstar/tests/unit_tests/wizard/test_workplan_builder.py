@@ -2650,6 +2650,8 @@ def test_gpu_blueprint_facts_carry_compute_needs(gpu_bp, roms_bp, tmp_path):
     assert facts.compute_needs.nodes == 1
     assert facts.cpus_needed == 5
     assert facts.use_pio is None
+    # its namelist fields are the ucla-roms release roms-marbl-gpu reads
+    assert facts.namelist_ref == "0.11.0"
     cpu = wb.blueprint_facts(roms_bp)
     assert cpu is not None and cpu.cpus_needed == 128
     assert cpu.compute_needs is not None and cpu.compute_needs.gpu_tasks == 0

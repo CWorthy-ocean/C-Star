@@ -483,6 +483,8 @@ def _gpu_data(**partitioning: t.Any) -> dict[str, t.Any]:
     settings = data["model_settings"]
     settings.setdefault("cppdefs", {})["use_pio"] = False
     settings.setdefault("calc_pflx", {})["calc_pflx"] = False
+    # the GPU build takes no compile-time template
+    data["code"]["templates_compile_time"].update(files=[], file_hashes={})
     data["domain"]["partitioning"].update(partitioning)
     return data
 
@@ -563,6 +565,12 @@ def test_cpu_forge_blueprint_yaml_and_hash_do_not_carry_the_gpu_fields():
             ),
             "roms-marbl-gpu",
         ),
+        (
+            lambda d: d["code"]["templates_compile_time"].update(
+                files=["cppdefs.opt.j2"]
+            ),
+            "takes no compile-time template",
+        ),
     ],
     ids=[
         "auto-tiling",
@@ -573,6 +581,7 @@ def test_cpu_forge_blueprint_yaml_and_hash_do_not_carry_the_gpu_fields():
         "calc-pflx",
         "upscale-output",
         "tiles-not-over-nodes",
+        "compile-time-template",
     ],
 )
 def test_gpu_forge_blueprint_refuses(edit, match):
@@ -592,6 +601,14 @@ def test_gpu_forge_blueprint_refusals_are_collected():
         ForgeBlueprint(**data)
 
     assert "ParallelIO" in str(err.value) and "nesting" in str(err.value)
+
+
+def test_cpu_forge_blueprint_needs_a_compile_time_template():
+    data = _build().model_dump(mode="json")
+    data["code"]["templates_compile_time"].update(files=[], file_hashes={})
+
+    with pytest.raises(ValidationError, match="no compile-time template"):
+        ForgeBlueprint(**data)
 
 
 @pytest.mark.parametrize("field", ["nodes", "writers_per_node"])

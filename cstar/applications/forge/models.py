@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    DEFAULT_EMITTED_APPLICATION,
     BgcSourceItem,
     BoundaryForcing,
     CdrSpec,
@@ -162,7 +163,7 @@ class ModelSpec(BaseModel):
 
     name: str
     description: str | None = None
-    application: EmittedApplication = Field(default="ucla_roms")
+    application: EmittedApplication = Field(default=DEFAULT_EMITTED_APPLICATION)
     code: ModelCode
     bgc_mode: BgcMode = "marbl"
     use_pio: bool = False

@@ -66,7 +66,7 @@ from collections import Counter
 from datetime import UTC, datetime, time
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self, get_args
+from typing import TYPE_CHECKING, Any, Final, Literal, Self, get_args
 
 import yaml
 from pydantic import (
@@ -463,6 +463,10 @@ FORGE_BLUEPRINT_VERSION = 11
 EmittedApplication = Literal["ucla_roms", "ucla_roms_gpu"]
 """The C-Star application whose blueprint a Forge run emits. ``ucla_roms_gpu``
 (roms-marbl-gpu) is experimental."""
+
+DEFAULT_EMITTED_APPLICATION: Final[EmittedApplication] = "ucla_roms"
+"""The application a ModelSpec or ForgeBlueprint that names none runs with; a saved
+file leaves the key out while it has this value."""
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -1831,7 +1835,7 @@ class ForgeBlueprint(Blueprint):
     application: str = (
         DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
     )
-    emitted_application: EmittedApplication = Field(default="ucla_roms")
+    emitted_application: EmittedApplication = Field(default=DEFAULT_EMITTED_APPLICATION)
     """The C-Star application whose blueprint the run emits. ``ucla_roms_gpu`` is
     experimental and takes its tiling from ``domain.partitioning``. Absent from a
     saved file and from the content hash while it is the default."""
@@ -1940,16 +1944,26 @@ class ForgeBlueprint(Blueprint):
 
     @model_validator(mode="after")
     def _application_fits_partitioning(self) -> ForgeBlueprint:
-        """The emitted application and the partitioning agree.
+        """The emitted application, the partitioning and the compile-time templates
+        agree.
 
-        ``ucla_roms_gpu`` needs a fixed tile layout the GPU model accepts, and
-        refuses what roms-marbl-gpu v0.1.3-beta cannot do; the CPU application has
-        no ``nodes``/``writers_per_node``. One check here, so no later stage
-        re-derives it.
+        ``ucla_roms_gpu`` needs a fixed tile layout the GPU model accepts, takes no
+        compile-time template, and refuses what roms-marbl-gpu v0.1.3-beta cannot
+        do; the CPU application renders at least one compile-time template (its
+        ``cppdefs.opt``) and has no ``nodes``/``writers_per_node``. One check here,
+        so no later stage re-derives it.
         """
         part = self.domain.partitioning
         violations: list[str] = []
+        templates = [
+            f for f in self.code.templates_compile_time.files if f.endswith(".j2")
+        ]
         if self.emitted_application != "ucla_roms_gpu":
+            if not templates:
+                violations.append(
+                    "code.templates_compile_time.files lists no compile-time "
+                    "template (.j2): the ucla_roms build needs its cppdefs.opt"
+                )
             for name in ("nodes", "writers_per_node"):
                 if getattr(part, name) is not None:
                     violations.append(
@@ -1965,6 +1979,12 @@ class ForgeBlueprint(Blueprint):
                 )
             if self.use_pio:
                 violations.append(f"{gpu} does not use ParallelIO (use_pio)")
+            if templates:
+                violations.append(
+                    f"{gpu} builds from its own source and takes no compile-time "
+                    f"template; remove {', '.join(templates)} from "
+                    "code.templates_compile_time.files"
+                )
             nesting = [
                 label
                 for label, active in (
@@ -2297,8 +2317,7 @@ class ForgeBlueprint(Blueprint):
             exclude["forcing"] = unset_blend
         # ``emitted_application`` likewise (``Partitioning`` drops its own unset GPU
         # fields when dumped).
-        default_emitted = type(stamped).model_fields["emitted_application"].default
-        if stamped.emitted_application == default_emitted:
+        if stamped.emitted_application == DEFAULT_EMITTED_APPLICATION:
             exclude["emitted_application"] = True
         data = stamped.model_dump(mode="json", exclude_none=False, exclude=exclude)
         # Pydantic keeps the narrowed ``provenance`` field at its ``Blueprint``

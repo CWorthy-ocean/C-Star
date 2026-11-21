@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Final, get_args
 import yaml
 
 from cstar.applications.forge.blueprint import (
+    DEFAULT_EMITTED_APPLICATION,
     BgcSourceItem,
     BoundaryForcing,
     CarbonateSensitivitySpec,
@@ -70,7 +71,6 @@ from cstar.applications.forge.engine import (
     check_derived_overrides,
     known_derived_values,
 )
-from cstar.applications.forge.models import ModelSpec
 
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
@@ -144,7 +144,18 @@ GPU_FORCING_SPEC: Final = "glorys-era5-unified-no-restoring"
 forcing without its surface restoring, which roms-marbl-gpu v0.1.3-beta reads only
 through GPU-only switches C-Star cannot write yet."""
 
-_MODEL_SPEC_APPLICATION_DEFAULT: Final = ModelSpec.model_fields["application"].default
+
+def has_surface_restoring(surface_items: Sequence[Any]) -> bool:
+    """Whether a ForcingSpec's ``forcing.surface`` items (raw spec data) restore at
+    the surface, which the ``ucla_roms_gpu`` target refuses (see
+    :data:`GPU_FORCING_SPEC`).
+    """
+    return any(
+        isinstance(item, dict)
+        and (item.get("type") == "restoring" or bool(item.get("restoring_forces")))
+        for item in surface_items
+    )
+
 
 # Default repo serving the render templates: this repository, whose bundled copy
 # lives at `cstar/additional_files/templates/forge/`. Every bundled ModelSpec pins
@@ -1111,7 +1122,7 @@ def build_forge_blueprint(
     # spec does not say). A GPU spec keys the tier and every version gate below on
     # the ucla-roms release whose namelist its roms-marbl-gpu pin reads; code.roms
     # keeps the roms-marbl-gpu pin itself.
-    application = model.get("application", _MODEL_SPEC_APPLICATION_DEFAULT)
+    application = model.get("application", DEFAULT_EMITTED_APPLICATION)
     if effective_roms_ref is not None:
         effective_roms_ref = namelist_ref_for_application(
             application, effective_roms_ref
@@ -1832,11 +1843,7 @@ def _check_gpu_target(
     checked here.
     """
     problems: list[str] = []
-    if any(
-        isinstance(it, dict)
-        and (it.get("type") == "restoring" or it.get("restoring_forces"))
-        for it in surface_items
-    ):
+    if has_surface_restoring(surface_items):
         problems.append(
             "the forcing has surface restoring, which roms-marbl-gpu reads only "
             "through GPU-only &surf_frc_settings switches C-Star cannot write yet; "
@@ -2059,7 +2066,7 @@ def _build_code(
     bgc_mode: str = "marbl",
     roms_ref: str | None = None,
     marbl_ref: str | None = None,
-    application: str = _MODEL_SPEC_APPLICATION_DEFAULT,
+    application: str = DEFAULT_EMITTED_APPLICATION,
 ) -> Code:
     code_block = model.get("code", {}) or {}
 
