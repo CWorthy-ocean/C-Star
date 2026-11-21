@@ -813,6 +813,18 @@ class TestRuntimeSettings:
 
         assert raised.value.rule == "gpu_features"
 
+    def test_a_setting_the_gpu_model_ignores_is_refused(
+        self, make_simulation: SimulationFactory
+    ) -> None:
+        sim = make_simulation(
+            namelist_overrides={"bgc_settings": {"xco2air_default": 400.0}}
+        )
+
+        with pytest.raises(NamelistConsistencyError, match="xco2air_default") as raised:
+            _ = sim.roms_runtime_settings
+
+        assert raised.value.rule == "gpu_ignored_settings"
+
     def test_more_forcing_files_than_the_gpu_reads_are_refused(
         self, make_simulation: SimulationFactory
     ) -> None:

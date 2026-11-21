@@ -1964,3 +1964,49 @@ def gpu_namelist_schema_for_ref(
     # Unreachable given a well-formed, contiguous registry with an open-ended
     # last entry, but keeps mypy happy about the return type.
     return last_cls
+
+
+def namelist_release_for_gpu_ref(ref: str | None) -> str:
+    """The ucla-roms release whose namelist vocabulary a roms-marbl-gpu ref reads.
+
+    Derived from the schema class :func:`gpu_namelist_schema_for_ref` selects:
+    the lower bound of that class's entry in :data:`NAMELIST_SCHEMA_REGISTRY`
+    (``v0.1.3-beta`` reads the ucla-roms ``0.11.0`` vocabulary). The result
+    parses with :func:`roms_version_from_ref`, so it can key the ucla-roms
+    selectors (run-time settings, precheck gates).
+
+    Parameters
+    ----------
+    ref : str or None
+        The roms-marbl-gpu git ref C-Star is pinned to.
+
+    Returns
+    -------
+    str
+        The ucla-roms release, e.g. ``"0.11.0"``.
+
+    Warns
+    -----
+    UserWarning
+        As :func:`gpu_namelist_schema_for_ref`: for a non-release ref or one
+        newer than :data:`NEWEST_KNOWN_UCLA_ROMS_GPU`.
+
+    Raises
+    ------
+    ValueError
+        As :func:`gpu_namelist_schema_for_ref`, for a release older than
+        :data:`OLDEST_SUPPORTED_UCLA_ROMS_GPU`; also if the selected class has
+        no :data:`NAMELIST_SCHEMA_REGISTRY` entry or an open lower bound (a
+        registry bug).
+    """
+    cls = gpu_namelist_schema_for_ref(ref)
+    for lower, _upper, entry_cls in NAMELIST_SCHEMA_REGISTRY:
+        if entry_cls is cls:
+            if lower is None:
+                break
+            return format_roms_version(lower)
+    raise ValueError(
+        f"{cls.__name__} has no ucla-roms release in NAMELIST_SCHEMA_REGISTRY "
+        f"(missing entry or open lower bound); the GPU registry points at a "
+        f"class the ucla-roms registry does not version."
+    )

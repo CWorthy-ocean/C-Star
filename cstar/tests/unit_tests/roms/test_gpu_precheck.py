@@ -17,9 +17,12 @@ from cstar.roms.precheck import (
     _GPU_ARRAY_SIZES,
     _GPU_STOP_SWITCHES,
     _GPU_WARN_SWITCHES,
+    GPU_FIXED_XCO2_AIR,
     NamelistConsistencyError,
     check_gpu_array_sizes,
     check_gpu_features,
+    check_gpu_ignored_settings,
+    gpu_feature_warnings,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -321,3 +324,67 @@ def test_a_live_namelist_with_too_many_forcing_files_raises(v0_11_0_namelist):
     v0_11_0_namelist.forcing_files.frcfiles = [f"f{i}.nc" for i in range(65)]
     with pytest.raises(NamelistConsistencyError, match="frcfiles: 65 values"):
         check_gpu_array_sizes(v0_11_0_namelist)
+
+
+def test_gpu_feature_warnings_lists_the_switches_that_are_on():
+    assert gpu_feature_warnings(
+        _on(("sponge_tune_settings", "ub_tune"), ("calc_pflx_settings", "calc_pflx"))
+    ) == [
+        f"&{g} {k} = .true.: {sentence}"
+        for g, k, sentence in WARN
+        if k in ("ub_tune", "calc_pflx")
+    ]
+    assert gpu_feature_warnings({}) == []
+
+
+def test_warn_false_raises_for_a_stop_switch_without_warning():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(NamelistConsistencyError, match="do_zslice"):
+            check_gpu_features(
+                _on(
+                    ("zslice_settings", "do_zslice"),
+                    ("calc_pflx_settings", "calc_pflx"),
+                ),
+                warn=False,
+            )
+        check_gpu_features(_on(("calc_pflx_settings", "calc_pflx")), warn=False)
+
+
+def _bgc(**values):
+    return {"bgc_settings": values}
+
+
+def test_ignored_settings_pass_at_the_fixed_value_and_when_missing():
+    check_gpu_ignored_settings(_bgc(xco2air_default=GPU_FIXED_XCO2_AIR))
+    check_gpu_ignored_settings(_bgc(xco2air_default=284.7000000001))
+    check_gpu_ignored_settings(_bgc(wrt_bgc_dia_his=False))
+    check_gpu_ignored_settings(_bgc())
+    check_gpu_ignored_settings({})
+
+
+def test_a_different_xco2air_default_is_refused():
+    with pytest.raises(NamelistConsistencyError, match="xco2air_default") as raised:
+        check_gpu_ignored_settings(_bgc(xco2air_default=400.0))
+    assert raised.value.rule == "gpu_ignored_settings"
+    assert raised.value.section == "bgc_settings"
+    assert raised.value.keys == ("xco2air_default",)
+
+
+def test_wrt_bgc_dia_his_is_refused():
+    with pytest.raises(NamelistConsistencyError, match="wrt_bgc_dia_his"):
+        check_gpu_ignored_settings(_bgc(wrt_bgc_dia_his=True))
+
+
+def test_both_ignored_settings_give_one_error():
+    with pytest.raises(NamelistConsistencyError) as raised:
+        check_gpu_ignored_settings(_bgc(xco2air_default=400.0, wrt_bgc_dia_his=True))
+    assert "xco2air_default" in str(raised.value)
+    assert "wrt_bgc_dia_his" in str(raised.value)
+
+
+def test_ignored_settings_on_a_live_namelist(v0_11_0_namelist):
+    check_gpu_ignored_settings(v0_11_0_namelist)
+    v0_11_0_namelist.bgc_settings.xco2air_default = 400.0
+    with pytest.raises(NamelistConsistencyError, match="xco2air_default"):
+        check_gpu_ignored_settings(v0_11_0_namelist)

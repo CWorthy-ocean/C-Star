@@ -17,7 +17,10 @@ from cstar.roms.namelist import (
     RomsNamelistV0_12_0,
     _parse_gpu_release,
     gpu_namelist_schema_for_ref,
+    namelist_release_for_gpu_ref,
+    namelist_schema_for_ref,
     namelist_schema_named,
+    roms_version_from_ref,
 )
 
 NOT_A_RELEASE = "is not a release tag"
@@ -220,3 +223,26 @@ def test_the_gpu_never_gets_a_newer_namelist_tier(ref):
         schema = gpu_namelist_schema_for_ref(ref)
     assert schema is RomsNamelistV0_11_0
     assert not issubclass(schema, RomsNamelistV0_12_0)
+
+
+def test_namelist_release_for_the_pinned_gpu_ref():
+    assert namelist_release_for_gpu_ref("v0.1.3-beta") == "0.11.0"
+
+
+def test_namelist_release_round_trips_to_the_same_schema():
+    release = namelist_release_for_gpu_ref("v0.1.3-beta")
+
+    assert roms_version_from_ref(release) == (0, 11, 0)
+    assert namelist_schema_for_ref(release) is gpu_namelist_schema_for_ref(
+        "v0.1.3-beta"
+    )
+
+
+def test_namelist_release_for_a_non_release_ref_warns():
+    with pytest.warns(UserWarning, match=NOT_A_RELEASE):
+        assert namelist_release_for_gpu_ref("main") == "0.11.0"
+
+
+def test_namelist_release_for_an_older_gpu_release_raises():
+    with pytest.raises(ValueError, match="older"):
+        namelist_release_for_gpu_ref("v0.1.2-beta")
