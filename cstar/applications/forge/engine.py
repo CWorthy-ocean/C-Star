@@ -32,7 +32,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -54,7 +54,7 @@ from cstar.applications.forge.namelist_model import (
     validate_run_time_sections,
 )
 from cstar.base.env import ENV_CSTAR_RUNID
-from cstar.base.exceptions import BlueprintError
+from cstar.base.exceptions import InvalidForgeBlueprintError
 from cstar.roms.namelist import release_ref_for_remote
 
 if TYPE_CHECKING:
@@ -495,20 +495,6 @@ def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
     A thin delegate to :meth:`ForgeBlueprint.integrity_problem`.
     """
     return cfg.integrity_problem()
-
-
-class InvalidForgeBlueprintError(BlueprintError, ValueError):
-    """A forge blueprint whose settings :func:`blueprint_problems` refuses; a
-    `ValueError` too, as callers caught before it had a type of its own.
-    """
-
-    def __init__(self, problems: Sequence[str]) -> None:
-        """Initialize the error from the problems that refuse the blueprint."""
-        self.problems = list(problems)
-        super().__init__(
-            "forge_blueprint has invalid values (fix before processing):\n  "
-            + "\n  ".join(self.problems)
-        )
 
 
 def blueprint_problems(cfg: ForgeBlueprint) -> list[str]:

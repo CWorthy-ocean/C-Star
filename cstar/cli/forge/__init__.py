@@ -189,8 +189,8 @@ def run(
     ] = None,
 ) -> None:
     """Process a forge blueprint with the full executor option set."""
-    from cstar.applications.forge.engine import InvalidForgeBlueprintError
     from cstar.applications.forge.runtime import run_blueprint
+    from cstar.base.exceptions import InvalidForgeBlueprintError
     from cstar.catalog.domain_catalog import user_catalog_root
     from cstar.cli.common import exit_on_failure
     from cstar.system.manager import selected_system_name
