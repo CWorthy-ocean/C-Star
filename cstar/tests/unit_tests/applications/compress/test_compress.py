@@ -63,6 +63,7 @@ from cstar.orchestration.manifest import (
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
+from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import Access, WorkplanRun
 from cstar.system.manager import OutsideSchedulerJob
 
@@ -526,7 +527,58 @@ class TestCompressRun:
         assert len([p for p in record.products if "compression" in p.metadata]) == 1
 
 
+def _reenter(root: Path, step_status: str) -> None:
+    """Record a re-entry: a second attempt, not yet closed, with the step at `step_status`.
+
+    A re-entry that launches nothing keeps each step's last status (only a
+    clobbered or resumed step is reset to ``""``) and leaves its attempt open
+    until the step records are folded in.
+    """
+    write_run_manifest(
+        root,
+        RunManifest(
+            run_id="r1",
+            name="r1",
+            kind="workplan",
+            created_at=START,
+            attempts=[
+                Attempt(start_at=START, finished_at=START),
+                Attempt(start_at=START),
+            ],
+            steps=[
+                StepEntry(
+                    name=STEP,
+                    application="roms_marbl",
+                    working_dir=STEP_DIR,
+                    status=step_status,
+                )
+            ],
+        ),
+    )
+
+
 class TestCli:
+    def test_a_reentry_that_launched_nothing_is_finished(self, run_root: Path) -> None:
+        """Every step is Done: folding the records closes the re-entry's attempt."""
+        _reenter(run_root, Status.Done.name)
+
+        result = invoke(str(run_root), "--yes", "--now", "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        assert "has not finished" not in result.output
+
+    def test_a_reentry_with_a_step_running_again_is_refused(
+        self, run_root: Path
+    ) -> None:
+        """A clobbered or resumed step has no status yet: the attempt stays open."""
+        _reenter(run_root, "")
+
+        result = invoke(str(run_root), "--yes", "--now", "--dry-run")
+
+        assert result.exit_code != 0
+        assert "has not finished" in result.output
+        assert not (run_root / "compress").exists()
+
     def test_dry_run_writes_the_blueprint(self, run_root: Path) -> None:
         result = invoke(str(run_root), "--yes", "--now", "--dry-run")
 
