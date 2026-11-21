@@ -23,12 +23,15 @@ def check(
     The schema version is checked first: a blueprint of a newer major than
     this build reads, or one without an automatic migration, is reported before
     its content is validated. A newer minor is validated, and reported as too
-    new if it holds anything this build does not know.
+    new if it holds anything this build does not know. A blueprint that passes
+    is then checked as its application checks it before a run
+    (`ApplicationDefinition.blueprint_problems`).
 
     Raises
     ------
     typer.Exit
-        If the schema version is unsupported or the blueprint needs migration.
+        If the schema version is unsupported, the blueprint needs migration, or
+        its application refuses its values.
     typer.BadParameter
         If the blueprint content is invalid.
     """
@@ -49,7 +52,8 @@ def check(
         )
         raise typer.Exit(1)
 
-    bp_type: type[Blueprint] = get_application(application).blueprint
+    app_def = get_application(application)
+    bp_type: type[Blueprint] = app_def.blueprint
     result = validate_serialized_entity(path, bp_type)
 
     # a newer minor holding what this build does not know is refused as too new
@@ -57,5 +61,13 @@ def check(
         report_schema_error(path, result.error)
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
+
+    if problems := app_def.blueprint_problems(result.item):
+        typer.echo(
+            f"The blueprint `{result.item.name}` has invalid values:\n  "
+            + "\n  ".join(problems),
+            err=True,
+        )
+        raise typer.Exit(1)
 
     print(f"The blueprint `{result.item.name}` is valid")

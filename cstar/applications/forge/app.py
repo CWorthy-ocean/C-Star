@@ -224,6 +224,25 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         )
 
     @t.override
+    def blueprint_problems(self, blueprint: ForgeBlueprint) -> Sequence[str]:
+        """Name the settings problems that refuse a forge run of `blueprint`.
+
+        Parameters
+        ----------
+        blueprint : ForgeBlueprint
+            The blueprint to check.
+
+        Returns
+        -------
+        Sequence[str]
+            The problems `process_forge_blueprint` refuses before staging data.
+        """
+        # Deferred like `emitted_blueprint`: the engine pulls in the namelist models.
+        from cstar.applications.forge.engine import blueprint_problems
+
+        return blueprint_problems(blueprint)
+
+    @t.override
     def artifacts(self, blueprint: ForgeBlueprint) -> Sequence[ArtifactSpec]:
         """Declare the files a forge run leaves in its step root.
 

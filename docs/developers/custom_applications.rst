@@ -159,6 +159,12 @@ state, launches nothing and skips post-run. Only then does ``--pre-run`` on
 the CLI rejects the flag for a blueprint run, and a workplan pre-run skips the
 application's steps and reports why.
 
+An application whose runner refuses some schema-valid blueprints before it starts
+work overrides ``blueprint_problems`` to return one message per problem, so that
+``cstar blueprint check`` reports them too; the default returns none. Check only what
+the blueprint itself decides, without staging or generating data. Forge returns the
+settings problems its runner refuses before staging source data.
+
 Declaring Products
 ------------------
 

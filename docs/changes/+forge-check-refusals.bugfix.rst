@@ -1,0 +1,1 @@
+``cstar blueprint check`` runs Forge's settings checks on a forge blueprint, as ``cstar forge run`` does before it stages any data, so a misspelled ``model_settings`` key or a CDR window that ends before the run is reported instead of ``The blueprint ... is valid``. ``cstar forge run`` now prints those problems as an error instead of a Python traceback.
