@@ -105,8 +105,9 @@ writes them that way, and C-Star refuses a file that is not.
 
 ParallelIO does its reading and writing on every ``pio_stride``-th rank. When
 the namelist leaves ``pio_stride`` empty (``pio_stride = ,``), as namelists
-from the ``roms-marbl-0.15-default`` model do, C-Star sets it when the run
-starts to the number of ranks on one node, so each node has one I/O rank. A
+from the ``roms-marbl-0.15-default`` and ``roms-marbl-0.16-default`` models do,
+C-Star sets it when the run starts to the number of ranks on one node, so each
+node has one I/O rank. A
 number in the namelist is kept. To have C-Star choose for an existing
 blueprint, add this to it:
 
@@ -115,6 +116,17 @@ blueprint, add this to it:
    namelist_overrides:
      pio_settings:
        pio_stride: null
+
+With ucla-roms 0.16.0 and later, ROMS reads the grid and initial files directly
+at start-up instead of through ParallelIO, with the same results. This is the
+default (``pio_direct_read: 'on'``). On a file system that rejects or slows down
+these reads, turn it off:
+
+.. code-block:: yaml
+
+   namelist_overrides:
+     pio_settings:
+       pio_direct_read: 'off'
 
 Example
 -------

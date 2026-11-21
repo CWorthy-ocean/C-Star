@@ -1,0 +1,5 @@
+The default ModelSpec, the wizard default, the bundled domains and the integration pin move to ``roms-marbl-0.16-default`` (ucla-roms 0.16.0), which writes different output from an unchanged setup; ``roms-marbl-0.15-default`` stays for reproducing 0.15.0 answers.
+- 3-D results change: the predictor step splits the vertical velocity differently (ucla-roms #468), and lateral viscosity, including the sponge's, now acts on the depth-averaged flow, which changes ``ubar``, ``vbar`` and ``zeta`` most in the sponge layer (ucla-roms #473).
+- Each record of the ``_avg`` and ``_bgc_avg`` files averages the model states one step later than before, and these files and ``_bgc_dia_avg`` gain ``avg_begin_time`` and ``avg_end_time`` (ucla-roms #472).
+- ``w`` in history, averages and boundary output includes the water added by point sources, such as CDR releases with ``cdr_volume`` (ucla-roms #470).
+- Builds without ParallelIO write their per-rank output as uncompressed CDF-5 instead of netCDF-4, so those files are larger; joined files are still compressed netCDF-4 (ucla-roms #470).

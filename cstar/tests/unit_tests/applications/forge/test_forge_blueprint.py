@@ -6784,7 +6784,7 @@ def test_committed_example_validates():
     if not example.exists():
         pytest.skip("example file not present")
     cfg = ForgeBlueprint.from_yaml(example)
-    assert cfg.composition.model.name == "roms-marbl-0.15-default"
+    assert cfg.composition.model.name == "roms-marbl-0.16-default"
     assert cfg.composition.model.origin == "catalog"
 
 
