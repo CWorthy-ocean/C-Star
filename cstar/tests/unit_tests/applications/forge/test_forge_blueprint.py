@@ -476,6 +476,143 @@ def test_cpus_needed_is_grid_sized_forge_estimate():
     assert cfg.compute_needs.tasks == cfg.cpus_needed
 
 
+def _gpu_data(**partitioning: t.Any) -> dict[str, t.Any]:
+    """A valid ``ucla_roms_gpu`` ForgeBlueprint as a dict, from the tiny CPU build."""
+    data = _build().model_dump(mode="json")
+    data["emitted_application"] = "ucla_roms_gpu"
+    settings = data["model_settings"]
+    settings.setdefault("cppdefs", {})["use_pio"] = False
+    settings.setdefault("calc_pflx", {})["calc_pflx"] = False
+    data["domain"]["partitioning"].update(partitioning)
+    return data
+
+
+def test_emitted_application_names_the_registered_applications():
+    from cstar.applications.forge.blueprint import EmittedApplication
+    from cstar.applications.ucla_roms.models import APP_NAME as CPU_APP
+    from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP
+
+    assert set(t.get_args(EmittedApplication)) == {CPU_APP, GPU_APP}
+
+
+def test_gpu_forge_blueprint_round_trips_its_gpu_fields():
+    bp = ForgeBlueprint(
+        **_gpu_data(n_procs_x=2, n_procs_y=2, nodes=2, writers_per_node=2)
+    )
+
+    loaded = ForgeBlueprint.from_yaml_data(yaml.safe_load(bp.to_yaml_str()))
+
+    assert loaded.emitted_application == "ucla_roms_gpu"
+    assert loaded.domain.partitioning.nodes == 2
+    assert loaded.domain.partitioning.writers_per_node == 2
+    assert loaded.content_hash() == bp.content_hash()
+
+
+def test_cpu_forge_blueprint_yaml_and_hash_do_not_carry_the_gpu_fields():
+    bp = _build()
+
+    text = bp.to_yaml_str()
+
+    for key in ("emitted_application", "nodes:", "writers_per_node:"):
+        assert key not in text
+    assert (
+        bp.content_hash()
+        == ForgeBlueprint.from_yaml_data(yaml.safe_load(text)).content_hash()
+    )
+    hashed = bp._hashed_content()
+    assert "emitted_application" not in hashed
+    assert set(hashed["domain"]["partitioning"]) <= {"n_procs_x", "n_procs_y"}
+    # the generic serializer (``cstar blueprint ...`` writers) drops them as well
+    from cstar.orchestration.serialization import dump_yaml
+
+    generic = dump_yaml(bp)
+    for key in ("emitted_application", "nodes:", "writers_per_node:"):
+        assert key not in generic
+
+
+@pytest.mark.parametrize(
+    ("edit", "match"),
+    [
+        (
+            lambda d: d["domain"]["partitioning"].update(
+                n_procs_x=None, n_procs_y=None, auto_tiling=True, n_cores=4
+            ),
+            "needs n_procs_x and n_procs_y",
+        ),
+        (lambda d: d["model_settings"]["cppdefs"].update(use_pio=True), "ParallelIO"),
+        (
+            lambda d: d["domain"].update(grid_kwargs_parent={"nx": 1}),
+            "domain.grid_kwargs_parent",
+        ),
+        (
+            lambda d: d["domain"].update(grid_kwargs_child={"nx": 1}),
+            "domain.grid_kwargs_child",
+        ),
+        (lambda d: d["cdr"].update(mode="upscaled"), "cdr.mode: upscaled"),
+        (
+            lambda d: d["model_settings"]["calc_pflx"].update(calc_pflx=True),
+            "calc_pflx",
+        ),
+        (
+            lambda d: d["model_settings"].update(upscale_output={"do_upscale": True}),
+            "do_upscale",
+        ),
+        (
+            lambda d: d["domain"]["partitioning"].update(
+                n_procs_x=3, n_procs_y=1, nodes=2
+            ),
+            "roms-marbl-gpu",
+        ),
+    ],
+    ids=[
+        "auto-tiling",
+        "pio",
+        "parent-grid",
+        "child-grid",
+        "upscaled-cdr",
+        "calc-pflx",
+        "upscale-output",
+        "tiles-not-over-nodes",
+    ],
+)
+def test_gpu_forge_blueprint_refuses(edit, match):
+    data = _gpu_data()
+    edit(data)
+
+    with pytest.raises(ValidationError, match=match):
+        ForgeBlueprint(**data)
+
+
+def test_gpu_forge_blueprint_refusals_are_collected():
+    data = _gpu_data()
+    data["model_settings"]["cppdefs"]["use_pio"] = True
+    data["cdr"]["mode"] = "upscaled"
+
+    with pytest.raises(ValidationError) as err:
+        ForgeBlueprint(**data)
+
+    assert "ParallelIO" in str(err.value) and "nesting" in str(err.value)
+
+
+@pytest.mark.parametrize("field", ["nodes", "writers_per_node"])
+def test_cpu_forge_blueprint_refuses_gpu_tiling_fields(field):
+    data = _build().model_dump(mode="json")
+    data["domain"]["partitioning"][field] = 1
+
+    with pytest.raises(ValidationError, match=f"{field} is only for ucla_roms_gpu"):
+        ForgeBlueprint(**data)
+
+
+def test_tiling_is_none_for_cpu_and_defaults_for_gpu():
+    assert _build().tiling is None
+
+    tiling = ForgeBlueprint(**_gpu_data(n_procs_x=2, n_procs_y=2)).tiling
+
+    assert tiling is not None
+    assert tiling.nodes == 1
+    assert tiling.compute_needs.gpu_tasks == 4
+
+
 def test_forge_blueprint_import_stays_light():
     """Importing ``cstar.applications.forge.blueprint`` must stay cheap.
 
