@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from cstar.roms.input_dataset import recorded_reference_date
+from cstar.roms.source_coverage import RECORD_TIME_TOLERANCE
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -21,9 +22,6 @@ if TYPE_CHECKING:
 NON_FORCING_TIME_NAMES: Final = frozenset({"ocean_time", "abs_time"})
 """Time variables ucla-roms never uses as a forcing time: ``ocean_time`` is in
 seconds and ``abs_time`` in hours since 1900."""
-
-_SLACK: Final = timedelta(seconds=1)
-"""Absorbs float rounding of records that sit on a window edge."""
 
 
 @dataclass(frozen=True)
@@ -226,8 +224,12 @@ def files_in_window(
         highs: list[datetime | None] = []
         for name in sorted({n for i in indices for n in _spans(times, i)}):
             records = [r for i in indices for r in _spans(times, i).get(name, ())]
-            before = [r for r in records if r < start - _SLACK]
-            after = [r for r in records if end is not None and r > end + _SLACK]
+            before = [r for r in records if r < start - RECORD_TIME_TOLERANCE]
+            after = [
+                r
+                for r in records
+                if end is not None and r > end + RECORD_TIME_TOLERANCE
+            ]
             lows.append(max(before) if before else None)
             highs.append(min(after) if after else None)
         low = None if any(x is None for x in lows) else min(x for x in lows if x)
@@ -292,14 +294,14 @@ def uncovered_variables(
         for name in {n for t in held_by for n in t.spans}:
             named = [t.spans[name] for t in held_by if name in t.spans]
             if (
-                min(f for f, _ in named) <= start + _SLACK
-                and max(la for _, la in named) >= end - _SLACK
+                min(f for f, _ in named) <= start + RECORD_TIME_TOLERANCE
+                and max(la for _, la in named) >= end - RECORD_TIME_TOLERANCE
             ):
                 covered = True
                 break
         if not covered:
-            late = first > start + _SLACK
-            early = last < end - _SLACK
+            late = first > start + RECORD_TIME_TOLERANCE
+            early = last < end - RECORD_TIME_TOLERANCE
             groups.setdefault((tuple(indices), first, last, late, early), []).append(v)
 
     return [
