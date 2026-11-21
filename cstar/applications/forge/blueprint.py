@@ -579,6 +579,13 @@ class UserProvidedFile(_Section):
 # theta_b=..., hc=..., N=...)``) -- must be passed all-or-none.
 _GRID_FILE_VERT_KEYS = ("theta_s", "theta_b", "hc", "N")
 
+# rt.Grid keywords the executor passes itself, so a copy in a grid_kwargs dict (a
+# DomainSpec or blueprint saved with ``verbose: true``) is ignored rather than
+# passed twice: roms-tools' verbosity is a runtime diagnostic, set for every
+# roms-tools call by the executor's ``verbose`` flag (``cstar forge run
+# --verbose``), not part of the grid.
+RUNTIME_GRID_KWARGS: frozenset[str] = frozenset({"verbose"})
+
 
 def vert_kwargs_from_grid_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Extract the ``theta_s``/``theta_b``/``hc``/``N`` subset of ``grid_kwargs``
@@ -777,7 +784,7 @@ class Domain(_Section):
         # forwards only theta_s/theta_b/hc/N to rt.Grid(filename=...)), so a
         # generation-only key like mask_shapefile or hmin alongside grid_file is
         # a config that would never take effect -- reject it loudly instead.
-        extras = set(self.grid_kwargs) - set(_GRID_FILE_VERT_KEYS)
+        extras = set(self.grid_kwargs) - set(_GRID_FILE_VERT_KEYS) - RUNTIME_GRID_KWARGS
         if extras:
             raise ValueError(
                 "domain.grid_file is set (a user-supplied grid) but grid_kwargs "
