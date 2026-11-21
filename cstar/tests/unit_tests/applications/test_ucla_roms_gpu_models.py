@@ -284,6 +284,27 @@ class TestNamelistOverrides:
         with pytest.raises(ValidationError, match="wrt_frc"):
             UclaRomsGpuBlueprint.model_validate(data)
 
+    def test_a_setting_the_gpu_model_ignores_is_rejected(
+        self, template_dict: dict[str, t.Any]
+    ) -> None:
+        data = _with_overrides(
+            template_dict, {"bgc_settings": {"xco2air_default": 400.0}}
+        )
+
+        with pytest.raises(ValidationError, match="xco2air_default"):
+            UclaRomsGpuBlueprint.model_validate(data)
+
+    def test_tiling_compute_needs_is_the_blueprints(
+        self, template_dict: dict[str, t.Any]
+    ) -> None:
+        bp = UclaRomsGpuBlueprint.model_validate(template_dict)
+
+        assert bp.compute_needs == bp.tiling.compute_needs
+        assert (
+            bp.tiling.compute_needs
+            == TilingParameterSet(n_procs_x=4, n_procs_y=2, nodes=2).compute_needs
+        )
+
     def test_the_same_switch_off_is_accepted(
         self, template_dict: dict[str, t.Any]
     ) -> None:

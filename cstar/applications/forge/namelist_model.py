@@ -80,6 +80,7 @@ from cstar.roms.namelist import (
     VerticalMixingSettings,
     format_roms_version,
     is_commit_hash,
+    namelist_release_for_gpu_ref,
     namelist_schema_for_ref,
     roms_version_from_ref,
 )
@@ -3260,6 +3261,52 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
             f"to _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA) or pin an older "
             f"ucla-roms release."
         ) from None
+
+
+def namelist_ref_for_application(application: str, roms_ref: str | None) -> str | None:
+    """The ucla-roms ref that keys Forge's namelist tier and version gates for a run
+    of `application` pinned to `roms_ref`.
+
+    Every place Forge picks a run-time settings tier, prunes version-gated
+    sections or gates a check on a ucla-roms release goes through this, so a GPU
+    run is checked and written in the vocabulary its model reads.
+
+    Parameters
+    ----------
+    application : str
+        The application the emitted blueprint runs with (``ucla_roms`` or
+        ``ucla_roms_gpu``).
+    roms_ref : str or None
+        The ref ``code.roms`` pins. Resolve a commit hash to its release tag
+        first (:func:`cstar.roms.namelist.release_ref_for_remote`) where the
+        repository can be reached.
+
+    Returns
+    -------
+    str or None
+        For ``ucla_roms``, `roms_ref` unchanged. For ``ucla_roms_gpu``, the
+        ucla-roms release whose namelist vocabulary the roms-marbl-gpu ref reads
+        (:func:`cstar.roms.namelist.namelist_release_for_gpu_ref`, ``"0.11.0"``
+        for v0.1.3-beta).
+
+    Warns
+    -----
+    UserWarning
+        For ``ucla_roms_gpu``, as :func:`cstar.roms.namelist.gpu_namelist_schema_for_ref`
+        (a ref that is not a release tag, or one newer than C-Star knows).
+
+    Raises
+    ------
+    ValueError
+        For ``ucla_roms_gpu``, a roms-marbl-gpu release older than C-Star supports.
+    """
+    # Deferred: the GPU application package imports the ucla_roms models, which
+    # this module's light importers do not need.
+    from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP_NAME
+
+    if application == GPU_APP_NAME:
+        return namelist_release_for_gpu_ref(roms_ref)
+    return roms_ref
 
 
 # Canonical forcing order -> frcfiles (matches write_roms_namelist).
