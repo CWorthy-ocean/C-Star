@@ -1,4 +1,3 @@
-import asyncio
 import os
 import typing as t
 from dataclasses import dataclass, replace
@@ -7,7 +6,7 @@ from pathlib import Path
 import typer
 
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
-from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
@@ -24,7 +23,11 @@ from cstar.cli.run.attach import (
     write_attached_record,
 )
 from cstar.cli.run.check import format_findings, summarize
-from cstar.cli.run.shared import resolve_by_handle
+from cstar.cli.run.shared import (
+    refresh_tracked_manifest,
+    resolve_by_handle,
+    tracked_record_of,
+)
 from cstar.cli.workplan.gather import collect_links, relink, report_conflicts
 from cstar.cli.workplan.shared import HELP_RUN_HANDLE, KEY_RUN, list_runs
 from cstar.entrypoint.utils import (
@@ -41,11 +44,6 @@ from cstar.entrypoint.utils import (
     ARG_VERIFY_HELP,
 )
 from cstar.execution.file_system import DirectoryManager
-from cstar.orchestration.dag_runner import (
-    get_launcher,
-    load_run_state,
-    refresh_run_manifest,
-)
 from cstar.orchestration.index import RunLocation, read_run_location, run_uri
 from cstar.orchestration.manifest import (
     RunManifest,
@@ -77,7 +75,6 @@ from cstar.orchestration.run_check import (
 )
 from cstar.orchestration.tracking import (
     Access,
-    TrackingRepository,
     WorkplanRun,
     require_writable,
 )
@@ -220,13 +217,8 @@ def _directory_source(target: str) -> PromoteSource:
         Raised when the path is not a directory holding a run manifest.
     """
     root, location = _directory_location(target)
-
-    # the directory of a run tracked here is still that run: a move must follow it
-    tracked = TrackingRepository().get_workplan_run_sync(location.run_id)
-    if tracked is not None and (
-        tracked.uuid != location.uuid or tracked.output_path.resolve() != root.resolve()
-    ):
-        tracked = None
+    # a move must follow the record of a run tracked here
+    tracked = tracked_record_of(root, location)
     return PromoteSource(root, tracked, named_by_path=True, indexed=False)
 
 
@@ -381,15 +373,12 @@ def _read_run(source: PromoteSource, workplan: LiveWorkplan | None) -> RunManife
         Raised when the run's manifest cannot be read.
     """
     root = source.root
-    refreshed = False
-    if source.record is not None and source.record.live and workplan is not None:
-        try:
-            launcher = get_launcher(workplan, force_local=workplan.pre_run)
-            status = asyncio.run(load_run_state(source.record.run_id, launcher))
-            refresh_run_manifest(root, source.record.run_id, status)
-            refreshed = True
-        except (CstarError, CstarExpectationFailed, OSError) as ex:
-            typer.echo(f"Warning: the manifest was not refreshed: {ex}", err=True)
+    refreshed = (
+        source.record is not None
+        and source.record.live
+        and workplan is not None
+        and refresh_tracked_manifest(root, source.record.run_id, workplan) is not None
+    )
 
     manifest = _read_manifest(root)
     if not refreshed:

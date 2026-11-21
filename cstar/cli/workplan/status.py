@@ -4,7 +4,8 @@ import typing as t
 import typer
 from rich.console import Console
 
-from cstar.base.exceptions import CstarError
+from cstar.base.adapter import CstarAdaptationError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
@@ -74,8 +75,11 @@ def status(
     try:
         workplan = LiveWorkplan.load(wp_path, tolerant=True)
 
-        # a pre-run's steps are local processes, whatever the system scheduler
-        launcher = get_launcher(workplan, force_local=workplan.pre_run)
+        # a pre-run's steps are local processes, whatever the system scheduler;
+        # statuses are only read, so nothing a launch needs is asked for
+        launcher = get_launcher(
+            workplan, force_local=workplan.pre_run, for_launch=False
+        )
         external = asyncio.run(load_external_runs(workplan, launcher))
         # the upstream run's record may be gone: show this run regardless
         for token, message in external.errors().items():
@@ -112,6 +116,11 @@ def status(
     except FileNotFoundError as ex:  # blueprint not found.
         log.debug("A file of the run was not found", exc_info=True)
         typer.echo(f"Unable to show the status of run {run.run_id!r}: {ex}", err=True)
+    except (CstarError, CstarExpectationFailed, CstarAdaptationError) as ex:
+        # such as a workplan naming a scheduler this machine lacks
+        log.debug("The status of the run could not be read", exc_info=True)
+        typer.echo(f"Unable to show the status of run {run.run_id!r}: {ex}", err=True)
+        raise typer.Exit(1) from ex
 
 
 if __name__ == "__main__":
