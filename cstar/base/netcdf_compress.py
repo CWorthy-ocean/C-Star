@@ -332,7 +332,8 @@ def verify_compressed(src: Path, dst: Path, encoding: Encoding) -> list[str]:
     last record of each variable (`VERIFIED_RECORDS`; every value of a variable
     without a record dimension), exact variables must be bit-identical and
     reduced variables within float32 rounding, or within the quantization
-    tolerance of `significant_digits`.
+    tolerance of `significant_digits`. A value below float32's smallest normal
+    number may become 0 or a subnormal: it passes within that absolute amount.
 
     Parameters
     ----------
@@ -354,6 +355,9 @@ def verify_compressed(src: Path, dst: Path, encoding: Encoding) -> list[str]:
     problems: list[str] = []
     digits = encoding.significant_digits
     rtol = 10.0 ** (1 - digits) if digits else 1e-6
+    # below float32's smallest normal number the cast keeps only an absolute
+    # precision: tracer tails of 1e-100 become 0 or a subnormal
+    atol = float(np.finfo(np.float32).tiny)
     with netCDF4.Dataset(src) as s, netCDF4.Dataset(dst) as d:
         s.set_auto_maskandscale(False)
         d.set_auto_maskandscale(False)
@@ -384,7 +388,7 @@ def verify_compressed(src: Path, dst: Path, encoding: Encoding) -> list[str]:
                 if var.dtype.kind != "f" or name in keep or out.dtype == var.dtype:
                     ok = np.array_equal(a, b, equal_nan=var.dtype.kind == "f")
                 else:
-                    ok = bool(np.allclose(b, a, rtol=rtol, atol=0, equal_nan=True))
+                    ok = bool(np.allclose(b, a, rtol=rtol, atol=atol, equal_nan=True))
                 if not ok:
                     problems.append(f"{name}: values differ at record {rec}")
                     break
