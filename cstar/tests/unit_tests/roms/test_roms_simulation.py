@@ -65,6 +65,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
+    RomsNamelistV0_15_0,
     RomsNamelistV0_16_0,
     namelist_schema_for_ref,
 )

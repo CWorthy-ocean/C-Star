@@ -777,7 +777,7 @@ fields:
   settings.pio_settings.pio_direct_read:
     label: Read grid and initial files directly
     symbol: pio_direct_read
-    hint: "On: read with O_DIRECT, same results. Off: through PIO, for file systems that reject O_DIRECT. Verify: both ways, reporting differences."
+    hint: "With ParallelIO. On: read the grid and initial files directly at start-up, with the same results. Off: read them through ParallelIO, for file systems that reject or slow down direct reads. Verify: read both ways and report any differences."
   settings.blk_frc.interp_frc:
     label: Interpolate from coarser grid
     symbol: interp_frc

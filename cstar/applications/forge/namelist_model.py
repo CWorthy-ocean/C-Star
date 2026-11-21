@@ -708,8 +708,9 @@ class PioSettingsCfg(_PioSettingsCfgCommon):
             raise ValueError(
                 f"pio_settings.pio_direct_read={data['pio_direct_read']!r} requires "
                 f"ucla-roms >= {version}; the pinned ucla-roms release reads the "
-                "grid and initial files through PIO only. Use 'on' or 'off' (both "
-                "read through PIO there), or pin a newer release."
+                "grid and initial files through PIO only. Use "
+                f"{PIO_DIRECT_READ_ON!r} or {PIO_DIRECT_READ_OFF!r} (both read "
+                "through PIO there), or pin a newer release."
             )
         return data
 
