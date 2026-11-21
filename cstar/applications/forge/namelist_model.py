@@ -87,10 +87,22 @@ from cstar.roms.precheck import (
     check_averages_end_on_marbl_step as _check_averages_end_on_marbl_step,
 )
 from cstar.roms.precheck import (
+    check_marbl_step_ceiling as _check_marbl_step_ceiling,
+)
+from cstar.roms.precheck import (
+    check_output_periods_divisible_by_dt as _check_output_periods_divisible_by_dt,
+)
+from cstar.roms.precheck import (
     check_output_streams_divide_rst as _check_output_streams_divide_rst,
 )
 from cstar.roms.precheck import (
+    check_output_written_in_window as _check_output_written_in_window,
+)
+from cstar.roms.precheck import (
     check_restart_period_divisible_by_dt as _check_restart_period_divisible_by_dt,
+)
+from cstar.roms.precheck import (
+    output_period_drift_warnings as _output_period_drift_warnings,
 )
 
 if TYPE_CHECKING:
@@ -888,6 +900,54 @@ def check_marbl_step_averages(
         canonical,
         cppdefs_for_precheck(settings.get("cppdefs"), settings.get("upscale_output")),
     )
+
+
+def check_output_cadence(
+    settings: Mapping[str, Any],
+    *,
+    settings_cls: type[_RunTimeSettingsCommon],
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> list[str]:
+    """Check forge's ``settings`` against the output-period and MARBL-step rules of
+    :mod:`cstar.roms.precheck`, returning the warnings for the caller to log.
+
+    Raises ``NamelistConsistencyError`` when an enabled history, average or BGC
+    period is not a whole multiple of ``dt`` (Rule H) or the MARBL step would
+    exceed 10,800 s (Rule I); ucla-roms stops at start-up on both. Warns for every
+    other stream whose period is not a multiple of ``dt``, naming the period ROMS
+    will use. Given the window, also warns when no stream writes in it (Rule K):
+    a warning, not an error, because the window is Forge's input window and a
+    ``ucla_roms`` step may run part of it, as the ``ucla_roms`` pre-run check,
+    which refuses, knows. Forge-vocabulary shim over those functions: the output
+    sections are translated through ``settings_cls``'s Cfg classes
+    (:func:`canonical_output_sections_for_precheck`, which raises pydantic's
+    ``ValidationError`` for a malformed section); ``dt`` and ``marbl_timestep``
+    already are the real Fortran keys.
+    """
+    dt = (settings.get("time_stepping") or {}).get("dt")
+    canonical = canonical_output_sections_for_precheck(dict(settings), settings_cls)
+    canonical["marbl_biogeochemistry_settings"] = {
+        "marbl_timestep": (settings.get("marbl_bgc") or {}).get("marbl_timestep")
+    }
+    canonical["time_stepping"] = {"dt": dt}
+    cppdefs = cppdefs_for_precheck(
+        settings.get("cppdefs"), settings.get("upscale_output")
+    )
+    schema = _NAMELIST_SCHEMA_BY_RUN_TIME_SETTINGS[settings_cls]
+    _check_output_periods_divisible_by_dt(canonical, cppdefs, schema=schema)
+    _check_marbl_step_ceiling(canonical, cppdefs)
+    messages = _output_period_drift_warnings(canonical, cppdefs, schema=schema)
+    if start_date is not None and end_date is not None and dt:
+        seconds = (end_date - start_date).total_seconds()
+        canonical["time_stepping"]["ntimes"] = int(seconds // dt)
+        try:
+            _check_output_written_in_window(
+                canonical, cppdefs, start_date=start_date, schema=schema
+            )
+        except NamelistConsistencyError as exc:
+            messages.append(str(exc))
+    return messages
 
 
 class _TsOutputCfgCommon(_SettingsSection):
@@ -3493,6 +3553,13 @@ def validate_run_time_sections(
             errors.append(str(exc))
         except ValidationError:
             pass  # a malformed section is already reported by the loop above
+    # And the output periods and MARBL step vs dt; its warnings are the resolver's.
+    try:
+        check_output_cadence(settings, settings_cls=settings_cls)
+    except NamelistConsistencyError as exc:
+        errors.append(str(exc))
+    except ValidationError:
+        pass  # a malformed section is already reported by the loop above
     errors += settings_support_problems(settings, settings_cls)
     return errors
 

@@ -68,6 +68,7 @@ from cstar.roms.precheck import (
     MAX_FORCING_FILES_BEFORE_0_13_0,
     MAX_NAMELIST_FILE_NAME_LENGTH,
     MAX_OUTPUT_ROOT_NAME_LENGTH,
+    NamelistConsistencyError,
 )
 from cstar.roms.simulation import IOLayout, ROMSSimulation, _join_workers
 from cstar.system.manager import (
@@ -101,6 +102,10 @@ EXAMPLE_NAMELIST_V0_12_0 = (
 EXAMPLE_NAMELIST_V0_13_0 = (
     Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 )
+EXAMPLE_NAMELIST_V0_15_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_15_0.nml"
+)
+_MARBL_CPPDEFS = {"marbl": True, "marbl_diags": True, "cdr_forcing": True}
 _REAL_NAMELIST_READ = RomsNamelist.read
 _REAL_NAMELIST_READ_V0_5_0 = RomsNamelistV0_5_0.read
 
@@ -3914,6 +3919,159 @@ class TestProcessingAndExecution:
             capture_output=True,
             text=True,
             shell=True,
+        )
+
+
+class TestOutputCadenceChecks:
+    """Output periods and the MARBL step against `dt`, and a run that writes
+    nothing (Rules H, I and K of `cstar.roms.precheck`): refused in `setup()` once
+    the runtime code is staged, before the inputs are staged and before `build()`,
+    and before every launch by `_check_runtime_settings`.
+    The stub runs 2025-01-01 to 2025-12-31; the 0.15.0 fixture has `dt` 2160 s
+    and daily restarts.
+    """
+
+    @staticmethod
+    def _namelist(**groups):
+        nml = RomsNamelistV0_15_0.read(EXAMPLE_NAMELIST_V0_15_0)
+        for group, values in groups.items():
+            for key, value in values.items():
+                setattr(getattr(nml, group), key, value)
+        return nml
+
+    @mock.patch.object(ROMSSimulation, "build")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    @pytest.mark.parametrize(
+        ("groups", "match"),
+        [
+            (
+                {
+                    "time_stepping": {"dt": 960.0},
+                    "basic_output_settings": {
+                        "wrt_file_his": True,
+                        "output_period_his": 3600.0,
+                    },
+                },
+                r"output_period_his \(3600\.0 s\)",
+            ),
+            (
+                {"basic_output_settings": {"output_period_rst": 2160.0 * 16000}},
+                "No output stream writes",
+            ),
+        ],
+        ids=["his-off-dt", "writes-nothing"],
+    )
+    def test_setup_refuses_before_staging_inputs(
+        self,
+        mock_externalcodebase_setup,
+        mock_additionalcode_get,
+        mock_inputdataset_get,
+        mock_build,
+        groups,
+        match,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        sim = stub_romssimulation
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        nml = self._namelist(**groups)
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_read_raw_namelist",
+                return_value=(nml, RomsNamelistV0_15_0, "0.15.0"),
+            ),
+            pytest.raises(NamelistConsistencyError, match=match),
+        ):
+            sim.setup()
+        mock_inputdataset_get.assert_not_called()
+        mock_build.assert_not_called()
+
+    @mock.patch.object(ROMSSimulation, "build")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_passes_a_conforming_namelist_without_warnings(
+        self,
+        mock_externalcodebase_setup,
+        mock_additionalcode_get,
+        mock_inputdataset_get,
+        mock_build,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+        caplog,
+    ):
+        sim = stub_romssimulation
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        nml = self._namelist(cdr_lite_output_settings={"do_cdr_lite_output": True})
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_read_raw_namelist",
+                return_value=(nml, RomsNamelistV0_15_0, "0.15.0"),
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            sim.setup()
+        # the stub has inputs to stage, which the refusals above never reach
+        mock_inputdataset_get.assert_called()
+        # the drift warning is left to the launch-time check
+        assert not any("cdr_lite" in r.getMessage() for r in caplog.records)
+
+    def test_dt_28800_with_marbl_is_refused(self, stub_romssimulation):
+        sim = stub_romssimulation
+        nml = self._namelist(
+            time_stepping={"dt": 28800.0, "ntimes": 1000},
+            basic_output_settings={"output_period_rst": 86400.0},
+        )
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_active_cppdefs_for_precheck",
+                return_value=_MARBL_CPPDEFS,
+            ),
+            pytest.raises(NamelistConsistencyError, match="MARBL step would be 28800"),
+        ):
+            sim._check_runtime_settings(nml)
+
+    def test_hourly_cdr_lite_with_dt_2160_warns(self, stub_romssimulation, caplog):
+        sim = stub_romssimulation
+        nml = self._namelist(
+            time_stepping={"ntimes": 1000},
+            cdr_lite_output_settings={"do_cdr_lite_output": True},
+        )
+        with caplog.at_level(logging.WARNING):
+            sim._check_runtime_settings(nml)
+        assert any(
+            "output_period_cdr_lite" in r.getMessage()
+            and "every 4320 s" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_writing_nothing_is_refused(self, stub_romssimulation):
+        sim = stub_romssimulation
+        nml = self._namelist(time_stepping={"ntimes": 30})  # 30 steps < one day
+        with pytest.raises(NamelistConsistencyError) as exc_info:
+            sim._check_runtime_settings(nml)
+        assert exc_info.value.rule == "output_written_in_window"
+
+    def test_writing_nothing_with_ntimes_overridden_warns(
+        self, stub_romssimulation, caplog
+    ):
+        """A run cut short on purpose (to see ROMS start and step) may want no
+        output.
+        """
+        sim = stub_romssimulation
+        sim.namelist_overrides = {"time_stepping": {"ntimes": 30}}
+        nml = self._namelist(time_stepping={"ntimes": 30})
+        with caplog.at_level(logging.WARNING):
+            sim._check_runtime_settings(nml)
+        assert any(
+            r.getMessage().startswith("No output stream writes")
+            and "ntimes is set by an override" in r.getMessage()
+            for r in caplog.records
         )
 
 
