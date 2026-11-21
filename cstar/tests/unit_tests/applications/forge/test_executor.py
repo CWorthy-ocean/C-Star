@@ -1241,6 +1241,110 @@ class TestGridBuildErrorLabels:
         assert "Building the" not in str(ei.value)  # not re-labelled
 
 
+class TestGridKwargsVerbose:
+    """A ``verbose`` key in a grid_kwargs dict (the bundled hvalfjordur-0 and
+    ccs-12km DomainSpecs carried ``verbose: true``) once reached
+    ``rt.Grid(**grid_kwargs, verbose=self.verbose)`` as a second ``verbose`` and
+    failed the executor build with a TypeError. The executor's own flag wins.
+    """
+
+    _PARENT: ClassVar[dict] = {
+        "nx": 20,
+        "ny": 20,
+        "size_x": 2000,
+        "size_y": 2000,
+        "center_lon": 0,
+        "center_lat": 55,
+        "rot": 0,
+        "N": 3,
+        "theta_s": 5.0,
+        "theta_b": 2.0,
+        "hc": 250.0,
+    }
+    _CHILD: ClassVar[dict] = {
+        "nx": 2,
+        "ny": 2,
+        "size_x": 100,
+        "size_y": 100,
+        "center_lon": 0,
+        "center_lat": 55,
+        "rot": 10,
+        "N": 4,
+        "theta_s": 6.0,
+        "theta_b": 3.0,
+        "hc": 200.0,
+    }
+
+    @pytest.mark.parametrize(
+        ("file_verbose", "flag"), [(True, False), (False, True)], ids=["on", "off"]
+    )
+    def test_domain_grid_kwargs_verbose_yields_to_the_flag(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path, file_verbose, flag
+    ):
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_path=_MODEL_PATH,
+            grid_name=args["grid_name"],
+            grid_kwargs={**args["grid_kwargs"], "verbose": file_verbose},
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        ForgeExecutor.from_forge_blueprint(cfg, host=host, verbose=flag)
+
+        (call,) = mock_grid.call_args_list
+        assert call.kwargs["verbose"] is flag
+        assert call.kwargs["nx"] == args["grid_kwargs"]["nx"]
+
+    def test_nested_grid_kwargs_verbose_yields_to_the_flag(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """Parent, this grid and child each carry ``verbose: true``; all three
+        rt.Grid calls get the executor's ``verbose=False``.
+        """
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_path=_MODEL_PATH,
+            grid_name=args["grid_name"],
+            grid_kwargs={**args["grid_kwargs"], "verbose": True},
+            grid_kwargs_parent={**self._PARENT, "verbose": True},
+            grid_kwargs_child={**self._CHILD, "verbose": True},
+            metadata_child={"period": 3600.0},
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        with patch(
+            "cstar.applications.forge.executor.rt.align_grids",
+            return_value=_create_grid_mock(),
+        ):
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+        built_nx = [c.kwargs["nx"] for c in mock_grid.call_args_list]
+        assert built_nx == [
+            self._PARENT["nx"],
+            self._CHILD["nx"],
+            args["grid_kwargs"]["nx"],
+        ]
+        assert [c.kwargs["verbose"] for c in mock_grid.call_args_list] == [False] * 3
+
+
 class TestForgeExecutorGetDs:
     """Tests for the get_ds method."""
 

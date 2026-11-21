@@ -13,7 +13,6 @@ grid_kwargs:
   center_lat: 63
   rot: -20
   N: 100
-  verbose: true
 open_boundaries:
   south: true
   east: true

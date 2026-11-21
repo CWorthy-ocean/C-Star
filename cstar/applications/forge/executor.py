@@ -32,6 +32,7 @@ import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import input_generator, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    RUNTIME_GRID_KWARGS,
     CarbonateSensitivitySpec,
     Forcing,
     OpenBoundaries,
@@ -532,9 +533,20 @@ class ForgeExecutor(BaseModel):
         than the grid the user previewed. Without the label the user is left
         checking the wrong grid against the wrong dataset's coverage.
         """
+        ignored = sorted(RUNTIME_GRID_KWARGS & grid_kwargs.keys())
+        if ignored:
+            log.debug(
+                "Grid(%s): ignoring %s in grid_kwargs; the executor's verbose=%s wins",
+                label,
+                ", ".join(ignored),
+                self.verbose,
+            )
+        build_kwargs = {
+            k: v for k, v in grid_kwargs.items() if k not in RUNTIME_GRID_KWARGS
+        }
         with mem_log(f"Grid({label})", enabled=self.verbose):
             try:
-                return rt.Grid(**grid_kwargs, verbose=self.verbose)
+                return rt.Grid(**build_kwargs, verbose=self.verbose)
             except ValueError as exc:
                 if _TOPO_NAN_MARKER not in str(exc):
                     raise
