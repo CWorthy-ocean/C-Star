@@ -773,6 +773,33 @@ class TestRuntimeSettings:
         # a key of the later tiers, which the GPU model rejects
         assert "v_sponge_trc" not in written.read_text()
 
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            # ucla-roms stops on hourly history at dt 960 s (Rule H)
+            {
+                "time_stepping": {"dt": 960.0},
+                "basic_output_settings": {
+                    "wrt_file_his": True,
+                    "output_period_his": 3600.0,
+                    "nrpf_his": 24,
+                },
+            },
+            # weekly restarts, nothing else on: a 1-day run writes nothing (Rule K)
+            {"basic_output_settings": {"output_period_rst": 604800.0}},
+        ],
+        ids=["period-off-dt", "writes-nothing"],
+    )
+    def test_ucla_roms_output_cadence_rules_are_left_out(
+        self, make_simulation: SimulationFactory, overrides: dict[str, Any]
+    ) -> None:
+        """roms-marbl-gpu has its own output writer, so the rules that mirror
+        ucla-roms' (H, I and K) do not refuse a GPU run (`_check_output_cadence`).
+        """
+        sim = make_simulation(namelist_overrides=overrides)
+
+        _ = sim.roms_runtime_settings
+
     @pytest.mark.filterwarnings("ignore:The GPU model does not honour")
     def test_a_stop_switch_of_the_gpu_model_is_refused(
         self, make_simulation: SimulationFactory

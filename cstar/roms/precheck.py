@@ -75,6 +75,27 @@ Rule E). A namelist that gives more values stops the GPU model while it reads th
 group. Same scope and call points as Rule F; for a GPU run it is the tighter of
 the two forcing-file limits.
 
+Rule H -- :func:`check_output_periods_divisible_by_dt` mirrors ucla-roms' start-up
+checks that the history and average periods (``init_avg_arrays`` in
+``src/basic_output.F90``) and the four BGC periods (``wrt_bgc_tracers`` and
+``wrt_bgc_diags`` in ``src/bgc_io.F90``) are whole multiples of ``dt``; ROMS
+stops otherwise. Every other periodic stream accepts any period and writes every
+``ceil(period / dt)`` steps instead: :func:`output_period_drift_warnings` names
+the period each of those streams really uses. Ungated by schema version (the
+checks are in every release C-Star supports).
+
+Rule I -- :func:`check_marbl_step_ceiling` mirrors
+``marbldrv_configure_tracers`` (``src/marbl_driver.F90``): ROMS stops when the
+MARBL step it uses (``marbl_timestep`` rounded down to a multiple of ``dt``, at
+least one ``dt``) exceeds :data:`MAX_MARBL_TIMESTEP`. Ungated by schema version.
+
+Rule K -- :func:`check_output_written_in_window`: ucla-roms writes a stream only
+when its period counter elapses, at a month change (monthly restarts and monthly
+averages), at start-up (history, floats, the BGC history streams and the CDR
+gas-exchange bracket record) or, for the CDR gas-exchange and upscaling streams,
+at the end of the run. A run in which none of these happens writes nothing, and
+its compute is lost. Ungated by schema version.
+
 All are plain functions, not Pydantic ``model_validator``s -- they must not
 run on every model construction (old blueprints/tests would break), and Rules
 A and C need an explicit, caller-supplied set of active cppdefs to know which
@@ -96,9 +117,11 @@ forge-shaped dict must first convert it (see
 
 from __future__ import annotations
 
+import math
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from cstar.roms.namelist import (
@@ -112,6 +135,10 @@ from cstar.roms.namelist import (
 
 AVERAGES_END_ON_MARBL_STEP_MIN_ROMS: tuple[int, int, int] = UCLA_ROMS_0_13_0
 """ucla-roms release from which ROMS checks Rule C at startup (PR #400)."""
+
+MAX_MARBL_TIMESTEP: float = 10800.0
+"""Longest MARBL step ucla-roms accepts, in seconds (Rule I). Mirrors the limit in
+``marbldrv_configure_tracers`` (``src/marbl_driver.F90``)."""
 
 MAX_NAMELIST_FILE_NAME_LENGTH: int = 250
 """Longest file name C-Star writes into a namelist key ROMS reads into a
@@ -162,12 +189,14 @@ class NamelistConsistencyError(ValueError):
     field it actually exposes, without this module knowing that vocabulary
     exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
     ``"restart_period_divisible_by_dt"``, ``"averages_end_on_marbl_step"``,
-    ``"file_name_lengths"``, ``"forcing_file_count"``, ``"gpu_features"`` or
-    ``"gpu_array_sizes"``). ``"file_name_lengths"`` reports every offending key in
-    one error, so its ``section`` may join several group names with ``", "`` and
-    its ``keys`` may span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"``
-    also report every offender in one error, but their ``section`` and ``keys``
-    name the first of them only.
+    ``"file_name_lengths"``, ``"forcing_file_count"``, ``"gpu_features"``,
+    ``"gpu_array_sizes"``, ``"output_periods_divisible_by_dt"``,
+    ``"marbl_step_ceiling"`` or ``"output_written_in_window"``).
+    ``"file_name_lengths"`` reports every offending key in one error, so its
+    ``section`` may join several group names with ``", "`` and its ``keys`` may
+    span those groups; ``"gpu_features"`` and ``"gpu_array_sizes"`` also report
+    every offender in one error, but their ``section`` and ``keys`` name the
+    first of them only.
     """
 
     def __init__(
@@ -292,6 +321,24 @@ class _StreamCheck:
         For a row whose gate changed between releases: the namelist schema
         must subclass ``since`` and must not subclass ``before``. ``None``
         leaves that side open.
+    monthly_field
+        Real Fortran namelist key (on ``section``) that switches the stream to
+        calendar-month averages, which ignore ``period_field`` (Rules H and K).
+    writes_outside_period
+        True if ROMS also writes the stream at start-up or at the end of the run,
+        whatever its period (Rule K): history, floats and the BGC history streams
+        write the initial state; the CDR gas-exchange stream writes a bracket
+        record at both ends; upscaling writes its last, partial window.
+    period_divides_dt
+        True if ROMS stops at start-up when the enabled stream's period is not a
+        whole multiple of ``dt`` (Rule H): history and averages
+        (``init_avg_arrays``) and the four BGC streams (``wrt_bgc_tracers``,
+        ``wrt_bgc_diags``). Every other stream writes every ``ceil(period / dt)``
+        steps instead (:func:`output_period_drift_warnings`).
+    divides_dt_cppdefs
+        Cppdef name(s) the Rule H check needs on top of ``cppdef_guard`` to be
+        compiled: ``wrt_bgc_diags`` checks the two BGC diagnostic periods only in
+        a ``MARBL_DIAGS`` (or ``BEC2_DIAG``, not mirrored) build.
     """
 
     label: str
@@ -302,6 +349,18 @@ class _StreamCheck:
     cppdef_guard: tuple[str, ...] = ()
     since: type[RomsNamelistBase] | None = None
     before: type[RomsNamelistBase] | None = None
+    monthly_field: str | None = None
+    writes_outside_period: bool = False
+    period_divides_dt: bool = False
+    divides_dt_cppdefs: tuple[str, ...] = ()
+
+    def refuses_period_off_dt(self, cppdefs: Mapping[str, Any]) -> bool:
+        """True if ROMS, built with ``cppdefs``, stops at start-up when this
+        enabled stream's period is not a whole multiple of ``dt`` (Rule H).
+        """
+        return self.period_divides_dt and _cppdef_guard_satisfied(
+            self.divides_dt_cppdefs, cppdefs
+        )
 
     def applies_to(self, schema: type[RomsNamelistBase] | None) -> bool:
         """True if this row is in ``schema``'s call list; ``None`` is the newest."""
@@ -337,6 +396,8 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("wrt_file_his",),
         "output_period_his",
         "nrpf_his",
+        writes_outside_period=True,
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "avg",
@@ -344,6 +405,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("wrt_file_avg",),
         "output_period_avg",
         "nrpf_avg",
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "frc", "frc_output_settings", ("wrt_frc",), "output_period_frc", "nrpf_frc"
@@ -385,6 +447,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("floats",),
         "output_period_particles",
         "nrpf_particles",
+        writes_outside_period=True,
     ),
     _StreamCheck(
         "sponge",
@@ -408,6 +471,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_cdr",
         "nrpf_cdr",
         cppdef_guard=("marbl", "marbl_diags", "cdr_forcing"),
+        monthly_field="cdr_monthly_averages",
     ),
     # ucla-roms 0.7.0 - 0.8.x (`&CDR_TRACER_OUTPUT_SETTINGS`)
     _StreamCheck(
@@ -417,6 +481,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_cdr_trc",
         "nrpf_cdr_trc",
         cppdef_guard=("marbl", "cdr_forcing"),
+        monthly_field="cdr_trc_monthly_averages",
     ),
     # ucla-roms >= 0.9.0 (`&CDR_LITE_OUTPUT_SETTINGS`, compiled unconditionally)
     _StreamCheck(
@@ -425,6 +490,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("do_cdr_lite_output",),
         "output_period_cdr_lite",
         "nrpf_cdr_lite",
+        monthly_field="cdr_lite_monthly_averages",
     ),
     _StreamCheck(
         "cdrgas",
@@ -433,6 +499,8 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_cdr_gas",
         "nrpf_cdr_gas",
         cppdef_guard=("marbl", "cdr_forcing"),
+        monthly_field="cdr_gas_monthly_averages",
+        writes_outside_period=True,
     ),
     _StreamCheck(
         "upscale",
@@ -441,6 +509,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_uscl",
         "nrpf_uscl",
         cppdef_guard=("marbl", "marbl_diags", "upscaling"),
+        writes_outside_period=True,
     ),
     _StreamCheck(
         "bgc_his",
@@ -449,6 +518,8 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_bgc_his",
         "nrpf_bgc_his",
         cppdef_guard=("marbl_or_bec2",),
+        writes_outside_period=True,
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "bgc_avg",
@@ -457,6 +528,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_bgc_avg",
         "nrpf_bgc_avg",
         cppdef_guard=("marbl_or_bec2",),
+        period_divides_dt=True,
     ),
     _StreamCheck(
         "bgc_his_dia",
@@ -465,6 +537,9 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_bgc_his_dia",
         "nrpf_bgc_his_dia",
         cppdef_guard=("marbl_or_bec2",),
+        writes_outside_period=True,
+        period_divides_dt=True,
+        divides_dt_cppdefs=("marbl_diags",),
     ),
     _StreamCheck(
         "bgc_avg_dia",
@@ -473,6 +548,8 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_bgc_avg_dia",
         "nrpf_bgc_avg_dia",
         cppdef_guard=("marbl_or_bec2",),
+        period_divides_dt=True,
+        divides_dt_cppdefs=("marbl_diags",),
     ),
 )
 
@@ -493,6 +570,44 @@ def _cppdef_guard_satisfied(guard: tuple[str, ...], cppdefs: Mapping[str, Any]) 
         elif not cppdefs.get(name, False):
             return False
     return True
+
+
+def _enabled_streams(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    cppdefs: Mapping[str, Any] | None,
+    schema: type[RomsNamelistBase] | None,
+) -> Iterator[tuple[_StreamCheck, Any]]:
+    """Yield ``(row, group)`` for every row of :data:`_STREAM_CHECKS` that ROMS
+    writes with these settings: in ``schema``'s call list (``None`` is the newest,
+    or ``type(settings)`` for a live namelist), compiled in, its group present and
+    its enable switch on.
+
+    ``cppdefs`` maps cppdef name -> active; an absent name is inactive. ``None``
+    means the build is not known yet, and every cppdef-gated row then counts as
+    compiled in: right for a rule that must not miss a write (Rule K), wrong for
+    one that refuses (pass ``{}`` there).
+    """
+    if schema is None and isinstance(settings, RomsNamelistBase):
+        schema = type(settings)
+    for check in _STREAM_CHECKS:
+        if not check.applies_to(schema):
+            continue
+        if (
+            cppdefs is not None
+            and check.cppdef_guard
+            and not _cppdef_guard_satisfied(check.cppdef_guard, cppdefs)
+        ):
+            continue
+        section = _section(settings, check.section)
+        if section is None:
+            continue
+        # A missing gate field reads as False (disabled), not "skip this
+        # stream": for an .or. gate (sflx, diagnostics) one field present-and-
+        # True with the other absent must still enable the stream -- `None`
+        # is falsy in `any(...)`, so this gives correct OR semantics for both
+        # the single-gate and two-gate rows.
+        if any(_section(section, f) for f in check.gate_fields):
+            yield check, section
 
 
 def check_output_streams_divide_rst(
@@ -569,31 +684,7 @@ def check_output_streams_divide_rst(
     if output_period_rst is None:
         return
 
-    cppdefs = cppdefs or {}
-    if schema is None and isinstance(settings, RomsNamelistBase):
-        schema = type(settings)
-
-    for check in _STREAM_CHECKS:
-        if not check.applies_to(schema):
-            continue
-        if check.cppdef_guard and not _cppdef_guard_satisfied(
-            check.cppdef_guard, cppdefs
-        ):
-            continue
-
-        section = _section(settings, check.section)
-        if section is None:
-            continue
-
-        # A missing gate field reads as False (disabled), not "skip this
-        # stream": for an .or. gate (sflx, diagnostics) one field present-and-
-        # True with the other absent must still enable the stream -- `None`
-        # is falsy in `any(...)`, so this gives correct OR semantics for both
-        # the single-gate and two-gate rows.
-        gate_values = [_section(section, f) for f in check.gate_fields]
-        if not any(gate_values):
-            continue
-
+    for check, section in _enabled_streams(settings, cppdefs or {}, schema):
         nrpf = _section(section, check.nrpf_field)
         period = _section(section, check.period_field)
         if nrpf is None or period is None:
@@ -663,6 +754,293 @@ def check_restart_period_divisible_by_dt(
             section="basic_output_settings",
             keys=("output_period_rst",),
         )
+
+
+def _time_stepping(
+    settings: RomsNamelistBase | Mapping[str, Any],
+) -> tuple[float | None, int | None]:
+    """``time_stepping.dt`` (``None`` unless positive) and ``time_stepping.ntimes``."""
+    time_stepping = _section(settings, "time_stepping")
+    dt = _section(time_stepping, "dt")
+    return (dt if dt is not None and dt > 0 else None), _section(
+        time_stepping, "ntimes"
+    )
+
+
+def _effective_period(period: float, dt: float) -> float:
+    """The spacing ROMS writes a periodic stream at: ``period`` rounded up to a
+    whole number of steps (the stream's counter adds ``dt`` each step and fires at
+    ``counter >= period``).
+    """
+    return dt * _steps_to_first_write(period, dt)
+
+
+def _steps_to_first_write(period: float, dt: float) -> int:
+    """The step on which a periodic stream first writes, ``ceil(period / dt)``
+    (0 for a period of 0, which writes every step), to round-off.
+    """
+    return max(0, math.ceil(period / dt - 1e-9))
+
+
+def _monthly(check: _StreamCheck, section: Any) -> bool:
+    """Whether ``check``'s stream averages over calendar months, ignoring its period."""
+    return check.monthly_field is not None and bool(
+        _section(section, check.monthly_field)
+    )
+
+
+def check_output_periods_divisible_by_dt(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    cppdefs: Mapping[str, Any] | None = None,
+    *,
+    schema: type[RomsNamelistBase] | None = None,
+) -> None:
+    """Raise ``NamelistConsistencyError`` if an enabled history, average or BGC
+    output period is not a whole multiple of ``time_stepping.dt`` (Rule H): ROMS
+    stops at start-up otherwise (``init_avg_arrays`` in ``src/basic_output.F90``,
+    ``wrt_bgc_tracers`` and ``wrt_bgc_diags`` in ``src/bgc_io.F90``).
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`.
+        A missing ``dt`` or period skips what needs it.
+    cppdefs
+        Mapping of cppdef name -> whether it is active in this build, as for
+        :func:`check_output_streams_divide_rst`: the BGC streams are checked only
+        in a ``MARBL`` (or ``BIOLOGY_BEC2``) build, their diagnostics only with
+        ``MARBL_DIAGS`` as well.
+    schema
+        The namelist schema of the pinned release, as for
+        :func:`check_output_streams_divide_rst`.
+
+    Notes
+    -----
+    Raises on the first violating stream. Other streams accept any period; see
+    :func:`output_period_drift_warnings`.
+    """
+    dt, _ = _time_stepping(settings)
+    if dt is None:
+        return
+    cppdefs = cppdefs or {}
+    for check, section in _enabled_streams(settings, cppdefs, schema):
+        if not check.refuses_period_off_dt(cppdefs):
+            continue
+        period = _section(section, check.period_field)
+        if period is None or is_whole_multiple(period, dt):
+            continue
+        raise NamelistConsistencyError(
+            f"{check.section}.{check.period_field} ({period} s) is not a whole "
+            f"multiple of time_stepping.dt ({dt} s), so ucla-roms would stop at "
+            f"start-up ('dt is not a factor of {check.period_field}'). Use a "
+            "period that is a multiple of dt, or a dt that divides the period.",
+            rule="output_periods_divisible_by_dt",
+            section=check.section,
+            keys=(check.period_field,),
+        )
+
+
+def output_period_drift_warnings(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    cppdefs: Mapping[str, Any] | None = None,
+    *,
+    schema: type[RomsNamelistBase] | None = None,
+) -> list[str]:
+    """One message per enabled output stream whose period is not a whole multiple
+    of ``time_stepping.dt`` and that ROMS accepts anyway, writing it every
+    ``ceil(period / dt)`` steps instead (the streams Rule H does not refuse).
+
+    A stream averaged over calendar months ignores its period and is skipped, as
+    is every stream when ``dt`` is missing. ``settings``, ``cppdefs`` and
+    ``schema`` are as for :func:`check_output_periods_divisible_by_dt`. Returns
+    the messages for the caller to log, so a caller that runs the rules again
+    (``setup`` before ``build``) can drop them.
+    """
+    dt, _ = _time_stepping(settings)
+    if dt is None:
+        return []
+    cppdefs = cppdefs or {}
+    messages = []
+    for check, section in _enabled_streams(settings, cppdefs, schema):
+        if check.refuses_period_off_dt(cppdefs):
+            continue  # Rule H refuses it
+        period = _section(section, check.period_field)
+        if period is None or _monthly(check, section) or is_whole_multiple(period, dt):
+            continue
+        messages.append(
+            f"{check.section}.{check.period_field} ({period} s) is not a whole "
+            f"multiple of time_stepping.dt ({dt} s): ROMS writes the "
+            f"'{check.label}' output every {_effective_period(period, dt):g} s "
+            "instead."
+        )
+    return messages
+
+
+def check_marbl_step_ceiling(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    cppdefs: Mapping[str, Any] | None = None,
+) -> None:
+    """Raise ``NamelistConsistencyError`` if the MARBL step ROMS would use exceeds
+    :data:`MAX_MARBL_TIMESTEP` (Rule I): ``marbldrv_configure_tracers``
+    (``src/marbl_driver.F90``) stops at start-up otherwise.
+
+    The MARBL step is ``marbl_biogeochemistry_settings.marbl_timestep`` rounded
+    down to a whole multiple of ``time_stepping.dt``, at least one ``dt``
+    (:func:`marbl_step`); with no ``marbl_timestep`` it is at least ``dt``, so
+    only a ``dt`` above the limit is refused. Checked only when ``cppdefs`` has
+    ``marbl`` active.
+    """
+    if not (cppdefs or {}).get("marbl", False):
+        return
+    dt, _ = _time_stepping(settings)
+    if dt is None:
+        return
+    marbl_timestep = _section(
+        _section(settings, "marbl_biogeochemistry_settings"), "marbl_timestep"
+    )
+    step = dt if marbl_timestep is None else marbl_step(dt, marbl_timestep)
+    if step <= MAX_MARBL_TIMESTEP + 1e-9:
+        return
+    if dt > MAX_MARBL_TIMESTEP:
+        section, key = "time_stepping", "dt"
+        cause = f"time_stepping.dt ({dt} s) is longer than that"
+    else:
+        section, key = "marbl_biogeochemistry_settings", "marbl_timestep"
+        cause = (
+            f"{section}.{key} ({marbl_timestep} s, rounded down to a multiple of "
+            f"dt {dt} s) is longer than that"
+        )
+    raise NamelistConsistencyError(
+        f"The MARBL step would be {step:g} s, but ucla-roms stops at start-up when "
+        f"it exceeds {MAX_MARBL_TIMESTEP:g} s, and {cause}. Set {section}.{key} "
+        f"to at most {MAX_MARBL_TIMESTEP:g} s.",
+        rule="marbl_step_ceiling",
+        section=section,
+        keys=(key,),
+    )
+
+
+def _month_changes(start_date: datetime, first: timedelta, last: timedelta) -> bool:
+    """Whether the calendar month at ``start_date + first`` differs from the one at
+    ``start_date + last``.
+    """
+    a, b = start_date + first, start_date + last
+    return (a.year, a.month) != (b.year, b.month)
+
+
+def check_output_written_in_window(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    cppdefs: Mapping[str, Any] | None,
+    *,
+    start_date: datetime,
+    schema: type[RomsNamelistBase] | None = None,
+) -> None:
+    """Raise ``NamelistConsistencyError`` if no enabled output stream writes during
+    a run of ``time_stepping.ntimes`` steps of ``time_stepping.dt`` from
+    ``start_date`` (Rule K). ucla-roms has no end-of-run write for most streams,
+    so such a run's compute is lost.
+
+    A stream counts as writing when:
+
+    - it writes at start-up or at the end of the run (history, floats, BGC
+      history and diagnostic history, CDR gas exchange, upscaling);
+    - it averages over calendar months and a month changes during the run, as
+      for monthly restarts;
+    - otherwise, its period elapses within the run, ``ceil(period / dt) <=
+      ntimes``. A periodic restart also counts one step early, as an
+      ``EXACT_RESTART`` build writes a record the step before the period ends.
+
+    Each rule errs towards "writes": the month test looks two steps past the end
+    (ROMS looks ahead by up to two steps), and with ``cppdefs`` ``None`` (the
+    build is not known yet) every cppdef-gated stream counts as compiled in.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`,
+        with ``time_stepping.dt`` and ``ntimes``. Without a positive ``dt`` and
+        ``ntimes`` the check is skipped.
+    cppdefs
+        Mapping of cppdef name -> whether it is active in this build, or ``None``
+        when unknown.
+    start_date
+        The model time of the run's first step.
+    schema
+        The namelist schema of the pinned release, as for
+        :func:`check_output_streams_divide_rst`.
+    """
+    dt, ntimes = _time_stepping(settings)
+    if dt is None or ntimes is None or ntimes <= 0:
+        return
+    month_changes = _month_changes(
+        start_date, timedelta(seconds=dt), timedelta(seconds=dt * (ntimes + 2))
+    )
+    enabled: list[str] = []
+
+    basic_output = _section(settings, "basic_output_settings")
+    restarts_on = bool(_section(basic_output, "wrt_file_rst"))
+    monthly_restarts = restarts_on and bool(_section(basic_output, "monthly_restarts"))
+    if monthly_restarts:
+        if month_changes:
+            return
+        enabled.append("restarts (monthly)")
+    elif restarts_on:
+        period = _section(basic_output, "output_period_rst")
+        if period is None or _steps_to_first_write(period, dt) <= ntimes + 1:
+            return
+        enabled.append(f"restarts (every {period:g} s)")
+
+    for check, section in _enabled_streams(settings, cppdefs, schema):
+        if check.writes_outside_period:
+            return
+        if _monthly(check, section):
+            if month_changes:
+                return
+            enabled.append(f"'{check.label}' (monthly)")
+            continue
+        period = _section(section, check.period_field)
+        if period is None or _steps_to_first_write(period, dt) <= ntimes:
+            return
+        enabled.append(f"'{check.label}' (every {_effective_period(period, dt):g} s)")
+
+    run_seconds = dt * ntimes
+    if enabled:
+        why = (
+            f"enabled streams: {', '.join(enabled)}, which write only when their "
+            "period elapses or, for monthly output, when the month changes, so the "
+            "run's results would be lost"
+        )
+    else:
+        why = "no output stream is enabled"
+    restart_period = (
+        "basic_output_settings.output_period_rst to at most the run length "
+        f"({run_seconds:g} s)"
+    )
+    # Advice and keys name the restart setting the user would change.
+    if monthly_restarts:
+        fix = (
+            "Monthly restarts write only when the month changes, and this run stays "
+            "in one month: turn off basic_output_settings.monthly_restarts and set "
+            f"{restart_period}"
+        )
+        keys: tuple[str, ...] = ("monthly_restarts", "output_period_rst")
+    elif restarts_on:
+        fix = f"Set {restart_period}"
+        keys = ("output_period_rst",)
+    else:
+        fix = (
+            "Turn on restarts (basic_output_settings.wrt_file_rst) and set "
+            f"{restart_period}"
+        )
+        keys = ("wrt_file_rst", "output_period_rst")
+    raise NamelistConsistencyError(
+        f"No output stream writes during this run of {ntimes} steps of {dt:g} s "
+        f"({timedelta(seconds=run_seconds)} from {start_date}): {why}. {fix}, or "
+        "turn on an output stream that writes within the run.",
+        rule="output_written_in_window",
+        section="basic_output_settings",
+        keys=keys,
+    )
 
 
 def marbl_step(dt: float, marbl_timestep: float) -> float:

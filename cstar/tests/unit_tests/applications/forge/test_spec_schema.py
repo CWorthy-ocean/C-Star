@@ -272,7 +272,11 @@ def test_old_output_spec_warns_once(
     with caplog.at_level(logging.WARNING, logger="cstar"):
         first = catalog.output_data("old-output")
         second = catalog.output_data("old-output")
-        cfg = _build(catalog, output_settings=second, run_time_overrides=_TRACERS)
+        # dt 3600 s, a divisor of the hourly CDR-lite output this spec turns on,
+        # so the resolver has nothing to warn about
+        cfg = _build(
+            catalog, output_settings=second, run_time_overrides=_TRACERS, dt=3600
+        )
 
     assert first == second
     assert "cdr_tracer_output" not in first

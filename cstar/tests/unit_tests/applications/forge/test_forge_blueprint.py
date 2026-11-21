@@ -2822,11 +2822,16 @@ def test_resolver_rejects_averages_that_end_off_the_marbl_step():
 
 
 def test_resolver_leaves_averages_off_the_marbl_step_to_older_releases():
+    """At dt 1800 s MARBL steps every 3600 s: a 5400 s average is a multiple of
+    dt, which every release requires, but not of the MARBL step, which only
+    ucla-roms >= 0.13.0 requires.
+    """
     cfg = _build(
         model_path=_MODEL_PATH_ROMS0120,
-        run_time_overrides=_bgc_diagnostics_averaged_every(60),
+        dt=1800,
+        run_time_overrides=_bgc_diagnostics_averaged_every(5400),
     )
-    assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 60
+    assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 5400
 
 
 def test_resolver_moves_the_cdr_average_it_turns_on_onto_marbl_steps(caplog):
@@ -5070,6 +5075,22 @@ def test_resolver_bgc_mode_cdr_lite_rejects_bgc_forcing():
     assert 'bgc_mode="cdr_lite"' in msg
     assert "initial_conditions.bgc_source" in msg
     assert "river[0]" in msg
+
+
+class TestResolverOutputCadenceCdrLite:
+    def test_checks_the_cdr_lite_stream_configure_build_turns_on(self, caplog):
+        """In ``bgc_mode`` cdr_lite the resolver checks the CDR-lite tracer stream
+        ``configure_build`` will turn on: its hourly period drifts at dt 7200 s.
+        """
+        with caplog.at_level(
+            logging.WARNING, logger="cstar.applications.forge.resolve"
+        ):
+            cfg = _build_cdr_lite()
+        assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+        (message,) = [
+            m for m in _resolver_warnings(caplog) if "output_period_cdr_lite" in m
+        ]
+        assert "every 7200 s" in message
 
 
 @pytest.mark.parametrize("mode", ["cdr-lite", "CDR_LITE", "", "bgc"])

@@ -696,7 +696,9 @@ class ROMSGpuSimulation(ROMSSimulation):
         partial file at every restart that resume and `continue-from` start
         from; and rule C applies to ucla-roms 0.13 namelists only, never to the
         0.11.0 vocabulary the GPU reads. With no cppdefs, rule A checks only the
-        streams no ucla-roms cppdef gates.
+        streams no ucla-roms cppdef gates. Rules H, I and K (output periods and
+        the MARBL step against dt, a run that writes nothing) are left out; see
+        `_check_output_cadence`.
 
         When `rank_layout` has fewer writer ranks than
         `suggested_writers_per_node` gives, says so: a warning when one history
@@ -742,6 +744,23 @@ class ROMSGpuSimulation(ROMSSimulation):
             )
         else:
             self.log.info(message)
+
+    def _check_output_cadence(
+        self,
+        nml: RomsNamelistBase,
+        cppdefs: dict[str, bool],
+        staged: dict[str, bool] | None,
+    ) -> list[str]:
+        """Check nothing: Rules H, I and K of `cstar.roms.precheck` mirror
+        ucla-roms' output writer and MARBL driver, and roms-marbl-gpu has its own,
+        whose period, start-up and end-of-run rules C-Star does not mirror.
+
+        Returns
+        -------
+        list[str]
+            No warnings.
+        """
+        return []
 
     def _cdr_lite_enabled(self) -> bool:
         """Whether the run has CDR_LITE tracers.

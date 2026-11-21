@@ -110,12 +110,17 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME, restart_timestamp
 from cstar.roms.precheck import (
+    NamelistConsistencyError,
     applies_to,
     averages_end_on_marbl_step_applies_to_schema,
     check_averages_end_on_marbl_step,
     check_file_name_lengths,
     check_forcing_file_count,
+    check_marbl_step_ceiling,
+    check_output_periods_divisible_by_dt,
     check_output_streams_divide_rst,
+    check_output_written_in_window,
+    output_period_drift_warnings,
 )
 from cstar.simulation import Simulation
 from cstar.system.manager import (
@@ -875,16 +880,6 @@ class ROMSSimulation(Simulation):
             return ts
         return self.start_date
 
-    def _effective_ntimes(self, nml: "RomsNamelistBase") -> int:
-        """Return the number of time steps ROMS runs: the user's `ntimes` override
-        if there is one, else the run length over `time_stepping.dt`.
-        """
-        if self._ntimes_overridden():
-            return int(nml.time_stepping.ntimes)
-        assert self.start_date is not None and self.end_date is not None
-        run_length_seconds = int((self.end_date - self.start_date).total_seconds())
-        return int(run_length_seconds // nml.time_stepping.dt)
-
     def _ntimes_overridden(self) -> bool:
         """Whether the user set `time_stepping.ntimes` explicitly."""
         return "ntimes" in self.namelist_overrides.get("time_stepping", {})
@@ -1332,13 +1327,19 @@ class ROMSSimulation(Simulation):
         if dt <= 0:
             raise ValueError(f"time_stepping.dt must be positive, got {dt}")
 
-        # ntimes is derived from the run length and the effective dt, unless
-        # the user explicitly overrode ntimes themselves.
-        nml.time_stepping.ntimes = self._effective_ntimes(nml)
-
+        self._derive_ntimes(nml)
         self._check_runtime_settings(nml)
 
         return nml
+
+    def _derive_ntimes(self, nml: RomsNamelistBase) -> None:
+        """Set `nml`'s `ntimes` from the run length and its (effective) `dt`, unless
+        `namelist_overrides` sets `ntimes` itself. `dt` must be positive.
+        """
+        if self._ntimes_overridden():
+            return
+        run_length_seconds = int((self.end_date - self.start_date).total_seconds())
+        nml.time_stepping.ntimes = int(run_length_seconds // nml.time_stepping.dt)
 
     def _check_runtime_settings(self, nml: RomsNamelistBase) -> None:
         """Check the composed namelist against rules ucla-roms enforces at start-up.
@@ -1356,33 +1357,128 @@ class ROMSSimulation(Simulation):
         Raises
         ------
         NamelistConsistencyError
-            If the output streams do not divide the restart rollover, an averaged
-            stream does not end on a MARBL step, or a file name is too long for
-            ROMS to read (see `cstar.roms.precheck`).
+            If an output-stream rule of `_check_output_settings` fails, or a file
+            name is too long for ROMS to read (see `cstar.roms.precheck`).
         """
-        # Output-stream / restart-rollover consistency check (ucla-roms >=
-        # 0.5.0's check_output_divides_rst, precheck.F90): a user overriding
-        # output/restart periods via namelist_overrides (or a hand-edited
-        # namelist file) can produce a config ucla-roms rejects at startup;
-        # catch it here so the failure surfaces with the override still in
-        # hand, mirroring the `dt <= 0` check in `roms_runtime_settings`.
-        # Version-gated via applies_to (the precheck landed in ucla-roms
-        # 0.5.0) -- gated on `nml`'s own concrete type rather than the schema
-        # that selected it, since `nml` may be a fresh, still-same-type
-        # instance from the override merge. Beside it runs the MARBL-step
-        # rule for the averaged `_cdr` and `_bgc_dia_avg` streams (ucla-roms >=
-        # 0.13.0's check_avg_ends_on_marbl_step), gated the same way.
-        cppdefs = self._active_cppdefs_for_precheck()
-        if applies_to(type(nml)):
-            check_output_streams_divide_rst(nml, cppdefs)
-        if averages_end_on_marbl_step_applies_to_schema(type(nml)):
-            check_averages_end_on_marbl_step(nml, cppdefs)
+        for message in self._check_output_settings(nml):
+            self.log.warning(message)
 
         # Names as written, after the override merge: ROMS cannot read one that
         # fills its buffer, and a pre-run never starts ROMS to find out. Likewise
         # a forcing-file list longer than the pinned release reads.
         check_file_name_lengths(nml)
         check_forcing_file_count(nml, type(nml))
+
+    def _check_output_settings(self, nml: RomsNamelistBase) -> list[str]:
+        """Check the output streams of `nml` against ucla-roms' start-up rules.
+
+        Run on the composed namelist by `_check_runtime_settings`, and at the end
+        of `setup()`, before `build()` compiles, on the namelist file with
+        `namelist_overrides` and `ntimes` applied (the output settings need nothing
+        else). Gated on `nml`'s own type, the schema it was read with.
+
+        - Rule A: every output stream's rollover divides the restart period
+          (ucla-roms >= 0.5.0, `check_output_streams_divide_rst`).
+        - Rule C: the averaged `_cdr` and `_bgc_dia_avg` streams end on a MARBL
+          step (ucla-roms >= 0.13.0, `check_averages_end_on_marbl_step`).
+        - The rules of `_check_output_cadence`.
+
+        Returns
+        -------
+        list[str]
+            Warnings for the caller to log.
+
+        Raises
+        ------
+        NamelistConsistencyError
+            If a rule fails.
+        """
+        cppdefs = self._active_cppdefs_for_precheck()
+        if applies_to(type(nml)):
+            check_output_streams_divide_rst(nml, cppdefs)
+        if averages_end_on_marbl_step_applies_to_schema(type(nml)):
+            check_averages_end_on_marbl_step(nml, cppdefs)
+        return self._check_output_cadence(nml, cppdefs, self._staged_cppdefs())
+
+    def _check_output_cadence(
+        self,
+        nml: RomsNamelistBase,
+        cppdefs: dict[str, bool],
+        staged: dict[str, bool] | None,
+    ) -> list[str]:
+        """Check the output periods and the MARBL step against `dt`, and that
+        something writes during the run (Rules H, I and K of `cstar.roms.precheck`).
+
+        A run that writes nothing is an error, except when `namelist_overrides`
+        sets `time_stepping.ntimes`: a run cut short to see the model start and
+        step may want no output, so it is a warning then. With `cppdefs.opt` not
+        staged yet, every cppdef-gated stream counts as writing. An override
+        point: a model whose output writer differs replaces these rules.
+
+        Parameters
+        ----------
+        nml : RomsNamelistBase
+            The namelist to check.
+        cppdefs : dict[str, bool]
+            The build's cppdefs (`_active_cppdefs_for_precheck`), empty if not
+            staged, for the rules that refuse.
+        staged : dict[str, bool] or None
+            The same, `None` if not staged (`_staged_cppdefs`), for the rule that
+            must not miss a stream.
+
+        Returns
+        -------
+        list[str]
+            Warnings for the caller to log: streams whose period is not a whole
+            multiple of `dt`, with the period ROMS will use, and a run that writes
+            nothing when `ntimes` is overridden.
+
+        Raises
+        ------
+        NamelistConsistencyError
+            If an enabled history, average or BGC period is not a multiple of
+            `dt`, the MARBL step exceeds 10,800 s, or nothing writes during a run
+            whose `ntimes` comes from its dates.
+        """
+        check_output_periods_divisible_by_dt(nml, cppdefs)
+        check_marbl_step_ceiling(nml, cppdefs)
+        messages = output_period_drift_warnings(nml, cppdefs)
+        try:
+            check_output_written_in_window(nml, staged, start_date=self.start_date)
+        except NamelistConsistencyError as exc:
+            if "ntimes" not in self.namelist_overrides.get("time_stepping", {}):
+                raise
+            messages.append(f"{exc} (time_stepping.ntimes is set by an override.)")
+        return messages
+
+    def _validate_output_settings(self) -> None:
+        """Run `_check_output_settings` in `setup()` once the compile-time and
+        runtime code are staged, so that output settings ucla-roms refuses at
+        start-up cost neither the input staging nor the compile. (It runs after
+        the codebases are set up: a commit-hash pin selects its namelist schema
+        through the staged ucla-roms clone.)
+
+        Reads the namelist file with `namelist_overrides` and `ntimes` applied;
+        warnings are left to `roms_runtime_settings`, which runs the same rules on
+        the composed namelist before every launch. Does nothing without runtime
+        code staged, or with a `dt` that `roms_runtime_settings` refuses.
+
+        Raises
+        ------
+        NamelistConsistencyError
+            If a rule fails.
+        ValueError
+            If the namelist file or `namelist_overrides` fail validation against
+            the namelist schema.
+        """
+        if self.runtime_code is None or self.runtime_code.working_copy is None:
+            return
+        nml, schema, chosen_by = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, chosen_by)
+        if nml.time_stepping.dt <= 0:
+            return
+        self._derive_ntimes(nml)
+        self._check_output_settings(nml)
 
     @property
     def input_datasets(self) -> list[ROMSInputDataset]:
@@ -1919,7 +2015,9 @@ class ROMSSimulation(Simulation):
         The method performs the following steps:
         1. Configures the ROMS and MARBL external codebases.
         2. Fetches and organizes compile-time code.
-        3. Fetches and organizes runtime code (e.g., namelists).
+        3. Fetches and organizes runtime code (e.g., namelists), then checks the
+           output settings against ucla-roms' start-up rules
+           (`_validate_output_settings`).
         4. Fetches and prepares input datasets.
 
         Parameters
@@ -1990,6 +2088,10 @@ class ROMSSimulation(Simulation):
         self.log.info("📦 Fetching runtime code... ")
         if self.runtime_code is not None:
             self.runtime_code.get(runtime_code_dir)
+
+        # The output rules read only the namelist, its overrides, `cppdefs.opt`
+        # and the dates: refuse before the inputs are staged.
+        self._validate_output_settings()
 
         # InputDatasets
         self.log.info("📦 Fetching input datasets...")
@@ -2599,9 +2701,8 @@ class ROMSSimulation(Simulation):
     }
 
     def _active_cppdefs_for_precheck(self) -> dict[str, bool]:
-        """Parse the staged `cppdefs.opt` (defensively) into the cppdefs
-        mapping `check_output_streams_divide_rst` expects, mirroring
-        `_validate_cppdef_flag`'s per-line `#define` detection.
+        """The staged `cppdefs.opt` as the cppdefs mapping
+        `check_output_streams_divide_rst` expects (see `_staged_cppdefs`).
 
         Returns an EMPTY mapping -- every cppdef-gated stream then skipped,
         exactly as an un-compiled cppdef would be -- if `compile_time_code`
@@ -2611,11 +2712,23 @@ class ROMSSimulation(Simulation):
         rule at startup once the actual build's `cppdefs.opt` is in place.
         Never raises out of this method.
         """
+        return self._staged_cppdefs() or {}
+
+    def _staged_cppdefs(self) -> dict[str, bool] | None:
+        """Parse the staged `cppdefs.opt` (defensively) into a mapping of the
+        `_PRECHECK_CPPDEF_MACROS` keys to whether each is `#define`d, mirroring
+        `_validate_cppdef_flag`'s per-line `#define` detection.
+
+        Returns `None` if `compile_time_code` (or its working copy) isn't staged
+        yet, or `cppdefs.opt` is missing: the build is unknown, which a rule that
+        must not miss a stream (`check_output_written_in_window`) tells apart from
+        a build without the cppdef. Never raises out of this method.
+        """
         try:
             build_dir = self.compile_time_code.working_copy.common_parent  # type: ignore[union-attr]
             cppdefs_text = (build_dir / "cppdefs.opt").read_text()
         except (AttributeError, FileNotFoundError, OSError):
-            return {}
+            return None
 
         return {
             key: any(
@@ -3043,8 +3156,9 @@ class ROMSSimulation(Simulation):
         dt = nml.time_stepping.dt
         if dt <= 0:
             return  # `roms_runtime_settings` reports it
+        self._derive_ntimes(nml)
         start = self._roms_start() or self.start_date
-        end = start + timedelta(seconds=self._effective_ntimes(nml) * dt)
+        end = start + timedelta(seconds=nml.time_stepping.ntimes * dt)
 
         entries = [
             inp
