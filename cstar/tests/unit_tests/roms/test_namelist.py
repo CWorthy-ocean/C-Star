@@ -22,6 +22,7 @@ from cstar.roms.namelist import (
     ParamSettings,
     ParamSettingsV0_4_0,
     PioSettings,
+    PioSettingsV0_16_0,
     RomsNamelist,
     RomsNamelistBase,
     RomsNamelistV0_4_0,
@@ -34,6 +35,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_13_0,
     RomsNamelistV0_14_0,
     RomsNamelistV0_15_0,
+    RomsNamelistV0_16_0,
     TsOutputSettingsV0_14_0,
     VSpongeSettingsV0_13_0,
     _parse_semver,
@@ -53,6 +55,7 @@ V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_
 V0_13_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 V0_14_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_14_0.nml"
 V0_15_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_15_0.nml"
+V0_16_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_16_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -147,16 +150,25 @@ def test_namelist_schema_for_ref_post_0_14_0(checkout_target):
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_14_0
 
 
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.15.0", "v0.15.0", "0.15.2", "v0.15.9"],
+)
+def test_namelist_schema_for_ref_post_0_15_0(checkout_target):
+    """Refs in `[0.15.0, 0.16.0)` select `RomsNamelistV0_15_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_15_0
+
+
 @pytest.mark.filterwarnings("ignore:ucla-roms release")
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.15.0", "v0.15.0", "0.15.2", "v0.16.0"],
+    ["0.16.0", "v0.16.0", "0.16.2", "v0.17.0"],
 )
-def test_namelist_schema_for_ref_post_0_15_0(checkout_target):
-    """Refs at or above 0.15.0 select `RomsNamelistV0_15_0` (newer releases
+def test_namelist_schema_for_ref_post_0_16_0(checkout_target):
+    """Refs at or above 0.16.0 select `RomsNamelistV0_16_0` (newer releases
     too, with a warning: see the newer-than-known tests below).
     """
-    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_15_0
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_16_0
 
 
 @pytest.mark.parametrize(
@@ -175,7 +187,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_15_0
+    assert schema is RomsNamelistV0_16_0
 
 
 def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
@@ -222,7 +234,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_15_0
+    assert schema is RomsNamelistV0_16_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -236,12 +248,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
         pytest.warns(UserWarning, match="use at your own risk"),
     ):
         schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_15_0
+    assert schema is RomsNamelistV0_16_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_15_0
+    assert schema is RomsNamelistV0_16_0
 
 
 NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
@@ -485,7 +497,7 @@ def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
     with pytest.warns(
         UserWarning,
         match=rf"Could not resolve .*{'a' * 40}.* latest known namelist schema "
-        rf"\({RomsNamelistV0_15_0.__name__}\)",
+        rf"\({RomsNamelistV0_16_0.__name__}\)",
     ):
         ref = release_ref_for_remote(
             "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
@@ -966,6 +978,54 @@ def test_roms_namelist_v0_15_0_implicit_fs_defaults_and_always_written():
     }
 
 
+def test_roms_namelist_v0_16_0_round_trip(tmp_path):
+    """`RomsNamelistV0_16_0.read` parses the 0.16.0 fixture, and a read -> write ->
+    read round trip reproduces the same model.
+    """
+    nml = RomsNamelistV0_16_0.read(V0_16_0_NAMELIST)
+    assert isinstance(nml.pio_settings, PioSettingsV0_16_0)
+    assert nml.pio_settings.pio_direct_read == "on"
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert re.search(r"pio_direct_read\s*=\s*'on'", out.read_text())
+    assert RomsNamelistV0_16_0.read(out) == nml
+
+
+def test_roms_namelist_v0_15_0_rejects_v0_16_0_fixture():
+    """`RomsNamelistV0_15_0` is strict: ucla-roms before 0.16.0 stops on an unknown
+    key in `&PIO_SETTINGS`, so the 0.15.0 schema rejects it and never writes it.
+    """
+    with pytest.raises(ValidationError, match="pio_direct_read"):
+        RomsNamelistV0_15_0.read(V0_16_0_NAMELIST)
+    written = RomsNamelistV0_15_0.read(V0_15_0_NAMELIST).to_f90nml_dict()
+    assert "pio_direct_read" not in written["pio_settings"]
+
+
+def test_roms_namelist_v0_16_0_pio_direct_read_defaults_and_always_written():
+    """A 0.15.0 namelist without the key still validates under
+    `RomsNamelistV0_16_0`, with the Fortran initializer (`on`), and the written
+    namelist carries the key.
+    """
+    nml = RomsNamelistV0_16_0.read(V0_15_0_NAMELIST)
+    assert nml.pio_settings.pio_direct_read == "on"
+    assert nml.to_f90nml_dict()["pio_settings"]["pio_direct_read"] == "on"
+
+
+@pytest.mark.parametrize("value", ["off", "verify"])
+def test_pio_settings_v0_16_0_accepts_the_other_read_modes(value):
+    """`off` and `verify` load and are written as given."""
+    settings = PioSettingsV0_16_0(pio_direct_read=value)
+    assert settings.pio_direct_read == value
+
+
+@pytest.mark.parametrize("value", ["On", "true", "", "direct"])
+def test_pio_settings_v0_16_0_rejects_values_ucla_roms_stops_on(value):
+    """ROMS stops on any value but exactly `on`, `off` or `verify`."""
+    with pytest.raises(ValidationError):
+        PioSettingsV0_16_0(pio_direct_read=value)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -1272,6 +1332,14 @@ class TestUnknownOverrideKeys:
         assert len(violations) == 1
         assert key in violations[0]
 
+    def test_pio_direct_read_key(self):
+        """Known from 0.16.0 on; unknown to `RomsNamelistV0_15_0`."""
+        overrides = {"pio_settings": {"pio_direct_read": "off"}}
+        assert RomsNamelistV0_16_0.unknown_override_keys(overrides) == []
+        violations = RomsNamelistV0_15_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert "pio_direct_read" in violations[0]
+
     def test_implicit_fs_group(self):
         """Known from 0.15.0 on; an unknown group to `RomsNamelistV0_14_0`."""
         overrides = {"implicit_fs": {"fs_mode": "implicit"}}
@@ -1315,6 +1383,7 @@ def test_param_settings_rejects_cdr_tracer_counts():
         RomsNamelistV0_13_0,
         RomsNamelistV0_14_0,
         RomsNamelistV0_15_0,
+        RomsNamelistV0_16_0,
     ],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):

@@ -65,7 +65,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_12_0,
     RomsNamelistV0_13_0,
-    RomsNamelistV0_15_0,
+    RomsNamelistV0_16_0,
     namelist_schema_for_ref,
 )
 from cstar.roms.precheck import (
@@ -108,6 +108,9 @@ EXAMPLE_NAMELIST_V0_13_0 = (
 )
 EXAMPLE_NAMELIST_V0_15_0 = (
     Path(__file__).parent / "fixtures" / "example_namelist_v0_15_0.nml"
+)
+EXAMPLE_NAMELIST_V0_16_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_16_0.nml"
 )
 _MARBL_CPPDEFS = {"marbl": True, "marbl_diags": True, "cdr_forcing": True}
 _REAL_NAMELIST_READ = RomsNamelist.read
@@ -722,7 +725,7 @@ class TestROMSSimulationInitialization:
         ``checkout_target`` to select a namelist schema, and that a non-release
         ``checkout_target`` (as set up by the ``stub_romssimulation`` fixture)
         surfaces the ``namelist_schema_for_ref`` fallback warning through the
-        property, actually selects the latest schema (``RomsNamelistV0_15_0``),
+        property, actually selects the latest schema (``RomsNamelistV0_16_0``),
         while still returning a valid namelist.
 
         The read is stubbed (the stub's working copy has no real files on
@@ -730,7 +733,7 @@ class TestROMSSimulationInitialization:
         the 0.5.0-style fixture — so the property's overrides are exercised
         against a real versioned schema, not the legacy one — but which class
         was actually *selected* is captured separately via the
-        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_15_0``
+        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_16_0``
         is a subclass of ``RomsNamelistV0_5_0`` and the stubbed read makes
         ``isinstance(result, RomsNamelistV0_5_0)`` true regardless of which
         class was selected.
@@ -766,7 +769,7 @@ class TestROMSSimulationInitialization:
         # the stub's codebase has no working copy, so no repo path is available
         # for commit-hash-to-release-tag resolution
         mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
-        assert selected_schemas == [RomsNamelistV0_15_0]
+        assert selected_schemas == [RomsNamelistV0_16_0]
         assert isinstance(result, RomsNamelistV0_5_0)
         run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
         assert result.time_stepping.ntimes == run_length_seconds // 2160.0
@@ -1721,6 +1724,68 @@ class TestROMSSimulationInitialization:
         result = sim.roms_runtime_settings
 
         assert result.pio_settings.pio_stride == expected
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions,
+        "path_for_roms_unpartitioned",
+        new_callable=mock.PropertyMock,
+    )
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(
+        ROMSModelGrid, "path_for_roms_unpartitioned", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_pio_stride_fill_keeps_pio_direct_read(
+        self,
+        mock_grid_path,
+        mock_grid_path_unpartitioned,
+        mock_ini_path,
+        mock_ini_path_unpartitioned,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Filling an empty `pio_stride` at launch leaves the other `&PIO_SETTINGS`
+        key, `pio_direct_read`, as the user set it, in the model and the file.
+        """
+        for var in ("SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID", "SLURM_TASKS_PER_NODE"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(
+            "cstar.roms.simulation.outside_scheduler_job", lambda _sysmgr: None
+        )
+        monkeypatch.setenv("SLURM_JOB_ID", "1")
+        monkeypatch.setenv("SLURM_TASKS_PER_NODE", "4,2")
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+            RomsNamelistV0_16_0,
+            EXAMPLE_NAMELIST_V0_16_0,
+        )
+        mock_grid_path_unpartitioned.return_value = [Path("grid.nc")]
+        mock_ini_path_unpartitioned.return_value = [Path("fake_ini.nc")]
+        sim.use_pio = True
+        sim.namelist_overrides = {
+            "pio_settings": {"pio_stride": None, "pio_direct_read": "off"}
+        }
+
+        result = sim.roms_runtime_settings
+
+        assert result.pio_settings.pio_stride == 4
+        assert result.pio_settings.pio_direct_read == "off"
+        written = tmp_path / "roms.nml"
+        result.write(written)
+        assert re.search(r"pio_direct_read\s*=\s*'off'", written.read_text())
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)

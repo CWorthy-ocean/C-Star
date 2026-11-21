@@ -37,6 +37,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_13_0,
     RunTimeSettingsV0_14_0,
     RunTimeSettingsV0_15_0,
+    RunTimeSettingsV0_16_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.catalog.spec_schema import known_spec_keys
@@ -3808,6 +3809,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_13_0,
         RunTimeSettingsV0_14_0,
         RunTimeSettingsV0_15_0,
+        RunTimeSettingsV0_16_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
