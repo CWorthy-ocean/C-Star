@@ -1246,12 +1246,15 @@ def test_wales_tutorial_blueprint_matches_the_bundled_copy():
 
 _BUNDLED_ARCHIVED_MODELS = [
     "cson_roms-marbl_v0.1",
+    "roms-marbl-0.10-default",
+    "roms-marbl-0.11-default",
     "roms-marbl-0.3-default",
     "roms-marbl-0.4-default",
     "roms-marbl-0.5-default",
     "roms-marbl-0.6-default",
     "roms-marbl-0.7-default",
     "roms-marbl-0.8-default",
+    "roms-marbl-0.9-default",
 ]
 
 
@@ -1264,7 +1267,7 @@ def _write_model(root: Path, name: str, text: str | None = None, **extra) -> Pat
     if text is None:
         base = yaml.safe_load(
             (
-                _DEFAULT_CATALOG_ROOT / "specs/ModelSpec/roms-marbl-0.9-default.yaml"
+                _DEFAULT_CATALOG_ROOT / "specs/ModelSpec/roms-marbl-0.12-default.yaml"
             ).read_text()
         )
         text = yaml.safe_dump({**base, **extra})
@@ -1280,7 +1283,7 @@ class TestArchivedModelNames:
         for name in _BUNDLED_ARCHIVED_MODELS:
             assert name in bundled.model_names
             assert bundled.load_model_spec(name).archived is True
-        assert bundled.load_model_spec("roms-marbl-0.9-default").archived is False
+        assert bundled.load_model_spec("roms-marbl-0.12-default").archived is False
 
     def test_specs_are_not_read_at_scan_time(self, tmp_path):
         with patch.object(DomainCatalog, "load_model_spec") as load:
