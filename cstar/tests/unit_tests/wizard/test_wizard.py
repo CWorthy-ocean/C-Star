@@ -4909,6 +4909,20 @@ def test_implicit_choice_does_not_survive_a_switch_to_the_0_14_model():
     assert ("implicit_fs", "fs_mode") not in wiz.editor._widgets
 
 
+def test_implicit_choice_with_an_older_ucla_roms_version_is_reported():
+    """Typing a ucla-roms version below 0.15.0 keeps the overrides, so the
+    settings check must name the release implicit_fs needs.
+    """
+    wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
+    wiz.editor._widgets[("implicit_fs", "fs_mode")][0].value = "implicit"
+    assert "Blueprint is valid" in wiz.validation.value
+
+    wiz.roms_ref.value = "0.14.0"
+    wiz._rebuild()
+    assert "implicit_fs needs ucla-roms >= 0.15.0" in wiz.validation.value
+    assert "Blueprint is valid" not in wiz.validation.value
+
+
 def test_off_list_fs_mode_neither_crashes_the_build_nor_the_sync():
     """A hand-edited value outside the choices gets a text box when the editor is
     built, and a sync with it leaves the dropdown alone; the validation reports it.

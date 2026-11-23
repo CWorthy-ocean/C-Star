@@ -2821,7 +2821,8 @@ class _RunTimeSettingsCommon(_SettingsSection):
 
     @classmethod
     def _other_tier_keys(cls) -> Iterable[str]:
-        # Sections other tiers model: prune_version_gated_sections is their gate.
+        # Sections other tiers model: prune_version_gated_sections is their gate
+        # (at resolve, in validate_run_time_sections and at configure_build).
         return version_gated_section_names()
 
     @model_validator(mode="after")
@@ -3102,7 +3103,8 @@ def prune_version_gated_sections(
     ``configure_build`` (the build-time net for stored blueprints that reach
     the build without re-resolving) call this before those checks, so the
     rule stays in one place; each caller decides whether to report what was
-    dropped.
+    dropped. :func:`validate_run_time_sections` calls it on a copy, so a stored
+    blueprint's request is refused before any data is staged.
 
     A section whose switch (:data:`_GATED_SECTION_SWITCHES`) asks for its feature
     (:data:`_SWITCH_REQUESTED`) is not dropped but rejected, naming the release
@@ -3512,10 +3514,11 @@ def validate_run_time_sections(
     flat ``model_settings`` (which omits the processing-filled sections). An unknown
     section or key, ``cppdefs`` included, is reported with the nearest valid name
     (:func:`unknown_settings_keys`), and one naming a section or key only up to case
-    (``Marbl_bgc``) as a misspelling; so are the other settings a Forge build cannot
-    honor (:func:`settings_support_problems`). Use it for fail-fast feedback on
-    hand-edited / loaded configs, where the inner values are otherwise opaque
-    (``model_settings`` is ``Dict[str, Any]``).
+    (``Marbl_bgc``) as a misspelling; so are a section switched on that the pinned
+    release does not model (:func:`prune_version_gated_sections`) and the other
+    settings a Forge build cannot honor (:func:`settings_support_problems`). Use
+    it for fail-fast feedback on hand-edited / loaded configs, where the inner
+    values are otherwise opaque (``model_settings`` is ``Dict[str, Any]``).
 
     Parameters
     ----------
@@ -3535,6 +3538,13 @@ def validate_run_time_sections(
         settings or {}, *_settings_spellings(settings_cls)
     ):
         errors.append(_misspelled_keys_message(misspelled))
+    # A section only a newer tier models (implicit_fs before 0.15.0) is skipped
+    # by the loop below; one whose switch asks for its feature is refused by the
+    # same rule configure_build applies. A copy: pruning deletes switched-off ones.
+    try:
+        prune_version_gated_sections(dict(settings or {}), settings_cls)
+    except ValueError as exc:
+        errors.append(str(exc))
     for key, value in (settings or {}).items():
         if key not in fields:
             continue  # not a run-time section (e.g. cppdefs) — nothing to check here
@@ -3586,8 +3596,8 @@ def validate_run_time_sections(
             errors.append(str(exc))
         # And the CDR-lite sections vs MARBL/CDR tracer counts (param vs cppdefs),
         # on the sections the selected tier models only: one it lacks is reported
-        # by prune_version_gated_sections (resolve/configure_build), not advised on
-        # here with 0.9-specific wording.
+        # by prune_version_gated_sections (above), not advised on here with
+        # 0.9-specific wording.
         keep = (*fields, "param", "cppdefs")
         modeled = {k: v for k, v in settings.items() if k in keep}
         try:
