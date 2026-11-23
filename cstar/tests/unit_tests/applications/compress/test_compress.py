@@ -236,6 +236,42 @@ class TestEngine:
             "hDIC: values differ at record 0"
         ]
 
+    @pytest.mark.parametrize("digits", [None, 4])
+    def test_values_below_float32_range_pass(
+        self, tmp_path: Path, digits: int | None
+    ) -> None:
+        # a CDR tracer's plume edge holds values far below float32's normal range,
+        # which the cast flushes to 0 or a subnormal
+        src = _write_roms_file(tmp_path / "src.nc", extra=("CDR_OAE_ALK1",))
+        with netCDF4.Dataset(src, "a") as ds:
+            ds["CDR_OAE_ALK1"][0, 0, 0, :5] = [1e-103, 6.08e-40, 1e-45, -2.3e-41, 0.0]
+        out = tmp_path / "out.nc"
+        enc = Encoding(float32=True, significant_digits=digits)
+        result = compress_netcdf(src, out, enc)
+
+        assert "CDR_OAE_ALK1" in result.reduced
+        with netCDF4.Dataset(out) as d:
+            assert d["CDR_OAE_ALK1"][0, 0, 0, 0] == 0.0  # the cast did underflow
+        assert verify_compressed(src, out, enc) == []
+
+    def test_verify_reports_a_reduced_value_that_moved(self, tmp_path: Path) -> None:
+        src = _write_roms_file(tmp_path / "src.nc", extra=("CDR_OAE_ALK1",))
+        with netCDF4.Dataset(src, "a") as ds:
+            ds["CDR_OAE_ALK1"][0, 0, 0, 0] = 6.08e-40
+            ds["hDIC"][0, 0, 0, 0] = 6.08e-40
+        out = tmp_path / "out.nc"
+        enc = Encoding(float32=True, protected=("hDIC",))
+        compress_netcdf(src, out, enc)
+        with netCDF4.Dataset(out, "a") as d:
+            d["CDR_OAE_ALK1"][0, 0, 0, 0] = 1e-30  # past the float32 underflow bound
+            d["temp"][0, 0, 0, 0] = d["temp"][0, 0, 0, 0] * 1.001
+            d["hDIC"][0, 0, 0, 0] = 0.0  # a protected variable stays bit-exact
+        assert verify_compressed(src, out, enc) == [
+            "hDIC: values differ at record 0",
+            "temp: values differ at record 0",
+            "CDR_OAE_ALK1: values differ at record 0",
+        ]
+
     def test_typed_attributes_are_cast_with_the_variable(self, tmp_path: Path) -> None:
         src = _write_roms_file(tmp_path / "src.nc")
         with netCDF4.Dataset(src, "a") as ds:
