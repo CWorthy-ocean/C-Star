@@ -179,7 +179,7 @@ constant-iron option;
 ucla-roms ``main`` with PIO enabled. The bundled domains and the example
 blueprint use ``roms-marbl-0.16-default``.
 
-``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and
+``roms-marbl-0.3-default`` through ``roms-marbl-0.11-default`` and
 ``cson_roms-marbl_v0.1`` are marked ``archived: true``. They remain
 loadable, and blueprints that name them keep working, but the wizard's model
 dropdown lists them only when "Show archived" is checked (loading a blueprint

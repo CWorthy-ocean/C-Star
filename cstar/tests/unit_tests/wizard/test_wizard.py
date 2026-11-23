@@ -4109,6 +4109,7 @@ def test_0_12_model_declares_the_time_interpolation_key():
     assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
     assert _INTERP_KEY not in wiz.editor._widgets
 
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "roms-marbl-0.11-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -4175,6 +4176,7 @@ class TestCarbonateSensitivityTimeInterpolation:
     def test_a_model_pick_seeds_the_default_again(self):
         wiz = self._wizard()
         self._checkbox(wiz).value = True
+        wiz.show_archived_models.value = True
         wiz.model_dd.value = "roms-marbl-0.11-default"
         wiz.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
@@ -4241,6 +4243,7 @@ class TestCarbonateSensitivityTimeInterpolation:
         assert wiz.cs_interp_box.children
 
         if pick == "model":
+            wiz.show_archived_models.value = True
             wiz.model_dd.value = "roms-marbl-0.11-default"
             wiz.bgc_dd.value = "cdr_lite"
         else:
@@ -4617,6 +4620,7 @@ def test_constant_fe_widgets_built_for_the_0_11_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "roms-marbl-0.11-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -4641,6 +4645,7 @@ def test_constant_fe_widgets_absent_for_the_0_10_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "roms-marbl-0.10-default"
     wiz._rebuild()
     assert wiz.config is not None
