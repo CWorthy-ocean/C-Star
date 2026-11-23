@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 import cstar.catalog
 from cstar.applications.forge.blueprint import ForgeBlueprint, RunWindow
+from cstar.applications.forge.engine import blueprint_problems
 from cstar.applications.forge.namelist_model import (
     CPPDEFS_KEYS,
     check_tile_sizes,
@@ -209,6 +210,48 @@ class TestOtherTierKeys:
                 "roms-marbl-0.14-default",
                 run_time_overrides={"implicit_fs": {"fs_mode": "implicit"}},
             )
+
+    @pytest.mark.parametrize(
+        ("ref", "section", "switch", "value", "first"),
+        [
+            ("0.14.0", "implicit_fs", "fs_mode", "implicit", "0.15.0"),
+            ("0.6.0", "cdr_lite_output", "do_cdr_lite_output", True, "0.7.0"),
+            ("0.6.0", "cdr_gas_exch_output", "do_cdr_gas_exch_output", True, "0.7.0"),
+            ("0.7.0", "cdr_lite", "cdr_online_carbonate_sensitivity", True, "0.9.0"),
+        ],
+    )
+    def test_newer_section_switched_on_gets_its_version_message(
+        self, ref: str, section: str, switch: str, value: Any, first: str
+    ) -> None:
+        settings = {section: {switch: value}}
+        problems = validate_run_time_sections(settings, roms_ref=ref)
+        assert len(problems) == 1, problems
+        assert f"{section}.{switch} enabled" in problems[0]
+        assert f"{section} needs ucla-roms >= {first}" in problems[0]
+        assert settings == {section: {switch: value}}
+
+    def test_newer_section_switched_off_passes_and_is_kept(self) -> None:
+        settings = {"implicit_fs": {"fs_mode": "split"}}
+        assert validate_run_time_sections(settings, roms_ref="0.14.0") == []
+        assert settings == {"implicit_fs": {"fs_mode": "split"}}
+
+    def test_newer_section_misspelled_switch_reported_once(self) -> None:
+        problems = validate_run_time_sections(
+            {"implicit_fs": {"Fs_mode": "implicit"}}, roms_ref="0.14.0"
+        )
+        assert len(problems) == 1, problems
+        assert "implicit_fs.Fs_mode" in problems[0]
+
+    def test_newer_section_refused_by_blueprint_problems(self) -> None:
+        bp = _resolve("roms-marbl-0.14-default")
+        settings = _merge(bp.model_settings, {"implicit_fs": {"fs_mode": "implicit"}})
+        problems = blueprint_problems(
+            bp.model_copy(update={"model_settings": settings})
+        )
+        assert [p for p in problems if "implicit_fs needs ucla-roms >= 0.15.0" in p], (
+            problems
+        )
+        assert blueprint_problems(bp) == []
 
     def test_newer_section_is_not_unknown(self) -> None:
         settings_cls = run_time_settings_for_ref("0.14.0")

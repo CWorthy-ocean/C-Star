@@ -1,0 +1,1 @@
+``cstar blueprint check`` and ``cstar forge run`` refuse, before any input is generated, a Forge settings section switched on that the pinned ucla-roms release lacks, such as ``implicit_fs.fs_mode: implicit`` before 0.15.0, and the wizard's settings check lists it; before, the build step stopped with a traceback.
