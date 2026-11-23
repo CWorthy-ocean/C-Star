@@ -8,11 +8,12 @@ not exist until the PR is opened. Before ``towncrier build``,
 file to ``<PR>.<type>.rst`` so the note links to its PR. The fragments folder
 is the ``directory`` of ``[tool.towncrier]`` in ``pyproject.toml``.
 
-The PR is the one that added the file, looking through later renames: the
-trailing ``(#N)`` of the squash-merge commit's subject, or, when the subject has
-none, the merged PR that GitHub associates with that commit. A ``+`` file whose
-type or PR cannot be found, or a failed GitHub lookup, stops the script with an
-error, so a release never goes out with an unlinked note by accident.
+The PR is the one that added the file, looking through later renames but not
+through copies: the trailing ``(#N)`` of the squash-merge commit's subject, or,
+when the subject has none, the merged PR that GitHub associates with that
+commit. A ``+`` file whose type or PR cannot be found, or a failed GitHub
+lookup, stops the script with an error, so a release never goes out with an
+unlinked note by accident.
 Fragments already named ``<PR>.<type>.rst`` are left alone.
 
 Usage:
@@ -102,8 +103,11 @@ def adding_commit(repo: Path, path: str) -> tuple[str, str] | None:
 
     ``--follow`` looks through renames, so a fragment that a later PR renamed
     (to fix its type, say) still counts as added by the PR that wrote it.
-    ``--literal-pathspecs`` keeps a ``*`` or ``[`` in a name from matching
-    other fragments.
+    ``--follow`` also traces a file back to a similar file that still exists
+    (status ``C``, a copy), and each ucla-roms adoption copies the previous
+    one's fragments, so the search stops at a copy too (``--diff-filter=AC``):
+    the PR that made the copy wrote this note. ``--literal-pathspecs`` keeps a
+    ``*`` or ``[`` in a name from matching other fragments.
     """
     out = subprocess.run(
         [
@@ -111,7 +115,7 @@ def adding_commit(repo: Path, path: str) -> tuple[str, str] | None:
             "--literal-pathspecs",
             "log",
             "--follow",
-            "--diff-filter=A",
+            "--diff-filter=AC",
             "--format=%H%x00%s",
             "-n",
             "1",
