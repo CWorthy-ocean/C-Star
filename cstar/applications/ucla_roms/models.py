@@ -204,7 +204,7 @@ def _cloneable(repo: CodeRepository) -> CodeRepository:
     return repo
 
 
-CodebaseRepository = t.Annotated[CodeRepository, AfterValidator(_cloneable)]
+RemoteCodeRepository = t.Annotated[CodeRepository, AfterValidator(_cloneable)]
 """A `CodeRepository` that C-Star clones and builds, so its `location` must be a
 remote repository URL (`cstar.base.gitutils.require_codebase_url`). Run-time and
 compile-time code may also be a local directory and uses `CodeRepository`."""
@@ -213,7 +213,7 @@ compile-time code may also be a local directory and uses `CodeRepository`."""
 class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     """Collection of repositories used to build, configure, and execute ROMS."""
 
-    roms: CodebaseRepository
+    roms: RemoteCodeRepository
     """The baseline ROMS repository."""
 
     run_time: CodeRepository
@@ -222,10 +222,10 @@ class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     compile_time: CodeRepository
     """Codebase used to modify base ROMS compilation."""
 
-    marbl: CodebaseRepository | None = Field(default=None, validate_default=False)
+    marbl: RemoteCodeRepository | None = Field(default=None, validate_default=False)
     """Codebase used to add MARBL to the simulation."""
 
-    pio: CodebaseRepository | None = Field(default=None, validate_default=False)
+    pio: RemoteCodeRepository | None = Field(default=None, validate_default=False)
     """Codebase used to add the ParallelIO library to the simulation."""
 
 

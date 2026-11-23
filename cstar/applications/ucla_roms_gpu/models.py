@@ -4,10 +4,10 @@ from datetime import datetime
 from pydantic import Field, NonNegativeInt, PositiveInt, model_validator
 
 from cstar.applications.ucla_roms.models import (
-    CodebaseRepository,
     CodeRepository,
     ForcingConfiguration,
     ParameterSet,
+    RemoteCodeRepository,
     RuntimeParameterSet,
     processor_grid_conflicts,
     unknown_override_names,
@@ -40,7 +40,7 @@ launching the model."""
 class GpuCodeRepositories(ConfiguredBaseModel):
     """The repositories a GPU run builds and configures the model from."""
 
-    roms: CodebaseRepository
+    roms: RemoteCodeRepository
     """The roms-marbl-gpu repository. It is cloned with its MARBL submodule, which
     the GPU build compiles into the model."""
 

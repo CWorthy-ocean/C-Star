@@ -66,17 +66,10 @@ from collections import Counter
 from datetime import UTC, datetime, time
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, get_args
+from typing import TYPE_CHECKING, Any, Literal, Self, get_args
 
 import yaml
-from pydantic import (
-    AfterValidator,
-    BaseModel,
-    ConfigDict,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cstar.applications.forge.source_registry import (
     DERIVED_BGC_SOURCES,
@@ -1686,23 +1679,24 @@ class TemplateRepo(CodeRepo):
     file_hashes: dict[str, str] = Field(default_factory=dict)
 
 
-def _cloneable(repo: CodeRepo) -> CodeRepo:
-    require_codebase_url(repo.location)
-    return repo
-
-
-CodebaseRepo = Annotated[CodeRepo, AfterValidator(_cloneable)]
-"""A codebase C-Star clones and builds: its ``location`` must be a remote repository
-URL (:func:`cstar.base.gitutils.require_codebase_url`), as in the ``ucla_roms``
-blueprint Forge emits. Templates may be a local directory and use ``TemplateRepo``."""
-
-
 class Code(_Section):
-    roms: CodebaseRepo
-    marbl: CodebaseRepo | None = None
-    pio: CodebaseRepo | None = None
+    roms: CodeRepo
+    marbl: CodeRepo | None = None
+    pio: CodeRepo | None = None
     templates_compile_time: TemplateRepo
     templates_run_time: TemplateRepo
+
+    @field_validator("roms", "marbl", "pio")
+    @classmethod
+    def _cloneable(cls, repo: CodeRepo | None) -> CodeRepo | None:
+        """C-Star clones and builds these codebases, so each ``location`` must be a
+        remote repository URL (:func:`cstar.base.gitutils.require_codebase_url`), as
+        in the ``ucla_roms`` blueprint Forge emits. Templates may be a local
+        directory.
+        """
+        if repo is not None:
+            require_codebase_url(repo.location)
+        return repo
 
 
 # ===========================================================================
