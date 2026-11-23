@@ -50,8 +50,8 @@ def require_codebase_url(location: str) -> str:
     msg = (
         f"{location!r} is not a remote repository URL. C-Star clones this codebase "
         "with git where the step runs, so `location` must be an https://, ssh:// or "
-        "git:// URL, such as https://github.com/CWorthy-ocean/ucla-roms.git (write "
-        "git@host:org/repo as ssh://git@host/org/repo). To run local changes, push "
+        "git:// URL, such as https://github.com/CWorthy-ocean/ucla-roms.git (write a "
+        "git@host:org/repo address as an ssh:// URL). To run local changes, push "
         "the branch to a fork and set `location` to the fork's URL."
     )
     raise ValueError(msg)

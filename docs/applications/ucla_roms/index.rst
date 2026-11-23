@@ -27,9 +27,10 @@ the following stages. Each writes into the blueprint's working directory, so
 when a stage fails you can look at what it left behind.
 
 1. **Stage the inputs.** The model code (ucla-roms, and MARBL and ParallelIO
-   when the blueprint asks for them), the compile-time and run-time files,
-   and the input datasets are fetched from wherever the blueprint says they
-   are: a git repository, a URL, or a local path. Only the datasets whose
+   when the blueprint asks for them) is cloned from its git repository. The
+   compile-time and run-time files and the input datasets are fetched from
+   wherever the blueprint says they are: a git repository, a URL, or a local
+   path. Only the datasets whose
    dates overlap the run window are fetched. Everything lands under
    ``input/`` in the working directory. Datasets that are on the
    same machine are symlinked rather than copied.
