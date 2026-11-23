@@ -1085,6 +1085,34 @@ def test_domain_grid_file_allows_vertical_coord_kwargs():
     assert domain.grid_file is not None
 
 
+def test_domain_grid_file_allows_verbose():
+    """``verbose`` is a runtime diagnostic the executor sets itself, not grid
+    geometry, so it is accepted (and ignored) beside a grid file as it is for a
+    generated grid.
+    """
+    from cstar.applications.forge.blueprint import (
+        Domain,
+        OpenBoundaries,
+        Partitioning,
+        UserProvidedFile,
+    )
+
+    domain = Domain(
+        grid_name="custom",
+        grid_kwargs={
+            "theta_s": 5.0,
+            "theta_b": 2.0,
+            "hc": 250.0,
+            "N": 3,
+            "verbose": True,
+        },
+        open_boundaries=OpenBoundaries(),
+        partitioning=Partitioning(n_procs_x=1, n_procs_y=1),
+        grid_file=UserProvidedFile(**_USER_FILE_KWARGS),
+    )
+    assert domain.grid_file is not None
+
+
 def test_domain_grid_file_rejects_nesting():
     from cstar.applications.forge.blueprint import (
         Domain,
