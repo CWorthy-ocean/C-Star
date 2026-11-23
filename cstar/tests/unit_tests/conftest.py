@@ -399,6 +399,26 @@ def tagged_ucla_roms_0_11_clone(tmp_path: Path) -> dict[str, str | Path]:
     }
 
 
+@pytest.fixture
+def https_url_for(monkeypatch: pytest.MonkeyPatch) -> Callable[[Path], str]:
+    """Return a function that serves a local git repo under an HTTPS URL.
+
+    A blueprint's codebase `location` must be a remote URL. Git rewrites the
+    returned URL to the repo (``url.<repo>.insteadOf``, set through
+    ``GIT_CONFIG_*`` for this test only), so code that clones it reads the local
+    repo and no request leaves the machine.
+    """
+
+    def _url(repo: Path) -> str:
+        url = f"https://example.invalid/{repo.parent.name}/{repo.name}.git"
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", f"url.{repo}.insteadOf")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", url)
+        return url
+
+    return _url
+
+
 @pytest.fixture(scope="module")
 def complete_blueprint_path(tests_path: Path) -> Path:
     """Fixture that returns the path to a valid, fully-populated blueprint.

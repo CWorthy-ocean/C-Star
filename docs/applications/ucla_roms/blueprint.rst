@@ -26,13 +26,14 @@ blueprint has these:
    mistake.
 ``code``
    The model code and the files it is built and run with. ``roms``, and
-   optionally ``marbl`` and ``pio``, each name a git repository by
-   ``location`` and pin it with a ``branch`` or ``commit``; a fork or a local
-   clone works too. ``compile_time`` and ``run_time`` point at the
-   compile-time files (``cppdefs.opt``, ``param.opt`` and the other ``.opt``
-   files, and the ``Makefile``) and the run-time files (the namelist and the
-   MARBL settings): a repository, a directory, or a URL, with a ``filter``
-   listing the files to take.
+   optionally ``marbl`` and ``pio``, each name a git repository by its URL
+   (usually ``https://``) in ``location`` and pin it with a ``branch`` or
+   ``commit``. To run local changes, push the branch to a fork and use the
+   fork's URL. ``compile_time`` and ``run_time``
+   point at the compile-time files (``cppdefs.opt``, ``param.opt`` and the
+   other ``.opt`` files, and the ``Makefile``) and the run-time files (the
+   namelist and the MARBL settings): a repository, a directory, or a URL,
+   with a ``filter`` listing the files to take.
 ``grid``, ``initial_conditions``
    The grid file and the initial conditions file.
 ``forcing``

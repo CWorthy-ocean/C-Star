@@ -322,3 +322,22 @@ class TestNamelistOverrides:
         )
 
         UclaRomsGpuBlueprint.model_validate(data)
+
+
+class TestCodebaseLocations:
+    def test_local_roms_is_refused(self, template_dict: dict[str, t.Any]) -> None:
+        """A local `code.roms` fails validation."""
+        template_dict["code"]["roms"]["location"] = "/home/user/roms-marbl-gpu"
+
+        with pytest.raises(ValidationError, match=r"is not a remote repository URL"):
+            UclaRomsGpuBlueprint.model_validate(template_dict)
+
+    def test_local_run_time_is_accepted(
+        self, template_dict: dict[str, t.Any], tmp_path: Path
+    ) -> None:
+        """A local directory is still valid for `code.run_time`."""
+        template_dict["code"]["run_time"]["location"] = str(tmp_path)
+
+        bp = UclaRomsGpuBlueprint.model_validate(template_dict)
+
+        assert str(bp.code.run_time.location) == str(tmp_path)

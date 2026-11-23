@@ -2432,6 +2432,7 @@ class TestForgeExecutorBuildAndRun:
         sample_open_boundaries,
         sample_partitioning,
         tagged_ucla_roms_clone,
+        https_url_for,
     ):
         """A commit-hash pin selects the namelist tier of the release it descends
         from (the one ucla_roms reads it with), while the emitted blueprint
@@ -2444,7 +2445,7 @@ class TestForgeExecutorBuildAndRun:
             sample_grid_kwargs, sample_open_boundaries, sample_partitioning
         )
         cfg.code.roms.commit = info["hash_0_4_2"]
-        cfg.code.roms.location = str(info["repo"])
+        cfg.code.roms.location = https_url_for(info["repo"])
 
         builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         run_ov, compile_ov = split_model_settings(cfg)
@@ -2478,6 +2479,7 @@ class TestForgeExecutorBuildAndRun:
         sample_open_boundaries,
         sample_partitioning,
         tagged_ucla_roms_0_11_clone,
+        https_url_for,
         hash_key,
         nz_chd,
     ):
@@ -2498,7 +2500,7 @@ class TestForgeExecutorBuildAndRun:
                 roms_ref=info[hash_key],
             )
             assert cfg.model_settings["cdr_frc"]["nz_chd"] == 50
-            cfg.code.roms.location = str(info["repo"])
+            cfg.code.roms.location = https_url_for(info["repo"])
 
             # This helper skips generate_inputs(), so the tier's generated sections
             # are absent; the output-stream precheck is unrelated to the rule.
@@ -2538,6 +2540,7 @@ class TestForgeExecutorBuildAndRun:
         sample_open_boundaries,
         sample_partitioning,
         tagged_ucla_roms_0_11_clone,
+        https_url_for,
     ):
         """Without upscaled CDR forcing there is no depth-profile level count to
         take from a file, so a hash pin of 0.11.0 keeps the seeded cdr_nz_chd.
@@ -2552,7 +2555,7 @@ class TestForgeExecutorBuildAndRun:
                 model_path=_MODEL_PATH_ROMS0110,
                 roms_ref=info["hash_0_11_0"],
             )
-            cfg.code.roms.location = str(info["repo"])
+            cfg.code.roms.location = https_url_for(info["repo"])
             with patch(
                 "cstar.applications.forge.executor.output_precheck_applies_to",
                 return_value=False,

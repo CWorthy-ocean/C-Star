@@ -79,6 +79,7 @@ from cstar.applications.forge.source_registry import (
     resolve_source,
 )
 from cstar.base.digest import digest_scheme, short_digest
+from cstar.base.gitutils import require_codebase_url
 from cstar.base.provenance import package_version, package_versions, system_name
 from cstar.orchestration.models import (
     Blueprint,
@@ -1691,6 +1692,18 @@ class Code(_Section):
     pio: CodeRepo | None = None
     templates_compile_time: TemplateRepo
     templates_run_time: TemplateRepo
+
+    @field_validator("roms", "marbl", "pio")
+    @classmethod
+    def _cloneable(cls, repo: CodeRepo | None) -> CodeRepo | None:
+        """C-Star clones and builds these codebases, so each ``location`` must be a
+        remote repository URL (:func:`cstar.base.gitutils.require_codebase_url`), as
+        in the ``ucla_roms`` blueprint Forge emits. Templates may be a local
+        directory.
+        """
+        if repo is not None:
+            require_codebase_url(repo.location)
+        return repo
 
 
 # ===========================================================================

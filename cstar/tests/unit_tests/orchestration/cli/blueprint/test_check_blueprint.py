@@ -3,6 +3,7 @@ import typing as t
 from pathlib import Path
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.core import get_application
@@ -429,3 +430,22 @@ def test_blueprint_check_needs_migration(plotter_v1_0_0_bp: Path) -> None:
     assert f"is {APP_PLOTTER} schema 1.0.0 and needs migration to {latest}" in output
     assert f"run: cstar blueprint migrate {plotter_v1_0_0_bp}" in output
     assert "is valid" not in output
+
+
+def test_blueprint_check_refuses_local_codebase(
+    tmp_path: Path, package_path: Path
+) -> None:
+    """A blueprint whose `code.roms` is a local checkout fails the check and the
+    output names the problem.
+    """
+    source = package_path / "cstar/tests/integration_tests/blueprints"
+    data = yaml.safe_load((source / "blueprint_complete.yaml").read_text())
+    data["code"]["roms"]["location"] = "/home/user/ucla-roms"
+    blueprint_path = tmp_path / "local-roms.yaml"
+    blueprint_path.write_text(yaml.safe_dump(data))
+
+    result = CliRunner().invoke(app, [str(blueprint_path)], color=False)
+
+    assert result.exit_code != 0
+    assert "is not a remote repository URL" in result.stderr
+    assert "is valid" not in result.stdout

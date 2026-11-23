@@ -18,6 +18,7 @@ from cstar.base.gitutils import (
     _has_local_modifications,
     _local_repo_mismatch,
     git_location_to_raw,
+    require_codebase_url,
 )
 
 
@@ -751,3 +752,44 @@ def test_describe_remote_nearest_tag_path_with_spaces(tmp_path, tagged_ucla_roms
     shutil.copytree(info["repo"], odd)
     assert _describe_remote_nearest_tag(str(odd), info["hash_0_4_2"]) == ("0.4.2", 0)
     assert _describe_nearest_tag(odd, info["hash_after_0_4_2"]) == ("0.4.2", 1)
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://github.com/CWorthy-ocean/ucla-roms.git",
+        "http://example.org/repo.git",
+        "https://gitlab.com/org/repo",
+        "https://git.example.edu/group/roms.git",
+        "HTTPS://github.com/org/repo.git",
+        "  https://github.com/org/repo.git  ",
+        "ssh://git@github.com/CWorthy-ocean/ucla-roms.git",
+        "git://example.org/ucla-roms.git",
+    ],
+)
+def test_require_codebase_url_accepts_remote_urls(location: str) -> None:
+    """A remote repository URL is returned unchanged."""
+    assert require_codebase_url(location) == location
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "/home/user/ucla-roms",
+        "../ucla-roms",
+        "~/git/ucla-roms",
+        "ucla-roms",
+        "git@github.com:CWorthy-ocean/ucla-roms.git",
+        "file:///home/user/ucla-roms",
+        "s3://bucket/ucla-roms.git",
+        "https://",
+        "https://@/org/repo.git",
+        "https://:443/org/repo.git",
+        "ssh:///org/repo.git",
+        "",
+    ],
+)
+def test_require_codebase_url_refuses_non_remote_locations(location: str) -> None:
+    """A path, scp-style address, file or data URL, or host-less URL is refused."""
+    with pytest.raises(ValueError, match=r"is not a remote repository URL"):
+        require_codebase_url(location)
