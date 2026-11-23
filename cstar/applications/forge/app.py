@@ -195,7 +195,8 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
 
     @t.override
     def emitted_blueprint(self, blueprint: ForgeBlueprint) -> EmittedBlueprint:
-        """Describe the `ucla_roms` blueprint a forge run of `blueprint` publishes.
+        """Describe the blueprint a forge run of `blueprint` publishes (`ucla_roms`,
+        or `ucla_roms_gpu` for an experimental GPU blueprint).
 
         Parameters
         ----------
@@ -205,18 +206,23 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         Returns
         -------
         EmittedBlueprint
-            The predicted `ucla_roms` blueprint.
+            The predicted emitted blueprint; for a GPU blueprint its compute needs
+            are those of the tiling.
         """
         # Deferred: this package's import (registration) must stay light, and
         # these pull in roms_tools/xarray/dask.
         from cstar.applications.forge.input_generator import netcdf_basename
-        from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS_APP
 
+        tiling = blueprint.tiling
         return EmittedBlueprint(
             filename=emitted_blueprint_filename(blueprint.name),
-            application=UCLA_ROMS_APP,
+            application=blueprint.emitted_application,
             producer=producer_ref(blueprint),
-            compute_needs=ComputeNeeds(tasks=blueprint.n_procs),
+            compute_needs=(
+                ComputeNeeds(tasks=blueprint.n_procs)
+                if tiling is None
+                else tiling.compute_needs
+            ),
             start_date=blueprint.run.start_date,
             end_date=blueprint.run.end_date,
             use_pio=blueprint.use_pio,
@@ -265,6 +271,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
             RUN_TIME_DIR_NAME,
         )
         from cstar.applications.forge.input_generator import netcdf_filename_component
+        from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP
 
         fs = JobFileSystemManager(Path("/"))
         output = fs.output_dir.relative_to(fs.root_dir)
@@ -280,6 +287,18 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
             )
             for stem, kind, metadata in INPUT_ARTIFACTS
         ]
+        # A GPU build has no compile-time template, so no cppdefs.opt is rendered.
+        cppdefs = (
+            []
+            if blueprint.emitted_application == GPU_APP
+            else [
+                ArtifactSpec(
+                    kind=ArtifactKind.config,
+                    pattern=(builds / COMPILE_TIME_DIR_NAME / "cppdefs.opt").as_posix(),
+                    metadata={"role": "cppdefs"},
+                )
+            ]
+        )
         return [
             ArtifactSpec(
                 kind=ArtifactKind.emitted_blueprint,
@@ -288,11 +307,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
                 ).as_posix(),
             ),
             *inputs,
-            ArtifactSpec(
-                kind=ArtifactKind.config,
-                pattern=(builds / COMPILE_TIME_DIR_NAME / "cppdefs.opt").as_posix(),
-                metadata={"role": "cppdefs"},
-            ),
+            *cppdefs,
             ArtifactSpec(
                 kind=ArtifactKind.config,
                 pattern=(builds / RUN_TIME_DIR_NAME / "namelist.nml").as_posix(),

@@ -26,10 +26,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    DEFAULT_EMITTED_APPLICATION,
     BgcSourceItem,
     BoundaryForcing,
     CdrSpec,
     CodeRepo,
+    EmittedApplication,
     RiverForcingItem,
     SourceSpec,
     SurfaceBlend,
@@ -128,6 +130,9 @@ class ModelSpec(BaseModel):
         Logical name of the model (e.g., "roms-marbl-0.16-default").
     description : str, optional
         Human-readable one-liner for catalogs/wizard display.
+    application : EmittedApplication
+        The C-Star application a run of this model uses: ``"ucla_roms"``, or
+        ``"ucla_roms_gpu"`` (roms-marbl-gpu; experimental).
     code : ModelCode
         Code repository refs (roms/marbl/pio) + template refs.
     bgc_mode : BgcMode
@@ -158,6 +163,7 @@ class ModelSpec(BaseModel):
 
     name: str
     description: str | None = None
+    application: EmittedApplication = Field(default=DEFAULT_EMITTED_APPLICATION)
     code: ModelCode
     bgc_mode: BgcMode = "marbl"
     use_pio: bool = False

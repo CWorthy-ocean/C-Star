@@ -11,13 +11,14 @@ import copy
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 import pytest
 import yaml
 
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
+    EmittedApplication,
     Forcing,
     ForgeBlueprint,
     ForgeProvenance,
@@ -2408,14 +2409,19 @@ def test_model_dd_hides_archived_specs_by_default():
     wiz = ForgeBlueprintWizard()
     archived = wiz.catalog.archived_model_names
     assert archived  # the bundled layer ships archived specs
+    # the dropdown lists the models of the selected application (Ocean model)
+    applications = wiz.catalog.model_applications
+    cpu_models = [
+        n
+        for n in wiz.catalog.model_names
+        if applications[n] == wiz.application_dd.value
+    ]
     assert wiz.show_archived_models.value is False
-    assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
-        archived
-    )
+    assert set(wiz._dd_values(wiz.model_dd)) == set(cpu_models) - set(archived)
     assert wiz.model_dd.value == "roms-marbl-0.16-default"
 
     wiz.show_archived_models.value = True
-    assert wiz._dd_values(wiz.model_dd) == list(wiz.catalog.model_names)
+    assert wiz._dd_values(wiz.model_dd) == cpu_models
     assert wiz.model_dd.value == "roms-marbl-0.16-default"
     labels = {value: label for label, value in wiz.model_dd.options}
     for name in archived:
@@ -2423,9 +2429,7 @@ def test_model_dd_hides_archived_specs_by_default():
     assert labels["roms-marbl-0.16-default"] == "roms-marbl-0.16-default (bundled)"
 
     wiz.show_archived_models.value = False
-    assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
-        archived
-    )
+    assert set(wiz._dd_values(wiz.model_dd)) == set(cpu_models) - set(archived)
 
 
 def test_dd_options_labels_archived_names_homogeneously():
@@ -8194,3 +8198,336 @@ class TestCdrLiteCdrPanel:
         wiz._on_cdr_file_attach(None)
 
         assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+
+
+# ---------------------------------------------------------------------------
+# the Ocean model choice (the experimental GPU application)
+# ---------------------------------------------------------------------------
+
+_GPU_MODEL = "roms-marbl-gpu-0.1.3-default"
+_GPU_APP = "ucla_roms_gpu"
+_RESTORING_FORCING = "glorys-era5-unified"
+_NO_RESTORING_FORCING = "glorys-era5-unified-no-restoring"
+_NESTING_REASON = "Nesting is not available on the GPU model"
+
+
+def _short_run(wiz):
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+
+def _gpu_wizard(catalog=None):
+    wiz = ForgeBlueprintWizard(catalog=catalog)
+    _short_run(wiz)
+    wiz.application_dd.value = _GPU_APP
+    return wiz
+
+
+class TestOceanModelChoice:
+    def test_options_are_the_emitted_applications_under_display_names(self):
+        wiz = ForgeBlueprintWizard()
+        assert wiz._dd_values(wiz.application_dd) == list(get_args(EmittedApplication))
+        labels = {value: label for label, value in wiz.application_dd.options}
+        assert "experimental" in labels[_GPU_APP]
+
+    def test_choice_follows_the_selected_model(self):
+        wiz = ForgeBlueprintWizard()
+        default = wiz._model_spec_declared()["application"]
+        assert wiz.application_dd.value == default
+        wiz.application_dd.value = _GPU_APP
+        assert wiz.model_dd.value == _GPU_MODEL
+        assert wiz._model_spec_declared()["application"] == _GPU_APP
+        # a stale choice is re-derived from the selected spec
+        with wiz._suspend():
+            wiz.application_dd.value = default
+        wiz._on_model_change(None)
+        assert wiz.application_dd.value == _GPU_APP
+
+    def test_model_dropdown_lists_only_the_chosen_application(self):
+        wiz = ForgeBlueprintWizard()
+        applications = wiz.catalog.model_applications
+        assert _GPU_MODEL not in wiz._dd_values(wiz.model_dd)
+
+        wiz.application_dd.value = _GPU_APP
+        assert wiz._dd_values(wiz.model_dd) == [_GPU_MODEL]
+
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
+        listed = wiz._dd_values(wiz.model_dd)
+        assert listed and all(applications[n] != _GPU_APP for n in listed)
+
+    def test_archived_filter_still_applies_to_the_cpu_models(self):
+        wiz = ForgeBlueprintWizard()
+        archived = wiz.catalog.archived_model_names
+        assert not set(archived) & set(wiz._dd_values(wiz.model_dd))
+        wiz.show_archived_models.value = True
+        assert set(archived) <= set(wiz._dd_values(wiz.model_dd))
+        assert _GPU_MODEL not in wiz._dd_values(wiz.model_dd)
+        wiz.application_dd.value = _GPU_APP
+        assert wiz._dd_values(wiz.model_dd) == [_GPU_MODEL]
+
+    def test_gpu_target_resolves_the_zero_dot_eleven_namelist_tier(self):
+        wiz = _gpu_wizard()
+        assert wiz._effective_roms_ref() == "0.11.0"
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
+        assert wiz._effective_roms_ref() != "0.11.0"
+
+
+class TestSwitchingTheTarget:
+    def test_cpu_to_gpu_selects_the_gpu_model_and_seeds_the_tiling(self):
+        wiz = ForgeBlueprintWizard()
+        wiz.npx.value, wiz.npy.value = 3, 5
+        wiz.auto_tiling_chk.value = True
+        assert wiz.forcing_dd.value == _RESTORING_FORCING
+
+        wiz.application_dd.value = _GPU_APP
+
+        assert wiz.model_dd.value == _GPU_MODEL
+        assert (wiz.npx.value, wiz.npy.value) == (2, 2)
+        assert (wiz.nodes.value, wiz.writers_per_node.value) == (1, 1)
+        assert wiz.auto_tiling_chk.value is False
+        assert wiz.use_pio_chk.value is False
+        assert wiz.forcing_dd.value == _NO_RESTORING_FORCING
+
+    def test_gpu_hides_the_cpu_only_widgets_and_shows_nodes_and_writers(self):
+        wiz = ForgeBlueprintWizard()
+        assert _display(wiz.nodes) == "none"
+        assert _display(wiz.writers_per_node) == "none"
+        wiz.application_dd.value = _GPU_APP
+        for hidden in (wiz.marbl_ref, wiz.use_pio_chk, wiz.auto_tiling_chk):
+            assert _display(hidden) == "none"
+        assert _display(wiz.n_cores) == "none"
+        assert _display(wiz.nodes) == ""
+        assert _display(wiz.writers_per_node) == ""
+
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
+        assert _display(wiz.nodes) == "none"
+        assert _display(wiz.writers_per_node) == "none"
+        for shown in (wiz.marbl_ref, wiz.use_pio_chk, wiz.auto_tiling_chk):
+            assert _display(shown) == ""
+
+    def test_gpu_disables_nesting_with_a_reason_and_cpu_restores_it(self):
+        wiz = ForgeBlueprintWizard()
+        assert not (wiz.nest_enable.disabled or wiz.parent_enable.disabled)
+        assert _display(wiz.nesting_gpu_note) == "none"
+
+        wiz.application_dd.value = _GPU_APP
+        assert wiz.nest_enable.disabled and wiz.parent_enable.disabled
+        assert _display(wiz.nesting_gpu_note) == ""
+        assert _NESTING_REASON in wiz.nesting_gpu_note.value
+
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
+        assert not (wiz.nest_enable.disabled or wiz.parent_enable.disabled)
+        assert _display(wiz.nesting_gpu_note) == "none"
+
+    def test_nesting_stays_disabled_under_a_grid_file_lock_after_the_switch(self):
+        wiz = ForgeBlueprintWizard()
+        wiz._set_grid_widgets_locked(True)
+        wiz.application_dd.value = _GPU_APP
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
+        assert wiz.nest_enable.disabled
+        wiz._set_grid_widgets_locked(False)
+        assert not wiz.nest_enable.disabled
+
+    def test_a_forcing_without_restoring_is_left_alone(self):
+        wiz = ForgeBlueprintWizard()
+        wiz.forcing_dd.value = _NO_RESTORING_FORCING
+        wiz.application_dd.value = _GPU_APP
+        assert wiz.forcing_dd.value == _NO_RESTORING_FORCING
+
+    def test_a_modified_forcing_is_not_swapped_away(self):
+        wiz = ForgeBlueprintWizard()
+        wiz._forcing_seed = {"not": "what the editor holds"}
+        wiz.application_dd.value = _GPU_APP
+        assert wiz.forcing_dd.value == _RESTORING_FORCING
+
+    def test_the_gathered_gpu_blueprint_is_valid(self):
+        wiz = _gpu_wizard()
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        assert "Invalid blueprint" not in wiz.derived.value
+        assert wiz.config.emitted_application == _GPU_APP
+        assert wiz.config.domain.partitioning.nodes == 1
+        assert wiz.config.domain.partitioning.writers_per_node == 1
+        assert wiz.config.tiling is not None
+
+    def test_gather_passes_nodes_and_writers_only_for_the_gpu(self):
+        wiz = _gpu_wizard()
+        wiz.nodes.value, wiz.writers_per_node.value = 2, 3
+        assert wiz._gather()["partitioning"] == {
+            "n_procs_x": 2,
+            "n_procs_y": 2,
+            "nodes": 2,
+            "writers_per_node": 3,
+        }
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
+        assert set(wiz._gather()["partitioning"]) == {"n_procs_x", "n_procs_y"}
+
+
+class TestReviewedGpuStates:
+    def test_switching_to_gpu_clears_nesting(self):
+        wiz = ForgeBlueprintWizard()
+        _short_run(wiz)
+        wiz.nest_enable.value = True
+        wiz.application_dd.value = _GPU_APP
+        assert not wiz.nest_enable.value
+        assert not wiz.parent_enable.value
+        assert wiz.nest_enable.disabled
+
+    def test_a_spec_that_cannot_be_read_stays_listed(self, monkeypatch):
+        wiz = ForgeBlueprintWizard()
+        readable = dict(wiz.catalog.model_applications)
+        hidden = next(n for n, a in readable.items() if a != _GPU_APP)
+        readable.pop(hidden)
+        monkeypatch.setattr(
+            type(wiz.catalog),
+            "model_applications",
+            property(lambda _self: dict(readable)),
+        )
+        wiz.show_archived_models.value = True
+        assert hidden in wiz._visible_model_names(archived=())
+
+    def test_a_load_without_nodes_resets_them_to_the_tiling_default(self, tmp_path):
+        from cstar.applications.ucla_roms_gpu.models import TilingParameterSet
+
+        first = _gpu_wizard()
+        first.nodes.value, first.writers_per_node.value = 2, 3
+        first._rebuild()
+        assert first.config is not None, first.derived.value
+        with_nodes = tmp_path / "with_nodes.yaml"
+        first.config.to_yaml(with_nodes)
+
+        second = _gpu_wizard()
+        second._rebuild()
+        assert second.config is not None, second.derived.value
+        without = second.config.model_copy(
+            update={
+                "domain": second.config.domain.model_copy(
+                    update={
+                        "partitioning": second.config.domain.partitioning.model_copy(
+                            update={"nodes": None, "writers_per_node": None}
+                        )
+                    }
+                )
+            }
+        )
+        without_nodes = tmp_path / "without_nodes.yaml"
+        without.to_yaml(without_nodes)
+
+        wiz = ForgeBlueprintWizard()
+        wiz.load_path.value = str(with_nodes)
+        wiz._on_load_path(None)
+        assert (wiz.nodes.value, wiz.writers_per_node.value) == (2, 3)
+        wiz.load_path.value = str(without_nodes)
+        wiz._on_load_path(None)
+        assert (wiz.nodes.value, wiz.writers_per_node.value) == (
+            TilingParameterSet.model_fields["nodes"].default,
+            TilingParameterSet.model_fields["writers_per_node"].default,
+        )
+
+
+class TestGpuLoadAndSave:
+    def test_load_back_restores_the_application_model_and_tiling_without_a_forcing_swap(
+        self, tmp_path
+    ):
+        wiz = _gpu_wizard()
+        wiz.npx.value, wiz.npy.value = 2, 2
+        wiz.nodes.value, wiz.writers_per_node.value = 2, 2
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        saved = tmp_path / "forge_blueprint.yaml"
+        wiz.config.to_yaml(saved)
+
+        wiz2 = ForgeBlueprintWizard()
+        assert wiz2.forcing_dd.value == _RESTORING_FORCING
+        wiz2.load_path.value = str(saved)
+        wiz2._on_load_path(None)
+
+        assert wiz2.application_dd.value == _GPU_APP
+        assert wiz2.model_dd.value == _GPU_MODEL
+        assert (wiz2.nodes.value, wiz2.writers_per_node.value) == (2, 2)
+        assert (wiz2.npx.value, wiz2.npy.value) == (2, 2)
+        # a load takes the forcing the file records, never the GPU switch's swap
+        assert wiz2.forcing_dd.value == wiz.config.composition.forcing.name
+        assert wiz2.nest_enable.disabled
+        assert _display(wiz2.nodes) == ""
+
+    def test_load_back_of_a_cpu_blueprint_switches_the_application_back(self, tmp_path):
+        cpu_wiz = ForgeBlueprintWizard()
+        _short_run(cpu_wiz)
+        assert cpu_wiz.config is not None, cpu_wiz.derived.value
+        saved = tmp_path / "forge_blueprint.yaml"
+        cpu_wiz.config.to_yaml(saved)
+
+        wiz = _gpu_wizard()
+        wiz.load_path.value = str(saved)
+        wiz._on_load_path(None)
+        assert wiz.application_dd.value != _GPU_APP
+        assert wiz.model_dd.value == cpu_wiz.config.composition.model.name
+        assert _display(wiz.nodes) == "none"
+
+    def test_loading_a_gpu_blueprint_whose_spec_is_not_in_the_catalog_uses_the_file(
+        self, tmp_path
+    ):
+        wiz = _gpu_wizard()
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        cfg = wiz.config.model_copy(
+            update={
+                "composition": wiz.config.composition.model_copy(
+                    update={
+                        "model": wiz.config.composition.model.model_copy(
+                            update={"name": "not-in-this-catalog"}
+                        )
+                    }
+                )
+            }
+        )
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+        assert wiz2.application_dd.value == _GPU_APP
+        assert wiz2._load_unknown_specs == ["model 'not-in-this-catalog'"]
+
+    def test_save_as_model_spec_keeps_the_application(self, tmp_path):
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        catalog = DomainCatalog(catalog_root=root)
+        wiz = _gpu_wizard(catalog)
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz.save_model_name.value = "my-gpu-model"
+        wiz._on_save_model(None)
+
+        assert "✓" in wiz.save_model_status.value, wiz.save_model_status.value
+        data = catalog.model_data("my-gpu-model")
+        assert data["application"] == _GPU_APP
+        assert "cppdefs" not in data["model_settings"]
+        assert catalog.model_applications["my-gpu-model"] == _GPU_APP
+        assert wiz.model_dd.value == "my-gpu-model"
+        assert wiz.application_dd.value == _GPU_APP
+
+    def test_save_as_domain_spec_omits_nodes_and_writers(self, tmp_path):
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        catalog = DomainCatalog(catalog_root=root)
+        wiz = _gpu_wizard(catalog)
+        wiz.nodes.value, wiz.writers_per_node.value = 2, 2
+        assert wiz.config is not None, wiz.derived.value
+
+        data = wiz._domain_spec_data()
+        assert data["partitioning"] == {"n_procs_x": 2, "n_procs_y": 2}
+
+        wiz.save_domain_name.value = "my-gpu-domain"
+        wiz._on_save_domain(None)
+        assert "✓" in wiz.save_domain_status.value, wiz.save_domain_status.value
+        assert catalog.domain_data("my-gpu-domain")["partitioning"] == {
+            "n_procs_x": 2,
+            "n_procs_y": 2,
+        }

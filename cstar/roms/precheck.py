@@ -75,6 +75,12 @@ Rule E). A namelist that gives more values stops the GPU model while it reads th
 group. Same scope and call points as Rule F; for a GPU run it is the tighter of
 the two forcing-file limits.
 
+Rule F2 -- :func:`check_gpu_ignored_settings`: roms-marbl-gpu v0.1.3-beta reads
+two namelist settings and ignores them (``xco2air_default`` other than the 284.7
+ppm it fixes, :data:`GPU_FIXED_XCO2_AIR`; ``wrt_bgc_dia_his``), so a run that sets
+them would differ from what the namelist says. Same scope and call points as
+Rule F.
+
 Rule H -- :func:`check_output_periods_divisible_by_dt` mirrors ucla-roms' start-up
 checks that the history and average periods (``init_avg_arrays`` in
 ``src/basic_output.F90``) and the four BGC periods (``wrt_bgc_tracers`` and
@@ -122,7 +128,7 @@ import warnings
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 from cstar.roms.namelist import (
     UCLA_ROMS_0_13_0,
@@ -1373,7 +1379,30 @@ v0.1.3-beta, in its order: switches the GPU model only warns about. ``what`` is
 the model's full warning sentence."""
 
 
-def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+def gpu_feature_warnings(settings: RomsNamelistBase | Mapping[str, Any]) -> list[str]:
+    """The ``_GPU_WARN_SWITCHES`` that are on in ``settings``, one line each.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_gpu_features`.
+
+    Returns
+    -------
+    list[str]
+        One ``&<group> <key> = .true.: <what>`` line per warn switch that is on,
+        in the model's order; empty when none is.
+    """
+    return [
+        f"&{s.group} {s.key} = .true.: {s.what}"
+        for s in _GPU_WARN_SWITCHES
+        if s.is_on(settings)
+    ]
+
+
+def check_gpu_features(
+    settings: RomsNamelistBase | Mapping[str, Any], *, warn: bool = True
+) -> None:
     """Raise ``NamelistConsistencyError`` if the namelist switches on a feature the
     GPU model does not have -- mirrors roms-marbl-gpu's start-up feature guard
     (``src/host/feature_guard.F90``, v0.1.3-beta; see Rule F in the module
@@ -1386,6 +1415,9 @@ def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
         (a live ``RomsNamelistBase``, or a mapping of group name to group
         mapping, such as a blueprint's namelist overrides). A missing group or key
         counts as off, and a switch is on only when its value is ``True``.
+    warn
+        Emit the warning below. A caller that reports the warn switches itself
+        (through :func:`gpu_feature_warnings`) passes ``False``.
 
     Raises
     ------
@@ -1396,16 +1428,16 @@ def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
     Warns
     -----
     UserWarning
-        If any switch in ``_GPU_WARN_SWITCHES`` is on: one warning lists them all.
+        If `warn` and any switch in ``_GPU_WARN_SWITCHES`` is on: one warning
+        lists them all.
         Emitted before the error, when both apply, as the model prints its warnings
         and errors together.
     """
-    warned = [s for s in _GPU_WARN_SWITCHES if s.is_on(settings)]
+    warned = gpu_feature_warnings(settings) if warn else []
     if warned:
         warnings.warn(
             "The GPU model does not honour these namelist settings (it warns about them "
-            "at start-up):\n  "
-            + "\n  ".join(f"&{s.group} {s.key} = .true.: {s.what}" for s in warned),
+            "at start-up):\n  " + "\n  ".join(warned),
             UserWarning,
             stacklevel=2,
         )
@@ -1424,6 +1456,80 @@ def check_gpu_features(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
             rule="gpu_features",
             section=unsupported[0].group,
             keys=(unsupported[0].key,),
+        )
+
+
+GPU_RESTORING_DATA: Final[tuple[tuple[str, str, str], ...]] = (
+    ("sss", "sflx_corr", "SFLX_CORR"),
+    ("sst", "qcorrection", "QCORRECTION"),
+    ("sDIC", "cflx_corr", "CFLX_CORR"),
+    ("sALK", "cflx_corr", "CFLX_CORR"),
+)
+"""Surface restoring data roms-marbl-gpu v0.1.3-beta looks for in the forcing files
+(`warn_unused_restoring`, `src/host/frc_io.F90`), as (variable, the GPU-only
+`&surf_frc_settings` switch that uses it, the ucla-roms cpp key the switch stands
+in for). The names are case-sensitive: a flux file's upper-case `SST` and `SSS` are
+not restoring data."""
+
+GPU_FIXED_XCO2_AIR: Final[float] = 284.7
+"""Atmospheric CO2 (ppm) roms-marbl-gpu v0.1.3-beta uses when the forcing has no
+`xco2_air` series (`src/host/marbl_step.F90:38`). `&bgc_settings xco2air_default`
+is read in `src/host/avg_out.F90` and never used."""
+
+
+def check_gpu_ignored_settings(settings: RomsNamelistBase | Mapping[str, Any]) -> None:
+    """Raise ``NamelistConsistencyError`` if the namelist sets a value the GPU model
+    reads and ignores (Rule F2 in the module docstring).
+
+    The settings are ``&bgc_settings xco2air_default`` other than
+    :data:`GPU_FIXED_XCO2_AIR` (the value is refused even though it is unused
+    wherever the forcing has an `xco2_air` series: without one the GPU model
+    ignores it) and ``&bgc_settings wrt_bgc_dia_his`` true.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_gpu_features`. A missing
+        group or key passes.
+
+    Raises
+    ------
+    NamelistConsistencyError
+        If either setting is present as described. One error lists them all; its
+        ``section`` and ``keys`` name the first.
+    """
+    bgc = _section(settings, "bgc_settings")
+    # (key, what the namelist says and the model does instead, the fix)
+    hits: list[tuple[str, str, str]] = []
+    xco2 = _section(bgc, "xco2air_default")
+    if xco2 is not None and not math.isclose(
+        xco2, GPU_FIXED_XCO2_AIR, rel_tol=0.0, abs_tol=1e-9
+    ):
+        hits.append(
+            (
+                "xco2air_default",
+                f"{xco2} (the GPU model uses {GPU_FIXED_XCO2_AIR})",
+                f"Set xco2air_default to {GPU_FIXED_XCO2_AIR}, or supply a "
+                "time-varying xco2_air series in the surface BGC forcing.",
+            )
+        )
+    if _section(bgc, "wrt_bgc_dia_his") is True:
+        hits.append(
+            (
+                "wrt_bgc_dia_his",
+                ".true. (the GPU model writes no such output)",
+                "Set wrt_bgc_dia_his to .false..",
+            )
+        )
+    if hits:
+        raise NamelistConsistencyError(
+            "The GPU model reads these namelist settings and ignores them:\n  "
+            + "\n  ".join(f"&bgc_settings {key} = {what}" for key, what, _ in hits)
+            + "\n"
+            + " ".join(fix for *_, fix in hits),
+            rule="gpu_ignored_settings",
+            section="bgc_settings",
+            keys=(hits[0][0],),
         )
 
 

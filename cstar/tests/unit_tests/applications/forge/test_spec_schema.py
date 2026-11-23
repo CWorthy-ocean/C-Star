@@ -226,7 +226,9 @@ def test_registered_adapters_reach_the_current_version(kind: str) -> None:
     migration = BlueprintMigration(SPEC_MIGRATIONS, SPEC_SCHEMA_VERSIONS)
     plan = migration.plan({"application": kind, "schema_version": "1.0.0"})
     assert plan.target == SPEC_SCHEMA_VERSIONS[kind]
-    assert plan.adapters[-1].target() == SPEC_SCHEMA_VERSIONS[kind]
+    # A minor bump (a new optional key) needs no adapter: the last one reaches the
+    # current major.
+    assert version_key(plan.adapters[-1].target())[0] == version_key(plan.target)[0]
 
 
 # ---------------------------------------------------------------------------

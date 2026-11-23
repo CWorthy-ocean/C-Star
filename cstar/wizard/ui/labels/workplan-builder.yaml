@@ -210,6 +210,14 @@ fields:
     label: CPUs
     symbol: num_cpus
     hint: Required for a deferred blueprint, which the launcher cannot read.
+  step.num_gpus:
+    label: GPUs
+    symbol: num_gpus
+    hint: Filled in from a GPU blueprint's tiling; leave blank for a CPU run.
+  step.num_nodes:
+    label: Nodes
+    symbol: num_nodes
+    hint: Filled in from a GPU blueprint's tiling; blank lets the launcher choose.
   step.max_walltime:
     label: Walltime
     symbol: max_walltime

@@ -34,6 +34,7 @@ from cstar.applications.forge.blueprint import (
     CDR_MODES,
     RUNTIME_GRID_KWARGS,
     CarbonateSensitivitySpec,
+    EmittedApplication,
     Forcing,
     OpenBoundaries,
     UserProvidedFile,
@@ -42,7 +43,7 @@ from cstar.applications.forge.blueprint import (
     infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
 )
-from cstar.applications.forge.engine import check_derived_overrides
+from cstar.applications.forge.engine import builds_marbl, check_derived_overrides
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
@@ -70,6 +71,7 @@ from cstar.applications.forge.namelist_model import (
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     n_tracers_from_param,
+    namelist_ref_for_application,
     normalize_legacy_sections,
     output_precheck_applies_to,
     prune_version_gated_sections,
@@ -84,8 +86,16 @@ from cstar.applications.forge.templates import (
 )
 from cstar.applications.forge.user_files import verify_user_file
 from cstar.applications.forge.util import mem_log
+from cstar.applications.ucla_roms_gpu.models import (
+    APP_NAME as GPU_APP_NAME,
+)
+from cstar.applications.ucla_roms_gpu.models import (
+    TilingParameterSet,
+    UclaRomsGpuBlueprint,
+)
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.utils import generate_schema_ref
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Resource
 from cstar.orchestration.serialization import (
@@ -94,6 +104,11 @@ from cstar.orchestration.serialization import (
     relativize_locations,
 )
 from cstar.roms.namelist import is_commit_hash, release_ref_for_remote
+from cstar.roms.precheck import (
+    check_gpu_array_sizes,
+    check_gpu_features,
+    check_gpu_ignored_settings,
+)
 
 log = logging.getLogger(__name__)
 
@@ -221,6 +236,46 @@ def _describe_grid_kwargs(gk: dict[str, Any]) -> str:
     return summary
 
 
+def emitted_blueprint_data(
+    data: dict[str, Any], *, application: str, tiling: TilingParameterSet | None
+) -> dict[str, Any]:
+    """The blueprint document of `application`, from the ``ucla_roms`` blueprint dump.
+
+    Forge assembles the ``ucla_roms`` shape through every stage; this is the one
+    place that turns it into the shape of the application it emits for.
+
+    Parameters
+    ----------
+    data : dict
+        The JSON dump of the ``ucla_roms``-shaped blueprint.
+    application : str
+        The application the emitted blueprint runs with.
+    tiling : TilingParameterSet or None
+        The GPU tiling (``ucla_roms_gpu`` only), which replaces ``partitioning``.
+
+    Returns
+    -------
+    dict
+        `data` unchanged for ``ucla_roms``. For ``ucla_roms_gpu``, a copy with
+        ``code`` cut to the repositories the GPU build uses (``roms``, ``run_time``),
+        ``tiling`` in place of ``partitioning``, and the application name, schema
+        version and ``$schema`` reference of ``UclaRomsGpuBlueprint``.
+    """
+    if application != GPU_APP_NAME:
+        return data
+    if tiling is None:
+        raise ValueError(f"{GPU_APP_NAME} needs a tiling")
+    schema_version = UclaRomsGpuBlueprint.model_fields["schema_version"].default
+    gpu = {k: v for k, v in data.items() if k not in ("partitioning", "code")}
+    gpu["code"] = {k: data["code"][k] for k in ("roms", "run_time")}
+    gpu["tiling"] = tiling.model_dump(mode="json", exclude_none=True)
+    gpu["application"] = GPU_APP_NAME
+    gpu["schema_version"] = schema_version
+    if "$schema" in gpu:
+        gpu["$schema"] = generate_schema_ref(GPU_APP_NAME, schema_version)
+    return gpu
+
+
 class ForgeExecutor(BaseModel):
     """
     Builder for C-Star UclaRomsBlueprint specifications.
@@ -307,6 +362,21 @@ class ForgeExecutor(BaseModel):
     )
     open_boundaries: OpenBoundaries
     partitioning: cstar_models.PartitioningParameterSet
+    emitted_application: EmittedApplication = Field(
+        default="ucla_roms",
+        description=(
+            "The application the emitted blueprint runs with (from the ForgeBlueprint "
+            "``emitted_application``). Every stage assembles the ``ucla_roms`` shape; "
+            "``persist`` converts it once, through ``emitted_blueprint_data``."
+        ),
+    )
+    tiling: TilingParameterSet | None = Field(
+        default=None,
+        description=(
+            "How a ``ucla_roms_gpu`` blueprint is split over GPUs and nodes; set if "
+            "and only if ``emitted_application`` is ``ucla_roms_gpu``."
+        ),
+    )
     start_date: datetime = Field(alias="start_time")
     end_date: datetime = Field(alias="end_time")
     cdr_mode: str = Field(
@@ -475,6 +545,27 @@ class ForgeExecutor(BaseModel):
     _cstar_simulation: Any | None = PrivateAttr(default=None)
     _settings_compile_time: dict[str, Any] = PrivateAttr(default_factory=dict)
     _settings_run_time: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_tiling(self) -> ForgeExecutor:
+        """A ``ucla_roms_gpu`` executor carries a tiling that matches ``partitioning``."""
+        gpu = self.emitted_application == GPU_APP_NAME
+        if gpu != (self.tiling is not None):
+            raise ValueError(
+                f"tiling must be set if and only if emitted_application is "
+                f"{GPU_APP_NAME!r}; got emitted_application="
+                f"{self.emitted_application!r} and tiling={self.tiling!r}"
+            )
+        if self.tiling is not None and (
+            (self.tiling.n_procs_x, self.tiling.n_procs_y)
+            != (self.partitioning.n_procs_x, self.partitioning.n_procs_y)
+        ):
+            raise ValueError(
+                f"tiling ({self.tiling.n_procs_x} x {self.tiling.n_procs_y}) must "
+                f"match partitioning ({self.partitioning.n_procs_x} x "
+                f"{self.partitioning.n_procs_y})"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_dates(self) -> ForgeExecutor:
@@ -1050,30 +1141,17 @@ class ForgeExecutor(BaseModel):
             (self._settings_compile_time.get("cppdefs") or {}).get("marbl", False)
         )
 
-    def _validated_ucla_roms_blueprint(self) -> cstar_models.UclaRomsBlueprint:
-        """Re-validate the assembled blueprint against the installed C-Star models.
-
-        The blueprint is assembled with ``model_construct`` because the
-        pre-generation stages are deliberately partial (placeholder resources;
-        ``runtime_params`` lives in the sidecar until ``configure_build``), so
-        nothing checks it against the cstar models --
-        which are ``extra="forbid"`` -- until C-Star loads the persisted file.
-        Round-tripping the exact serialized form (the same ``model_dump`` that
-        ``persist`` writes, minus the ``$schema`` key that ``deserialize``
-        strips) through ``model_validate`` fails at emit time instead, pointing
-        at the offending field. Returns the validated instance so the executor
-        holds -- and persists -- a fully validated blueprint from here on.
-
-        Only meaningful once ``generate_inputs`` has filled in real data
-        (``_inputs_generated``); the placeholder blueprint cannot validate.
-
-        Raises
-        ------
-        ValueError
-            If blueprint is not initialized.
+    def _emitted_blueprint_dict(self) -> dict[str, Any]:
+        """The JSON document of the blueprint this executor emits, with its
+        ``$schema`` key (the application's blueprint shape, see
+        ``emitted_blueprint_data``).
         """
         if self.ucla_roms_blueprint is None:
-            raise ValueError("Cannot validate: blueprint is not initialized")
+            raise ValueError("Cannot emit: blueprint is not initialized")
+        # Use mode='json' to ensure all values are JSON/YAML-serializable (no Python
+        # objects) and exclude_none=True to handle placeholder values gracefully.
+        # Pydantic serialization warnings are expected for placeholder values
+        # created with model_construct().
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", message=".*Pydantic.*", category=UserWarning
@@ -1082,18 +1160,61 @@ class ForgeExecutor(BaseModel):
                 "ignore", message=".*serialization.*", category=UserWarning
             )
             data = self.ucla_roms_blueprint.model_dump(mode="json", exclude_none=True)
+        return emitted_blueprint_data(
+            data, application=self.emitted_application, tiling=self.tiling
+        )
+
+    def _validated_ucla_roms_blueprint(self) -> cstar_models.UclaRomsBlueprint:
+        """Re-validate the assembled blueprint against the installed C-Star models.
+
+        The blueprint is assembled with ``model_construct`` because the
+        pre-generation stages are deliberately partial (placeholder resources;
+        ``runtime_params`` lives in the sidecar until ``configure_build``), so
+        nothing checks it against the cstar models --
+        which are ``extra="forbid"`` -- until C-Star loads the persisted file.
+        Round-tripping the exact document ``persist`` writes (minus the
+        ``$schema`` key that ``deserialize`` strips) through ``model_validate``
+        of the emitted application's blueprint (``UclaRomsBlueprint`` or
+        ``UclaRomsGpuBlueprint``) fails at emit time instead, pointing at the
+        offending field.
+
+        Only meaningful once ``generate_inputs`` has filled in real data
+        (``_inputs_generated``); the placeholder blueprint cannot validate.
+
+        Returns
+        -------
+        UclaRomsBlueprint
+            The ``ucla_roms``-shaped blueprint the executor keeps: the validated
+            instance for ``ucla_roms``; for ``ucla_roms_gpu``, whose validated
+            instance has another shape, the executor's own blueprint unchanged.
+
+        Raises
+        ------
+        ValueError
+            If blueprint is not initialized, or does not validate.
+        """
+        data = self._emitted_blueprint_dict()
         data.pop("$schema", None)
+        model: type[cstar_models.UclaRomsBlueprint | UclaRomsGpuBlueprint] = (
+            UclaRomsGpuBlueprint
+            if self.emitted_application == GPU_APP_NAME
+            else cstar_models.UclaRomsBlueprint
+        )
         try:
-            return cstar_models.UclaRomsBlueprint.model_validate(data)
+            validated = model.model_validate(data)
         except ValidationError as exc:
             msg = (
                 "The emitted UCLA-ROMS blueprint does not validate against the "
-                f"installed C-Star models ({cstar_models.__file__}); C-Star would "
+                f"installed C-Star models ({model.__module__}); C-Star would "
                 "reject it at load time. Most likely Forge emits a field this "
                 "C-Star version does not declare (its models are extra='forbid'), "
                 f"or a value fails a cstar validator:\n{exc}"
             )
             raise ValueError(msg) from exc
+        if isinstance(validated, cstar_models.UclaRomsBlueprint):
+            return validated
+        assert self.ucla_roms_blueprint is not None
+        return self.ucla_roms_blueprint
 
     def persist(self) -> None:
         """
@@ -1131,22 +1252,8 @@ class ForgeExecutor(BaseModel):
         # Ensure directory exists
         bp_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save blueprint to YAML file
-        # Use mode='json' to ensure all values are JSON/YAML-serializable (no Python objects)
-        # Use exclude_none=True to handle placeholder values gracefully
-        # Suppress expected serialization warnings for placeholder values created with model_construct()
-        with warnings.catch_warnings():
-            # Filter all Pydantic serialization warnings
-            # These occur because placeholder values (None) don't match expected types
-            warnings.filterwarnings(
-                "ignore", message=".*Pydantic.*", category=UserWarning
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*serialization.*", category=UserWarning
-            )
-            ucla_roms_blueprint_dict = self.ucla_roms_blueprint.model_dump(
-                mode="json", exclude_none=True
-            )
+        # Save the emitted blueprint (the application's shape) to YAML file
+        ucla_roms_blueprint_dict = self._emitted_blueprint_dict()
 
         # The Blueprint serializer injects a "$schema" ref into every dump, but
         # the canonical C-Star file format carries it as a yaml-language-server
@@ -2447,10 +2554,11 @@ class ForgeExecutor(BaseModel):
             if self.code_spec is not None
             else None
         )
-        effective_roms_ref = (
+        effective_roms_ref = namelist_ref_for_application(
+            self.emitted_application,
             release_ref_for_remote(self.code_spec.roms.location, pinned_roms_ref)
             if self.code_spec is not None and pinned_roms_ref
-            else pinned_roms_ref
+            else pinned_roms_ref,
         )
         with warnings.catch_warnings():
             # See the matching resolver guard: an internal version probe
@@ -2703,7 +2811,7 @@ class ForgeExecutor(BaseModel):
             cppdefs=cppdefs,
             marbl_code=None
             if self.code_spec is None
-            else self.code_spec.marbl is not None,
+            else builds_marbl(self.code_spec, self.emitted_application),
             open_boundaries=self.open_boundaries.model_dump(),
             is_child=self.grid_kwargs_parent is not None,
         )
@@ -2787,9 +2895,17 @@ class ForgeExecutor(BaseModel):
         # duplication is intentional and cheap -- this check must run before
         # any build side effects (the mkdir/render calls just below), so it
         # can't reuse an object built later in this method.)
-        if output_precheck_applies_to(settings_cls):
+        gpu = self.emitted_application == GPU_APP_NAME
+        if gpu or output_precheck_applies_to(settings_cls):
             rt = settings_cls.model_validate(self._settings_run_time)
             nml = build_namelist(rt, n_tracers)
+        if gpu:
+            # The GPU model's own limits (stored blueprints reach here without
+            # re-resolving): features it lacks, settings it ignores, array sizes.
+            check_gpu_features(nml)
+            check_gpu_ignored_settings(nml)
+            check_gpu_array_sizes(nml)
+        if output_precheck_applies_to(settings_cls):
             check_output_streams_divide_rst(
                 nml.model_dump(),
                 cppdefs_for_precheck(
@@ -2837,12 +2953,21 @@ class ForgeExecutor(BaseModel):
             **self._settings_compile_time,
             **self._settings_run_time,
         }
-        compile_time_code = render_roms_settings(
-            template_files=["cppdefs.opt.j2"],
-            template_dir=self._stage_templates("compile_time"),
-            settings_dict=cppdefs_render_dict,
-            code_output_dir=self.compile_time_code_dir,
-            n_tracers=n_tracers,
+        # A spec that lists no compile-time template (the GPU build has none)
+        # renders nothing and emits no compile_time code entry.
+        compile_time_templates = [
+            f for f in self._template_files("compile_time") if f.endswith(".j2")
+        ]
+        compile_time_code = (
+            render_roms_settings(
+                template_files=compile_time_templates,
+                template_dir=self._stage_templates("compile_time"),
+                settings_dict=cppdefs_render_dict,
+                code_output_dir=self.compile_time_code_dir,
+                n_tracers=n_tracers,
+            )
+            if compile_time_templates
+            else None
         )
 
         # ------------------------------------------------------------------
@@ -2889,9 +3014,10 @@ class ForgeExecutor(BaseModel):
             ucla_roms_blueprint_dict = self.ucla_roms_blueprint.model_dump(mode="json")
             code_dict = ucla_roms_blueprint_dict["code"]
             # Convert dicts from render_roms_settings / write_roms_namelist to CodeRepository objects
-            code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(
-                **compile_time_code
-            )
+            if compile_time_code is not None:
+                code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(
+                    **compile_time_code
+                )
             code_dict["run_time"] = cstar_models.CodeRepository.model_construct(
                 **run_time_code
             )

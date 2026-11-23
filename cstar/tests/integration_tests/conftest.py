@@ -231,7 +231,7 @@ def forge_blueprint_factory(
         case = FORGE_CASES[case_name]
         domain = test_catalog.domain_data(case.domain)
         cfg = build_forge_blueprint(
-            model_path=test_catalog.model_path(MODEL_SPEC),
+            model_path=test_catalog.model_path(case.model_spec),
             grid_name=domain["grid_name"],
             grid_kwargs=domain["grid_kwargs"],
             open_boundaries=domain["open_boundaries"],
@@ -247,7 +247,8 @@ def forge_blueprint_factory(
             run_time_overrides=run_time_overrides or case.run_time_overrides,
             bgc_mode=case.bgc_mode,
             cdr=cdr or case.cdr,
-            roms_ref=ROMS_REF,
+            # ROMS_REF is a ucla-roms ref: a GPU spec keeps its own pin
+            roms_ref=ROMS_REF if case.model_spec == MODEL_SPEC else None,
         )
         working_dir.mkdir(parents=True, exist_ok=True)
         cfg.working_dir = working_dir

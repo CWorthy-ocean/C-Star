@@ -80,6 +80,7 @@ from cstar.roms.namelist import (
     VerticalMixingSettings,
     format_roms_version,
     is_commit_hash,
+    namelist_release_for_gpu_ref,
     namelist_schema_for_ref,
     roms_version_from_ref,
 )
@@ -3262,6 +3263,52 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         ) from None
 
 
+def namelist_ref_for_application(application: str, roms_ref: str | None) -> str | None:
+    """The ucla-roms ref that keys Forge's namelist tier and version gates for a run
+    of `application` pinned to `roms_ref`.
+
+    Every place Forge picks a run-time settings tier, prunes version-gated
+    sections or gates a check on a ucla-roms release goes through this, so a GPU
+    run is checked and written in the vocabulary its model reads.
+
+    Parameters
+    ----------
+    application : str
+        The application the emitted blueprint runs with (``ucla_roms`` or
+        ``ucla_roms_gpu``).
+    roms_ref : str or None
+        The ref ``code.roms`` pins. Resolve a commit hash to its release tag
+        first (:func:`cstar.roms.namelist.release_ref_for_remote`) where the
+        repository can be reached.
+
+    Returns
+    -------
+    str or None
+        For ``ucla_roms``, `roms_ref` unchanged. For ``ucla_roms_gpu``, the
+        ucla-roms release whose namelist vocabulary the roms-marbl-gpu ref reads
+        (:func:`cstar.roms.namelist.namelist_release_for_gpu_ref`, ``"0.11.0"``
+        for v0.1.3-beta).
+
+    Warns
+    -----
+    UserWarning
+        For ``ucla_roms_gpu``, as :func:`cstar.roms.namelist.gpu_namelist_schema_for_ref`
+        (a ref that is not a release tag, or one newer than C-Star knows).
+
+    Raises
+    ------
+    ValueError
+        For ``ucla_roms_gpu``, a roms-marbl-gpu release older than C-Star supports.
+    """
+    # Deferred: the GPU application package imports the ucla_roms models, which
+    # this module's light importers do not need.
+    from cstar.applications.ucla_roms_gpu.models import APP_NAME as GPU_APP_NAME
+
+    if application == GPU_APP_NAME:
+        return namelist_release_for_gpu_ref(roms_ref)
+    return roms_ref
+
+
 # Canonical forcing order -> frcfiles (matches write_roms_namelist).
 _FORCING_ORDER = (
     "surface_forcing_path",
@@ -3672,8 +3719,35 @@ _PRECHECK_SECTIONS: tuple[str, ...] = (
 )
 
 
+GPU_PRECHECK_SECTIONS: tuple[str, ...] = (
+    "river_frc",
+    "pipe_frc",
+    "cdr_output",
+    "cdr_lite_output",
+    "cdr_gas_exch_output",
+    "zslice",
+    "particles",
+    "frc_output",
+    "surf_flux",
+    "ocean_vars",
+    "bgc",
+    "tides",
+    "diagnostics",
+    "sponge_tune",
+    "calc_pflx",
+)
+"""The Forge sections whose canonical groups the GPU rules read: Rule F's stop and
+warn switches and Rule F2's ``&bgc_settings`` values
+(:func:`cstar.roms.precheck.check_gpu_features`,
+:func:`cstar.roms.precheck.check_gpu_ignored_settings`). Pass to
+:func:`canonical_output_sections_for_precheck` as ``sections``."""
+
+
 def canonical_output_sections_for_precheck(
-    settings: dict[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+    settings: dict[str, Any],
+    settings_cls: type[_RunTimeSettingsCommon],
+    *,
+    sections: Sequence[str] = _PRECHECK_SECTIONS,
 ) -> dict[str, Any]:
     """Translate the output-stream-relevant sections of a forge run-time
     settings dict into C-Star's canonical namelist vocabulary (RomsNamelistBase
@@ -3689,7 +3763,7 @@ def canonical_output_sections_for_precheck(
     ``generate_inputs()``/executor time), so a full run-time-settings
     validation can't succeed yet. None of those sections affect any
     output-stream field, so this only validates+aliases the sections the
-    checker actually reads (:data:`_PRECHECK_SECTIONS`), each through the Cfg
+    checker actually reads (`sections`, :data:`_PRECHECK_SECTIONS` by default), each through the Cfg
     class and into the group of ``settings_cls``, the tier of the pinned
     ucla-roms release. A section absent from ``settings`` or from that tier is
     simply omitted from the result -- the checker already treats an absent
@@ -3707,7 +3781,7 @@ def canonical_output_sections_for_precheck(
     """
     namelist_cls = namelist_schema_for(settings_cls)
     out: dict[str, Any] = {}
-    for section_name in _PRECHECK_SECTIONS:
+    for section_name in sections:
         info = settings_cls.model_fields.get(section_name)
         section = settings.get(section_name)
         if info is None or section is None:

@@ -23,7 +23,11 @@ from cstar.roms.namelist import (
     check_supported_gpu_release,
     gpu_namelist_schema_for_ref,
 )
-from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
+from cstar.roms.precheck import (
+    check_gpu_array_sizes,
+    check_gpu_features,
+    check_gpu_ignored_settings,
+)
 
 if t.TYPE_CHECKING:
     from cstar.system.toolchain import ToolchainName
@@ -86,6 +90,14 @@ class TilingParameterSet(ParameterSet):
             tiles=self.n_procs_x * self.n_procs_y,
             nodes=self.nodes,
             writers_per_node=self.writers_per_node,
+        )
+
+    @property
+    def compute_needs(self) -> ComputeNeeds:
+        """The MPI tasks, GPUs and nodes the run needs."""
+        layout = self.layout
+        return ComputeNeeds(
+            tasks=layout.tasks, gpu_tasks=layout.tiles, nodes=layout.nodes
         )
 
     @model_validator(mode="after")
@@ -208,8 +220,9 @@ class UclaRomsGpuBlueprint(Blueprint):
         Unknown group/key names are an error when `code.roms` pins a
         roms-marbl-gpu release and a warning otherwise. `np_xi`/`np_eta`
         conflicts with `tiling`, switches for features the GPU model does
-        not have (Rule F in :mod:`cstar.roms.precheck`) and arrays with more
-        values than it reads (Rule G) are always an error.
+        not have (Rule F in :mod:`cstar.roms.precheck`), settings it reads and
+        ignores (Rule F2) and arrays with more values than it reads (Rule G)
+        are always an error.
         Values are re-validated when the overrides are merged onto the real
         namelist before launch.
         """
@@ -234,15 +247,13 @@ class UclaRomsGpuBlueprint(Blueprint):
             raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
 
         check_gpu_features(self.namelist_overrides)
+        check_gpu_ignored_settings(self.namelist_overrides)
         check_gpu_array_sizes(self.namelist_overrides)
 
     @property
     def compute_needs(self) -> ComputeNeeds:
         """The MPI tasks, GPUs and nodes the run needs (from the tiling)."""
-        layout = self.tiling.layout
-        return ComputeNeeds(
-            tasks=layout.tasks, gpu_tasks=layout.tiles, nodes=layout.nodes
-        )
+        return self.tiling.compute_needs
 
     @property
     def processor_grid(self) -> tuple[int | None, int | None]:

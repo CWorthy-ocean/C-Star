@@ -391,3 +391,10 @@ def test_output_table_and_variable_grid_fields_exist():
         for title, keys in grids:
             for key in keys:
                 check(f"_VARIABLE_GRIDS[{section!r}] {title!r}", section, key)
+
+
+def test_gpu_fields_have_entries(wizard):
+    for key in ("application_dd", "nodes", "writers_per_node"):
+        assert key in labels.known_keys()
+        assert labels.label_for(key).hint
+        assert hasattr(wizard, key)

@@ -66,10 +66,20 @@ from collections import Counter
 from datetime import UTC, datetime, time
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self, get_args
+from typing import TYPE_CHECKING, Any, Final, Literal, Self, get_args
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeInt,
+    PositiveInt,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from cstar.applications.forge.source_registry import (
     DERIVED_BGC_SOURCES,
@@ -97,6 +107,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
+    from cstar.applications.ucla_roms_gpu.models import TilingParameterSet
     from cstar.orchestration.models import CatalogSpecKind
 
 
@@ -443,7 +454,19 @@ _HASH_EXCLUDE = frozenset({"forge_blueprint_version", "composition"})
 # an explicit exception to the "additive fields don't bump" rule above: a v10 build
 # rejects null, so the bump makes it say "upgrade cstar-ocean" instead of failing
 # validation.
+# Also within v11 (never released, so no separate bump/migration needed):
+# ``emitted_application`` and ``domain.partitioning.nodes``/``writers_per_node`` were
+# added (the experimental ``ucla_roms_gpu`` target). They are written only when set, so
+# files that do not use them are unchanged.
 FORGE_BLUEPRINT_VERSION = 11
+
+EmittedApplication = Literal["ucla_roms", "ucla_roms_gpu"]
+"""The C-Star application whose blueprint a Forge run emits. ``ucla_roms_gpu``
+(roms-marbl-gpu) is experimental."""
+
+DEFAULT_EMITTED_APPLICATION: Final[EmittedApplication] = "ucla_roms"
+"""The application a ModelSpec or ForgeBlueprint that names none runs with; a saved
+file leaves the key out while it has this value."""
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -675,6 +698,25 @@ class Partitioning(_Section):
     """Total number of cores to use when ``auto_tiling`` selects the tiling layout.
     Forge policy (stricter than C-Star's): always required alongside
     ``auto_tiling`` -- n_procs_x/n_procs_y are never combined with auto_tiling."""
+    nodes: PositiveInt | None = Field(default=None)
+    """GPU only (``ucla_roms_gpu``): the ``tiling.nodes`` of the emitted blueprint.
+    ``None`` takes ``TilingParameterSet``'s own default."""
+    writers_per_node: NonNegativeInt | None = Field(default=None)
+    """GPU only (``ucla_roms_gpu``): the ``tiling.writers_per_node`` of the emitted
+    blueprint. ``None`` takes ``TilingParameterSet``'s own default."""
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_gpu_tiling(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """Leave ``nodes``/``writers_per_node`` out of every dump while unset, so the
+        files, hashes and CPU consumers of a run that does not use them are unchanged.
+        """
+        data: dict[str, Any] = handler(self)
+        for name in ("nodes", "writers_per_node"):
+            if data.get(name) is None:
+                data.pop(name, None)
+        return data
 
     @model_validator(mode="after")
     def _validate_partitioning(self) -> Partitioning:
@@ -1800,6 +1842,10 @@ class ForgeBlueprint(Blueprint):
     application: str = (
         DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
     )
+    emitted_application: EmittedApplication = Field(default=DEFAULT_EMITTED_APPLICATION)
+    """The C-Star application whose blueprint the run emits. ``ucla_roms_gpu`` is
+    experimental and takes its tiling from ``domain.partitioning``. Absent from a
+    saved file and from the content hash while it is the default."""
     # The blueprint's canonical name + human description (``Blueprint`` base fields).
     # ``name`` is the single source of truth for every derived name (``casename``,
     # namelist ``title``, ``output_root_name``, ``run_output_dir``, the default
@@ -1902,6 +1948,108 @@ class ForgeBlueprint(Blueprint):
                 "in the wizard, fills it in)."
             )
         return self
+
+    @model_validator(mode="after")
+    def _application_fits_partitioning(self) -> ForgeBlueprint:
+        """The emitted application, the partitioning and the compile-time templates
+        agree.
+
+        ``ucla_roms_gpu`` needs a fixed tile layout the GPU model accepts, takes no
+        compile-time template, and refuses what roms-marbl-gpu v0.1.3-beta cannot
+        do; the CPU application renders at least one compile-time template (its
+        ``cppdefs.opt``) and has no ``nodes``/``writers_per_node``. One check here,
+        so no later stage re-derives it.
+        """
+        part = self.domain.partitioning
+        violations: list[str] = []
+        templates = [
+            f for f in self.code.templates_compile_time.files if f.endswith(".j2")
+        ]
+        if self.emitted_application != "ucla_roms_gpu":
+            if not templates:
+                violations.append(
+                    "code.templates_compile_time.files lists no compile-time "
+                    "template (.j2): the ucla_roms build needs its cppdefs.opt"
+                )
+            for name in ("nodes", "writers_per_node"):
+                if getattr(part, name) is not None:
+                    violations.append(
+                        f"domain.partitioning.{name} is only for ucla_roms_gpu "
+                        f"(emitted_application is {self.emitted_application!r})"
+                    )
+        else:
+            gpu = "the experimental ucla_roms_gpu target (roms-marbl-gpu v0.1.3-beta)"
+            if part.n_procs_x is None or part.n_procs_y is None:
+                violations.append(
+                    f"{gpu} needs n_procs_x and n_procs_y; auto_tiling and "
+                    "n_cores are not supported"
+                )
+            if self.use_pio:
+                violations.append(f"{gpu} does not use ParallelIO (use_pio)")
+            if templates:
+                violations.append(
+                    f"{gpu} builds from its own source and takes no compile-time "
+                    f"template; remove {', '.join(templates)} from "
+                    "code.templates_compile_time.files"
+                )
+            nesting = [
+                label
+                for label, active in (
+                    ("domain.grid_kwargs_parent", self.domain.grid_kwargs_parent),
+                    ("domain.grid_kwargs_child", self.domain.grid_kwargs_child),
+                    ("cdr.mode: upscaled", self.cdr.mode == "upscaled"),
+                    (
+                        "model_settings.calc_pflx.calc_pflx",
+                        (self.model_settings.get("calc_pflx") or {}).get("calc_pflx"),
+                    ),
+                    (
+                        "model_settings.upscale_output.do_upscale",
+                        (self.model_settings.get("upscale_output") or {}).get(
+                            "do_upscale"
+                        ),
+                    ),
+                )
+                if active
+            ]
+            if nesting:
+                violations.append(
+                    f"{gpu} cannot take part in nesting (it does not compute the "
+                    f"up/vp pressure fluxes); remove {', '.join(nesting)}"
+                )
+            if part.n_procs_x is not None and part.n_procs_y is not None:
+                try:
+                    _ = self.tiling
+                except ValueError as err:
+                    violations.append(f"{gpu} refuses this tiling: {err}")
+        if violations:
+            raise ValueError("; ".join(violations))
+        return self
+
+    @property
+    def tiling(self) -> TilingParameterSet | None:
+        """The ``ucla_roms_gpu`` tiling this blueprint emits, or ``None`` for any other
+        application. Built from ``domain.partitioning``; ``nodes`` and
+        ``writers_per_node`` take ``TilingParameterSet``'s defaults while unset.
+        """
+        part = self.domain.partitioning
+        if (
+            self.emitted_application != "ucla_roms_gpu"
+            or part.n_procs_x is None
+            or part.n_procs_y is None
+        ):
+            return None
+        # Deferred: ``cstar.applications.ucla_roms_gpu`` must stay out of this
+        # module's import (see ``test_forge_blueprint_import_stays_light``).
+        from cstar.applications.ucla_roms_gpu.models import TilingParameterSet
+
+        extras = {
+            name: value
+            for name in ("nodes", "writers_per_node")
+            if (value := getattr(part, name)) is not None
+        }
+        return TilingParameterSet(
+            n_procs_x=part.n_procs_x, n_procs_y=part.n_procs_y, **extras
+        )
 
     @field_validator("name")
     @classmethod
@@ -2174,6 +2322,10 @@ class ForgeBlueprint(Blueprint):
         }
         if unset_blend:
             exclude["forcing"] = unset_blend
+        # ``emitted_application`` likewise (``Partitioning`` drops its own unset GPU
+        # fields when dumped).
+        if stamped.emitted_application == DEFAULT_EMITTED_APPLICATION:
+            exclude["emitted_application"] = True
         data = stamped.model_dump(mode="json", exclude_none=False, exclude=exclude)
         # Pydantic keeps the narrowed ``provenance`` field at its ``Blueprint``
         # base position; saved files have it last. Forge files never populate
