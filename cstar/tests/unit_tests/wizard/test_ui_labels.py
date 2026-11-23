@@ -393,9 +393,8 @@ def test_output_table_and_variable_grid_fields_exist():
                 check(f"_VARIABLE_GRIDS[{section!r}] {title!r}", section, key)
 
 
-def test_gpu_fields_have_entries_and_the_target_is_flagged_experimental(wizard):
-    assert labels.label_for("application_tb").experimental is True
-    for key in ("application_tb", "nodes", "writers_per_node"):
+def test_gpu_fields_have_entries(wizard):
+    for key in ("application_dd", "nodes", "writers_per_node"):
         assert key in labels.known_keys()
         assert labels.label_for(key).hint
         assert hasattr(wizard, key)

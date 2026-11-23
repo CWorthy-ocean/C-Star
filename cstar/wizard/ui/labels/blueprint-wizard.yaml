@@ -12,7 +12,7 @@ sections:
     required: false
   model:
     title: Model
-    desc: Choose the UCLA-ROMS model preset, biogeochemistry mode, and code versions this blueprint builds against.
+    desc: Choose the ocean model, its preset, the biogeochemistry mode, and the code versions this blueprint builds against.
     required: true
   grid:
     title: Domain and grid
@@ -244,10 +244,9 @@ fields:
     label: From a file
   upload:
     label: Upload blueprint file
-  application_tb:
-    label: Runs on
-    experimental: true
-    hint: CPU runs ucla-roms. GPU runs roms-marbl-gpu, which is experimental, takes no ParallelIO or nesting, and cannot restore surface values.
+  application_dd:
+    label: Ocean model
+    hint: The model code the run uses; the Model preset list shows its presets. ucla-roms runs on CPUs. roms-marbl-gpu runs on GPUs and is experimental; it takes no ParallelIO or nesting, and cannot restore surface values.
   model_dd:
     label: Model preset
     required: true

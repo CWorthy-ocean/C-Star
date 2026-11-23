@@ -55,6 +55,7 @@ from cstar.applications.forge.blueprint import (
     ClimatologyMode,
     CoarseGridMode,
     Composition,
+    EmittedApplication,
     ExtrapMethod,
     ForgeBlueprint,
     ForgeProvenance,
@@ -4950,11 +4951,18 @@ class _ForcingEditor:
 # catalog but is no longer the default.
 _DEFAULT_MODEL = "roms-marbl-0.16-default"
 
-# The same for the experimental GPU target (the "Runs on" toggle's GPU side).
+# The same for the experimental GPU application (roms-marbl-gpu).
 _DEFAULT_GPU_MODEL = "roms-marbl-gpu-0.1.3-default"
 
-# What a ModelSpec that declares no application runs on (the toggle's CPU side).
+# The application a ModelSpec that declares none runs with.
 _CPU_APPLICATION: Final[str] = DEFAULT_EMITTED_APPLICATION
+
+# "Ocean model" dropdown labels; the widget's value stays the application name,
+# and an application without an entry is listed under that name.
+_APPLICATION_LABELS: Final[dict[str, str]] = {
+    DEFAULT_EMITTED_APPLICATION: "ucla-roms (CPU)",
+    _GPU_APPLICATION: "roms-marbl-gpu (GPU, experimental)",
+}
 
 # The GPU-only ``Partitioning`` keys: gathered only for the GPU target, kept out
 # of a saved DomainSpec (which has no such fields).
@@ -5225,12 +5233,15 @@ class ForgeBlueprintWizard:
             ),
             layout=W.Layout(width="auto"),
         )
-        # What the selected model runs on: derived from its ModelSpec (see
-        # _sync_application), never stored apart from it. Experimental.
-        self.application_tb = W.ToggleButtons(
-            options=[("CPU", _CPU_APPLICATION), ("GPU", _GPU_APPLICATION)],
+        # The model code (C-Star application) the selected ModelSpec runs with:
+        # derived from that spec (see _sync_application), never stored apart from
+        # it. Filters model_dd to that application's specs.
+        self.application_dd = W.Dropdown(
+            options=[
+                (_APPLICATION_LABELS.get(app, app), app)
+                for app in get_args(EmittedApplication)
+            ],
             value=_CPU_APPLICATION,
-            tooltip="CPU runs ucla-roms; GPU runs roms-marbl-gpu (experimental).",
         )
         self.model_dd = W.Dropdown(
             options=self._model_dd_options(),
@@ -6320,7 +6331,7 @@ class ForgeBlueprintWizard:
         self.cdr_simple_replace_btn.on_click(self._on_cdr_simple_replace)
         self.model_dd.observe(self._on_model_change, names="value")
         self.show_archived_models.observe(self._on_show_archived_change, names="value")
-        self.application_tb.observe(self._on_application_change, names="value")
+        self.application_dd.observe(self._on_application_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
         self.bgc_dd.observe(self._sync_co2_visibility, names="value")
@@ -6459,7 +6470,7 @@ class ForgeBlueprintWizard:
     def _visible_model_names(
         self, archived: Collection[str], selected: str | None = None
     ) -> list[str]:
-        """Catalog models ``model_dd`` lists, of the application ``application_tb``
+        """Catalog models ``model_dd`` lists, of the application ``application_dd``
         shows: all of them when "Show archived" is checked, otherwise the
         non-*archived* ones plus *selected* (so unchecking never drops the current
         choice).
@@ -6470,7 +6481,7 @@ class ForgeBlueprintWizard:
             for n in self.catalog.model_names
             # a spec that cannot be read is listed with the default application,
             # so selecting it still reports why it cannot be read
-            if applications.get(n, _CPU_APPLICATION) == self.application_tb.value
+            if applications.get(n, _CPU_APPLICATION) == self.application_dd.value
         ]
         if self.show_archived_models.value:
             return names
@@ -6838,11 +6849,11 @@ class ForgeBlueprintWizard:
 
     def _is_gpu(self) -> bool:
         """Whether the selected model runs on the GPU target."""
-        return self.application_tb.value == _GPU_APPLICATION
+        return self.application_dd.value == _GPU_APPLICATION
 
     def _sync_application(self, application: str | None = None) -> None:
         """Make everything that depends on the application agree with it: the
-        ``application_tb`` value (by default derived from the selected ModelSpec),
+        ``application_dd`` value (by default derived from the selected ModelSpec),
         the models ``model_dd`` lists, and which Model/Run widgets apply. The one
         place the wizard branches on the application, besides the switch handler and
         ``_gather``; called from the model-change handler, the loads and at start.
@@ -6851,7 +6862,7 @@ class ForgeBlueprintWizard:
             application = self._model_spec_declared()["application"]
         gpu = application == _GPU_APPLICATION
         with self._suspend():
-            self.application_tb.value = application
+            self.application_dd.value = application
             selected = self.model_dd.value
             self.model_dd.options = self._model_dd_options(selected)
             if selected in self._dd_values(self.model_dd):
@@ -6884,11 +6895,11 @@ class ForgeBlueprintWizard:
         self.nesting_gpu_note.layout.display = "" if gpu else "none"
 
     def _on_application_change(self, change) -> None:
-        """The user flipped "Runs on": select that application's default model.
+        """The user picked an Ocean model: select that application's default model.
 
         A CPU to GPU switch also seeds the tiling the GPU model needs and swaps a
         forcing with surface restoring (which the GPU model cannot do) for the
-        bundled one without. A load never comes here: it sets the toggle through
+        bundled one without. A load never comes here: it sets the dropdown through
         ``_sync_application`` under ``_suspend``.
         """
         if getattr(self, "_suspended", False):
@@ -7156,7 +7167,7 @@ class ForgeBlueprintWizard:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             try:
-                return namelist_ref_for_application(self.application_tb.value, ref)
+                return namelist_ref_for_application(self.application_dd.value, ref)
             except ValueError:
                 return None
 
@@ -8711,7 +8722,7 @@ class ForgeBlueprintWizard:
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
-            # The toggle first: model_dd lists only its application's specs. A spec
+            # The application first: model_dd lists only its specs. A spec
             # the catalog lacks has no application to read, so the file's decides.
             self._sync_application(
                 self.catalog.model_applications.get(
@@ -10536,7 +10547,7 @@ class ForgeBlueprintWizard:
         model_card = components.card(
             W,
             "model",
-            components.field_row(W, "application_tb", self.application_tb),
+            components.field_row(W, "application_dd", self.application_dd),
             components.field_row(
                 W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
             ),

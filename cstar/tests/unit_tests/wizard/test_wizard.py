@@ -11,13 +11,14 @@ import copy
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 import pytest
 import yaml
 
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
+    EmittedApplication,
     Forcing,
     ForgeBlueprint,
     ForgeProvenance,
@@ -2408,12 +2409,12 @@ def test_model_dd_hides_archived_specs_by_default():
     wiz = ForgeBlueprintWizard()
     archived = wiz.catalog.archived_model_names
     assert archived  # the bundled layer ships archived specs
-    # the dropdown lists the models of the selected application ("Runs on")
+    # the dropdown lists the models of the selected application (Ocean model)
     applications = wiz.catalog.model_applications
     cpu_models = [
         n
         for n in wiz.catalog.model_names
-        if applications[n] == wiz.application_tb.value
+        if applications[n] == wiz.application_dd.value
     ]
     assert wiz.show_archived_models.value is False
     assert set(wiz._dd_values(wiz.model_dd)) == set(cpu_models) - set(archived)
@@ -8200,7 +8201,7 @@ class TestCdrLiteCdrPanel:
 
 
 # ---------------------------------------------------------------------------
-# the experimental "Runs on" (CPU / GPU) choice
+# the Ocean model choice (the experimental GPU application)
 # ---------------------------------------------------------------------------
 
 _GPU_MODEL = "roms-marbl-gpu-0.1.3-default"
@@ -8218,33 +8219,39 @@ def _short_run(wiz):
 def _gpu_wizard(catalog=None):
     wiz = ForgeBlueprintWizard(catalog=catalog)
     _short_run(wiz)
-    wiz.application_tb.value = _GPU_APP
+    wiz.application_dd.value = _GPU_APP
     return wiz
 
 
-class TestRunsOnToggle:
-    def test_toggle_follows_the_selected_model(self):
+class TestOceanModelChoice:
+    def test_options_are_the_emitted_applications_under_display_names(self):
+        wiz = ForgeBlueprintWizard()
+        assert wiz._dd_values(wiz.application_dd) == list(get_args(EmittedApplication))
+        labels = {value: label for label, value in wiz.application_dd.options}
+        assert "experimental" in labels[_GPU_APP]
+
+    def test_choice_follows_the_selected_model(self):
         wiz = ForgeBlueprintWizard()
         default = wiz._model_spec_declared()["application"]
-        assert wiz.application_tb.value == default
-        wiz.application_tb.value = _GPU_APP
+        assert wiz.application_dd.value == default
+        wiz.application_dd.value = _GPU_APP
         assert wiz.model_dd.value == _GPU_MODEL
         assert wiz._model_spec_declared()["application"] == _GPU_APP
-        # a stale toggle is re-derived from the selected spec
+        # a stale choice is re-derived from the selected spec
         with wiz._suspend():
-            wiz.application_tb.value = default
+            wiz.application_dd.value = default
         wiz._on_model_change(None)
-        assert wiz.application_tb.value == _GPU_APP
+        assert wiz.application_dd.value == _GPU_APP
 
-    def test_dropdown_lists_only_the_toggles_application(self):
+    def test_model_dropdown_lists_only_the_chosen_application(self):
         wiz = ForgeBlueprintWizard()
         applications = wiz.catalog.model_applications
         assert _GPU_MODEL not in wiz._dd_values(wiz.model_dd)
 
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         assert wiz._dd_values(wiz.model_dd) == [_GPU_MODEL]
 
-        wiz.application_tb.value = wiz.application_tb.options[0][1]
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
         listed = wiz._dd_values(wiz.model_dd)
         assert listed and all(applications[n] != _GPU_APP for n in listed)
 
@@ -8255,13 +8262,13 @@ class TestRunsOnToggle:
         wiz.show_archived_models.value = True
         assert set(archived) <= set(wiz._dd_values(wiz.model_dd))
         assert _GPU_MODEL not in wiz._dd_values(wiz.model_dd)
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         assert wiz._dd_values(wiz.model_dd) == [_GPU_MODEL]
 
     def test_gpu_target_resolves_the_zero_dot_eleven_namelist_tier(self):
         wiz = _gpu_wizard()
         assert wiz._effective_roms_ref() == "0.11.0"
-        wiz.application_tb.value = wiz.application_tb.options[0][1]
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
         assert wiz._effective_roms_ref() != "0.11.0"
 
 
@@ -8272,7 +8279,7 @@ class TestSwitchingTheTarget:
         wiz.auto_tiling_chk.value = True
         assert wiz.forcing_dd.value == _RESTORING_FORCING
 
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
 
         assert wiz.model_dd.value == _GPU_MODEL
         assert (wiz.npx.value, wiz.npy.value) == (2, 2)
@@ -8285,14 +8292,14 @@ class TestSwitchingTheTarget:
         wiz = ForgeBlueprintWizard()
         assert _display(wiz.nodes) == "none"
         assert _display(wiz.writers_per_node) == "none"
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         for hidden in (wiz.marbl_ref, wiz.use_pio_chk, wiz.auto_tiling_chk):
             assert _display(hidden) == "none"
         assert _display(wiz.n_cores) == "none"
         assert _display(wiz.nodes) == ""
         assert _display(wiz.writers_per_node) == ""
 
-        wiz.application_tb.value = wiz.application_tb.options[0][1]
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
         assert _display(wiz.nodes) == "none"
         assert _display(wiz.writers_per_node) == "none"
         for shown in (wiz.marbl_ref, wiz.use_pio_chk, wiz.auto_tiling_chk):
@@ -8303,20 +8310,20 @@ class TestSwitchingTheTarget:
         assert not (wiz.nest_enable.disabled or wiz.parent_enable.disabled)
         assert _display(wiz.nesting_gpu_note) == "none"
 
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         assert wiz.nest_enable.disabled and wiz.parent_enable.disabled
         assert _display(wiz.nesting_gpu_note) == ""
         assert _NESTING_REASON in wiz.nesting_gpu_note.value
 
-        wiz.application_tb.value = wiz.application_tb.options[0][1]
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
         assert not (wiz.nest_enable.disabled or wiz.parent_enable.disabled)
         assert _display(wiz.nesting_gpu_note) == "none"
 
     def test_nesting_stays_disabled_under_a_grid_file_lock_after_the_switch(self):
         wiz = ForgeBlueprintWizard()
         wiz._set_grid_widgets_locked(True)
-        wiz.application_tb.value = _GPU_APP
-        wiz.application_tb.value = wiz.application_tb.options[0][1]
+        wiz.application_dd.value = _GPU_APP
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
         assert wiz.nest_enable.disabled
         wiz._set_grid_widgets_locked(False)
         assert not wiz.nest_enable.disabled
@@ -8324,13 +8331,13 @@ class TestSwitchingTheTarget:
     def test_a_forcing_without_restoring_is_left_alone(self):
         wiz = ForgeBlueprintWizard()
         wiz.forcing_dd.value = _NO_RESTORING_FORCING
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         assert wiz.forcing_dd.value == _NO_RESTORING_FORCING
 
     def test_a_modified_forcing_is_not_swapped_away(self):
         wiz = ForgeBlueprintWizard()
         wiz._forcing_seed = {"not": "what the editor holds"}
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         assert wiz.forcing_dd.value == _RESTORING_FORCING
 
     def test_the_gathered_gpu_blueprint_is_valid(self):
@@ -8352,7 +8359,7 @@ class TestSwitchingTheTarget:
             "nodes": 2,
             "writers_per_node": 3,
         }
-        wiz.application_tb.value = wiz.application_tb.options[0][1]
+        wiz.application_dd.value = wiz.application_dd.options[0][1]
         assert set(wiz._gather()["partitioning"]) == {"n_procs_x", "n_procs_y"}
 
 
@@ -8361,7 +8368,7 @@ class TestReviewedGpuStates:
         wiz = ForgeBlueprintWizard()
         _short_run(wiz)
         wiz.nest_enable.value = True
-        wiz.application_tb.value = _GPU_APP
+        wiz.application_dd.value = _GPU_APP
         assert not wiz.nest_enable.value
         assert not wiz.parent_enable.value
         assert wiz.nest_enable.disabled
@@ -8419,7 +8426,7 @@ class TestReviewedGpuStates:
 
 
 class TestGpuLoadAndSave:
-    def test_load_back_restores_the_toggle_model_and_tiling_without_a_forcing_swap(
+    def test_load_back_restores_the_application_model_and_tiling_without_a_forcing_swap(
         self, tmp_path
     ):
         wiz = _gpu_wizard()
@@ -8435,7 +8442,7 @@ class TestGpuLoadAndSave:
         wiz2.load_path.value = str(saved)
         wiz2._on_load_path(None)
 
-        assert wiz2.application_tb.value == _GPU_APP
+        assert wiz2.application_dd.value == _GPU_APP
         assert wiz2.model_dd.value == _GPU_MODEL
         assert (wiz2.nodes.value, wiz2.writers_per_node.value) == (2, 2)
         assert (wiz2.npx.value, wiz2.npy.value) == (2, 2)
@@ -8444,7 +8451,7 @@ class TestGpuLoadAndSave:
         assert wiz2.nest_enable.disabled
         assert _display(wiz2.nodes) == ""
 
-    def test_load_back_of_a_cpu_blueprint_switches_the_toggle_back(self, tmp_path):
+    def test_load_back_of_a_cpu_blueprint_switches_the_application_back(self, tmp_path):
         cpu_wiz = ForgeBlueprintWizard()
         _short_run(cpu_wiz)
         assert cpu_wiz.config is not None, cpu_wiz.derived.value
@@ -8454,7 +8461,7 @@ class TestGpuLoadAndSave:
         wiz = _gpu_wizard()
         wiz.load_path.value = str(saved)
         wiz._on_load_path(None)
-        assert wiz.application_tb.value != _GPU_APP
+        assert wiz.application_dd.value != _GPU_APP
         assert wiz.model_dd.value == cpu_wiz.config.composition.model.name
         assert _display(wiz.nodes) == "none"
 
@@ -8477,7 +8484,7 @@ class TestGpuLoadAndSave:
         )
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
-        assert wiz2.application_tb.value == _GPU_APP
+        assert wiz2.application_dd.value == _GPU_APP
         assert wiz2._load_unknown_specs == ["model 'not-in-this-catalog'"]
 
     def test_save_as_model_spec_keeps_the_application(self, tmp_path):
@@ -8500,7 +8507,7 @@ class TestGpuLoadAndSave:
         assert "cppdefs" not in data["model_settings"]
         assert catalog.model_applications["my-gpu-model"] == _GPU_APP
         assert wiz.model_dd.value == "my-gpu-model"
-        assert wiz.application_tb.value == _GPU_APP
+        assert wiz.application_dd.value == _GPU_APP
 
     def test_save_as_domain_spec_omits_nodes_and_writers(self, tmp_path):
         import shutil
