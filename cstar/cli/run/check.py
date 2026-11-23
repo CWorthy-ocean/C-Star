@@ -1,4 +1,3 @@
-import asyncio
 import os
 import shlex
 import typing as t
@@ -7,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
@@ -17,7 +16,7 @@ from cstar.cli.common import (
     set_ctxmap,
     try_get_from_ctxmap,
 )
-from cstar.cli.run.shared import resolve_by_handle
+from cstar.cli.run.shared import refresh_tracked_manifest, resolve_by_handle
 from cstar.cli.workplan.gather import collect_links, relink, report_conflicts
 from cstar.cli.workplan.shared import HELP_RUN_HANDLE, KEY_RUN, list_runs
 from cstar.entrypoint.utils import (
@@ -31,11 +30,6 @@ from cstar.entrypoint.utils import (
     ARG_REPAIR_HELP,
     ARG_VERIFY,
     ARG_VERIFY_HELP,
-)
-from cstar.orchestration.dag_runner import (
-    get_launcher,
-    load_run_state,
-    refresh_run_manifest,
 )
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
@@ -425,12 +419,7 @@ def _load_manifest(
     """
     run_root = resolved.run_root
     if resolved.run_id is not None and not no_refresh and workplan is not None:
-        try:
-            launcher = get_launcher(workplan, force_local=workplan.pre_run)
-            status = asyncio.run(load_run_state(resolved.run_id, launcher))
-            refresh_run_manifest(run_root, resolved.run_id, status)
-        except (CstarError, CstarExpectationFailed) as ex:
-            typer.echo(f"Warning: the manifest was not refreshed: {ex}", err=True)
+        refresh_tracked_manifest(run_root, resolved.run_id, workplan)
 
     try:
         manifest = read_run_manifest(run_root, tolerant=tolerant)

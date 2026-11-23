@@ -118,9 +118,9 @@ def refresh() -> t.Iterator[Refresh]:
     """Replace what refreshing the manifest of a tracked run reaches for."""
     status = mock.AsyncMock(return_value=DagStatus({}))
     with (
-        mock.patch("cstar.cli.run.check.get_launcher"),
-        mock.patch("cstar.cli.run.check.load_run_state", status),
-        mock.patch("cstar.cli.run.check.refresh_run_manifest") as refresh_manifest,
+        mock.patch("cstar.cli.run.shared.get_launcher"),
+        mock.patch("cstar.cli.run.shared.load_run_state", status),
+        mock.patch("cstar.cli.run.shared.refresh_run_manifest") as refresh_manifest,
     ):
         yield Refresh(status, refresh_manifest)
 
@@ -972,7 +972,7 @@ def test_a_refresh_that_cannot_run_is_a_warning(run: FakeRun, refresh: Refresh) 
     )
     failure = CstarExpectationFailed("no scheduler on this system")
 
-    with mock.patch("cstar.cli.run.check.get_launcher", side_effect=failure):
+    with mock.patch("cstar.cli.run.shared.get_launcher", side_effect=failure):
         result = invoke(run.record.run_id, record=run.record)
 
     assert result.exit_code == EXIT_FINDINGS, result.output

@@ -1,4 +1,5 @@
 import errno
+import typing as t
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -8,6 +9,7 @@ import yaml
 from click.testing import Result
 from typer.testing import CliRunner
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.workplan.status import app
 from cstar.entrypoint.utils import ARG_NO_REFRESH
 from cstar.orchestration.dag_runner import DagStatus
@@ -82,7 +84,10 @@ def test_workplan_status_launcher_follows_pre_run(
     mock_get_launcher.assert_called_once()
     (passed_wp,) = mock_get_launcher.call_args.args
     assert passed_wp.compute_environment == lwp.compute_environment
-    assert mock_get_launcher.call_args.kwargs == {"force_local": pre_run}
+    assert mock_get_launcher.call_args.kwargs == {
+        "force_local": pre_run,
+        "for_launch": False,
+    }
 
 
 def test_workplan_status_reports_external_dependency(
@@ -367,6 +372,65 @@ def test_workplan_status_of_a_run_missing_a_file_is_one_line(
     assert result.stderr.count(f"Unable to show the status of run {mock_run_id!r}") == 1
     assert str(trx_path) in result.stderr
     assert "Traceback" not in result.output
+
+
+def test_workplan_status_asks_for_none_of_what_a_launch_needs(
+    tmp_path: Path, hello_world_bp_path: Path, mock_run_id: str
+) -> None:
+    """Verify reading a run's statuses does not run the launcher's launch
+    preconditions, such as the SLURM account a system requires.
+    """
+    run, _ = _tracked_run(tmp_path, hello_world_bp_path, mock_run_id)
+    unset = CstarExpectationFailed(
+        "Unable to load environment variables required by the system: "
+        "CSTAR_SLURM_ACCOUNT"
+    )
+
+    with (
+        mock.patch(LOOKUP, mock.AsyncMock(return_value=run)),
+        mock.patch.object(
+            LocalLauncher, "check_preconditions", side_effect=unset
+        ) as check,
+        mock.patch(
+            "cstar.cli.workplan.status.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({"first": Status.Done})),
+        ),
+        mock.patch("cstar.cli.workplan.status.display_summary"),
+    ):
+        result = CliRunner().invoke(app, [run.run_id], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert "Unable to" not in result.output + result.stderr
+    check.assert_not_called()
+
+
+def test_workplan_status_names_a_launcher_the_system_lacks_without_a_traceback(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a workplan naming a scheduler this machine lacks is one line and
+    exit code 1, not an uncaught exception.
+    """
+    run, _ = _tracked_run(tmp_path, hello_world_bp_path, mock_run_id)
+    message = "Workplan requests the slurm launcher but system 'x' has no scheduler"
+
+    with (
+        mock.patch(LOOKUP, mock.AsyncMock(return_value=run)),
+        mock.patch(
+            "cstar.cli.workplan.status.get_launcher",
+            side_effect=CstarExpectationFailed(message),
+        ),
+    ):
+        result = CliRunner().invoke(app, [run.run_id], color=False)
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert (
+        f"Unable to show the status of run {mock_run_id!r}: {message}"
+        in flatten_cli_output(result.stderr)
+    )
 
 
 def test_workplan_status_leaves_an_unchanged_manifest_byte_for_byte(
