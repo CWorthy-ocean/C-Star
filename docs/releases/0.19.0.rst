@@ -1,0 +1,431 @@
+.. _0.19.0:
+
+0.19.0
+------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- A workplan's ``slurm`` settings (a step's ``compute_overrides.slurm`` or the workplan's ``compute_environment.slurm``) now reject unknown keys instead of ignoring them; remove or correct the key the error names. (`#885 <https://github.com/CWorthy-ocean/C-Star/pull/885>`_)
+- Branch pins select the newest tier in both Forge and ``ucla_roms``, so a run pinned to a ucla-roms branch without ucla-roms #413 stops on the new keys; a commit-hash pin resolves to its nearest release tag and keeps that release's tier. (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+- New namelist tier for ucla-roms >= 0.14.0 that adds ``wrt_avg_temp``/``wrt_avg_salt``; earlier releases stop on unknown namelist keys, so they keep the 0.13 tier and Forge rejects either key switched on there with an error naming 0.14.0. (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+- On ucla-roms 0.14.0 and later, a MARBL run needs BGC sources for its boundary forcing and initial conditions (ucla-roms #421): a physics-only ForcingSpec such as ``glorys-era5-physics`` now needs ``bgc_mode: none``. (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+- C-Star now requires roms-tools 5.4.0 or later (``roms-tools>=5.4.0,<6``); upgrade roms-tools in your environment along with C-Star. (`#897 <https://github.com/CWorthy-ocean/C-Star/pull/897>`_)
+- On Bouchet, C-Star builds with the ``gompi-2024a`` toolchain in place of ``gompi-2022b``: rebuild ROMS, MARBL and ParallelIO builds made there before this release. (`#905 <https://github.com/CWorthy-ocean/C-Star/pull/905>`_)
+- Forge now refuses surface or boundary forcing whose records do not span the run window, naming the file, the time variable and its first or last record; before, it wrote truncated forcing and ROMS stopped once its clock passed the last record, possibly hours into the run. (`#926 <https://github.com/CWorthy-ocean/C-Star/pull/926>`_)
+
+  - ROMS needs a record at or before ``start_date`` and one at or after ``end_date`` for every forcing variable; a climatology is exempt. Stage source data that covers the window, or shorten it.
+  - The check also runs on files a rerun reuses, so a window extended since the inputs were generated is refused until they are regenerated with ``--clobber``.
+  - Initial conditions that would start the model at another time than ``start_date`` are refused the same way, including a file written with flexible start time by an earlier release.
+
+- Forge refuses a CDR forcing that does not fit the run or the grid, which it used to generate without a message. (`#927 <https://github.com/CWorthy-ocean/C-Star/pull/927>`_)
+
+  - A CDR window (``cdr_forcing`` ``start_time``/``end_time``) that does not cover the run, or a release whose ``times`` all fall outside the run, is refused when the blueprint is built or processed.
+  - A release outside the domain, or so far below the seafloor that its vertical profile is zero at every level, is refused before any input is generated; ROMS used to move the first to the nearest cell and deliver none of the second.
+  - ``cdr_frc.time_interpolation`` set against the releases' ``time_interpolation`` is refused, including in a blueprint saved before this version whose CDR releases set ``time_interpolation: true``; set the two to match.
+
+- A ``nest-from`` or ``carbonate-sensitivity-from`` directive now stops the step before ROMS starts when the files it gathers leave a gap in time, or do not reach back to the step's ``start_date`` and on to its ``end_date``; before, ROMS interpolated linearly across a missing segment with no message, and a source that ended early failed only when the model time reached its end. (`#929 <https://github.com/CWorthy-ocean/C-Star/pull/929>`_)
+
+  - List every segment of the source, separated by ``;``: ``step: parent_1;parent_2;parent_3``, or ``path:`` with one output directory per segment. The error names the files on both sides of each gap.
+  - A gap is a stretch more than twice as long as the spacing of the records around it. Records at the same time where two runs meet, and an output period that changes from one segment to the next, are not gaps.
+
+- Forge refuses, when a blueprint is resolved or validated and before any input is generated, settings that used to be ignored or to stop the run only after the ROMS build; the wizard's settings check lists them too. (`#930 <https://github.com/CWorthy-ocean/C-Star/pull/930>`_)
+
+  - An unknown section or key in ``model_settings``, overrides or OutputSpecs, such as ``botom_drag``, ``ocean_vars.wrt_fiel_his`` or ``cppdefs.diagnostic``, is refused with the nearest valid name. A key the pinned ucla-roms release does not have still gets its message naming the release that adds it.
+  - ``pipe_frc.pipe_source: true`` is refused: Forge writes no pipe forcing, so ROMS stopped at initialisation.
+  - ``n_procs_x`` or ``n_procs_y`` that leave a tile with no grid points (16 × 16 tiles on an 8 × 8 grid, or 9 tiles across 10 points) are refused with the largest count that works.
+  - ``run.model_reference_date`` with a time of day is refused when the blueprint loads; use midnight. ROMS refused such a run after the build.
+
+- Forge and ``ucla_roms`` blueprints whose output periods or MARBL step ucla-roms refuses at start-up are now refused before inputs are generated or ROMS is compiled, and a run that would write no output stops before it starts. (`#931 <https://github.com/CWorthy-ocean/C-Star/pull/931>`_)
+
+  - An enabled history, average or BGC output period (``output_period_his``, ``output_period_avg``, ``output_period_bgc_his``, ``output_period_bgc_avg``, ``output_period_bgc_his_dia``, ``output_period_bgc_avg_dia``) must be a whole multiple of ``dt``. For example, hourly output is refused with a ``dt`` of 7200 s or 960 s.
+  - With MARBL, a MARBL step above 10,800 s is refused: any ``dt`` above 10,800 s, or a ``marbl_timestep`` that rounds down to more than 10,800 s.
+  - A ``ucla_roms`` run in which no output stream writes (for example, a one-day run with weekly or monthly restarts and nothing else enabled) is refused before it starts; when ``time_stepping.ntimes`` is set by a namelist override, this is a warning instead. Forge warns about such a run, since a ``ucla_roms`` step may run only part of its window.
+  - Forge and ``ucla_roms`` warn when another stream's period (CDR, CDR-lite, CDR gas exchange, upscaling, nesting extraction, forcing, surface flux and the rest) is not a whole multiple of ``dt``, naming the period ROMS writes it at instead, for example every 3840 s for hourly output with ``dt`` 960 s.
+  - A ``ucla_roms`` blueprint's output-stream checks, including the restart-file and MARBL-step averaging checks that used to run only just before launch, now also run during setup, as soon as the namelist is fetched and before the input datasets are staged or ROMS is compiled.
+
+- Forge refuses a MARBL setup whose biogeochemical sources would start the plankton at zero, and two setups that used to fail at compile or ROMS start-up. (`#932 <https://github.com/CWorthy-ocean/C-Star/pull/932>`_)
+
+  - An initial-conditions or boundary BGC source set with no ``CHL`` or no ``Fe`` source (ESPER, GLODAP or WOA_BGC alone) is refused; keep a UNIFIED item supplying ``CHL`` and ``Fe`` as the bundled specs do, or add them to a ``constants`` source.
+  - ``cppdefs.marbl: true`` set as an override without ``bgc_mode: marbl`` is refused; set ``bgc_mode: marbl`` instead.
+  - Open boundaries with no ``forcing.boundary`` block are refused unless the domain is a nested child; add a boundary block or close those sides.
+
+- Removed: automatic time-splitting and its feature flags ``CSTAR_FF_ORCH_TRX_TIMESPLIT``, ``CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ`` and ``CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME``; split a run into explicit workplan steps chained with ``continue-from`` (the wizard's "Chunk a run in time" recipe writes them). (`#933 <https://github.com/CWorthy-ocean/C-Star/pull/933>`_)
+
+  - An exported flag has no effect, and the CLI says so: each ``ucla_roms`` step now runs its whole period as one job.
+
+- Forge refuses an override that contradicts a value it derives from the generated inputs, naming the setting, both values and the blueprint field to change instead; before, the override won and the namelist or cppdefs no longer matched the input files. (`#935 <https://github.com/CWorthy-ocean/C-Star/pull/935>`_)
+
+  - The refused overrides are ``blk_frc.interp_frc`` and ``bgc.interp_frc`` (set by each surface item's ``coarse_grid_mode``), ``param.llm``, ``mmm``, ``n``, ``np_xi`` and ``np_eta`` (``domain.grid_kwargs`` and ``domain.partitioning``), ``extract_data.n_chd``, ``theta_s_chd``, ``theta_b_chd`` and ``hc_chd`` (``domain.grid_kwargs_child``) and ``cppdefs.obc_*`` (``domain.open_boundaries``). The wizard can set the two ``interp_frc`` values under Advanced settings; an override equal to the derived value is kept.
+  - A parent's ``domain.grid_kwargs_child`` must give the child's ``N``, ``theta_s``, ``theta_b`` and ``hc`` when the blueprint is built; Forge used to fill a missing ``N`` or ``hc`` with values (90 levels, 250 m) that differ from those roms-tools builds the child with (100, 300 m). A saved blueprint without them still loads and runs.
+
+- New namelist tier for ucla-roms >= 0.16.0 that adds ``pio_settings.pio_direct_read``; earlier releases stop on unknown keys in ``&PIO_SETTINGS``, so they keep the 0.15 tier, where Forge drops ``on`` and ``off`` (both read through ParallelIO there) and rejects ``verify`` with an error naming 0.16.0. (`#939 <https://github.com/CWorthy-ocean/C-Star/pull/939>`_)
+
+  - Branch pins select the newest tier in both Forge and ``ucla_roms``, so a ParallelIO run pinned to a ucla-roms branch without ucla-roms #462 stops on the new key; builds without ParallelIO never read the group and still run.
+  - A commit-hash pin resolves to its nearest release tag and keeps that release's tier.
+
+Python API Changes
+~~~~~~~~~~~~~~~~~~
+
+- Removed with time-splitting: ``RomsTimeSplitter``, ``SplitFrequency``, ``get_time_slices``, ``apply_automatic_overrides``, the transform registry (``TRANSFORMS``, ``register_transform``, ``get_transforms``), ``Transform.is_active`` and ``LiveStep.parent``. (`#933 <https://github.com/CWorthy-ocean/C-Star/pull/933>`_)
+
+  - ``ApplicationDefinition.applicable_transforms`` is no longer read or required; an application that still declares transforms there gets a warning when it registers, and they do not run.
+
+Changes to Output
+~~~~~~~~~~~~~~~~~
+
+- Forge names a boundary or surface BGC file whose ``use_vars`` tag would exceed 40 characters ``<source>-<n>vars_<digest>`` (e.g. ``boundary-bgc-unified-23vars_3581d4be.nc``) instead of joining every variable; a domain already generated under the old long name keeps and reuses its file. (`#879 <https://github.com/CWorthy-ocean/C-Star/pull/879>`_)
+- Saved forge blueprints leave out ``glorys_layout``, ``constants``, ``esper_method`` and ``esper_equation`` on sources where they are unset, so a source shows only the fields that apply to it; existing files still load and content hashes are unchanged. (`#890 <https://github.com/CWorthy-ocean/C-Star/pull/890>`_)
+- ucla-roms 0.14.0 changes results wherever water flows in through an open boundary (ucla-roms #415). (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+- With roms-tools 5.4.0, Forge and ``nest_ic`` write different initial conditions, boundary forcing and surface forcing from an unchanged blueprint. (`#897 <https://github.com/CWorthy-ocean/C-Star/pull/897>`_)
+
+  - Below a source column's bottom, tracers now blend over 25 m into the nearest column with water at that depth instead of copying the bottom value down; ``bottom_fill_blend_m: .inf`` restores the old fill.
+  - ERA5 ``qair`` is computed from ERA5's surface pressure instead of a fixed 1010 hPa, which changes it by about 1% over the ocean.
+  - ESPER-derived tracers are groomed by default (``groom: false`` turns it off), and ESPER oxygen is floored at 5.0 mmol/m³ instead of 2.0, with no switch.
+
+- ucla-roms 0.15.0 writes different output from an unchanged setup: (`#911 <https://github.com/CWorthy-ocean/C-Star/pull/911>`_)
+
+  - Nested child runs give different results: the boundary data a parent extracts now hold ``u``, ``v`` and the tracers at the time of the record, one parent time step later than before (ucla-roms #435).
+  - MARBL diagnostics are written in double precision, which changes them by up to 6e-8 relative (ucla-roms #443).
+  - With ``wrt_bgc_his`` off and ``wrt_bgc_avg`` on, each ``_bgc_dia`` file holds ``nrpf_bgc_his_dia`` records instead of one (ucla-roms #437).
+
+- Forge stages the corrected unified BGC climatology as ``BGCdataset_v2_1b.nc``, in which the negative deep-ocean values that interpolation left in the labile DOC, DON and DOP fields are set to zero; the first Forge run after upgrading downloads it again (about 10 GB) into the shared source-data cache. (`#918 <https://github.com/CWorthy-ocean/C-Star/pull/918>`_)
+
+  - A cached ``BGCdataset_v2_1a.nc`` is reported as stale on every staging run until it is deleted; Forge never deletes it.
+  - Domains whose initial or boundary BGC came from UNIFIED should be regenerated before a run that will be compared with earlier ones.
+
+- The bundled DomainSpecs ``PAC_2fth_deg``, ``NEP-4th_deg`` and ``GoA-10th_deg`` now have their grid axes swapped, at rotation 0, 0 and -15 instead of -90, -90 and -105: the grid points and cells are the same, but every file made from them is transposed and the processor layout is 8 by 16 instead of 16 by 8. (`#920 <https://github.com/CWorthy-ocean/C-Star/pull/920>`_)
+
+  - Their boundary names now match the compass, and each opens its geographic south edge, all open ocean, which was a closed wall before; ``GoA-10th_deg`` stays closed only on its east edge, which is all land.
+  - At the old rotations, roms-tools 5.4.0 and earlier wrote winds and initial and boundary currents reversed in half the cells of ``PAC_2fth_deg`` and ``NEP-4th_deg`` and all of ``GoA-10th_deg`` (CWorthy-ocean/roms-tools#737); at the new rotations no cell is affected.
+  - A run made from the old specs cannot be continued from the new ones.
+
+- With flexible start time (``initial_conditions.allow_flex_time``), the initial conditions are now stamped at ``start_date``, so ROMS starts there; before, ROMS started at the source record roms-tools took (up to 24 hours later) while the blueprint, the forcing and the CDR releases kept the requested dates. The record's own time is kept in the file's ``ini_time_source_record`` attribute, and Forge warns when it differs from ``start_date``. (`#926 <https://github.com/CWorthy-ocean/C-Star/pull/926>`_)
+- The namelist's ``cdr_time_interpolation`` now follows the CDR releases' ``time_interpolation``, so releases with ``time_interpolation: true`` are interpolated in time, as roms-tools accounts them, instead of held as steps one record late. (`#927 <https://github.com/CWorthy-ocean/C-Star/pull/927>`_)
+- Forge derives the time step from the grid unless you set one, and the derived ``dt`` is now the largest divisor of 3600 s at or below the CFL estimate, so a new blueprint can get a different ``dt``. (`#934 <https://github.com/CWorthy-ocean/C-Star/pull/934>`_)
+
+  - The wizard no longer saves 7200 s by default: until you type a time step it shows and saves the derived value, which follows grid edits, and "Use CFL value" (formerly "Compute from CFL") goes back to it.
+  - Derived ``dt`` for the bundled domains: GoA-10th_deg 450 s, NEP-4th_deg 1200 s, PAC_2fth_deg 1800 s, ccs-12km 900 s, hvalfjordur-0 180 s, wio-toy and gulf-guinea-toy 3600 s (MARBL stopped at startup with their old values).
+  - A DomainSpec saved from the wizard carries ``dt`` only when you set it.
+
+- Forge writes the values it derives from the generated inputs into the namelist and cppdefs even when the saved blueprint's ``model_settings`` holds an older or hand-edited value, so the same blueprint can now render a different namelist. (`#935 <https://github.com/CWorthy-ocean/C-Star/pull/935>`_)
+
+  - With ``coarse_grid_mode: always``, or ``auto`` when roms-tools puts the surface files on the coarse grid, the namelist says ``interp_bulk_frc = .true.`` and ``interp_bgc_frc = .true.``; it used to say ``.false.``, which does not match the files.
+  - A parent whose ``grid_kwargs_child`` left out ``N`` or ``hc`` gets the child's ``n_chd`` and ``hc_chd`` from the child grid roms-tools built (100 levels and 300 m by default) instead of 90 and 250 m.
+  - A grid size, tile count or open-boundary switch edited in ``model_settings`` (rather than in ``domain``) is replaced by the value from the grid, the partitioning or ``open_boundaries``.
+
+- The default ModelSpec, the wizard default, the bundled domains and the integration pin move to ``roms-marbl-0.16-default`` (ucla-roms 0.16.0), which writes different output from an unchanged setup; ``roms-marbl-0.15-default``, ``roms-marbl-0.14-default`` and ``roms-marbl-0.13-default`` stay for reproducing earlier answers. (`#939 <https://github.com/CWorthy-ocean/C-Star/pull/939>`_)
+
+  - 3-D results change: the predictor step splits the vertical velocity differently (ucla-roms #468), and lateral viscosity, including the sponge's, now acts on the depth-averaged flow, which changes ``ubar``, ``vbar`` and ``zeta`` most in the sponge layer (ucla-roms #473).
+  - Each record of the ``_avg`` and ``_bgc_avg`` files averages the model states one step later than before, and these files and ``_bgc_dia_avg`` gain ``avg_begin_time`` and ``avg_end_time``; pair ``_avg`` and ``_bgc_avg`` records by ``avg_end_time`` (ucla-roms #472).
+  - ``w`` in history, averages and boundary output includes the water added by point sources, such as CDR releases with ``cdr_volume`` (ucla-roms #470).
+  - Parameterized CDR releases spread over several cells (``cdr_hsc`` > 0) can change at the rounding level: their weights no longer depend on the tiling (ucla-roms #470).
+  - Builds without ParallelIO write their per-rank output as uncompressed CDF-5 instead of netCDF-4, so those files are larger; joined files are still compressed netCDF-4 (ucla-roms #470).
+
+New features
+~~~~~~~~~~~~
+
+- ``nest_ic`` blueprints accept ``bottom_fill_blend_m`` for the child's initial conditions, where the child is deeper than the parent (blueprint schema 1.2.0). (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
+- Forge blueprints accept ``bottom_fill_blend_m`` in ``initial_conditions`` and ``boundary``: the depth below a source column's bottom over which tracers blend into the nearest column with water at that depth. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
+
+  - ``0`` takes the neighbouring column's value at once, ``.inf`` copies the bottom value down, and leaving it unset uses roms-tools' default.
+  - The wizard has a "Below-bottom blend depth" box in the initial-conditions and boundary interpolation settings.
+
+- The wizard has a "Groom ESPER tracers" checkbox on the initial-conditions and boundary sections, checked by default. It keeps any hand-written ``groom_settings`` when a blueprint is loaded and saved again with the box checked, and leaves them out while the box is unchecked. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
+- Forge blueprints accept ``groom`` on ``initial_conditions`` and ``boundary``; ``groom: false`` turns off ROMS-Tools' grooming of ESPER-derived tracers, which is on by default. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
+
+  - On (the default, ROMS-Tools' own) is left out of saved blueprints and the content hash, so existing blueprints keep their hash and an explicit ``groom: true`` hashes the same as leaving it out.
+
+- Forge blueprints accept ``groom_settings`` on ``initial_conditions`` and ``boundary``, overriding ROMS-Tools' grooming thresholds; it is set by hand in the blueprint YAML only. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
+
+  - Unknown keys or invalid values fail when the blueprint loads, and so does ``groom_settings`` with ``groom: false``, since ROMS-Tools applies the settings only while grooming is on. An empty ``groom_settings`` counts as unset.
+
+- Forge blueprints and ModelSpecs accept ``cppdefs.diagnostics`` to define ``DIAGNOSTICS`` in the generated ``cppdefs.opt``. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- The wizard's diagnostics output row has a Diagnostics switch that compiles ucla-roms with ``DIAGNOSTICS``, writing the ``_dia`` file of momentum and tracer term balances. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+
+  - Off by default; while it is off, the other diagnostics settings are hidden.
+  - The temperature and salinity diagnostics boxes sit in the same row and show only while tracer diagnostics are on.
+  - With ParallelIO it needs ucla-roms 0.13.1 or later; Forge refuses diagnostics with ParallelIO on an older release pin, which aborts at the first diagnostics output.
+  - Known issue: in ucla-roms 0.16.0 and earlier, tracer diagnostics can corrupt memory and crash a finished run as it shuts down when a tile is three or more grid points wider than it is tall (ucla-roms #476); leave tracer diagnostics off, or set ``n_procs_x`` and ``n_procs_y`` so tiles are about square.
+
+- Workplan steps can run on GPU nodes: ``num_gpus`` (and optionally ``gpus_per_node``) in a step's ``slurm`` settings requests GPUs, and C-Star lays the job out evenly over the nodes. (`#885 <https://github.com/CWorthy-ocean/C-Star/pull/885>`_)
+
+  - A GPU step goes to the system's GPU queue unless ``CSTAR_SLURM_GPU_QUEUE`` names another, and is charged to ``CSTAR_SLURM_GPU_ACCOUNT`` when set, else ``CSTAR_SLURM_ACCOUNT``; ``cstar init`` offers both.
+  - On Perlmutter a GPU job needs an account (NERSC policy), so C-Star refuses to compose one without.
+  - A step whose application needs a toolchain the system does not have (GPU builds on Anvil) is refused before it is submitted, not after it waits in the queue.
+
+- GPU runs are supported on Perlmutter with roms-marbl-gpu v0.1.3-beta, from its public repository. (`#885 <https://github.com/CWorthy-ocean/C-Star/pull/885>`_)
+- New application ``ucla_roms_gpu`` (blueprint schema 1.0.0) runs roms-marbl-gpu on GPU nodes, one GPU per tile, with C-Star building the model from the pinned roms-marbl-gpu release. (`#885 <https://github.com/CWorthy-ocean/C-Star/pull/885>`_)
+
+  - A ``tiling`` block sets the tiles (``n_procs_x``, ``n_procs_y``), the ``nodes`` the job spans and the ``writers_per_node`` output ranks (default 1); C-Star requests ``tiles + writers_per_node x nodes`` MPI tasks.
+  - Namelist settings the GPU model would stop on are refused before the build and again before launch: switches for features it lacks, and more forcing files than it reads (64).
+  - Forcing that holds surface restoring data is refused once staged, before the build, since the GPU model would ignore it (see Known gaps).
+  - A bundled ``wales-toy-gpu`` example blueprint runs a toy domain on one 4-GPU node.
+  - roms-marbl-gpu v0.1.3-beta and later are supported; an older pin is refused when the blueprint is checked.
+
+- New command ``cstar run compress <run>`` compresses the netCDF data files of a finished run in place, keeping the variables analyses and later steps need exact. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+
+  - For each detected file type it asks: compress it, cast non-protected variables to float32, also quantize them (BitGroom, significant digits), and override the chunk shape.
+  - Restart, nesting boundary, carbonate sensitivity (``_cdrgas``) and forge files default to not compressed: other runs read them, and a CPU ROMS build with ParallelIO cannot read netCDF-4 input.
+  - Each file is checked against its original (the first and last record of each variable) before it replaces it; originals are kept under ``uncompressed_originals/`` unless you choose to delete them.
+
+- The answers are saved as a ``compress`` blueprint in ``<run>/compress/``, which ``--blueprint`` reuses on another run (asking only about file types it does not match) and ``cstar blueprint run`` runs directly. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+- ``--submit`` submits the compression as a one-step SLURM workplan, ``--now`` compresses in the current process, and ``--workers N`` sets how many files are compressed at once (the job's cores with ``--submit``). (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+
+  - Compressing outside a scheduler job on a cluster warns that login nodes may stop the process; ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` silences the warning.
+
+- Oscar (Brown CCV) is a registered system: C-Star loads its modules, builds with the site's gcc and ``hpcx-mpi``, and submits jobs with ``cstar blueprint submit`` and ``cstar workplan submit``. (`#887 <https://github.com/CWorthy-ocean/C-Star/pull/887>`_)
+
+  - Jobs go to the ``batch`` partition by default (``debug`` is also known) and launch with ``srun --mpi=pmix``; no ``CSTAR_SLURM_ACCOUNT`` is needed unless you use a condo or priority account.
+  - The machine is recognised by its ``/oscar/home`` mount; ``cstar env set CSTAR_SYSTEM oscar`` pins it if detection misses.
+  - With no ``SCRATCH`` variable exported, ``CSTAR_DATA_HOME`` resolves onto the user's ``~/scratch`` directory.
+
+- ``ts_output.wrt_avg_temp`` and ``ts_output.wrt_avg_salt`` write temperature and salinity to the averages file (ucla-roms 0.14.0); the wizard shows them under "Variables in average files". (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+
+  - Both are off by default and take effect only with ``ocean_vars.wrt_file_avg``.
+
+- New bundled ModelSpec ``roms-marbl-0.14-default`` for ucla-roms 0.14.0. (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+- The wizard's surface forcing rows have blend controls (fallback source, its radiation correction, blend width and profile); choosing CONUS404 offers ERA5 as the fallback and moves the row's radiation correction to it. (`#901 <https://github.com/CWorthy-ocean/C-Star/pull/901>`_)
+- A physics surface forcing item accepts a ``blend`` block that fills every grid point a regional source misses from a global one such as ERA5, using ROMS-Tools' surface-forcing blend. (`#901 <https://github.com/CWorthy-ocean/C-Star/pull/901>`_)
+
+  - ``fallback`` takes its own ``source``, ``correct_radiation`` and ``options``; ``width_km`` (``0``, the default, switches at the footprint's edge) and ``profile`` (``smoothstep`` or ``linear``) shape the band between the two.
+  - When any surface item has a blend, every surface item must set the same ``coarse_grid_mode``, ``never`` or ``always``.
+  - Forge writes one blended file, ``<name>_surface-physics-<primary>-<fallback>_*.nc``.
+
+- Forge accepts CONUS404, the 4 km North American reanalysis, as a physics surface forcing source (``source: {name: CONUS404}``), streamed from its store on Amazon S3. (`#901 <https://github.com/CWorthy-ocean/C-Star/pull/901>`_)
+
+  - A CONUS404 item with ``correct_radiation: true``, ``climatology: true`` or ``regrid_method: scipy`` is refused when the blueprint loads.
+  - Used alone on a grid that reaches past CONUS404's footprint, Forge stops before writing the surface forcing and asks for a ``blend``.
+
+- Describe a cluster C-Star does not know in a system file of your own: a ``systems/<name>.yaml`` file under your catalog (``~/cstar/catalog`` by default) or under a group's catalog listed in ``CSTAR_CATALOG`` is used like a bundled system, and one with a bundled system's name replaces it, with a warning. See "Describe your cluster" in the deployments docs. (`#908 <https://github.com/CWorthy-ocean/C-Star/pull/908>`_)
+
+  - New ``cstar system`` commands: ``list`` shows every system C-Star can see and which file it uses, ``show NAME`` prints a system's file to start your own from, ``template`` prints a commented blank one, ``check [NAME|PATH]`` tests a file on the machine it describes, and ``add PATH`` copies a checked file into your catalog or, with ``--catalog``, a group's.
+  - ``cstar init --system-file PATH`` sets C-Star up with a system file and puts the file where C-Star finds it; the System section of ``cstar init`` also accepts the path of a system file.
+  - A system file C-Star cannot use (invalid YAML or schema, a name that does not match the file name, or writable by every user) is skipped with a warning that names it and why; ``CSTAR_SYSTEM`` naming such a file is an error that says why.
+  - ``cstar env show`` names the system file in use when it is not a bundled one.
+
+- C-Star ships skills for coding agents (Claude Code, Codex, Gemini CLI, GitHub Copilot and others), starting with ``cstar-system``, which writes and tests a system file for a cluster C-Star does not know; see "With a coding agent" in "Describe your cluster". (`#910 <https://github.com/CWorthy-ocean/C-Star/pull/910>`_)
+
+  - ``cstar skill install`` links the shipped skills into ``~/.agents/skills`` and, when ``~/.claude`` exists, ``~/.claude/skills``; ``cstar skill list`` shows where each is installed.
+  - ``cstar init`` offers the install when it finds a coding agent's folder in your home directory.
+
+- Forge and the wizard can run ucla-roms 0.15.0's implicit free surface: set ``implicit_fs.fs_mode`` to ``implicit`` (in the wizard, under Advanced settings, Physics & subgrid tuning). (`#911 <https://github.com/CWorthy-ocean/C-Star/pull/911>`_)
+
+  - ``split``, the default, keeps the split-explicit barotropic scheme and the results of earlier releases.
+  - ``fs_nsub``, ``fs_rho_inf``, ``fs_tol`` and ``fs_verbose`` set the implicit scheme's sub-steps, damping, solver tolerance and log detail; the wizard shows the first three only in implicit mode.
+  - Pins below 0.15.0 keep the 0.14 namelist tier, and Forge rejects ``fs_mode: implicit`` there with an error naming 0.15.0. A run pinned to a ucla-roms branch without ucla-roms #420 gets the ``&IMPLICIT_FS`` group in its namelist, ignores it and keeps the split-explicit scheme.
+
+- New bundled ModelSpec ``roms-marbl-0.15-default`` for ucla-roms 0.15.0. (`#911 <https://github.com/CWorthy-ocean/C-Star/pull/911>`_)
+- C-Star recognises TACC's Stampede3, loads its Intel compiler and MPI modules, and submits jobs there. (`#913 <https://github.com/CWorthy-ocean/C-Star/pull/913>`_)
+- C-Star builds and submits GPU runs on the H100 nodes of TACC's Stampede3. (`#917 <https://github.com/CWorthy-ocean/C-Star/pull/917>`_)
+
+  - The GPU build links the Fortran MPI library the MPI installation provides: MPICH's ``libmpifort`` or OpenMPI's ``libmpi_mpifh``.
+  - A system file's ``gpu_nodes`` can set ``request_gpus: false`` for GPU nodes that a job reaches through its partition alone, without asking for GPUs (``--gpus-per-node``).
+
+- A SLURM system file can set ``upper_case_account: true`` for a site that accepts accounts only in upper case; C-Star then submits the account, and lists it in ``cstar init``, in upper case. Stampede3's file sets it, since TACC refuses the lower-case name SLURM reports. (`#917 <https://github.com/CWorthy-ocean/C-Star/pull/917>`_)
+- The wizard's Surface forcing panel starts with an **Atmospheric CO2** choice for MARBL runs: *Static*, a **Constant atmospheric xCO2** (``bgc.xco2air_default``; 284.7 ppm, the pre-industrial average, unless you change it), or *Time-varying*, NOAA's marine boundary layer record (the ``MBL_co2`` source). (`#923 <https://github.com/CWorthy-ocean/C-Star/pull/923>`_)
+
+  - The constant moved here from the Advanced settings, and ``MBL_co2`` is no longer one of the sources a BGC surface row offers.
+
+- Forge downloads the preprocessed GloFAS river dataset from Google Drive when a blueprint uses the ``GLOFAS`` river source, instead of requiring you to stage it by hand. (`#924 <https://github.com/CWorthy-ocean/C-Star/pull/924>`_)
+
+  - It is saved as ``<source_data>/GLOFAS/glofas_v4_rivers_daily_w_rivr2o_v1.nc``; a hand-staged ``glofas_v4_rivers_daily_w_rivr2o.nc`` is no longer used.
+
+- With ParallelIO, C-Star can choose ``pio_stride`` for the machine a run lands on: an empty ``pio_stride`` in the namelist becomes the number of MPI ranks on one node when the run starts, so each node has one I/O rank instead of every rank doing I/O. (`#936 <https://github.com/CWorthy-ocean/C-Star/pull/936>`_)
+
+  - The bundled ``roms-marbl-0.15-default`` and ``roms-marbl-0.16-default`` models leave ``pio_stride`` empty, so Forge blueprints made from them get one I/O rank per node. Older bundled models, existing blueprints and namelists that set a number keep that number.
+  - Set ``namelist_overrides: {pio_settings: {pio_stride: null}}`` to have C-Star choose for an existing ``ucla_roms`` blueprint. In the wizard, a blank PIO stride box means the same.
+  - Forge blueprints are saved as version 11; an older C-Star asks to be upgraded before reading one.
+
+- With ParallelIO, ucla-roms 0.16.0 reads the grid and initial (or restart) files directly with O_DIRECT, which shortens start-up on large domains; Forge and the wizard set this with ``pio_settings.pio_direct_read`` (in the wizard, under Advanced settings, Physics & subgrid tuning, Parallel I/O). (`#939 <https://github.com/CWorthy-ocean/C-Star/pull/939>`_)
+
+  - ``on``, the default in ``roms-marbl-0.16-default``, gives the same results bit for bit as reading through ParallelIO.
+  - Set ``off`` on a file system that rejects or slows down O_DIRECT reads; ``verify`` reads both ways and reports values that differ.
+
+- New bundled ModelSpec ``roms-marbl-0.16-default`` for ucla-roms 0.16.0. (`#939 <https://github.com/CWorthy-ocean/C-Star/pull/939>`_)
+
+Bug Fixes
+~~~~~~~~~
+
+- An infinite value (``.inf``) in a blueprint or a workplan step's overrides was turned into ``null`` when saved, hashed or template-filled; it now stays infinite. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
+- Forge records its surface-BGC files as products of the run (it was looking for them under names it never writes). (`#879 <https://github.com/CWorthy-ocean/C-Star/pull/879>`_)
+- Pre-run now refuses a namelist file name too long for ROMS (more than 250 characters, or more than 220 for ``output_root_name``/``extract_root_name``), listing each one with its length; before, pre-run passed and ROMS stopped at startup (ucla-roms >= 0.13.0) or cut the name off silently (earlier releases). (`#879 <https://github.com/CWorthy-ocean/C-Star/pull/879>`_)
+- Forge wrote the diagnostics output period as a real number (``86400.0``), which ucla-roms cannot read into its integer setting, so any run with ``DIAGNOSTICS`` compiled in stopped at startup. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- On Perlmutter, C-Star again loads a module set that exists (``cray-hdf5/1.14.3.9``, ``cray-netcdf/4.9.2.3``, ``cray-parallel-netcdf/1.12.3.21`` under ``PrgEnv-gnu/8.7.0`` and ``cray-mpich/9.1.0``), so ``NETCDFHOME`` and ``PNETCDFHOME`` resolve and ROMS builds on CPU nodes. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
+- Scheduled steps on Perlmutter no longer fail with ``OSError: [Errno 524]`` before the model starts when the state or cache directory is under ``$HOME`` or ``/global/cfs``. (`#884 <https://github.com/CWorthy-ocean/C-Star/pull/884>`_)
+
+  - Where a file system cannot lock files, C-Star carries on without the lock and logs one warning per directory saying other processes are not kept out there.
+  - A workplan run orchestrated inside an allocation on those mounts now writes its run record, sentinels and manifest instead of failing or silently skipping the manifest.
+
+- Chained steps whose output files share a name (e.g. ``_cdrgas`` files at a step boundary) no longer crash input staging with ``FileExistsError``. (`#888 <https://github.com/CWorthy-ocean/C-Star/pull/888>`_)
+
+  - Same-named forcing files whose time records follow on in the order listed are staged side by side, the later one as ``<name>_2.nc``, and ROMS reads both.
+  - Any other shared input name is refused with one error listing the files, before ``--clobber`` deletes anything.
+
+- Forge wrote the river count of a fresh river build instead of the reused river file when that file's YAML sidecar was missing, so ROMS failed reading ``river_volume``. (`#888 <https://github.com/CWorthy-ocean/C-Star/pull/888>`_)
+- ``cstar admin clean --run-id`` no longer leaves a broken link to the run's removed record, after which every ``cstar run ls`` warned that a record could not be read. (`#889 <https://github.com/CWorthy-ocean/C-Star/pull/889>`_)
+
+  - It also removes the run's empty history folder and its lock file, which were always left behind.
+  - Running it again on a partly cleaned run-id now removes what is left, instead of reporting nothing to clean.
+
+- Forge blueprints with initial conditions and boundary on different GLORYS layouts staged only one layout, and input generation then failed for the other section. (`#890 <https://github.com/CWorthy-ocean/C-Star/pull/890>`_)
+- Forge reads GLORYS files it can't subchunk directly, with one warning, instead of failing or building a reference that later crashed roms-tools with a decompression error. (`#892 <https://github.com/CWorthy-ocean/C-Star/pull/892>`_)
+
+  - Covers compressed or differently chunked NetCDF4, CDF-5/NetCDF3 files, and files whose time encodings use different reference dates (previously a hard error).
+  - Works in workplans as well, where ``--no-subchunk`` can't be passed.
+
+- A cached GLORYS subchunk reference is now reused only for the exact files it was built from, and saved only after it passes its time-axis check. (`#892 <https://github.com/CWorthy-ocean/C-Star/pull/892>`_)
+
+  - Previously a second domain with the same run window reused the first domain's regional reference.
+  - Files replaced in place, a failed time-axis check or an interrupted build previously left a reference that the next run reused.
+
+- A blueprint carrying a ``$schema`` key, from a hand edit or a dump made in Python, no longer fails validation in editors and validators against the schema that key names. (`#894 <https://github.com/CWorthy-ocean/C-Star/pull/894>`_)
+
+  - New schema versions: ucla_roms 3.3.1, ucla_roms_gpu 1.0.1, nest_ic 1.2.1, plotter 2.1.1, and hello_world, upscaler and cdr_metrics 1.1.1; blueprints written at the previous versions still load unchanged.
+
+- The published ``compress`` blueprint schema now accepts the ``$schema`` key that C-Star writes into dumped blueprints (compress schema 1.1.1). (`#895 <https://github.com/CWorthy-ocean/C-Star/pull/895>`_)
+- Input generation now stops with an error where regridding leaves NaN at an ocean point, instead of silently writing 0 there (roms-tools 5.4.0). (`#897 <https://github.com/CWorthy-ocean/C-Star/pull/897>`_)
+
+  - ``bypass_validation: true`` on a Forge blueprint's ``initial_conditions`` or ``boundary`` writes 0 there as before.
+  - A ``nest_ic`` child grid that reaches the edge of its parent grid now fails, since the parent has no velocities there; keep the child inside the parent.
+
+- GLODAP initial conditions and boundary forcing no longer get 0 where one variable has no data in a column that the others have, such as silicate in the Black Sea (roms-tools 5.4.0). (`#897 <https://github.com/CWorthy-ocean/C-Star/pull/897>`_)
+- On Derecho and any other PBS system, a workplan runs its steps on the current node instead of handing them to the SLURM launcher, and warns when started outside a PBS job; a workplan that sets ``compute_environment.launcher: slurm`` there is refused before anything runs. (`#903 <https://github.com/CWorthy-ocean/C-Star/pull/903>`_)
+- The wizard (``cstar wizard``) no longer shows a blank page or stays on "Running ..." when it starts on a busy machine. (`#907 <https://github.com/CWorthy-ocean/C-Star/pull/907>`_)
+- On a PBS system such as Derecho, the refusal to run ROMS on a login node and Forge's closing hint no longer suggest ``cstar blueprint submit``, which C-Star cannot do there; the refusal says to run inside a PBS job. (`#908 <https://github.com/CWorthy-ocean/C-Star/pull/908>`_)
+- A GitHub or http(s) URL in ``CSTAR_CATALOG`` is read as one catalog location; on Linux and macOS C-Star split it at its ``:``, so the catalog it named was never read. (`#915 <https://github.com/CWorthy-ocean/C-Star/pull/915>`_)
+
+  - An http(s) catalog that is not on GitHub is read too, from a server that lists its directories (as ``python -m http.server`` does); before, C-Star found nothing in it, from ``CSTAR_CATALOG`` or from the wizard's catalog bar.
+  - A single URL entered in the wizard's catalog bar loads that catalog again.
+  - A URL as the first ``CSTAR_CATALOG`` entry is refused with an error, as ``local`` is, since the first entry is the catalog you write to; ``cstar forge run`` used to create a directory named ``https`` for it in the current directory.
+
+- On systems where a partition's walltime limit comes from a QOS (such as TACC Stampede3), jobs are laid out using the partition's own CPUs per node instead of the system file's ``max_cpus_per_node`` or the largest node on the machine. (`#916 <https://github.com/CWorthy-ocean/C-Star/pull/916>`_)
+
+  - On a system that requires jobs to state their nodes and tasks per node (``requires_task_distribution: true``), a job that gives neither is now spread by its queue's CPUs per node, falling back to ``max_cpus_per_node`` only when the queue's is unknown.
+
+- On a SLURM system whose nodes run two hardware threads per core, C-Star now places one MPI rank per physical core instead of one per hardware thread, so jobs there ask for twice as many nodes as before; the model's results do not change. (`#916 <https://github.com/CWorthy-ocean/C-Star/pull/916>`_)
+
+  - This applies to the CPUs per node C-Star reads from ``sinfo`` for a partition and to its machine-wide fallback; a system file's ``max_cpus_per_node`` and a job's own CPUs per node are used as given.
+
+- A step running as a local process, such as a ``--pre-run``, is no longer reported and recorded as failed when ``cstar run status`` is asked on another machine than the one running it (another login node, for example); that machine shows the step's last recorded status. (`#919 <https://github.com/CWorthy-ocean/C-Star/pull/919>`_)
+
+  - Re-running the workplan from another machine while the step is still in progress is refused, naming the machine that runs it; before, the step could start again beside itself. Wait for it to finish, run the command on that machine, or pass ``--clobber`` to start over after stopping the other process yourself.
+
+- A failed copy from the repository cache now stops staging with an error that names the copy, and removes the partial copy. (`#925 <https://github.com/CWorthy-ocean/C-Star/pull/925>`_)
+- A repository clone that fails is now tried three times, as intended, instead of twice, and C-Star stops right after the last failed attempt instead of waiting another 30 seconds. (`#925 <https://github.com/CWorthy-ocean/C-Star/pull/925>`_)
+- Staging a code repository (such as ucla-roms or MARBL) no longer fails when the repository cache or the target directory has a space in its path. (`#925 <https://github.com/CWorthy-ocean/C-Star/pull/925>`_)
+- A ``ROMSSimulation`` built in Python now refuses a list of input datasets in which one starts neither at the simulation's start date nor where another dataset in the list ends. Blueprint runs were not affected. (`#925 <https://github.com/CWorthy-ocean/C-Star/pull/925>`_)
+- Forge writes the CDR forcing's ``cdr_time`` relative to the run's ``model_reference_date`` instead of 2000-01-01, so a run with CDR releases and another reference date is no longer refused after the ROMS build. (`#927 <https://github.com/CWorthy-ocean/C-Star/pull/927>`_)
+- The Forge wizard's Download link waits until the open boundaries are derived from the grid or set by hand. On a new custom grid it used to hand out the provisional east and north boundaries, which Save replaces with the ones the land mask gives. (`#928 <https://github.com/CWorthy-ocean/C-Star/pull/928>`_)
+- A blueprint loaded into the Forge wizard and saved again keeps what the file asked for; before, the wizard rebuilt it from its fields and silently dropped what they could not hold. (`#928 <https://github.com/CWorthy-ocean/C-Star/pull/928>`_)
+
+  - Run start, end and reference dates keep their time of day, so the nested-run tutorial's child still starts at 06:00. A date you change starts at midnight.
+  - A parent or child grid keeps ``hmin``, ``close_narrow_channels`` and the other ``grid_kwargs`` the wizard has no field for, so a child is aligned to the parent that actually ran. ``prefill_kwargs`` and ``extrap_kwargs`` are kept too.
+  - A simple-mode CDR forcing with more than one release, a flux that changes in time, a tracer other than ALK or a time of day is kept as loaded, with its fields locked; **Edit as one release** replaces it with its first release at a constant ALK flux.
+  - Picking a DomainSpec sets its ``hmin``, channel closing and mask shapefile, and keeps its other ``grid_kwargs``.
+  - The load status names a ModelSpec, ForcingSpec or OutputSpec that is not in the catalog; the blueprint is saved under the spec the dropdown shows instead.
+
+- In the Forge wizard, a BGC source's **Constant values** entry that is not ``key=number`` and an options box holding invalid JSON now mark the blueprint invalid and name the entry to fix. The wizard used to drop them and save the rest, removing that tracer or option from the blueprint. (`#928 <https://github.com/CWorthy-ocean/C-Star/pull/928>`_)
+- The wizard no longer saves boundary or potential tides switched on for a run that has no tidal input (a child grid, or no tidal forcing), which stopped ROMS at startup; an Advanced setting edited back to its value from the specs no longer counts as an edit. (`#934 <https://github.com/CWorthy-ocean/C-Star/pull/934>`_)
+- ``cstar blueprint check`` now reports a forge blueprint that ``cstar forge run`` would refuse, such as one with a misspelled ``model_settings`` key or a CDR window that ends before the run, instead of saying it is valid. (`#942 <https://github.com/CWorthy-ocean/C-Star/pull/942>`_)
+
+  - ``cstar forge run`` prints that refusal as an error instead of a Python traceback.
+
+- Forge runs on the bundled ``hvalfjordur-0`` and ``ccs-12km`` domains, or any domain whose ``grid_kwargs`` holds ``verbose``, no longer fail with "got multiple values for keyword argument 'verbose'". (`#944 <https://github.com/CWorthy-ocean/C-Star/pull/944>`_)
+
+  - Only ``cstar forge run --verbose`` sets roms-tools verbosity; a ``verbose`` key in ``grid_kwargs`` is ignored.
+
+- ``cstar run promote`` no longer refuses to move a finished submitted run as unfinished when ``CSTAR_SLURM_ACCOUNT`` is unset; it reads the steps' statuses from the scheduler without it. (`#945 <https://github.com/CWorthy-ocean/C-Star/pull/945>`_)
+
+  - ``cstar run check`` refreshes the run without it too, instead of warning that the manifest was not refreshed and reporting the attempt as open.
+
+- ``cstar run status``, ``cstar workplan status`` and ``cstar run show`` no longer stop with a Python traceback when ``CSTAR_SLURM_ACCOUNT`` is unset: reading a run's status needs no submission settings. (`#945 <https://github.com/CWorthy-ocean/C-Star/pull/945>`_)
+
+  - When ``cstar run status`` cannot read the statuses, such as for a workplan that names a scheduler this machine lacks, it prints a one-line error instead of a traceback.
+
+- ``cstar blueprint check``, ``cstar workplan check`` and ``cstar workplan run`` refuse a ``code.roms``, ``code.marbl`` or ``code.pio`` location that git cannot clone where the step runs; before, such a run failed on the compute node after the queue wait. (`#947 <https://github.com/CWorthy-ocean/C-Star/pull/947>`_)
+
+  - A local clone, a ``git@github.com:org/repo`` address and a ``file://`` URL are refused; give an ``https://``, ``ssh://`` or ``git://`` URL, and to run local changes, push the branch to a fork and use the fork's URL.
+  - Forge blueprints follow the same rule; ``code.run_time``, ``code.compile_time`` and Forge's templates still accept a local directory.
+
+Improvements
+~~~~~~~~~~~~
+
+- The bundled ``roms-marbl-0.13-default`` ModelSpec now pins ucla-roms 0.13.1, which changes no namelist key. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- The wizard no longer has a separate "Temperature and salinity output" section: the temperature and salinity checkboxes are under "Variables in history files", the only file they affect. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- Module lists (``.lmod`` files) may contain blank lines and ``#`` comments; the Perlmutter list now names its login defaults explicitly so a change of site defaults does not change the build. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
+- Locks on a run's records are bounded: a writer gives up after 60 s instead of waiting forever on a stalled process. (`#884 <https://github.com/CWorthy-ocean/C-Star/pull/884>`_)
+
+  - ``cstar workplan ls --size`` and ``cstar workplan status --size`` warn that a run's disk usage was not recorded instead of failing.
+  - ``cstar run attach`` refuses in one line, and a new run does not start, with a message naming the lock file.
+
+- ucla_roms runs are unchanged; the ROMS runner, resume and input adapters were generalised so both ROMS applications share them. (`#885 <https://github.com/CWorthy-ocean/C-Star/pull/885>`_)
+- The ParallelIO error for a netCDF-4 input now suggests ``nccopy -k cdf5``, and points at ``uncompressed_originals/`` for a file ``cstar run compress`` rewrote. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+- The variables the CDR metrics and the upscaler read are now named once, in their applications, so other parts of C-Star use the same lists. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+- Applications can name the variables compression keeps exact: UCLA-ROMS protects the CDR metrics inputs, both members of every carbonate perturbation pair, the carbonate sensitivities and the upscaler's boundary inputs, and forge keeps every variable exact. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+- Setup and pre-run refuse a ``river_frc_settings.nriv`` that differs from the river forcing file's river count, which ROMS either stops on or silently drops rivers for. (`#888 <https://github.com/CWorthy-ocean/C-Star/pull/888>`_)
+- Pre-run refuses a namelist that lists more forcing files than the pinned ucla-roms reads (360 before 0.13.0, 10000 from 0.13.0). (`#888 <https://github.com/CWorthy-ocean/C-Star/pull/888>`_)
+- A forge blueprint whose sources need a dataset missing from ``datasets`` (for example a GLORYS layout changed by hand) is now refused at load, and by ``cstar blueprint check``, naming each section and the dataset key it needs, instead of failing during input generation after staging. (`#890 <https://github.com/CWorthy-ocean/C-Star/pull/890>`_)
+- Forge refuses a MARBL build whose boundary forcing or initial conditions have no BGC sources on ucla-roms >= 0.14.0, which would otherwise stop at ROMS startup; the wizard shows the error as you edit. (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+
+  - A nested child's boundary (fed by its parent) and domains with no open side are not checked.
+
+- On Anvil, Bouchet and Elja, C-Star now loads the modules a build uses by name, including those the site loads by default, and on Anvil, Elja and Perlmutter it loads ``cmake``, which ParallelIO builds need: (`#905 <https://github.com/CWorthy-ocean/C-Star/pull/905>`_)
+
+  - Anvil loads ``cmake/3.20.0`` and its default ``hdf5/1.10.7`` and ``netcdf-c/4.7.4`` explicitly; Elja loads ``CMake/3.26.3``; Perlmutter loads ``cmake/3.30.2``.
+  - Bouchet builds with the ``gompi-2024a`` toolchain (GCC 13.3.0, OpenMPI 5.0.3, HDF5 1.14.5, netCDF 4.9.2, netCDF-Fortran 4.6.1, PnetCDF 1.14.0) in place of ``gompi-2022b``, and finds MPI through ``EBROOTOPENMPI``.
+  - Elja loads ``GCC/12.3.0``, the compiler its netCDF-Fortran module already switched to, and names the HDF5 and netCDF modules that came with it.
+  - On Derecho, Elja, Expanse and Perlmutter, ``MPIHOME``, ``NETCDFHOME`` and ``PNETCDFHOME`` no longer end in ``/``. On Derecho, a missing ``parallel-netcdf`` module now stops the build with a message naming ``PNETCDFHOME`` instead of pointing it at ``/``.
+
+- Number boxes in the wizard no longer change their value when the mouse wheel is scrolled over them, and no longer show up/down arrows. (`#906 <https://github.com/CWorthy-ocean/C-Star/pull/906>`_)
+- Forge warns when a MARBL run pinned to ucla-roms before 0.14.0 has no BGC sources for its boundary forcing or initial conditions: those releases start the run with the missing BGC tracers at zero and say so only in the ROMS log. (`#923 <https://github.com/CWorthy-ocean/C-Star/pull/923>`_)
+- Before generating inputs, Forge warns about each CDR release ROMS will move: one on land (to the nearest wet cell, with the distance), on the edge of the grid, or below the seafloor. (`#927 <https://github.com/CWorthy-ocean/C-Star/pull/927>`_)
+
+  - With ``cdr_frc.relocate_to_wet_pts`` off, a release on land is refused there instead, rather than stopping ROMS at start-up.
+
+- In the Forge wizard's simple CDR mode, a release position or time you have not edited follows the grid center and the run window when you change them, so the release no longer stays at the values it had when you picked the mode. (`#928 <https://github.com/CWorthy-ocean/C-Star/pull/928>`_)
+- Each ucla_roms run stages, partitions and lists for ROMS only the forcing files that hold records for its own window, so you can list a long run's forcing in full. Before, every segment of a long run got every file, and ROMS read through all the earlier ones at startup. (`#938 <https://github.com/CWorthy-ocean/C-Star/pull/938>`_)
+
+  - The files kept always include the record just before the run's start and the one just after its end, so ROMS reads the same records as before. The log names how many files of each kind each run uses.
+  - A forcing list longer than the model reads (360 files before ucla-roms 0.13.0, 64 for the GPU model) is no longer refused when each run's own window needs fewer files.
+
+- A ucla_roms run whose forcing does not reach back to its start or on to its end is refused before ROMS is built; before, ROMS stopped at its first step ("First available forcing record is past current time") or at its last step ("Ran out of time records"), after the queue wait and the run. (`#938 <https://github.com/CWorthy-ocean/C-Star/pull/938>`_)
+
+  - The error names each forcing variable that falls short, the files that hold it, the time span they cover and the span the run needs.
+  - Carbonate sensitivities the build does not read from files, and river forcing with rivers off, are not checked; any other forcing file the build does not read is, so remove such a file from the blueprint.
+
+- ``cstar blueprint check`` and ``cstar forge run`` refuse, before any input is generated, a Forge settings section switched on that the pinned ucla-roms release lacks, such as ``implicit_fs.fs_mode: implicit`` before 0.15.0, and the wizard's settings check lists it; before, the build step stopped with a traceback. (`#950 <https://github.com/CWorthy-ocean/C-Star/pull/950>`_)
+- The Forge wizard's model dropdown hides ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default`` and ``roms-marbl-0.11-default`` unless "Show archived" is checked; blueprints that name them keep working. (`#951 <https://github.com/CWorthy-ocean/C-Star/pull/951>`_)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- Published the ``nest_ic`` 1.2.0 blueprint schema and described the new field on the ``nest_ic`` page. (`#877 <https://github.com/CWorthy-ocean/C-Star/pull/877>`_)
+- The ESPER entry in the Forge source-datasets docs gives the oxygen floor as 5.0 mmol/m³ (MARBL's ``parm_o2_min``) and explains grooming, ``groom`` and ``groom_settings``. (`#878 <https://github.com/CWorthy-ocean/C-Star/pull/878>`_)
+- Bundled ModelSpecs, the bundled and documentation Forge blueprints are re-pinned to the template commit that adds ``DIAGNOSTICS``; their rendered ``cppdefs.opt`` is unchanged. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- The wizard docs describe the new placement and the diagnostics switch. (`#880 <https://github.com/CWorthy-ocean/C-Star/pull/880>`_)
+- The macOS cells of the weekly extended integration workflow skip the nesting + upscaling workplan test, which cannot finish on the macOS runner; ubuntu cells still run it. (`#881 <https://github.com/CWorthy-ocean/C-Star/pull/881>`_)
+- The system-registration developer page's ``perlmutter.lmod`` example now shows the real Perlmutter list instead of Anvil's modules. (`#882 <https://github.com/CWorthy-ocean/C-Star/pull/882>`_)
+- Fixed a flaky unit test: the service-loop delay test no longer depends on how busy the CI runner is. (`#883 <https://github.com/CWorthy-ocean/C-Star/pull/883>`_)
+- Published the ``ucla_roms_gpu`` blueprint schema 1.0.0 and a blueprint template, and documented GPU steps and the two GPU settings in the workplan and HPC deployment pages (GPU runs on Anvil are listed as planned); full application docs follow in a later PR. (`#885 <https://github.com/CWorthy-ocean/C-Star/pull/885>`_)
+- New documentation page, "Compressing a finished run", under Moving runs, and a published JSON schema for the ``compress`` blueprint. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+- ``netCDF4>=1.6`` is now a core dependency (it was a development-only dependency) and is listed in the conda environment files. (`#886 <https://github.com/CWorthy-ocean/C-Star/pull/886>`_)
+- Documentation: Oscar added to the supported-machines table (marked untested) and to the per-system SLURM settings and scratch notes on the HPC page. (`#887 <https://github.com/CWorthy-ocean/C-Star/pull/887>`_)
+- The forge blueprint page says to update ``datasets`` when editing a source by hand, and the developer page on source data describes when the ``resolved_datasets`` snapshot is bypassed. (`#890 <https://github.com/CWorthy-ocean/C-Star/pull/890>`_)
+- The Forge source datasets page notes that compressed GLORYS files are read directly and points users with their own GLORYS archive to the explicit source ``path``. (`#892 <https://github.com/CWorthy-ocean/C-Star/pull/892>`_)
+- The schema reference page now lists the nest_ic and upscaler blueprint schemas. (`#894 <https://github.com/CWorthy-ocean/C-Star/pull/894>`_)
+- The schema reference page now lists the ``compress`` blueprint schemas. (`#895 <https://github.com/CWorthy-ocean/C-Star/pull/895>`_)
+- The bundled OutputSpecs carry the two new switches turned off; older releases drop them. (`#896 <https://github.com/CWorthy-ocean/C-Star/pull/896>`_)
+- Pull request descriptions now carry an ``AI disclosure:`` line, and the contributing guide links the organization's AI policy. (`#899 <https://github.com/CWorthy-ocean/C-Star/pull/899>`_)
+- ``AGENTS.md`` gives AI coding agents this project's setup, test, lint, and contribution rules. (`#900 <https://github.com/CWorthy-ocean/C-Star/pull/900>`_)
+- A new developer page lists the design and CLI conventions that code review applies. (`#900 <https://github.com/CWorthy-ocean/C-Star/pull/900>`_)
+- ``s3fs>=2025.1`` joins C-Star's dependencies, to stream CONUS404; an existing environment needs ``mamba install -c conda-forge "s3fs>=2025.1"`` before it can use that source. (`#901 <https://github.com/CWorthy-ocean/C-Star/pull/901>`_)
+- Release notes are now written as one file per note in ``docs/changes/`` and assembled by towncrier at release, instead of being copied from pull request descriptions; the contributor guide's "Writing a release note" section has the format. (`#902 <https://github.com/CWorthy-ocean/C-Star/pull/902>`_)
+- The machines C-Star knows are now described by YAML files in ``cstar/catalog/bundled/systems/``, one per system, in place of Python classes and separate module and environment files; the names, modules, environment variables and queues are unchanged. (`#904 <https://github.com/CWorthy-ocean/C-Star/pull/904>`_)
+
+  - The ROMS build record (``cstar_build.json``) also names the system file the build used and its digest.
+
+- Published schema: run manifest 1.6.0, in which each attempt records the digest of the system file it used (``system_spec_digest``). (`#908 <https://github.com/CWorthy-ocean/C-Star/pull/908>`_)
+- Make the integration tiers fail under CI when a tool they need is missing, keep a developer's ``CSTAR_*``, ``PROJECT`` and scratch variables out of the e2e tests, and stop the integration workflows from replacing conda's binary packages. (`#921 <https://github.com/CWorthy-ocean/C-Star/pull/921>`_)
+- The weekly extended workflow tests ucla-roms 0.16.0 and ``main``. (`#939 <https://github.com/CWorthy-ocean/C-Star/pull/939>`_)
+- The bundled domains, example blueprints and docs move to ``roms-marbl-0.16-default``; the nesting/upscaling and WIO tutorial examples keep their pins, and the bundled ``wales-toy`` blueprint stays on ucla-roms 0.13.0. (`#939 <https://github.com/CWorthy-ocean/C-Star/pull/939>`_)

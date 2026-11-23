@@ -1,1 +1,0 @@
-The bundled OutputSpecs carry the two new switches turned off; older releases drop them.

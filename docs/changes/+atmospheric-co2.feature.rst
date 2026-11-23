@@ -1,2 +1,0 @@
-The wizard's Surface forcing panel starts with an **Atmospheric CO2** choice for MARBL runs: *Static*, a **Constant atmospheric xCO2** (``bgc.xco2air_default``; 284.7 ppm, the pre-industrial average, unless you change it), or *Time-varying*, NOAA's marine boundary layer record (the ``MBL_co2`` source).
-- The constant moved here from the Advanced settings, and ``MBL_co2`` is no longer one of the sources a BGC surface row offers.

@@ -1,1 +1,0 @@
-The Forge wizard's model dropdown hides ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default`` and ``roms-marbl-0.11-default`` unless "Show archived" is checked; blueprints that name them keep working.

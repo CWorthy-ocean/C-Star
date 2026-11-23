@@ -1,4 +1,0 @@
-The bundled DomainSpecs ``PAC_2fth_deg``, ``NEP-4th_deg`` and ``GoA-10th_deg`` now have their grid axes swapped, at rotation 0, 0 and -15 instead of -90, -90 and -105: the grid points and cells are the same, but every file made from them is transposed and the processor layout is 8 by 16 instead of 16 by 8.
-- Their boundary names now match the compass, and each opens its geographic south edge, all open ocean, which was a closed wall before; ``GoA-10th_deg`` stays closed only on its east edge, which is all land.
-- At the old rotations, roms-tools 5.4.0 and earlier wrote winds and initial and boundary currents reversed in half the cells of ``PAC_2fth_deg`` and ``NEP-4th_deg`` and all of ``GoA-10th_deg`` (CWorthy-ocean/roms-tools#737); at the new rotations no cell is affected.
-- A run made from the old specs cannot be continued from the new ones.

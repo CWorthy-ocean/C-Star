@@ -1,3 +1,0 @@
-``cstar blueprint check``, ``cstar workplan check`` and ``cstar workplan run`` refuse a ``code.roms``, ``code.marbl`` or ``code.pio`` location that git cannot clone where the step runs; before, such a run failed on the compute node after the queue wait.
-- A local clone, a ``git@github.com:org/repo`` address and a ``file://`` URL are refused; give an ``https://``, ``ssh://`` or ``git://`` URL, and to run local changes, push the branch to a fork and use the fork's URL.
-- Forge blueprints follow the same rule; ``code.run_time``, ``code.compile_time`` and Forge's templates still accept a local directory.

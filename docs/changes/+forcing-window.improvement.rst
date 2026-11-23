@@ -1,3 +1,0 @@
-Each ucla_roms run stages, partitions and lists for ROMS only the forcing files that hold records for its own window, so you can list a long run's forcing in full. Before, every segment of a long run got every file, and ROMS read through all the earlier ones at startup.
-- The files kept always include the record just before the run's start and the one just after its end, so ROMS reads the same records as before. The log names how many files of each kind each run uses.
-- A forcing list longer than the model reads (360 files before ucla-roms 0.13.0, 64 for the GPU model) is no longer refused when each run's own window needs fewer files.

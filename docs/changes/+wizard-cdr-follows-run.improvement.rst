@@ -1,1 +1,0 @@
-In the Forge wizard's simple CDR mode, a release position or time you have not edited follows the grid center and the run window when you change them, so the release no longer stays at the values it had when you picked the mode.

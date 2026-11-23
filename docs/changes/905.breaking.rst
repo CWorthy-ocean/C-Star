@@ -1,1 +1,0 @@
-On Bouchet, C-Star builds with the ``gompi-2024a`` toolchain in place of ``gompi-2022b``: rebuild ROMS, MARBL and ParallelIO builds made there before this release.
