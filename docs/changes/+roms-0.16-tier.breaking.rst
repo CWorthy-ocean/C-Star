@@ -1,3 +1,0 @@
-New namelist tier for ucla-roms >= 0.16.0 that adds ``pio_settings.pio_direct_read``; earlier releases stop on unknown keys in ``&PIO_SETTINGS``, so they keep the 0.15 tier, where Forge drops ``on`` and ``off`` (both read through ParallelIO there) and rejects ``verify`` with an error naming 0.16.0.
-- Branch pins select the newest tier in both Forge and ``ucla_roms``, so a ParallelIO run pinned to a ucla-roms branch without ucla-roms #462 stops on the new key; builds without ParallelIO never read the group and still run.
-- A commit-hash pin resolves to its nearest release tag and keeps that release's tier.

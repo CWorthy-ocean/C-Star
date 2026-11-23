@@ -1,1 +1,0 @@
-The system-registration developer page's ``perlmutter.lmod`` example now shows the real Perlmutter list instead of Anvil's modules.

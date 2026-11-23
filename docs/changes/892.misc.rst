@@ -1,1 +1,0 @@
-The Forge source datasets page notes that compressed GLORYS files are read directly and points users with their own GLORYS archive to the explicit source ``path``.

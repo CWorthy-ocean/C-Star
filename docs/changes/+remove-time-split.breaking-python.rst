@@ -1,2 +1,0 @@
-Removed with time-splitting: ``RomsTimeSplitter``, ``SplitFrequency``, ``get_time_slices``, ``apply_automatic_overrides``, the transform registry (``TRANSFORMS``, ``register_transform``, ``get_transforms``), ``Transform.is_active`` and ``LiveStep.parent``.
-- ``ApplicationDefinition.applicable_transforms`` is no longer read or required; an application that still declares transforms there gets a warning when it registers, and they do not run.

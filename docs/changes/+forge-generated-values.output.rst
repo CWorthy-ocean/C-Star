@@ -1,4 +1,0 @@
-Forge writes the values it derives from the generated inputs into the namelist and cppdefs even when the saved blueprint's ``model_settings`` holds an older or hand-edited value, so the same blueprint can now render a different namelist.
-- With ``coarse_grid_mode: always``, or ``auto`` when roms-tools puts the surface files on the coarse grid, the namelist says ``interp_bulk_frc = .true.`` and ``interp_bgc_frc = .true.``; it used to say ``.false.``, which does not match the files.
-- A parent whose ``grid_kwargs_child`` left out ``N`` or ``hc`` gets the child's ``n_chd`` and ``hc_chd`` from the child grid roms-tools built (100 levels and 300 m by default) instead of 90 and 250 m.
-- A grid size, tile count or open-boundary switch edited in ``model_settings`` (rather than in ``domain``) is replaced by the value from the grid, the partitioning or ``open_boundaries``.

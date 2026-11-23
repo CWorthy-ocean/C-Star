@@ -1,1 +1,0 @@
-The published ``compress`` blueprint schema now accepts the ``$schema`` key that C-Star writes into dumped blueprints (compress schema 1.1.1).

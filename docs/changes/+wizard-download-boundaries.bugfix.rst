@@ -1,1 +1,0 @@
-The Forge wizard's Download link waits until the open boundaries are derived from the grid or set by hand. On a new custom grid it used to hand out the provisional east and north boundaries, which Save replaces with the ones the land mask gives.

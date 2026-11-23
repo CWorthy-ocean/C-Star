@@ -1,1 +1,0 @@
-A ``ROMSSimulation`` built in Python now refuses a list of input datasets in which one starts neither at the simulation's start date nor where another dataset in the list ends. Blueprint runs were not affected.

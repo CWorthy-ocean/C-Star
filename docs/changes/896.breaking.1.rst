@@ -1,1 +1,0 @@
-On ucla-roms 0.14.0 and later, a MARBL run needs BGC sources for its boundary forcing and initial conditions (ucla-roms #421): a physics-only ForcingSpec such as ``glorys-era5-physics`` now needs ``bgc_mode: none``.
