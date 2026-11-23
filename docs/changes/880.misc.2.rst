@@ -1,1 +1,0 @@
-The integration tests and the weekly extended CI run against ucla-roms 0.13.1.

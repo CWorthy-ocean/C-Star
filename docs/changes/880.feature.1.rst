@@ -2,3 +2,4 @@ The wizard's diagnostics output row has a Diagnostics switch that compiles ucla-
 - Off by default; while it is off, the other diagnostics settings are hidden.
 - The temperature and salinity diagnostics boxes sit in the same row and show only while tracer diagnostics are on.
 - With ParallelIO it needs ucla-roms 0.13.1 or later; Forge refuses diagnostics with ParallelIO on an older release pin, which aborts at the first diagnostics output.
+- Known issue: in ucla-roms 0.16.0 and earlier, tracer diagnostics can corrupt memory and crash a finished run as it shuts down when a tile is three or more grid points wider than it is tall (ucla-roms #476); leave tracer diagnostics off, or set ``n_procs_x`` and ``n_procs_y`` so tiles are about square.
