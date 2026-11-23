@@ -33,6 +33,7 @@ from cstar.applications.forge.blueprint import (
     BLEND_FALLBACK_INHERITED_FIELDS,
     FORGE_BLUEPRINT_VERSION,
     CarbonateSensitivitySpec,
+    Code,
     Composition,
     ForgeBlueprint,
     ForgeProvenance,
@@ -10669,3 +10670,21 @@ class TestForcingCoverageCallSites:
         with pytest.raises(ValueError, match="invalid values") as exc:
             process_forge_blueprint(cfg, executor_factory=_FakeBuilder)
         assert "forcing.boundary.bgc_sources (ESPER)" in str(exc.value)
+
+
+@pytest.mark.parametrize("section", ["roms", "marbl", "pio"])
+def test_local_codebase_is_refused(section: str) -> None:
+    """A local `code.roms`, `code.marbl`, or `code.pio` fails validation."""
+    code = _build().code.model_dump()
+    code[section] = {"location": "/home/user/checkout", "branch": "main"}
+
+    with pytest.raises(ValidationError, match=r"is not a remote repository URL"):
+        Code.model_validate(code)
+
+
+def test_local_templates_are_accepted(tmp_path: Path) -> None:
+    """A local directory is still valid for `templates_run_time`."""
+    code = _build().code.model_dump()
+    code["templates_run_time"]["location"] = str(tmp_path)
+
+    assert Code.model_validate(code).templates_run_time.location == str(tmp_path)

@@ -740,3 +740,35 @@ class TestCarbonateSensitivity:
                 source_np_eta=n_y,
             ),
         ]
+
+
+class TestCodebaseLocations:
+    """Only the codebases C-Star clones must be remote repository URLs."""
+
+    @pytest.mark.parametrize("section", ["roms", "marbl", "pio"])
+    def test_local_codebase_is_refused(
+        self, complete_blueprint_dict: dict[str, Any], section: str
+    ) -> None:
+        """A local `code.roms`, `code.marbl`, or `code.pio` fails validation."""
+        complete_blueprint_dict["partitioning"]["use_pio"] = True
+        complete_blueprint_dict["code"].setdefault(section, {"branch": "main"})
+        complete_blueprint_dict["code"][section]["location"] = "/home/user/checkout"
+
+        with pytest.raises(ValidationError) as excinfo:
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        errors = excinfo.value.errors()
+        assert any(("code", section) == e["loc"][:2] for e in errors)
+        assert "is not a remote repository URL" in str(excinfo.value)
+
+    def test_local_run_and_compile_time_are_accepted(
+        self, complete_blueprint_dict: dict[str, Any], tmp_path: Path
+    ) -> None:
+        """A local directory is still valid for `run_time` and `compile_time`."""
+        for section in ("run_time", "compile_time"):
+            complete_blueprint_dict["code"][section]["location"] = str(tmp_path)
+
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+        assert str(bp.code.run_time.location) == str(tmp_path)
+        assert str(bp.code.compile_time.location) == str(tmp_path)

@@ -4,11 +4,57 @@ import shlex
 import tempfile
 import warnings
 from pathlib import Path
+from typing import Final
+from urllib.parse import urlsplit
 
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 
 log = get_logger(__name__)
+
+CODEBASE_URL_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https", "ssh", "git"})
+"""URL schemes a blueprint may give for a codebase C-Star clones and builds
+(ROMS, MARBL, ParallelIO): the git transports that reach a remote server.
+`cstar.execution.file_system.is_remote_resource` is a different list, of data
+schemes such as ``s3`` that git cannot clone."""
+
+
+def require_codebase_url(location: str) -> str:
+    """Return `location` if it is a remote URL a codebase can be cloned from.
+
+    C-Star clones a codebase with git on the machine that runs the step, and
+    `cstar.io.source_data.SourceData` stages only a remote repository there: a
+    local checkout, a ``git@host:org/repo`` address (which has no scheme, so is
+    read as a path) or a ``file://`` URL would fail only after any queue wait.
+    The check is static and contacts no server.
+
+    Parameters
+    ----------
+    location : str
+        The repository location from a blueprint.
+
+    Returns
+    -------
+    str
+        `location`, unchanged.
+
+    Raises
+    ------
+    ValueError
+        If `location` is not a URL with a scheme in `CODEBASE_URL_SCHEMES` and a
+        host.
+    """
+    parts = urlsplit(location.strip())
+    if parts.scheme.casefold() in CODEBASE_URL_SCHEMES and parts.hostname:
+        return location
+    msg = (
+        f"{location!r} is not a remote repository URL. C-Star clones this codebase "
+        "with git where the step runs, so `location` must be an https://, ssh:// or "
+        "git:// URL, such as https://github.com/CWorthy-ocean/ucla-roms.git (write "
+        "git@host:org/repo as ssh://git@host/org/repo). To run local changes, push "
+        "the branch to a fork and set `location` to the fork's URL."
+    )
+    raise ValueError(msg)
 
 
 def _clone(source_repo: str, local_path: str | Path) -> None:

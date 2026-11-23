@@ -3,6 +3,7 @@ import warnings
 from datetime import datetime
 
 from pydantic import (
+    AfterValidator,
     Field,
     HttpUrl,
     PositiveInt,
@@ -13,6 +14,7 @@ from pydantic import (
 from pytimeparse import parse
 
 from cstar.base.application_names import legacy_names
+from cstar.base.gitutils import require_codebase_url
 from cstar.base.utils import generate_schema_ref
 from cstar.orchestration.models import (
     Blueprint,
@@ -197,10 +199,21 @@ class CodeRepository(DocLocMixin):
         return self
 
 
+def _cloneable(repo: CodeRepository) -> CodeRepository:
+    require_codebase_url(str(repo.location))
+    return repo
+
+
+CodebaseRepository = t.Annotated[CodeRepository, AfterValidator(_cloneable)]
+"""A `CodeRepository` that C-Star clones and builds, so its `location` must be a
+remote repository URL (`cstar.base.gitutils.require_codebase_url`). Run-time and
+compile-time code may also be a local directory and uses `CodeRepository`."""
+
+
 class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     """Collection of repositories used to build, configure, and execute ROMS."""
 
-    roms: CodeRepository
+    roms: CodebaseRepository
     """The baseline ROMS repository."""
 
     run_time: CodeRepository
@@ -209,10 +222,10 @@ class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     compile_time: CodeRepository
     """Codebase used to modify base ROMS compilation."""
 
-    marbl: CodeRepository | None = Field(default=None, validate_default=False)
+    marbl: CodebaseRepository | None = Field(default=None, validate_default=False)
     """Codebase used to add MARBL to the simulation."""
 
-    pio: CodeRepository | None = Field(default=None, validate_default=False)
+    pio: CodebaseRepository | None = Field(default=None, validate_default=False)
     """Codebase used to add the ParallelIO library to the simulation."""
 
 
