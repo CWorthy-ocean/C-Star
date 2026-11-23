@@ -158,6 +158,36 @@ def test_renamed_fragment_keeps_the_pr_that_wrote_it(repo):
     }
 
 
+def test_copied_fragment_belongs_to_the_pr_that_copied_it(repo):
+    # A ucla-roms adoption copies the previous one's note and edits it.
+    note = (
+        "The examples now run on ucla-roms {v}.\n"
+        "- The blueprints pin the new release.\n"
+        "- Their namelists gain the keys it reads.\n"
+    )
+    _commit(repo, {"+roms-0.15.misc.rst": note.format(v="0.15")}, "Adopt (#47)")
+    _commit(repo, {"+roms-0.16.misc.rst": note.format(v="0.16")}, "Adopt (#48)")
+    _git(
+        repo, "mv", f"{CHANGES}/+roms-0.16.misc.rst", f"{CHANGES}/+roms-0.16.bugfix.rst"
+    )
+    _git(repo, "commit", "-q", "-m", "Fix the note's type (#49)")
+    # git log --follow sees the copy, so this test exercises the bug.
+    walk = _git(
+        repo,
+        "log",
+        "--follow",
+        "--name-status",
+        "--format=",
+        "--",
+        f"{CHANGES}/+roms-0.16.bugfix.rst",
+    )
+    assert any(line.startswith("C") for line in walk.splitlines()), walk
+    assert nf.number_fragments(repo, lookup=_no_lookup) == {
+        "+roms-0.15.misc.rst": "47.misc.rst",
+        "+roms-0.16.bugfix.rst": "48.bugfix.rst",
+    }
+
+
 def test_any_extension_and_untyped_files(repo):
     _commit(repo, {"+plain.misc": "No extension.\n"}, "Add (#45)")
     assert nf.number_fragments(repo, lookup=_no_lookup) == {
