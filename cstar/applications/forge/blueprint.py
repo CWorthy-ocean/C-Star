@@ -728,6 +728,84 @@ class Partitioning(_Section):
         return self
 
 
+NESTING_PERIOD_DEFAULT: float = 3600.0
+"""roms-tools' ``make_nesting_info`` default ``period`` (seconds): the extraction
+period of a child whose ``Domain.metadata_child`` states none."""
+
+# The keys a nesting child's settings may carry, as roms-tools' make_nesting_info
+# names them. A DomainSpec states them in its grid_kwargs["metadata"] block (the
+# domain's settings as somebody's child); a blueprint keeps only the period, in
+# Domain.metadata_child (see split_child_nesting_metadata).
+_CHILD_METADATA_KEY = "metadata"
+_NESTING_METADATA_KEYS: frozenset[str] = frozenset(
+    {"period", "prefix", "include_bgc", "include_pressure_fluxes"}
+)
+# ucla-roms reads the variable prefix from the nesting file and refuses one with an
+# "_"; Forge writes one child, so roms-tools' default is the only prefix it needs.
+_NESTING_PREFIX = "child"
+
+
+def split_child_nesting_metadata(
+    grid_kwargs_child: dict[str, Any] | None,
+    metadata_child: dict[str, Any] | None,
+    include_pressure_fluxes: bool,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, bool]:
+    """Fold a child's nesting settings into the blueprint's one place for each.
+
+    Returns ``(grid_kwargs_child, metadata_child, include_pressure_fluxes)`` for a
+    :class:`Domain`: ``grid_kwargs_child`` without the ``metadata`` block a
+    DomainSpec carries, ``metadata_child`` holding only the extraction ``period``
+    (``None`` when neither source states one), and the pressure-flux switch. The
+    block and ``metadata_child`` are merged key by key, ``metadata_child`` winning
+    (the wizard's period widget over a child preset's block).
+
+    ``include_pressure_fluxes: true`` in either source turns the switch on;
+    ``include_bgc`` is dropped, since the executor follows the parent's
+    ``bgc_mode``; ``prefix`` is dropped when it is roms-tools' default
+    ``"child"``. A different prefix, a period that is not a positive number, or
+    any other key raises ``ValueError``. Idempotent.
+    """
+    child = grid_kwargs_child
+    block: dict[str, Any] = {}
+    if isinstance(child, dict) and _CHILD_METADATA_KEY in child:
+        block = dict(child[_CHILD_METADATA_KEY] or {})
+        child = {k: v for k, v in child.items() if k != _CHILD_METADATA_KEY}
+    stated = dict(metadata_child or {})
+    if "period" in block and "period" in stated and block["period"] != stated["period"]:
+        logger.debug(
+            "Nesting period: metadata_child's %r wins over grid_kwargs_child's "
+            "metadata %r.",
+            stated["period"],
+            block["period"],
+        )
+    merged = {**block, **stated}
+    problems = []
+    if unknown := sorted(set(merged) - _NESTING_METADATA_KEYS):
+        problems.append(
+            f"unknown key(s) {', '.join(unknown)}; a child's nesting settings take "
+            f"{', '.join(sorted(_NESTING_METADATA_KEYS))}"
+        )
+    if merged.get("prefix", _NESTING_PREFIX) != _NESTING_PREFIX:
+        problems.append(
+            f"prefix {merged['prefix']!r} is not supported; Forge writes one child "
+            f"with roms-tools' default prefix {_NESTING_PREFIX!r}"
+        )
+    period = merged.get("period")
+    if period is not None and (
+        isinstance(period, bool) or not isinstance(period, int | float) or period <= 0
+    ):
+        problems.append(f"period {period!r} must be a positive number of seconds")
+    if problems:
+        raise ValueError("Nesting child settings: " + "; ".join(problems))
+    if merged.get("include_pressure_fluxes"):
+        include_pressure_fluxes = True
+    return (
+        child,
+        {"period": period} if period is not None else None,
+        include_pressure_fluxes,
+    )
+
+
 class Domain(_Section):
     """Grid construction inputs (kwargs only — the ``rt.Grid`` is built at processing time).
 
@@ -764,8 +842,15 @@ class Domain(_Section):
     grid_kwargs_child: dict[str, Any] | None = None
     """roms-tools ``Grid`` kwargs of the finer child grid this domain extracts
     nesting data for. Accepts the same optional ``topography_source`` /
-    ``topography_path`` overrides as ``grid_kwargs_parent``."""
+    ``topography_path`` overrides as ``grid_kwargs_parent``. A child DomainSpec's
+    ``metadata`` block is folded into ``metadata_child`` and
+    ``nesting_include_pressure_fluxes`` on validation (see
+    :func:`split_child_nesting_metadata`), so it never stays here."""
     metadata_child: dict[str, Any] | None = None
+    """The child's nesting settings: only ``period``, the extraction period in
+    seconds (:data:`NESTING_PERIOD_DEFAULT` when unset). The one source for both the
+    namelist's ``extract_data.extract_period`` and the period written to
+    ``nesting.nc``; see :attr:`child_extract_period`."""
     nesting_include_pressure_fluxes: bool = False
     """Whether to include baroclinic pressure fluxes in the nesting extraction file
     (passed to make_nesting_info / make_edata as include_pressure_fluxes)."""
@@ -798,6 +883,41 @@ class Domain(_Section):
     def is_parent(self) -> bool:
         """Whether this domain is a parent that extracts nesting data for a child."""
         return self.grid_kwargs_child is not None
+
+    @property
+    def child_extract_period(self) -> float | None:
+        """The child's extraction period in seconds (``metadata_child["period"]``,
+        else :data:`NESTING_PERIOD_DEFAULT`); ``None`` when there is no child.
+        """
+        if not self.is_parent:
+            return None
+        return float((self.metadata_child or {}).get("period", NESTING_PERIOD_DEFAULT))
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_child_metadata(cls, data: Any) -> Any:
+        """Fold a child DomainSpec's ``grid_kwargs_child["metadata"]`` into
+        ``metadata_child``/``nesting_include_pressure_fluxes`` on every entry point
+        (a file saved before this rule, a hand-written one, direct construction);
+        see :func:`split_child_nesting_metadata`.
+        """
+        if not isinstance(data, dict):
+            return data
+        child, meta = data.get("grid_kwargs_child"), data.get("metadata_child")
+        if not isinstance(child, dict | None) or not isinstance(meta, dict | None):
+            return data  # field validation reports the wrong type
+        child, meta, fluxes = split_child_nesting_metadata(
+            child, meta, data.get("nesting_include_pressure_fluxes", False)
+        )
+        data = dict(data)
+        for key, value, default in (
+            ("grid_kwargs_child", child, None),
+            ("metadata_child", meta, None),
+            ("nesting_include_pressure_fluxes", fluxes, False),
+        ):
+            if key in data or value != default:
+                data[key] = value
+        return data
 
     @model_validator(mode="after")
     def _grid_file_excludes_generation_geometry(self) -> Domain:
