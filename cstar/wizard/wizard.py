@@ -4808,10 +4808,7 @@ class ForgeBlueprintWizard:
         # _CPPDEFS_DERIVED_LEAVES). Without this, flipping PIO or editing the roms
         # ref and saving the blueprint (without pressing "Save as new spec") would
         # silently record composition.model.modified=False.
-        declared = self.model_card.declared()
-        spec_deviation = self.use_pio_chk.value != declared[
-            "use_pio"
-        ] or self.model_card.deviates_from_spec(declared)
+        spec_deviation = self.model_card.deviates_from_spec()
         model_modified = (
             any(not _is_output_key(s, f) for s, f in deviations) or spec_deviation
         )

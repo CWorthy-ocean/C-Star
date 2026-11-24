@@ -180,7 +180,9 @@ class ModelCard:
             description=label_for("buttons.attach", "Attach").label, icon="link"
         )
         self.cs_clear_btn = W.Button(
-            description=label_for("buttons.detach", "Detach").label, icon="times"
+            description=label_for("buttons.detach", "Detach").label,
+            icon="times",
+            button_style="danger",  # a destructive action
         )
         self.cs_status = W.HTML("")
         self.cs_path_box = W.VBox(
@@ -240,8 +242,6 @@ class ModelCard:
         them and the ForcingSpec row below.
         """
         W = self.W
-        # Danger-styled destructive action.
-        self.cs_clear_btn.button_style = "danger"
         return [
             components.field_row(
                 W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
@@ -299,13 +299,13 @@ class ModelCard:
         """The selected ModelSpec's file in the catalog."""
         return self.catalog.model_path(self.model_dd.value)
 
-    def declared(self) -> dict[str, Any]:
+    def _declared(self) -> dict[str, Any]:
         """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
         ``use_pio``.
 
         Single re-parse of the ModelSpec file backing the ``default_*`` methods
-        below and the wizard's spec-deviation check in ``_rebuild`` -- both need the
-        same catalog-declared values to compare live widget state against.
+        below and `deviates_from_spec` -- both need the same catalog-declared
+        values to compare live widget state against.
         """
         try:
             data = load_model_spec_data(self.model_path())
@@ -328,21 +328,21 @@ class ModelCard:
 
     def default_roms_ref(self) -> str:
         """The selected model's pinned ucla-roms checkout target (commit or branch)."""
-        return self.declared()["roms_ref"]
+        return self._declared()["roms_ref"]
 
     def default_marbl_ref(self) -> str:
         """The selected model's pinned MARBL checkout target (commit or branch)."""
-        return self.declared()["marbl_ref"]
+        return self._declared()["marbl_ref"]
 
     def default_bgc_mode(self) -> str:
         """The selected model's ModelSpec-declared bgc_mode (prepopulates bgc_dd)."""
-        return self.declared()["bgc_mode"]
+        return self._declared()["bgc_mode"]
 
     def default_use_pio(self) -> bool:
         """The selected model's ModelSpec-declared use_pio (prepopulates the Run
         card's use_pio_chk).
         """
-        return self.declared()["use_pio"]
+        return self._declared()["use_pio"]
 
     def effective_roms_ref(self) -> str | None:
         """The ucla-roms ref that determines the run-time-settings schema.
@@ -355,13 +355,17 @@ class ModelCard:
         """
         return self.typed_roms_ref or self.default_roms_ref() or None
 
-    def deviates_from_spec(self, declared: dict[str, Any]) -> bool:
-        """Whether the BGC mode, or a typed ucla-roms or MARBL ref, differs from what
-        the ModelSpec declares (*declared*, from `declared`). A blank ref takes the
-        spec's pin, so it never deviates.
+    def deviates_from_spec(self) -> bool:
+        """Whether the build choices differ from what the selected ModelSpec
+        declares: ParallelIO (the Run card's checkbox, read through ``use_pio``),
+        the BGC mode, or a typed ucla-roms or MARBL ref. A blank ref takes the
+        spec's pin, so it never deviates. These are resolver kwargs, not settings
+        leaves, so the wizard's override diff cannot see them.
         """
+        declared = self._declared()
         return (
-            self.bgc_dd.value != declared["bgc_mode"]
+            self._use_pio() != declared["use_pio"]
+            or self.bgc_dd.value != declared["bgc_mode"]
             or bool((ref := self.typed_roms_ref) and ref != declared["roms_ref"])
             or bool((mref := self.typed_marbl_ref) and mref != declared["marbl_ref"])
         )
@@ -459,7 +463,7 @@ class ModelCard:
             return names
         return [n for n in names if n not in archived or n == selected]
 
-    def _model_dd_options(self, selected: str | None = None) -> list:
+    def _model_dd_options(self, selected: str | None = None) -> list[Any]:
         archived = self.catalog.archived_model_names
         return _dd_options(
             self.catalog,
@@ -468,7 +472,7 @@ class ModelCard:
             archived=archived,
         )
 
-    def _on_show_archived_change(self, _change):
+    def _on_show_archived_change(self, _change: Any) -> None:
         """Re-option ``model_dd`` for the new checkbox state, keeping its value."""
         with self._suspend():
             selected = self.model_dd.value
@@ -476,11 +480,11 @@ class ModelCard:
             self.model_dd.value = selected
 
     # ---- visibility ----------------------------------------------------------
-    def _sync_marbl_ref_visibility(self, _change=None):
+    def _sync_marbl_ref_visibility(self, _change: Any = None) -> None:
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
         self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
 
-    def _sync_carbonate_sensitivity_visibility(self, _change=None):
+    def _sync_carbonate_sensitivity_visibility(self, _change: Any = None) -> None:
         # The carbonate sensitivity group only matters in "cdr_lite" mode (the
         # wizard shows the CDR panel's hint then too, see its _sync_cdr_lite_hint);
         # the attach row only for the "path" source. Attached state is kept (not
@@ -578,7 +582,7 @@ class ModelCard:
             else ""
         )
 
-    def _on_cs_attach(self, _btn):
+    def _on_cs_attach(self, _btn: Any) -> None:
         path_str = self.cs_path.value.strip()
         if not path_str:
             self.cs_status.value = components.status_span("err", "Enter a path first.")
@@ -586,7 +590,7 @@ class ModelCard:
         # Explicit click always re-scans and re-hashes -- no dedupe here.
         self._attach_carbonate_sensitivity_dir(path_str)
 
-    def _on_cs_path_submit(self, _change) -> None:
+    def _on_cs_path_submit(self, _change: Any) -> None:
         """Attach the typed directory on Enter/focus-out (twin of the wizard's
         `_on_cdr_file_path_submit`): a typed-but-unattached path would otherwise
         leave the blueprint invalid with no hint as to why.
@@ -597,7 +601,7 @@ class ModelCard:
         if path_str:
             self._attach_carbonate_sensitivity_dir(path_str)
 
-    def _on_cs_clear(self, _btn):
+    def _on_cs_clear(self, _btn: Any) -> None:
         self._carbonate_sensitivity = None
         self.cs_path.value = ""  # fires _on_cs_path_submit, a no-op when blank
         self.cs_status.value = _CARBONATE_DIR_HINT
