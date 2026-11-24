@@ -356,13 +356,13 @@ def test_every_settings_field_key_names_a_real_namelist_field():
 
 
 def test_namelist_label_uses_glossary_override():
-    from cstar.wizard.wizard import _namelist_label
+    from cstar.wizard.settings_editor import _namelist_label
 
     assert _namelist_label("lateral_visc", "visc2") == "Horizontal viscosity"
 
 
 def test_namelist_label_falls_back_to_field_name_when_unknown():
-    from cstar.wizard.wizard import _namelist_label
+    from cstar.wizard.settings_editor import _namelist_label
 
     assert _namelist_label("lateral_visc", "not_a_real_field") == "not_a_real_field"
 
@@ -377,7 +377,7 @@ def test_output_table_and_variable_grid_fields_exist():
     Mirrors ``test_every_settings_field_key_names_a_real_namelist_field``'s glossary
     check, but for the table/grid definitions rather than the label glossary.
     """
-    from cstar.wizard.wizard import _OUTPUT_TABLES, _VARIABLE_GRIDS
+    from cstar.wizard.settings_editor import _OUTPUT_TABLES, _VARIABLE_GRIDS
 
     section_fields = _all_settings_section_field_names()
 

@@ -8149,7 +8149,7 @@ class TestForgeBlueprintWizard:
         """bgc/marbl_bgc straddle physics and output: the write-controls appear in the
         Output card, the rest under Biogeochemistry (the PARTIAL_OUTPUT_SECTIONS seam).
         """
-        from cstar.wizard.wizard import _OUTPUT_CARD
+        from cstar.wizard.settings_editor import _OUTPUT_CARD
 
         w = self._wizard()
         group_fields = w.editor._group_fields

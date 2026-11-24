@@ -44,30 +44,32 @@ from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.fields import _base_type, _is_optional_numeric, _make_field_widget
-from cstar.wizard.wizard import (
+from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
-    _BOUNDARY_NONE,
     _FORCING_CARD,
-    _IC_NONE,
     _MODEL_CARD,
     _OUTPUT_CARD,
     _OUTPUT_MORE_TITLE,
     _OUTPUT_TABLES,
+    _applies_in,
+    _in_forcing_card,
+    _in_output_card,
+    _namelist_tooltip,
+    _output_placement,
+    _section_submodel,
+    _SettingsEditor,
+)
+from cstar.wizard.wizard import (
+    _BOUNDARY_NONE,
+    _IC_NONE,
     _STICKY_STEPS,
     WIZARD_TOOL,
     ForgeBlueprintWizard,
     ForgeBlueprintWizardApp,
     WorkplanHooks,
-    _applies_in,
     _drain_stream_buffer,
     _ForcingEditor,
-    _in_forcing_card,
-    _in_output_card,
     _is_output_key,
-    _namelist_tooltip,
-    _output_placement,
-    _section_submodel,
-    _SettingsEditor,
 )
 
 

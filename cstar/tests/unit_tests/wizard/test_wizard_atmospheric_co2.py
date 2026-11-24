@@ -14,10 +14,10 @@ import ipywidgets as W
 import pytest
 
 import cstar.catalog
+from cstar.wizard.settings_editor import _FORCING_CARD
 from cstar.wizard.wizard import (
     _CO2_STATIC,
     _CO2_TIME_VARYING,
-    _FORCING_CARD,
     ForgeBlueprintWizard,
     _ForcingEditor,
     _source_opts_for,
