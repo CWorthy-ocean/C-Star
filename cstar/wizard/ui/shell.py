@@ -174,7 +174,7 @@ def blueprint_app(catalog_root: str | None = None) -> AppShell:
     Imports ``ForgeBlueprintWizardApp`` lazily (it, in turn, lazily imports
     ipywidgets).
     """
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.app import ForgeBlueprintWizardApp
 
     queue_iopub_instead_of_dropping()
     app = ForgeBlueprintWizardApp(catalog_root)
@@ -187,7 +187,8 @@ def app(catalog_root: str | None = None) -> AppShell:
     The Workplan page shares the Blueprint page's app (and so its catalog).
     Imports are lazy (both pages, in turn, lazily import ipywidgets).
     """
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp, WorkplanHooks
+    from cstar.wizard.app import ForgeBlueprintWizardApp
+    from cstar.wizard.wizard import WorkplanHooks
     from cstar.wizard.workplan_builder import WorkplanBuilderPage
 
     queue_iopub_instead_of_dropping()

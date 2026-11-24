@@ -40,8 +40,9 @@ from cstar.orchestration.models import (
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
 from cstar.wizard import workplan_builder as wb
+from cstar.wizard.app import ForgeBlueprintWizardApp
 from cstar.wizard.ui import labels
-from cstar.wizard.wizard import WIZARD_TOOL, ForgeBlueprintWizardApp
+from cstar.wizard.wizard import WIZARD_TOOL
 from cstar.wizard.workplan_builder import WorkplanBuilderPage, _StepPane
 
 _BP_TEMPLATE = (

@@ -43,6 +43,7 @@ from cstar.applications.forge.namelist_model import (
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
+from cstar.wizard.app import ForgeBlueprintWizardApp
 from cstar.wizard.fields import _base_type, _is_optional_numeric, _make_field_widget
 from cstar.wizard.forcing_editor import _BOUNDARY_NONE, _IC_NONE, _ForcingEditor
 from cstar.wizard.settings_editor import (
@@ -64,7 +65,6 @@ from cstar.wizard.wizard import (
     _STICKY_STEPS,
     WIZARD_TOOL,
     ForgeBlueprintWizard,
-    ForgeBlueprintWizardApp,
     WorkplanHooks,
     _drain_stream_buffer,
     _is_output_key,
@@ -7680,7 +7680,7 @@ def test_set_grid_widgets_locked_toggles_grid_lock_banner():
 
 
 def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.app import ForgeBlueprintWizardApp
 
     app = ForgeBlueprintWizardApp()
     assert app.widget is app._outer
@@ -7688,12 +7688,21 @@ def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
     assert "forge-catalog-bar" in app._bar.widget._dom_classes
 
 
+def test_wizard_module_keeps_the_public_names_that_moved():
+    """Notebooks import these from ``cstar.wizard.wizard``; they now live elsewhere."""
+    from cstar.wizard import app, fields, settings_editor, wizard
+
+    assert wizard.ForgeBlueprintWizardApp is app.ForgeBlueprintWizardApp
+    assert wizard.HELP_TEXT is fields.HELP_TEXT
+    assert wizard.LABEL_TEXT is settings_editor.LABEL_TEXT
+
+
 def test_catalog_bar_loads_a_single_url_as_one_read_only_store(monkeypatch):
     """A URL typed in the catalog bar is one store, not split at its ``:``."""
     import ipywidgets as w
 
     from cstar.wizard import wizard as wizard_module
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.app import ForgeBlueprintWizardApp
 
     app = ForgeBlueprintWizardApp()
     store_calls = []

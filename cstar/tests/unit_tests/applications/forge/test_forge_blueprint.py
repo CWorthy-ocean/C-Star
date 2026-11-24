@@ -9230,7 +9230,7 @@ class TestForgeBlueprintWizardApp:
 
     def _app(self, **kwargs):
         pytest.importorskip("ipywidgets")
-        from cstar.wizard.wizard import ForgeBlueprintWizardApp
+        from cstar.wizard.app import ForgeBlueprintWizardApp
 
         return ForgeBlueprintWizardApp(**kwargs)
 
@@ -9258,7 +9258,7 @@ class TestForgeBlueprintWizardApp:
         # writable layer over bundled, matching CSTAR_CATALOG semantics),
         # so a malformed GitHub URL is the failure case now. Calls `_load`
         # directly -- the catalog bar's own reload button now requires a
-        # two-step confirm (see `cstar.wizard.wizard.CatalogBar`),
+        # two-step confirm (see `cstar.wizard.ui.catalog_bar.CatalogBar`),
         # which isn't this test's concern.
         app = self._app()
         original_inner = app.inner
