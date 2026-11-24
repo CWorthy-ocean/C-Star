@@ -93,6 +93,7 @@ Directory map
     +-- wizard/                        # Wizard presentation layer (shared UI kit + Voila front-end)
     |   +-- wizard.py                      # ForgeBlueprintWizard (ipywidgets UI): the cards, _rebuild, save
     |   +-- model_card.py                  # ModelCard: the Model card's widgets, gather/populate share and chip
+    |   +-- domain_card.py                 # DomainCard: the Grid card (Domain pick, grid, grid file, derived values, nesting)
     |   +-- run_card.py                    # RunCard: the Run card's run window, processor layout and CDR section
     |   +-- review_card.py                 # ReviewCard: the Save and Next steps cards (name, Save, workplan, Run Forge)
     |   +-- forcing_editor.py              # _ForcingEditor: the Forcing card's rows, sources and options
@@ -320,12 +321,13 @@ The call chain end to end
    key names a real widget or namelist field. ``_rebuild()`` also refreshes
    the sticky status bar, per-card chips and accordion titles
    (``_update_status``). A card with a module of its own (the Model card's
-   ``ModelCard``, ``wiz.model_card``, the Run card's ``RunCard``,
-   ``wiz.run_card``, and ``ReviewCard``, ``wiz.review_card``, which holds both
-   the Save and the Next steps cards) owns its widgets and their observers, its
-   share of ``_gather`` and ``_populate_from``, and its chip; the wizard
-   places its rows, reacts to it by observing its widgets, and reads and sets
-   it only through its methods. The CSS travels inside the widget tree so the
+   ``ModelCard``, ``wiz.model_card``, the Grid card's ``DomainCard``,
+   ``wiz.domain_card``, the Run card's ``RunCard``, ``wiz.run_card``, and
+   ``ReviewCard``, ``wiz.review_card``, which holds both the Save and the Next
+   steps cards) owns its widgets and their observers, its share of ``_gather``
+   and ``_populate_from``, and its chip; the wizard places its rows, reacts to
+   it by observing its widgets, and reads and sets it only through its
+   methods. The CSS travels inside the widget tree so the
    plain-notebook path is styled too; only the Voila page column
    (``body[data-voila] .forge-shell``) is shell-specific. Every colour is a
    ``--forge-*`` token from ``branding.PALETTE``, which holds a light and a
@@ -334,8 +336,9 @@ The call chain end to end
    Python names a class (``components.status_span`` for status text) and never
    writes a colour itself, or it would stay light in the dark theme; a unit
    test enforces this.
-2. User picks a domain -> ``_on_domain()`` prefills
-   grid/boundaries/partitioning/dates from ``catalog.domain_data(name)``.
+2. User picks a domain -> ``_on_domain()`` prefills the grid and boundaries
+   (``DomainCard.load_picked_domain``), then the partitioning and dates
+   (``RunCard.populate_from_domain``), from ``catalog.domain_data(name)``.
 3. Every edit -> ``_rebuild()`` -> ``build_forge_blueprint(**self._gather())``
    (``cstar/applications/forge/resolve.py``) -- reads the single
    consolidated ModelSpec file directly as a dict (no Pydantic here;
