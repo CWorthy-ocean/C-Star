@@ -22,8 +22,8 @@ _TITLES = [
 
 def _wizard() -> ForgeBlueprintWizard:
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     return wiz
 

@@ -150,7 +150,7 @@ class TestLoadSaveKeepsTheData:
     def test_a_new_date_starts_at_midnight(self):
         wiz = _load(_NEST_TINY_CHILD)
 
-        wiz.start.value = date(2012, 1, 1)
+        wiz.run_card.start.value = date(2012, 1, 1)
 
         gathered = wiz._gather()
         assert gathered["start_date"] == datetime(2012, 1, 1)
@@ -259,80 +259,80 @@ class TestSimpleCdrTheFieldsCannotShow:
 
         wiz = _load(path)
 
-        assert wiz.cdr_mode_dd.value == "simple"
-        assert reason in wiz.cdr_simple_note.value
-        assert all(w.disabled for w in wiz._cdr_simple_fields)
+        assert wiz.run_card.cdr_mode_dd.value == "simple"
+        assert reason in wiz.run_card.cdr_simple_note.value
+        assert all(w.disabled for w in wiz.run_card.cdr_simple_fields)
         saved = _save(wiz, tmp_path / "saved.yaml")
         assert _data_diff(_as_written(path), saved) == []
 
     def test_a_release_the_fields_can_show_stays_editable(self):
         wiz = _load(_WIO_RELEASE)
 
-        assert wiz._cdr_simple_loaded is None
-        assert wiz.cdr_simple_note.value == ""
-        assert not any(w.disabled for w in wiz._cdr_simple_fields)
+        assert wiz.run_card._cdr_simple_loaded is None
+        assert wiz.run_card.cdr_simple_note.value == ""
+        assert not any(w.disabled for w in wiz.run_card.cdr_simple_fields)
 
     def test_a_cdr_lite_release_the_wizard_saved_stays_editable(self, tmp_path):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         wiz._boundaries_touched = True  # not exercising boundary derivation
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        wiz.cdr_mode_dd.value = "simple"
+        wiz.run_card.cdr_mode_dd.value = "simple"
         saved = _save(wiz, tmp_path / "lite.yaml")
         # the resolver names the release's tracer set in the saved file
         assert saved["cdr"]["cdr_forcing"]["releases"][0]["tracer_set"] == "cdr_lite"
 
         loaded = _load(tmp_path / "lite.yaml")
 
-        assert loaded._cdr_simple_loaded is None
-        assert not any(w.disabled for w in loaded._cdr_simple_fields)
+        assert loaded.run_card._cdr_simple_loaded is None
+        assert not any(w.disabled for w in loaded.run_card.cdr_simple_fields)
 
     def test_edit_as_one_release_replaces_it(self, tmp_path):
         wiz = _load(_variant(tmp_path, _WIO_RELEASE, _two_releases))
 
-        wiz.cdr_simple_replace_btn.click()
+        wiz.run_card.cdr_simple_replace_btn.click()
 
         cdr = wiz.config.cdr.cdr_forcing
         assert [r["tracer_fluxes"] for r in cdr["releases"]] == [
             {"ALK": [1.0e6, 1.0e6]}
         ]
-        assert not any(w.disabled for w in wiz._cdr_simple_fields)
+        assert not any(w.disabled for w in wiz.run_card.cdr_simple_fields)
 
     def test_leaving_simple_mode_drops_it(self, tmp_path):
         wiz = _load(_variant(tmp_path, _WIO_RELEASE, _two_releases))
 
-        wiz.cdr_mode_dd.value = "none"
-        wiz.cdr_mode_dd.value = "simple"
+        wiz.run_card.cdr_mode_dd.value = "none"
+        wiz.run_card.cdr_mode_dd.value = "simple"
 
-        assert wiz._cdr_simple_loaded is None
+        assert wiz.run_card._cdr_simple_loaded is None
         assert len(wiz.config.cdr.cdr_forcing["releases"]) == 1
 
 
 class TestSimpleCdrFollowsTheRun:
     def test_untouched_fields_follow_the_run_window_and_grid(self):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.cdr_mode_dd.value = "simple"
-        wiz.cdr_simple_lon.value = 61.25  # the user's own choice
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.cdr_mode_dd.value = "simple"
+        wiz.run_card.cdr_simple_lon.value = 61.25  # the user's own choice
 
-        wiz.end.value = date(2012, 1, 5)
+        wiz.run_card.end.value = date(2012, 1, 5)
         wiz.grid_w["center_lat"].value = -3.0
         wiz.grid_w["center_lon"].value = 62.0
 
-        assert wiz.cdr_simple_end.value == date(2012, 1, 5)
-        assert wiz.cdr_simple_lat.value == -3.0
-        assert wiz.cdr_simple_lon.value == 61.25
+        assert wiz.run_card.cdr_simple_end.value == date(2012, 1, 5)
+        assert wiz.run_card.cdr_simple_lat.value == -3.0
+        assert wiz.run_card.cdr_simple_lon.value == 61.25
         release = wiz.config.cdr.cdr_forcing["releases"][0]
         assert release["times"][-1] == "2012-01-05T00:00:00"
 
     def test_a_loaded_release_stays_put(self):
         wiz = _load(_WIO_RELEASE)
 
-        wiz.end.value = date(2012, 1, 9)
+        wiz.run_card.end.value = date(2012, 1, 9)
 
-        assert wiz.cdr_simple_end.value == date(2012, 1, 6)
+        assert wiz.run_card.cdr_simple_end.value == date(2012, 1, 6)
 
 
 def _open_ocean_grid(nx: int = 20, ny: int = 20):
@@ -346,8 +346,8 @@ def _open_ocean_grid(nx: int = 20, ny: int = 20):
 class TestDownloadWaitsForDerivedBoundaries:
     def test_a_fresh_custom_grid_offers_no_download(self):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
 
         assert wiz.config is not None, wiz.derived.value
         assert _downloaded(wiz.download_link.value) is None
@@ -358,8 +358,8 @@ class TestDownloadWaitsForDerivedBoundaries:
         self, tmp_path, monkeypatch
     ):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         monkeypatch.setattr(wiz, "_build_grid_from_widgets", _open_ocean_grid)
 
         before = _downloaded(wiz.download_link.value)
@@ -375,8 +375,8 @@ class TestDownloadWaitsForDerivedBoundaries:
         self, tmp_path, monkeypatch
     ):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         provisional = {d: w.value for d, w in wiz.bnd.items()}
         monkeypatch.setattr(wiz, "_build_grid_from_widgets", _open_ocean_grid)
 
@@ -418,8 +418,8 @@ class TestFreeTextIsReadOrRefused:
 
     def test_a_bad_constant_stops_the_blueprint(self, tmp_path):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         row = wiz._forcing_editor._rows["ic_bgc"][0]
         row["name"].value = "constants"
         row["constants"].value = "ALK=2300, DIC=2100x"
@@ -433,8 +433,8 @@ class TestFreeTextIsReadOrRefused:
 
     def test_a_bad_box_does_not_break_copying_rows_or_switching_bgc(self):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         editor = wiz._forcing_editor
         before = list(editor._rows["boundary_bgc"])
         row = editor._rows["ic_bgc"][0]
@@ -449,8 +449,8 @@ class TestFreeTextIsReadOrRefused:
 
     def test_bad_options_json_stops_the_blueprint(self):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
 
         wiz._forcing_editor.ic_options.value = '{"chunks": '
 

@@ -30,19 +30,19 @@ def test_use_pio_chk_emit_is_unconditional():
     resolver's None fallback re-reads the ModelSpec default.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     # roms-marbl-0.14-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
-    assert wiz.use_pio_chk.value is True
-    wiz.use_pio_chk.value = False
+    assert wiz.run_card.use_pio_chk.value is True
+    wiz.run_card.use_pio_chk.value = False
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["use_pio"] is False
     assert wiz.config.code.pio is None
 
-    wiz.use_pio_chk.value = True
+    wiz.run_card.use_pio_chk.value = True
     wiz._rebuild()
     assert wiz.config.model_settings["cppdefs"]["use_pio"] is True
     assert wiz.config.code.pio is not None
@@ -53,26 +53,26 @@ def test_auto_tiling_chk_toggles_dependent_widget_state():
     use_pio on; unchecking reverses all of it but leaves use_pio's value as-is.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.use_pio_chk.value = False
-    assert wiz.auto_tiling_chk.value is False
-    assert wiz.npx.disabled is False
-    assert wiz.npy.disabled is False
-    assert "none" in (wiz.n_cores.layout.display or "none")
-    assert wiz.use_pio_chk.disabled is False
+    wiz.run_card.use_pio_chk.value = False
+    assert wiz.run_card.auto_tiling_chk.value is False
+    assert wiz.run_card.npx.disabled is False
+    assert wiz.run_card.npy.disabled is False
+    assert "none" in (wiz.run_card.n_cores.layout.display or "none")
+    assert wiz.run_card.use_pio_chk.disabled is False
 
-    wiz.auto_tiling_chk.value = True
-    assert wiz.npx.disabled is True
-    assert wiz.npy.disabled is True
-    assert (wiz.n_cores.layout.display or "") == ""
-    assert wiz.use_pio_chk.value is True
-    assert wiz.use_pio_chk.disabled is True
+    wiz.run_card.auto_tiling_chk.value = True
+    assert wiz.run_card.npx.disabled is True
+    assert wiz.run_card.npy.disabled is True
+    assert (wiz.run_card.n_cores.layout.display or "") == ""
+    assert wiz.run_card.use_pio_chk.value is True
+    assert wiz.run_card.use_pio_chk.disabled is True
 
-    wiz.auto_tiling_chk.value = False
-    assert wiz.npx.disabled is False
-    assert wiz.npy.disabled is False
-    assert "none" in (wiz.n_cores.layout.display or "none")
-    assert wiz.use_pio_chk.disabled is False
-    assert wiz.use_pio_chk.value is True  # left as-is, not reset
+    wiz.run_card.auto_tiling_chk.value = False
+    assert wiz.run_card.npx.disabled is False
+    assert wiz.run_card.npy.disabled is False
+    assert "none" in (wiz.run_card.n_cores.layout.display or "none")
+    assert wiz.run_card.use_pio_chk.disabled is False
+    assert wiz.run_card.use_pio_chk.value is True  # left as-is, not reset
 
 
 def test_auto_tiling_toggle_seeds_n_cores_from_n_procs():
@@ -82,22 +82,22 @@ def test_auto_tiling_toggle_seeds_n_cores_from_n_procs():
     survives unrelated _sync_auto_tiling() calls.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.npx.value = 4
-    wiz.npy.value = 6
+    wiz.run_card.npx.value = 4
+    wiz.run_card.npy.value = 6
 
-    wiz.auto_tiling_chk.value = True
-    assert wiz.n_cores.value == 24
+    wiz.run_card.auto_tiling_chk.value = True
+    assert wiz.run_card.n_cores.value == 24
 
     # A manual n_cores edit is not clobbered by direct sync calls.
-    wiz.n_cores.value = 30
-    wiz._sync_auto_tiling()
-    assert wiz.n_cores.value == 30
+    wiz.run_card.n_cores.value = 30
+    wiz.run_card._sync_auto_tiling()
+    assert wiz.run_card.n_cores.value == 30
 
     # Re-toggling recomputes from the (re-enabled, possibly edited) grid.
-    wiz.auto_tiling_chk.value = False
-    wiz.npx.value = 2
-    wiz.auto_tiling_chk.value = True
-    assert wiz.n_cores.value == 12
+    wiz.run_card.auto_tiling_chk.value = False
+    wiz.run_card.npx.value = 2
+    wiz.run_card.auto_tiling_chk.value = True
+    assert wiz.run_card.n_cores.value == 12
 
 
 def test_auto_tiling_gathers_n_cores_partitioning():
@@ -105,11 +105,11 @@ def test_auto_tiling_gathers_n_cores_partitioning():
     partitioning when checked, and back to n_procs_x/y when unchecked.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
-    wiz.auto_tiling_chk.value = True
-    wiz.n_cores.value = 24
+    wiz.run_card.auto_tiling_chk.value = True
+    wiz.run_card.n_cores.value = 24
     wiz._rebuild()
     assert wiz.config is not None
     part = wiz.config.domain.partitioning
@@ -118,25 +118,25 @@ def test_auto_tiling_gathers_n_cores_partitioning():
     assert part.n_procs_x is None
     assert part.n_procs_y is None
 
-    wiz.auto_tiling_chk.value = False
+    wiz.run_card.auto_tiling_chk.value = False
     wiz._rebuild()
     part = wiz.config.domain.partitioning
     assert part.auto_tiling is False
-    assert part.n_procs_x == wiz.npx.value
-    assert part.n_procs_y == wiz.npy.value
+    assert part.n_procs_x == wiz.run_card.npx.value
+    assert part.n_procs_y == wiz.run_card.npy.value
 
 
 def test_cdr_upload_valid_yaml_gathers_into_config():
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
-    wiz.cdr_mode_dd.value = "yaml"
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz.run_card.cdr_mode_dd.value = "yaml"
 
-    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    wiz.run_card._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
 
-    assert wiz._cdr_forcing is not None
-    assert "✓ CDR" in wiz.cdr_status.value
-    assert wiz._gather()["cdr"]["cdr_forcing"] is wiz._cdr_forcing
+    assert wiz.run_card._cdr_forcing is not None
+    assert "✓ CDR" in wiz.run_card.cdr_status.value
+    assert wiz._gather()["cdr"]["cdr_forcing"] is wiz.run_card._cdr_forcing
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["cdr_forcing"] is True
     assert wiz.config.cdr.mode == "yaml"
@@ -148,13 +148,13 @@ def test_cdr_upload_invalid_yaml_surfaces_error_and_does_not_set_config():
     ``read_cdr_forcing_yaml``'s own parse check, before roms-tools is ever imported.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
-    wiz._on_cdr_upload(_upload_change(b"---\nSomeOtherThing:\n  foo: bar\n"))
+    wiz.run_card._on_cdr_upload(_upload_change(b"---\nSomeOtherThing:\n  foo: bar\n"))
 
-    assert wiz._cdr_forcing is None
-    assert "invalid" in wiz.cdr_status.value.lower()
+    assert wiz.run_card._cdr_forcing is None
+    assert "invalid" in wiz.run_card.cdr_status.value.lower()
     # mode is still the default "none" (never touched by this test) -- no CDR
     # was gathered, and the rest of the config still resolves fine.
     assert wiz._gather()["cdr"] == {
@@ -174,8 +174,8 @@ def test_cdr_upload_semantically_broken_yaml_caught_by_eager_rt_construction():
     silently into the blueprint and only fail much later, during blueprint processing.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
     text = _CDR_SAMPLE_YAML.read_text()
     # swap start_time/end_time so parsing succeeds but roms-tools' own
@@ -186,23 +186,23 @@ def test_cdr_upload_semantically_broken_yaml_caught_by_eager_rt_construction():
     )
     assert swapped != text, "fixture format changed -- update this test's replace()"
 
-    wiz._on_cdr_upload(_upload_change(swapped.encode("utf-8")))
+    wiz.run_card._on_cdr_upload(_upload_change(swapped.encode("utf-8")))
 
-    assert wiz._cdr_forcing is None
-    assert "invalid" in wiz.cdr_status.value.lower()
+    assert wiz.run_card._cdr_forcing is None
+    assert "invalid" in wiz.run_card.cdr_status.value.lower()
     assert wiz._gather()["cdr"]["cdr_forcing"] is None
 
 
 def test_cdr_clear_resets_state():
     wiz = ForgeBlueprintWizard()
-    wiz.cdr_mode_dd.value = "yaml"
-    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
-    assert wiz._cdr_forcing is not None
+    wiz.run_card.cdr_mode_dd.value = "yaml"
+    wiz.run_card._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    assert wiz.run_card._cdr_forcing is not None
 
-    wiz._on_cdr_clear(None)
+    wiz.run_card._on_cdr_clear(None)
 
-    assert wiz._cdr_forcing is None
-    assert wiz.cdr_status.value == ""
+    assert wiz.run_card._cdr_forcing is None
+    assert wiz.run_card.cdr_status.value == ""
     assert wiz._gather()["cdr"]["cdr_forcing"] is None
 
 
@@ -213,10 +213,10 @@ def test_cdr_mode_yaml_with_nothing_uploaded_invalidates_the_blueprint():
     an Invalid preview rather than silently falling back to "no CDR".
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
-    wiz.cdr_mode_dd.value = "yaml"
+    wiz.run_card.cdr_mode_dd.value = "yaml"
 
     assert wiz.config is None
     assert "Invalid" in wiz.derived.value
@@ -224,10 +224,10 @@ def test_cdr_mode_yaml_with_nothing_uploaded_invalidates_the_blueprint():
 
 def test_cdr_forcing_round_trips_through_load(tmp_path):
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
-    wiz.cdr_mode_dd.value = "yaml"
-    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz.run_card.cdr_mode_dd.value = "yaml"
+    wiz.run_card._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
     assert wiz.config is not None
     saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
@@ -236,8 +236,8 @@ def test_cdr_forcing_round_trips_through_load(tmp_path):
     wiz2.load_path.value = str(saved)
     wiz2._on_load_path(None)
 
-    assert wiz2.cdr_mode_dd.value == "yaml"
-    assert wiz2._cdr_forcing is not None
+    assert wiz2.run_card.cdr_mode_dd.value == "yaml"
+    assert wiz2.run_card._cdr_forcing is not None
 
     # cdr_forcing is stored as a plain dict (no typed CDR model, by design -- see the
     # plan's "no typed CDR Pydantic model" note), so a bare YAML timestamp parses to
@@ -246,13 +246,13 @@ def test_cdr_forcing_round_trips_through_load(tmp_path):
     def _iso(t):
         return t.isoformat() if hasattr(t, "isoformat") else str(t)
 
-    orig = [dict(r) for r in wiz._cdr_forcing["releases"]]
-    back = [dict(r) for r in wiz2._cdr_forcing["releases"]]
+    orig = [dict(r) for r in wiz.run_card._cdr_forcing["releases"]]
+    back = [dict(r) for r in wiz2.run_card._cdr_forcing["releases"]]
     for r in (orig, back):
         for release in r:
             release["times"] = [_iso(t) for t in release["times"]]
     assert back == orig
-    assert "✓ CDR loaded" in wiz2.cdr_status.value
+    assert "✓ CDR loaded" in wiz2.run_card.cdr_status.value
 
 
 # ===========================================================================
@@ -262,73 +262,73 @@ def test_cdr_forcing_round_trips_through_load(tmp_path):
 
 def test_cdr_mode_switch_shows_and_hides_panels():
     wiz = ForgeBlueprintWizard()
-    assert _display(wiz.cdr_simple_box) == "none"
-    assert _display(wiz.cdr_yaml_box) == "none"
-    assert _display(wiz.cdr_netcdf_box) == "none"
-    assert _display(wiz.cdr_upscaled_box) == "none"
-    assert _display(wiz.cdr_plot_box) == "none"
+    assert _display(wiz.run_card.cdr_simple_box) == "none"
+    assert _display(wiz.run_card.cdr_yaml_box) == "none"
+    assert _display(wiz.run_card.cdr_netcdf_box) == "none"
+    assert _display(wiz.run_card.cdr_upscaled_box) == "none"
+    assert _display(wiz.run_card.cdr_plot_box) == "none"
 
-    wiz.cdr_mode_dd.value = "simple"
-    assert _display(wiz.cdr_simple_box) == ""
-    assert _display(wiz.cdr_yaml_box) == "none"
-    assert _display(wiz.cdr_plot_box) == ""
+    wiz.run_card.cdr_mode_dd.value = "simple"
+    assert _display(wiz.run_card.cdr_simple_box) == ""
+    assert _display(wiz.run_card.cdr_yaml_box) == "none"
+    assert _display(wiz.run_card.cdr_plot_box) == ""
 
-    wiz.cdr_mode_dd.value = "yaml"
-    assert _display(wiz.cdr_simple_box) == "none"
-    assert _display(wiz.cdr_yaml_box) == ""
-    assert _display(wiz.cdr_netcdf_box) == "none"
-    assert _display(wiz.cdr_plot_box) == ""
+    wiz.run_card.cdr_mode_dd.value = "yaml"
+    assert _display(wiz.run_card.cdr_simple_box) == "none"
+    assert _display(wiz.run_card.cdr_yaml_box) == ""
+    assert _display(wiz.run_card.cdr_netcdf_box) == "none"
+    assert _display(wiz.run_card.cdr_plot_box) == ""
 
-    wiz.cdr_mode_dd.value = "netcdf"
-    assert _display(wiz.cdr_yaml_box) == "none"
-    assert _display(wiz.cdr_netcdf_box) == ""
-    assert _display(wiz.cdr_plot_box) == ""
+    wiz.run_card.cdr_mode_dd.value = "netcdf"
+    assert _display(wiz.run_card.cdr_yaml_box) == "none"
+    assert _display(wiz.run_card.cdr_netcdf_box) == ""
+    assert _display(wiz.run_card.cdr_plot_box) == ""
 
-    wiz.cdr_mode_dd.value = "upscaled"
-    assert _display(wiz.cdr_netcdf_box) == "none"
-    assert _display(wiz.cdr_upscaled_box) == ""
-    assert _display(wiz.cdr_plot_box) == "none"  # no plots for upscaled
+    wiz.run_card.cdr_mode_dd.value = "upscaled"
+    assert _display(wiz.run_card.cdr_netcdf_box) == "none"
+    assert _display(wiz.run_card.cdr_upscaled_box) == ""
+    assert _display(wiz.run_card.cdr_plot_box) == "none"  # no plots for upscaled
 
-    wiz.cdr_mode_dd.value = "none"
-    assert _display(wiz.cdr_upscaled_box) == "none"
-    assert _display(wiz.cdr_plot_box) == "none"
+    wiz.run_card.cdr_mode_dd.value = "none"
+    assert _display(wiz.run_card.cdr_upscaled_box) == "none"
+    assert _display(wiz.run_card.cdr_plot_box) == "none"
 
 
 def test_cdr_yaml_and_netcdf_panels_link_to_docs():
     doc_url = "https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html"
     wiz = ForgeBlueprintWizard()
-    assert doc_url in wiz.cdr_yaml_box.children[0].value
-    assert doc_url in wiz.cdr_netcdf_box.children[0].value
+    assert doc_url in wiz.run_card.cdr_yaml_box.children[0].value
+    assert doc_url in wiz.run_card.cdr_netcdf_box.children[0].value
 
 
 def test_cdr_simple_mode_seeds_defaults_on_activation():
     wiz = ForgeBlueprintWizard()
     wiz.grid_w["center_lat"].value = 12.5
     wiz.grid_w["center_lon"].value = -34.5
-    wiz.start.value = date(2015, 3, 1)
-    wiz.end.value = date(2015, 4, 1)
+    wiz.run_card.start.value = date(2015, 3, 1)
+    wiz.run_card.end.value = date(2015, 4, 1)
 
-    wiz.cdr_mode_dd.value = "simple"
+    wiz.run_card.cdr_mode_dd.value = "simple"
 
-    assert wiz.cdr_simple_lat.value == 12.5
-    assert wiz.cdr_simple_lon.value == -34.5
-    assert wiz.cdr_simple_start.value == date(2015, 3, 1)
-    assert wiz.cdr_simple_end.value == date(2015, 4, 1)
-    assert wiz.cdr_simple_depth.value == 1.0
-    assert wiz.cdr_simple_hsc.value == 10.0
-    assert wiz.cdr_simple_vsc.value == 10.0
-    assert wiz.cdr_simple_flux.value == 2 * 10**6
+    assert wiz.run_card.cdr_simple_lat.value == 12.5
+    assert wiz.run_card.cdr_simple_lon.value == -34.5
+    assert wiz.run_card.cdr_simple_start.value == date(2015, 3, 1)
+    assert wiz.run_card.cdr_simple_end.value == date(2015, 4, 1)
+    assert wiz.run_card.cdr_simple_depth.value == 1.0
+    assert wiz.run_card.cdr_simple_hsc.value == 10.0
+    assert wiz.run_card.cdr_simple_vsc.value == 10.0
+    assert wiz.run_card.cdr_simple_flux.value == 2 * 10**6
 
 
 def test_cdr_simple_mode_compiles_flat_two_point_pulse():
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 3)
-    wiz.cdr_mode_dd.value = "simple"
-    wiz.cdr_simple_name.value = "my_release"
-    wiz.cdr_simple_lat.value = 10.0
-    wiz.cdr_simple_lon.value = 20.0
-    wiz.cdr_simple_flux.value = 5.0
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 3)
+    wiz.run_card.cdr_mode_dd.value = "simple"
+    wiz.run_card.cdr_simple_name.value = "my_release"
+    wiz.run_card.cdr_simple_lat.value = 10.0
+    wiz.run_card.cdr_simple_lon.value = 20.0
+    wiz.run_card.cdr_simple_flux.value = 5.0
 
     cdr = wiz._gather()["cdr"]
 
@@ -352,48 +352,48 @@ def test_cdr_simple_mode_compiles_flat_two_point_pulse():
 
 def test_cdr_simple_mode_round_trips_through_populate_from():
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
-    wiz.cdr_mode_dd.value = "simple"
-    wiz.cdr_simple_name.value = "rt_release"
-    wiz.cdr_simple_lat.value = 5.0
-    wiz.cdr_simple_lon.value = 6.0
-    wiz.cdr_simple_depth.value = 2.0
-    wiz.cdr_simple_hsc.value = 15.0
-    wiz.cdr_simple_vsc.value = 25.0
-    wiz.cdr_simple_flux.value = 3.5e6
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz.run_card.cdr_mode_dd.value = "simple"
+    wiz.run_card.cdr_simple_name.value = "rt_release"
+    wiz.run_card.cdr_simple_lat.value = 5.0
+    wiz.run_card.cdr_simple_lon.value = 6.0
+    wiz.run_card.cdr_simple_depth.value = 2.0
+    wiz.run_card.cdr_simple_hsc.value = 15.0
+    wiz.run_card.cdr_simple_vsc.value = 25.0
+    wiz.run_card.cdr_simple_flux.value = 3.5e6
     assert wiz.config is not None
 
     wiz2 = ForgeBlueprintWizard()
     wiz2._populate_from(wiz.config)
 
-    assert wiz2.cdr_mode_dd.value == "simple"
-    assert wiz2.cdr_simple_name.value == "rt_release"
-    assert wiz2.cdr_simple_lat.value == 5.0
-    assert wiz2.cdr_simple_lon.value == 6.0
-    assert wiz2.cdr_simple_depth.value == 2.0
-    assert wiz2.cdr_simple_hsc.value == 15.0
-    assert wiz2.cdr_simple_vsc.value == 25.0
-    assert wiz2.cdr_simple_flux.value == 3.5e6
-    assert wiz2.cdr_simple_start.value == date(2012, 1, 1)
-    assert wiz2.cdr_simple_end.value == date(2012, 1, 2)
+    assert wiz2.run_card.cdr_mode_dd.value == "simple"
+    assert wiz2.run_card.cdr_simple_name.value == "rt_release"
+    assert wiz2.run_card.cdr_simple_lat.value == 5.0
+    assert wiz2.run_card.cdr_simple_lon.value == 6.0
+    assert wiz2.run_card.cdr_simple_depth.value == 2.0
+    assert wiz2.run_card.cdr_simple_hsc.value == 15.0
+    assert wiz2.run_card.cdr_simple_vsc.value == 25.0
+    assert wiz2.run_card.cdr_simple_flux.value == 3.5e6
+    assert wiz2.run_card.cdr_simple_start.value == date(2012, 1, 1)
+    assert wiz2.run_card.cdr_simple_end.value == date(2012, 1, 2)
     assert wiz2.config.content_hash() == wiz.config.content_hash()
 
 
 def test_cdr_upscaled_mode_round_trips_through_populate_from():
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
-    wiz.cdr_mode_dd.value = "upscaled"
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz.run_card.cdr_mode_dd.value = "upscaled"
     assert wiz.config is not None
     assert wiz.config.cdr.mode == "upscaled"
 
     wiz2 = ForgeBlueprintWizard()
     wiz2._populate_from(wiz.config)
 
-    assert wiz2.cdr_mode_dd.value == "upscaled"
-    assert wiz2._cdr_forcing is None
-    assert wiz2._cdr_forcing_file is None
+    assert wiz2.run_card.cdr_mode_dd.value == "upscaled"
+    assert wiz2.run_card._cdr_forcing is None
+    assert wiz2.run_card._cdr_forcing_file is None
     assert wiz2.config.content_hash() == wiz.config.content_hash()
 
 
@@ -420,7 +420,7 @@ def test_composition_cdr_specref_provenance(tmp_path):
         },
     )
     wiz2 = ForgeBlueprintWizard(catalog=catalog)
-    wiz2.cdr_dd.value = "prov-cdr"
+    wiz2.run_card.cdr_dd.value = "prov-cdr"
 
     assert wiz2.config.composition.cdr.name == "prov-cdr"
     assert wiz2.config.composition.cdr.origin == "catalog"
@@ -438,7 +438,7 @@ def test_composition_cdr_specref_provenance(tmp_path):
     wiz3.load_path.value = str(saved)
     wiz3._on_load_path(None)
 
-    assert wiz3.cdr_dd.value == "prov-cdr"
+    assert wiz3.run_card.cdr_dd.value == "prov-cdr"
     assert wiz3.config.composition.cdr.modified is False
 
 
@@ -454,33 +454,33 @@ def test_cdr_plot_generate_builds_once_and_switches_without_rebuild(monkeypatch)
     monkeypatch.setattr(roms_tools, "CDRForcing", fake_cls)
 
     wiz = ForgeBlueprintWizard()
-    wiz.cdr_mode_dd.value = "yaml"
-    wiz._cdr_forcing = {
+    wiz.run_card.cdr_mode_dd.value = "yaml"
+    wiz.run_card._cdr_forcing = {
         "start_time": "2012-01-01T00:00:00",
         "end_time": "2012-01-02T00:00:00",
         "releases": [],
     }
     wiz._rebuild()
 
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
 
     assert len(build_calls) == 1
-    assert wiz._cdr_plot_object is not None
+    assert wiz.run_card._cdr_plot_object is not None
     # The "building…" marker must not stick around after a successful render.
-    assert "building" not in wiz.cdr_plot_status.value
-    assert "✓" in wiz.cdr_plot_status.value
-    assert list(wiz.cdr_plot_release_dd.options) == ["r1", "r2"]
-    assert ("Tracer flux (ALK)", "tracer_flux") in wiz.cdr_plot_type_dd.options
-    assert _display(wiz.cdr_plot_release_dd) == ""  # >1 release -- shown
-    assert wiz.cdr_plot_img.value
+    assert "building" not in wiz.run_card.cdr_plot_status.value
+    assert "✓" in wiz.run_card.cdr_plot_status.value
+    assert list(wiz.run_card.cdr_plot_release_dd.options) == ["r1", "r2"]
+    assert ("Tracer flux (ALK)", "tracer_flux") in wiz.run_card.cdr_plot_type_dd.options
+    assert _display(wiz.run_card.cdr_plot_release_dd) == ""  # >1 release -- shown
+    assert wiz.run_card.cdr_plot_img.value
 
-    wiz.cdr_plot_type_dd.value = "distribution"
+    wiz.run_card.cdr_plot_type_dd.value = "distribution"
     assert len(build_calls) == 1  # no rebuild
-    assert wiz.cdr_plot_img.value
+    assert wiz.run_card.cdr_plot_img.value
 
-    wiz.cdr_plot_release_dd.value = "r2"
+    wiz.run_card.cdr_plot_release_dd.value = "r2"
     assert len(build_calls) == 1  # still no rebuild
-    assert wiz.cdr_plot_img.value
+    assert wiz.run_card.cdr_plot_img.value
 
 
 def test_cdr_plot_hides_tracer_flux_for_volume_type_forcing(monkeypatch):
@@ -490,19 +490,19 @@ def test_cdr_plot_hides_tracer_flux_for_volume_type_forcing(monkeypatch):
     monkeypatch.setattr(roms_tools, "CDRForcing", fake_cls)
 
     wiz = ForgeBlueprintWizard()
-    wiz.cdr_mode_dd.value = "yaml"
-    wiz._cdr_forcing = {
+    wiz.run_card.cdr_mode_dd.value = "yaml"
+    wiz.run_card._cdr_forcing = {
         "start_time": "2012-01-01T00:00:00",
         "end_time": "2012-01-02T00:00:00",
         "releases": [],
     }
     wiz._rebuild()
 
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
 
-    option_values = dict(wiz.cdr_plot_type_dd.options).values()
+    option_values = dict(wiz.run_card.cdr_plot_type_dd.options).values()
     assert "tracer_flux" not in option_values
-    assert "volume-type" in wiz.cdr_plot_status.value
+    assert "volume-type" in wiz.run_card.cdr_plot_status.value
 
 
 def test_cdr_forcing_from_netcdf_reconstructs_tracer_perturbation(tmp_path):
@@ -513,7 +513,7 @@ def test_cdr_forcing_from_netcdf_reconstructs_tracer_perturbation(tmp_path):
     import roms_tools as rt
     import xarray as xr
 
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     times = np.array(["2012-01-01", "2012-01-02", "2012-01-03"], dtype="datetime64[ns]")
     ds = xr.Dataset(
@@ -646,7 +646,7 @@ def test_cdr_forcing_from_netcdf_reconstructs_cdr_lite_releases(tmp_path):
     is not a MARBL tracer set, which roms-tools' ``TracerPerturbation`` defaults
     to -- the reconstruction named every column as a MARBL tracer and was rejected.
     """
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     original, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
@@ -688,7 +688,7 @@ def test_cdr_forcing_from_netcdf_cdr_lite_forcing_plots_without_network(
     """
     import cartopy
 
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
@@ -701,7 +701,7 @@ def test_cdr_forcing_from_netcdf_cdr_lite_forcing_plots_without_network(
 
 
 def test_cdr_forcing_from_netcdf_reconstructs_passive_releases(tmp_path):
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     original, path = _save_cdr_forcing(
@@ -732,7 +732,7 @@ def test_cdr_forcing_from_netcdf_keeps_marbl_releases_beside_generated_tracers(
     (the file's ``tracer_release`` is empty for its rows): it is rebuilt as before,
     ALK-only, and the ``cdr_lite`` one from its own columns.
     """
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     original, path = _save_cdr_forcing(tmp_path, _marbl_and_cdr_lite_releases(), grid)
@@ -750,7 +750,7 @@ def test_cdr_forcing_from_netcdf_reconstructs_passive_volume_releases(tmp_path):
     """A passive volume release keeps its dye concentration under its own tracer
     set (``temp``/``salt`` are left to roms-tools' defaults).
     """
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     original, path = _save_cdr_forcing(
@@ -783,7 +783,7 @@ def test_cdr_forcing_from_netcdf_reconstructs_passive_volume_releases(tmp_path):
 def test_cdr_forcing_from_netcdf_keeps_a_marbl_volume_release_off_the_dye_columns(
     tmp_path,
 ):
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     original, path = _save_cdr_forcing(
@@ -810,7 +810,7 @@ def test_cdr_forcing_from_netcdf_requires_tracer_release_for_generated_tracers(
 ):
     import xarray as xr
 
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     grid = _small_cdr_grid()
     _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
@@ -856,26 +856,28 @@ def test_cdr_plot_of_an_attached_cdr_lite_file_draws_each_releases_own_tracer(
     flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
     wiz = _cdr_lite_wizard()
     monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
-    wiz.cdr_mode_dd.value = "netcdf"
-    wiz._attach_cdr_file_from_path(str(path))
-    assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+    wiz.run_card.cdr_mode_dd.value = "netcdf"
+    wiz.run_card._attach_cdr_file_from_path(str(path))
+    assert "no CDR_* tracers" not in wiz.run_card.cdr_file_status.value
 
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
 
-    assert "✓" in wiz.cdr_plot_status.value, wiz.cdr_plot_status.value
-    assert wiz.cdr_plot_img.value  # "Release locations" drew
-    assert list(wiz.cdr_plot_release_dd.options) == ["oae", "dor"]
-    assert ("Tracer flux", "tracer_flux") in wiz.cdr_plot_type_dd.options
-    assert "Tracer flux (ALK)" not in dict(wiz.cdr_plot_type_dd.options)
+    assert "✓" in wiz.run_card.cdr_plot_status.value, wiz.run_card.cdr_plot_status.value
+    assert wiz.run_card.cdr_plot_img.value  # "Release locations" drew
+    assert list(wiz.run_card.cdr_plot_release_dd.options) == ["oae", "dor"]
+    assert ("Tracer flux", "tracer_flux") in wiz.run_card.cdr_plot_type_dd.options
+    assert "Tracer flux (ALK)" not in dict(wiz.run_card.cdr_plot_type_dd.options)
 
-    wiz.cdr_plot_type_dd.value = "tracer_flux"
-    wiz.cdr_plot_release_dd.value = "dor"
+    wiz.run_card.cdr_plot_type_dd.value = "tracer_flux"
+    wiz.run_card.cdr_plot_release_dd.value = "dor"
 
     assert flux_calls == [
         ("CDR_OAE_ALK1", ["oae"]),
         ("CDR_DOR_DIC1", ["dor"]),
     ]
-    assert {("tracer_flux", "oae"), ("tracer_flux", "dor")} <= set(wiz._cdr_plot_cache)
+    assert {("tracer_flux", "oae"), ("tracer_flux", "dor")} <= set(
+        wiz.run_card._cdr_plot_cache
+    )
 
 
 def test_cdr_plot_of_the_simple_release_follows_the_bgc_mode(
@@ -891,30 +893,30 @@ def test_cdr_plot_of_the_simple_release_follows_the_bgc_mode(
     grid = _small_cdr_grid()
     wiz = _cdr_lite_wizard()
     monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
-    wiz.cdr_simple_name.value = "pulse"
-    wiz.cdr_simple_lat.value = 55.0
-    wiz.cdr_simple_lon.value = 0.5  # off the coarse grid's coastal cells
-    wiz.cdr_simple_depth.value = 5.0
+    wiz.run_card.cdr_simple_name.value = "pulse"
+    wiz.run_card.cdr_simple_lat.value = 55.0
+    wiz.run_card.cdr_simple_lon.value = 0.5  # off the coarse grid's coastal cells
+    wiz.run_card.cdr_simple_depth.value = 5.0
 
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
 
-    assert "✓" in wiz.cdr_plot_status.value, wiz.cdr_plot_status.value
-    cdr = wiz._cdr_plot_object
+    assert "✓" in wiz.run_card.cdr_plot_status.value, wiz.run_card.cdr_plot_status.value
+    cdr = wiz.run_card._cdr_plot_object
     assert cdr.tracer_set == "cdr_lite"
     assert cdr.release_tracers == {"pulse": ("CDR_OAE_ALK1", "CDR_OAE_DIC1")}
-    assert ("Tracer flux", "tracer_flux") in wiz.cdr_plot_type_dd.options
+    assert ("Tracer flux", "tracer_flux") in wiz.run_card.cdr_plot_type_dd.options
 
-    wiz.cdr_plot_type_dd.value = "tracer_flux"
+    wiz.run_card.cdr_plot_type_dd.value = "tracer_flux"
 
     assert flux_calls == [("CDR_OAE_ALK1", ["pulse"])]
-    assert wiz.cdr_plot_img.value
+    assert wiz.run_card.cdr_plot_img.value
 
     # A BGC-mode switch changes what the resolver would generate: drop the plot.
     wiz.model_card.bgc_dd.value = "marbl"
-    assert wiz._cdr_plot_object is None
-    wiz._on_cdr_plot_generate(None)
-    assert wiz._cdr_plot_object.tracer_set == "marbl"
-    assert ("Tracer flux (ALK)", "tracer_flux") in wiz.cdr_plot_type_dd.options
+    assert wiz.run_card._cdr_plot_object is None
+    wiz.run_card._on_cdr_plot_generate(None)
+    assert wiz.run_card._cdr_plot_object.tracer_set == "marbl"
+    assert ("Tracer flux (ALK)", "tracer_flux") in wiz.run_card.cdr_plot_type_dd.options
 
 
 def test_cdr_plot_of_a_mixed_forcing_draws_only_the_selected_marbl_release(
@@ -931,15 +933,15 @@ def test_cdr_plot_of_a_mixed_forcing_draws_only_the_selected_marbl_release(
     flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
     wiz = _cdr_lite_wizard()
     monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
-    wiz.cdr_mode_dd.value = "netcdf"
-    wiz._attach_cdr_file_from_path(str(path))
+    wiz.run_card.cdr_mode_dd.value = "netcdf"
+    wiz.run_card._attach_cdr_file_from_path(str(path))
 
-    wiz._on_cdr_plot_generate(None)
-    assert "✓" in wiz.cdr_plot_status.value, wiz.cdr_plot_status.value
-    assert ("Tracer flux", "tracer_flux") in wiz.cdr_plot_type_dd.options
+    wiz.run_card._on_cdr_plot_generate(None)
+    assert "✓" in wiz.run_card.cdr_plot_status.value, wiz.run_card.cdr_plot_status.value
+    assert ("Tracer flux", "tracer_flux") in wiz.run_card.cdr_plot_type_dd.options
 
-    wiz.cdr_plot_type_dd.value = "tracer_flux"  # the first release, "m"
-    wiz.cdr_plot_release_dd.value = "dor"
+    wiz.run_card.cdr_plot_type_dd.value = "tracer_flux"  # the first release, "m"
+    wiz.run_card.cdr_plot_release_dd.value = "dor"
 
     assert flux_calls == [("ALK", ["m"]), ("CDR_DOR_DIC1", ["dor"])]
 
@@ -957,16 +959,16 @@ def test_cdr_plot_of_an_attached_file_survives_a_bgc_mode_change(
     monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
     wiz = _cdr_lite_wizard()
     monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
-    wiz.cdr_mode_dd.value = "netcdf"
-    wiz._attach_cdr_file_from_path(str(path))
-    wiz._on_cdr_plot_generate(None)
-    built = wiz._cdr_plot_object
+    wiz.run_card.cdr_mode_dd.value = "netcdf"
+    wiz.run_card._attach_cdr_file_from_path(str(path))
+    wiz.run_card._on_cdr_plot_generate(None)
+    built = wiz.run_card._cdr_plot_object
     assert built is not None
 
     wiz.model_card.bgc_dd.value = "marbl"
 
-    assert wiz._cdr_plot_object is built
-    assert wiz.cdr_plot_img.value
+    assert wiz.run_card._cdr_plot_object is built
+    assert wiz.run_card.cdr_plot_img.value
 
 
 def test_cdr_plot_fingerprint_tolerates_a_selection_the_build_rejects(monkeypatch):
@@ -974,20 +976,22 @@ def test_cdr_plot_fingerprint_tolerates_a_selection_the_build_rejects(monkeypatc
     plot's cache check must not raise, and building the plot reports the error.
     """
     wiz = _cdr_lite_wizard()
-    forcing = wiz._simple_cdr_forcing_dict()
+    forcing = wiz.run_card._simple_cdr_forcing_dict()
     volume = {**forcing["releases"][0], "release_type": "volume"}
     monkeypatch.setattr(
-        wiz, "_simple_cdr_forcing_dict", lambda: {**forcing, "releases": [volume]}
+        wiz.run_card,
+        "_simple_cdr_forcing_dict",
+        lambda: {**forcing, "releases": [volume]},
     )
 
-    wiz._cdr_plot_inputs_fingerprint()
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._cdr_plot_inputs_fingerprint()
+    wiz.run_card._on_cdr_plot_generate(None)
 
-    assert "volume releases are not supported" in wiz.cdr_plot_status.value
+    assert "volume releases are not supported" in wiz.run_card.cdr_plot_status.value
 
 
 def test_cdr_forcing_from_netcdf_wraps_errors_with_path(tmp_path):
-    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.run_card import _cdr_forcing_from_netcdf
 
     path = tmp_path / "not_cdr.nc"
     import xarray as xr
@@ -1020,26 +1024,26 @@ class TestCdrLiteCdrPanel:
     def test_hint_lives_in_the_run_card_and_shows_only_for_cdr_lite(self):
         wiz = ForgeBlueprintWizard()
         run_card = _find_card(wiz.widget, "run")
-        assert wiz.cdr_lite_hint in _descendants(run_card)
+        assert wiz.run_card.cdr_lite_hint in _descendants(run_card)
 
-        assert _display(wiz.cdr_lite_hint) == "none"
+        assert _display(wiz.run_card.cdr_lite_hint) == "none"
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert _display(wiz.cdr_lite_hint) == ""
-        assert "tracer_set: cdr_lite" in wiz.cdr_lite_hint.value
-        assert "required" in wiz.cdr_lite_hint.value
+        assert _display(wiz.run_card.cdr_lite_hint) == ""
+        assert "tracer_set: cdr_lite" in wiz.run_card.cdr_lite_hint.value
+        assert "required" in wiz.run_card.cdr_lite_hint.value
         wiz.model_card.bgc_dd.value = "none"
-        assert _display(wiz.cdr_lite_hint) == "none"
+        assert _display(wiz.run_card.cdr_lite_hint) == "none"
 
     def test_netcdf_without_cdr_tracers_warns_in_cdr_lite_mode(self, tmp_path):
         p = _write_cdr_netcdf_with_tracers(tmp_path / "cdr.nc", ["temp", "salt", "ALK"])
         wiz = _new_wizard()
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        wiz.cdr_mode_dd.value = "netcdf"
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
 
-        assert wiz._cdr_forcing_file is not None  # a warning, not a block
-        assert "no CDR_* tracers" in wiz.cdr_file_status.value
+        assert wiz.run_card._cdr_forcing_file is not None  # a warning, not a block
+        assert "no CDR_* tracers" in wiz.run_card.cdr_file_status.value
 
     def test_netcdf_with_cdr_tracers_does_not_warn(self, tmp_path):
         p = _write_cdr_netcdf_with_tracers(
@@ -1047,17 +1051,17 @@ class TestCdrLiteCdrPanel:
         )
         wiz = _new_wizard()
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        wiz.cdr_mode_dd.value = "netcdf"
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
 
-        assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+        assert "no CDR_* tracers" not in wiz.run_card.cdr_file_status.value
 
     def test_netcdf_without_cdr_tracers_does_not_warn_outside_cdr_lite(self, tmp_path):
         p = _write_cdr_netcdf_with_tracers(tmp_path / "cdr.nc", ["temp", "salt", "ALK"])
         wiz = _new_wizard()
-        wiz.cdr_mode_dd.value = "netcdf"
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
 
-        assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+        assert "no CDR_* tracers" not in wiz.run_card.cdr_file_status.value

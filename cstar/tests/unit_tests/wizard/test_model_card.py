@@ -105,12 +105,12 @@ def test_use_pio_chk_default_seeded_from_model_spec():
     """
     wiz = ForgeBlueprintWizard()
     assert wiz.model_card.model_dd.value == "roms-marbl-0.16-default"
-    assert wiz.use_pio_chk.value is True
+    assert wiz.run_card.use_pio_chk.value is True
     assert wiz.model_card.default_use_pio() is True
 
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
-    assert wiz.use_pio_chk.value is False
+    assert wiz.run_card.use_pio_chk.value is False
     assert wiz.model_card.default_use_pio() is False
 
 
@@ -143,8 +143,8 @@ def test_model_dd_hides_archived_specs_by_default():
 
 def test_loading_a_blueprint_with_an_archived_model_selects_it(tmp_path):
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     wiz._rebuild()
@@ -382,7 +382,7 @@ class TestCarbonateSensitivityGroup:
         d = _write_cdrgas_dir(tmp_path / "hdf5", fmt="NETCDF4")
         wiz = _cdr_lite_wizard()
         wiz.model_card.cs_source_dd.value = "path"
-        wiz.use_pio_chk.value = True
+        wiz.run_card.use_pio_chk.value = True
         wiz.model_card._attach_carbonate_sensitivity_dir(str(d))
         assert "CDF-5" in wiz.model_card.cs_status.value
 
@@ -391,10 +391,10 @@ class TestCarbonateSensitivityGroup:
         classic = _write_cdrgas_dir(tmp_path / "classic", fmt="NETCDF3_64BIT")
         wiz = _cdr_lite_wizard()
         wiz.model_card.cs_source_dd.value = "path"
-        wiz.use_pio_chk.value = False
+        wiz.run_card.use_pio_chk.value = False
         wiz.model_card._attach_carbonate_sensitivity_dir(str(hdf5))
         assert "CDF-5" not in wiz.model_card.cs_status.value
-        wiz.use_pio_chk.value = True
+        wiz.run_card.use_pio_chk.value = True
         wiz.model_card._attach_carbonate_sensitivity_dir(str(classic))
         assert "CDF-5" not in wiz.model_card.cs_status.value
 
@@ -531,8 +531,8 @@ class TestCarbonateSensitivityGroup:
     @pytest.mark.parametrize("mode", ["marbl", "none"])
     def test_load_back_selects_the_other_bgc_modes_from_cppdefs(self, mode):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         if mode == "none":
             _strip_bgc_forcing(wiz)
             wiz.model_card.bgc_dd.value = "none"

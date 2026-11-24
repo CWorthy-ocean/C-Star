@@ -86,12 +86,14 @@ def _cdr_lite_wizard(catalog=None):
     tracers by default).
     """
     wiz = ForgeBlueprintWizard() if catalog is None else ForgeBlueprintWizard(catalog)
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
-    wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz.run_card.use_pio_chk.value = (
+        False  # off: no CDF-5 conversion warning per rebuild
+    )
     _strip_bgc_forcing(wiz)
     wiz.model_card.bgc_dd.value = "cdr_lite"
-    wiz.cdr_mode_dd.value = "simple"
+    wiz.run_card.cdr_mode_dd.value = "simple"
     return wiz
 
 
@@ -148,6 +150,6 @@ def _fake_cdr_forcing_class(*, release_type="tracer_perturbation", names=("r1",)
 
 def _new_wizard():
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     return wiz

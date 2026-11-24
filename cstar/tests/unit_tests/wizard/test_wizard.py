@@ -89,8 +89,8 @@ def test_invalid_bottom_fill_blend_m_shows_an_invalid_blueprint_banner(section, 
     makes the blueprint valid again.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
 
@@ -111,8 +111,8 @@ def test_invalid_bottom_fill_blend_m_shows_an_invalid_blueprint_banner(section, 
 def test_blend_with_auto_coarse_mode_surfaces_the_forcing_error():
     """A user who sets ``auto`` back on a blended row sees the Forcing error."""
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     row = wiz._forcing_editor._rows["surface"][0]
     row["blend_fallback"].value = "ERA5"
@@ -282,8 +282,8 @@ def test_co2_tvarying_is_not_user_editable():
     wiz = ForgeBlueprintWizard()
     assert not hasattr(wiz, "co2_tvarying_chk")
 
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     # The default model's forcing includes an MBL_co2 bgc surface source, so the
     # resolver still auto-derives co2_tvarying=True with no UI toggle involved.
@@ -296,8 +296,8 @@ def test_resolver_derived_cppdefs_fields_have_no_accordion_widget():
     must never expose a competing editor for any of them.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     for field in (
         "obc_west",
@@ -320,8 +320,8 @@ def test_sponge_tune_editable_via_advanced_settings_accordion():
     accordion's generic (section, field) override mechanism.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is False
     assert ("cppdefs", "sponge_tune") in wiz.editor._widgets
@@ -333,8 +333,8 @@ def test_sponge_tune_editable_via_advanced_settings_accordion():
 
 def test_nt_passive_editable_via_advanced_settings_accordion():
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.model_settings["param"]["nt_passive"] == 0
     assert ("param", "nt_passive") in wiz.editor._widgets
@@ -350,8 +350,8 @@ def test_nhy_nox_forcing_editable_in_bgc_advanced_settings_pane():
     checkboxes in the Biogeochemistry (BGC / MARBL) advanced settings pane.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is True
     assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is True
@@ -372,8 +372,8 @@ def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
     doesn't raise.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
     fe = wiz._forcing_editor
     for ws in list(fe._rows["surface"]):
@@ -401,8 +401,8 @@ def test_bgc_dd_marbl_gathers_into_cppdefs():
     covered at the resolver level, see test_resolver_bgc_mode_none_raises_with_bgc_forcing).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["marbl"] is True
@@ -416,8 +416,8 @@ def test_bgc_dd_none_with_non_default_bgc_forcing_surfaces_error_legibly():
     area, as one line pointing at the full message in the preview.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.forcing_dd.value = "glorys-era5-esper"
     wiz.model_card.bgc_dd.value = "none"
     wiz._rebuild()
@@ -440,8 +440,8 @@ def test_rebuild_error_status_points_at_the_preview_only_when_truncated(
     monkeypatch, message, suffixed
 ):
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
     def _raise(**_kw):
         raise ValueError(message)
@@ -467,9 +467,11 @@ class TestBgcModeForcingDefault:
         wiz = (
             ForgeBlueprintWizard() if catalog is None else ForgeBlueprintWizard(catalog)
         )
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.use_pio_chk.value = (
+            False  # off: no CDF-5 conversion warning per rebuild
+        )
         return wiz
 
     @staticmethod
@@ -509,7 +511,9 @@ class TestBgcModeForcingDefault:
     @pytest.mark.parametrize("mode", ["none", "cdr_lite"])
     def test_leaving_marbl_switches_the_untouched_default_to_physics(self, mode):
         wiz = self._wizard()
-        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        wiz.run_card.cdr_mode_dd.value = (
+            "simple"  # cdr_lite needs a CDR forcing to resolve
+        )
         wiz.model_card.bgc_dd.value = mode
         assert wiz.forcing_dd.value == self.PHYSICS
         assert wiz.config is not None, wiz.derived.value
@@ -602,10 +606,12 @@ class TestBgcModeSettings:
     @staticmethod
     def _wizard():
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.use_pio_chk.value = False
-        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.use_pio_chk.value = False
+        wiz.run_card.cdr_mode_dd.value = (
+            "simple"  # cdr_lite needs a CDR forcing to resolve
+        )
         return wiz
 
     @staticmethod
@@ -702,9 +708,9 @@ class TestBgcModeSettings:
         record survives, and the next valid resolve rebuilds the editor.
         """
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.use_pio_chk.value = False
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.use_pio_chk.value = False
         self._toggle(wiz, ("bgc", "wrt_his"))
         marbl_editor = wiz.editor
 
@@ -724,7 +730,9 @@ class TestBgcModeSettings:
         assert ("bgc", "wrt_his") in wiz._overrides
         assert wiz._active_overrides == {_INTERP_KEY: False}  # the wizard's own
 
-        wiz.cdr_mode_dd.value = "simple"  # a CDR forcing: the config resolves again
+        wiz.run_card.cdr_mode_dd.value = (
+            "simple"  # a CDR forcing: the config resolves again
+        )
         assert wiz.config is not None, wiz.derived.value
         assert wiz.editor is not marbl_editor
         assert wiz.editor._bgc_mode == "cdr_lite"
@@ -747,7 +755,9 @@ class TestBgcModeSettings:
         resolve builds it with extract_data.
         """
         wiz = self._wizard()
-        wiz.cdr_mode_dd.value = "netcdf"  # no file attached: the config is invalid
+        wiz.run_card.cdr_mode_dd.value = (
+            "netcdf"  # no file attached: the config is invalid
+        )
         assert wiz.config is None
         stale = wiz.editor
         assert stale is not None  # same model, mode and role: kept
@@ -758,7 +768,7 @@ class TestBgcModeSettings:
         (placeholder,) = wiz.output_editor_box.children
         assert "once the blueprint is valid" in placeholder.value
 
-        wiz.cdr_mode_dd.value = "none"
+        wiz.run_card.cdr_mode_dd.value = "none"
         assert wiz.config is not None, wiz.derived.value
         assert wiz._editor_key.is_parent
         assert "extract_data" in wiz.editor._group_fields[_OUTPUT_CARD]
@@ -769,7 +779,7 @@ class TestBgcModeSettings:
         editor = wiz.editor
 
         if failure == "no_end_date":
-            wiz.end.value = None
+            wiz.run_card.end.value = None
         else:
             wiz.grid_w["nx"].value = 0  # the resolver rejects a non-positive grid
 
@@ -778,7 +788,7 @@ class TestBgcModeSettings:
         assert wiz.editor_box.children == (editor.accordion,)
         assert wiz.output_editor_box.children == (editor.output_box,)
 
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.end.value = date(2012, 1, 2)
         wiz.grid_w["nx"].value = 10
         assert wiz.config is not None, wiz.derived.value
         assert wiz.editor is editor
@@ -786,7 +796,7 @@ class TestBgcModeSettings:
     def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
         wiz = self._wizard()
         wiz.model_card.bgc_dd.value = "marbl"
-        wiz.cdr_mode_dd.value = "none"
+        wiz.run_card.cdr_mode_dd.value = "none"
         self._toggle(wiz, ("bgc", "wrt_his"))
         assert wiz.config is not None, wiz.derived.value
 
@@ -904,47 +914,50 @@ def test_cdr_plot_cache_invalidated_by_input_edit_and_mode_switch(monkeypatch):
     monkeypatch.setattr(roms_tools, "CDRForcing", fake_cls)
 
     wiz = ForgeBlueprintWizard()
-    wiz.cdr_mode_dd.value = "yaml"
-    wiz._cdr_forcing = {
+    wiz.run_card.cdr_mode_dd.value = "yaml"
+    wiz.run_card._cdr_forcing = {
         "start_time": "2012-01-01T00:00:00",
         "end_time": "2012-01-02T00:00:00",
         "releases": [],
     }
     wiz._rebuild()
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
     assert len(build_calls) == 1
-    assert wiz._cdr_plot_object is not None
+    assert wiz.run_card._cdr_plot_object is not None
 
     # An unrelated watched-widget edit goes through _rebuild() (the one hook
     # _invalidate_cdr_plot_cache is attached to), but the fingerprint check
     # sees no plot-affecting change -- the rendered plot SURVIVES.
     wiz.description.value = "something else"
-    assert wiz._cdr_plot_object is not None
-    assert wiz.cdr_plot_img.value != b""
+    assert wiz.run_card._cdr_plot_object is not None
+    assert wiz.run_card.cdr_plot_img.value != b""
     assert len(build_calls) == 1
 
     # A CDR-input edit changes the fingerprint and clears everything.
-    wiz._cdr_forcing = {**wiz._cdr_forcing, "end_time": "2012-01-03T00:00:00"}
+    wiz.run_card._cdr_forcing = {
+        **wiz.run_card._cdr_forcing,
+        "end_time": "2012-01-03T00:00:00",
+    }
     wiz._rebuild()
-    assert wiz._cdr_plot_object is None
-    assert wiz._cdr_plot_cache == {}
-    assert wiz.cdr_plot_img.value == b""
+    assert wiz.run_card._cdr_plot_object is None
+    assert wiz.run_card._cdr_plot_cache == {}
+    assert wiz.run_card.cdr_plot_img.value == b""
 
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
     assert len(build_calls) == 2
 
     # A grid-geometry edit also invalidates (the plot's grid is stale).
     wiz.grid_w["center_lat"].value = wiz.grid_w["center_lat"].value + 1.0
-    assert wiz._cdr_plot_object is None
-    assert wiz._cdr_plot_cache == {}
+    assert wiz.run_card._cdr_plot_object is None
+    assert wiz.run_card._cdr_plot_cache == {}
 
-    wiz._on_cdr_plot_generate(None)
+    wiz.run_card._on_cdr_plot_generate(None)
     assert len(build_calls) == 3
 
     # A mode switch also invalidates (leaving "yaml" clears _cdr_forcing too).
-    wiz.cdr_mode_dd.value = "none"
-    assert wiz._cdr_plot_object is None
-    assert wiz._cdr_plot_cache == {}
+    wiz.run_card.cdr_mode_dd.value = "none"
+    assert wiz.run_card._cdr_plot_object is None
+    assert wiz.run_card._cdr_plot_cache == {}
 
 
 def test_ntides_syncs_from_tidal_forcing_into_model_settings():
@@ -952,8 +965,8 @@ def test_ntides_syncs_from_tidal_forcing_into_model_settings():
     not just the run-time-defaults placeholder (10).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     tidal_rows = wiz._forcing_editor._rows["tidal"]
     assert tidal_rows, "expected a default tidal row from the model's forcing inputs"
@@ -980,8 +993,8 @@ def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():
     resolves to the *latest* schema, so it can't stand in for "legacy" here).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.roms_ref.value = "0.2.0"
     wiz._rebuild()
     assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
@@ -1018,8 +1031,8 @@ def test_default_model_uses_latest_settings_schema():
     explicitly.)
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz._editor_key.settings_cls is RunTimeSettingsV0_16_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
@@ -1034,8 +1047,8 @@ def test_advection_cppdefs_editable_only_for_models_that_declare_them():
     dict, so a spec that omits the key must show no widget for it at all.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.model_settings["cppdefs"]["parabolic_splines"] is False
     assert wiz.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
@@ -1064,8 +1077,8 @@ def test_advection_cppdefs_editable_via_advanced_settings_accordion(tmp_path):
     survives a save/load round trip.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.composition.model.modified is False
 
@@ -1101,8 +1114,8 @@ def test_0_12_model_declares_the_time_interpolation_key():
     release that stops on the key) does not declare it.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = "roms-marbl-0.12-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -1125,10 +1138,12 @@ class TestCarbonateSensitivityTimeInterpolation:
     @staticmethod
     def _wizard():
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.use_pio_chk.value = False
-        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.use_pio_chk.value = False
+        wiz.run_card.cdr_mode_dd.value = (
+            "simple"  # cdr_lite needs a CDR forcing to resolve
+        )
         wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         return wiz
@@ -1208,9 +1223,9 @@ class TestCarbonateSensitivityTimeInterpolation:
         for the valid blueprint.
         """
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.use_pio_chk.value = False
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.use_pio_chk.value = False
         wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is None
 
@@ -1230,7 +1245,7 @@ class TestCarbonateSensitivityTimeInterpolation:
         assert self._checkbox(wiz) is checkbox  # same selection: not rebuilt
         assert wiz._overrides[_INTERP_KEY] is True
 
-        wiz.cdr_mode_dd.value = "simple"
+        wiz.run_card.cdr_mode_dd.value = "simple"
         assert wiz.config is not None, wiz.derived.value
         assert wiz._editor_key.resolved
         assert wiz.editor_box.children == (wiz.editor.accordion,)
@@ -1241,9 +1256,9 @@ class TestCarbonateSensitivityTimeInterpolation:
     @pytest.mark.parametrize("pick", ["model", "roms_ref"])
     def test_an_older_release_drops_the_switch_on_an_invalid_blueprint(self, pick):
         wiz = ForgeBlueprintWizard()
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
-        wiz.use_pio_chk.value = False
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
+        wiz.run_card.use_pio_chk.value = False
         wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is None
         assert wiz.model_card.cs_interp_box.children
@@ -1284,8 +1299,8 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     sections and their widgets.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
 
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "roms-marbl-0.6-default"
@@ -1360,8 +1375,8 @@ def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
     a save/load round trip.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     wiz._overrides[("param", "nt_cdr_oae")] = 2
@@ -1396,8 +1411,8 @@ def test_constant_fe_widgets_built_for_the_0_11_model():
     docstring.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "roms-marbl-0.11-default"
     wiz._rebuild()
@@ -1421,8 +1436,8 @@ def test_constant_fe_widgets_absent_for_the_0_10_model():
     widget.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "roms-marbl-0.10-default"
     wiz._rebuild()
@@ -1443,8 +1458,8 @@ def test_v_sponge_trc_widget_built_for_the_0_13_model():
     gets no accordion one.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -1466,8 +1481,8 @@ def test_v_sponge_trc_widget_absent_for_the_0_12_model():
     section, whose ``v_sponge`` has its own widget, no pane entry).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = "roms-marbl-0.12-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -1482,8 +1497,8 @@ def test_v_sponge_trc_edit_reaches_the_blueprint_beside_the_domain_v_sponge():
     loading the saved blueprint rebuilds the same override.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -1529,8 +1544,8 @@ def test_avg_ts_widgets_built_in_the_averages_grid_for_the_0_14_model():
     composed settings do.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = "roms-marbl-0.14-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -1565,8 +1580,8 @@ def test_avg_ts_widgets_absent_for_the_0_13_model():
     OutputSpec carries both (switched off).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     wiz._rebuild()
     assert wiz.config is not None
@@ -1581,8 +1596,8 @@ def test_constant_fe_value_hidden_until_use_constant_fe_is_on():
     value (neither widget's).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     use_fe, _ = wiz.editor._widgets[("marbl_bgc", "use_constant_fe")]
     fe_value, _ = wiz.editor._widgets[("marbl_bgc", "constant_fe_value")]
@@ -1605,8 +1620,8 @@ _IMPLICIT_FS_FIELDS = ("fs_mode", "fs_nsub", "fs_rho_inf", "fs_tol", "fs_verbose
 
 def _implicit_fs_wizard(model: str) -> ForgeBlueprintWizard:
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.model_card.model_dd.value = model
     wiz._rebuild()
     return wiz
@@ -1757,8 +1772,8 @@ def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
     (``configure_build`` recomputes it from the knob).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     knob = ("cdr_lite", "cdr_online_carbonate_sensitivity")
     wiz._overrides[("param", "nt_cdr_oae")] = 1
     wiz._rebuild()
@@ -1822,8 +1837,8 @@ def test_legacy_named_output_spec_shows_up_under_the_new_section_name(tmp_path, 
     catalog = DomainCatalog(catalog_root=root)
 
     wiz = ForgeBlueprintWizard(catalog=catalog)
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     with caplog.at_level(logging.WARNING, logger="cstar.catalog.spec_schema"):
         wiz.output_dd.value = "legacy-out"
     wiz._rebuild()
@@ -1847,12 +1862,12 @@ def test_domain_modified_reflects_deviation_from_catalog_pick():
     assert wiz.config.composition.domain.origin == "catalog"
     assert wiz.config.composition.domain.modified is False
 
-    orig_npx = wiz.npx.value
-    wiz.npx.value = orig_npx + 1
+    orig_npx = wiz.run_card.npx.value
+    wiz.run_card.npx.value = orig_npx + 1
     assert wiz.config.composition.domain.modified is True
     assert wiz.config.composition.domain.origin == "catalog"  # never flips to custom
 
-    wiz.npx.value = orig_npx  # revert exactly -> deviation clears
+    wiz.run_card.npx.value = orig_npx  # revert exactly -> deviation clears
     assert wiz.config.composition.domain.modified is False
 
 
@@ -1862,7 +1877,7 @@ def test_domain_modified_false_when_hand_authored():
     """
     wiz = ForgeBlueprintWizard()
     assert wiz.domain_dd.value == "<custom>"
-    wiz.npx.value = wiz.npx.value + 1
+    wiz.run_card.npx.value = wiz.run_card.npx.value + 1
     assert wiz.config.composition.domain.origin == "custom"
     assert wiz.config.composition.domain.modified is False
 
@@ -1872,8 +1887,8 @@ def test_forcing_modified_reflects_deviation_from_catalog_pick():
     (post-unification) origin no longer flips to "custom" on edit.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.composition.forcing.modified is False
     assert wiz.config.composition.forcing.origin == "catalog"
@@ -1977,8 +1992,8 @@ def test_model_and_output_modified_from_accordion_overrides():
     at all before this fix).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.composition.model.modified is False
     assert wiz.config.composition.output.modified is False
@@ -2003,10 +2018,10 @@ def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
     this catalog spec" even after a save/load cycle).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
-    wiz.npx.value = wiz.npx.value + 1  # deviate domain
+    wiz.run_card.npx.value = wiz.run_card.npx.value + 1  # deviate domain
     wiz._overrides[("lateral_visc", "visc2")] = 99.0  # deviate model
     wiz._rebuild()
     assert wiz.config.composition.domain.modified is True
@@ -2036,8 +2051,8 @@ def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
     for a file the user never touched.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config.composition.forcing.modified is False
     assert wiz.config.composition.model.modified is False
@@ -2296,8 +2311,8 @@ def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_p
     import asyncio
 
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True  # not exercising boundary derivation here
@@ -2330,8 +2345,8 @@ def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
     import asyncio
 
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True  # not exercising boundary derivation here
@@ -2352,8 +2367,8 @@ def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_siz
     import asyncio
 
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True  # not exercising boundary derivation here
@@ -2407,8 +2422,8 @@ def test_on_run_error_status_names_the_command(monkeypatch, tmp_path):
     import asyncio
 
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True
@@ -3009,19 +3024,21 @@ class TestGridFileAttach:
 class TestCdrFileAttach:
     def test_attach_populates_and_clears_yaml_upload(self, tmp_path):
         wiz = _new_wizard()
-        wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
-        assert wiz._cdr_forcing is not None
+        wiz.run_card._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+        assert wiz.run_card._cdr_forcing is not None
 
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)  # submit -> auto-attach, no click needed
+        wiz.run_card.cdr_file_path.value = str(
+            p
+        )  # submit -> auto-attach, no click needed
 
-        assert wiz._cdr_forcing_file == {
+        assert wiz.run_card._cdr_forcing_file == {
             "location": str(p),
-            "content_hash": wiz._cdr_forcing_file["content_hash"],
+            "content_hash": wiz.run_card._cdr_forcing_file["content_hash"],
         }
-        assert wiz._cdr_forcing is None
-        assert "cleared" in wiz.cdr_file_status.value.lower()
-        assert "attached" in wiz.cdr_file_status.value.lower()
+        assert wiz.run_card._cdr_forcing is None
+        assert "cleared" in wiz.run_card.cdr_file_status.value.lower()
+        assert "attached" in wiz.run_card.cdr_file_status.value.lower()
 
     def test_netcdf_mode_shows_hint_until_attached(self, tmp_path):
         """CdrSpec rejects mode='netcdf' without cdr_forcing_file; the status
@@ -3029,22 +3046,24 @@ class TestCdrFileAttach:
         brings the hint back.
         """
         wiz = _new_wizard()
-        assert wiz.cdr_file_status.value == ""
+        assert wiz.run_card.cdr_file_status.value == ""
 
-        wiz.cdr_mode_dd.value = "netcdf"
-        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
+        assert "no file attached yet" in wiz.run_card.cdr_file_status.value.lower()
         assert wiz.config is None  # invalid until attached, as before
 
-        wiz.cdr_file_path.value = str(_write_tiny_cdr_netcdf(tmp_path / "cdr.nc"))
-        assert "attached" in wiz.cdr_file_status.value.lower()
-        assert "no file attached yet" not in wiz.cdr_file_status.value.lower()
+        wiz.run_card.cdr_file_path.value = str(
+            _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        )
+        assert "attached" in wiz.run_card.cdr_file_status.value.lower()
+        assert "no file attached yet" not in wiz.run_card.cdr_file_status.value.lower()
         assert wiz.config is not None, wiz.derived.value
 
-        wiz._on_cdr_file_clear(None)
-        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+        wiz.run_card._on_cdr_file_clear(None)
+        assert "no file attached yet" in wiz.run_card.cdr_file_status.value.lower()
 
-        wiz.cdr_mode_dd.value = "none"  # leaving netcdf mode clears the slot
-        assert wiz.cdr_file_status.value == ""
+        wiz.run_card.cdr_mode_dd.value = "none"  # leaving netcdf mode clears the slot
+        assert wiz.run_card.cdr_file_status.value == ""
 
     def test_upload_fallback_stages_and_attaches(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
@@ -3052,72 +3071,72 @@ class TestCdrFileAttach:
         src = _write_tiny_cdr_netcdf(tmp_path / "uploaded_cdr.nc")
         change = {"new": ({"name": "uploaded_cdr.nc", "content": src.read_bytes()},)}
 
-        wiz._on_cdr_file_upload(change)
+        wiz.run_card._on_cdr_file_upload(change)
 
         staged = tmp_path / "forge_user_files" / "uploaded_cdr.nc"
         assert staged.exists()
-        assert wiz._cdr_forcing_file == {
+        assert wiz.run_card._cdr_forcing_file == {
             "location": str(staged),
-            "content_hash": wiz._cdr_forcing_file["content_hash"],
+            "content_hash": wiz.run_card._cdr_forcing_file["content_hash"],
         }
 
     def test_yaml_upload_clears_attached_cdr_file(self, tmp_path):
         wiz = _new_wizard()
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
-        assert wiz._cdr_forcing_file is not None
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
+        assert wiz.run_card._cdr_forcing_file is not None
 
-        wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+        wiz.run_card._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
 
-        assert wiz._cdr_forcing is not None
-        assert wiz._cdr_forcing_file is None
-        assert "cleared" in wiz.cdr_status.value.lower()
+        assert wiz.run_card._cdr_forcing is not None
+        assert wiz.run_card._cdr_forcing_file is None
+        assert "cleared" in wiz.run_card.cdr_status.value.lower()
 
     def test_attach_warns_but_does_not_block_when_ncdr_dim_missing(self, tmp_path):
         wiz = _new_wizard()
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc", with_ncdr_dim=False)
-        wiz.cdr_file_path.value = str(p)
+        wiz.run_card.cdr_file_path.value = str(p)
 
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card._on_cdr_file_attach(None)
 
-        assert wiz._cdr_forcing_file is not None  # not blocked
-        assert "ncdr" in wiz.cdr_file_status.value.lower()
+        assert wiz.run_card._cdr_forcing_file is not None  # not blocked
+        assert "ncdr" in wiz.run_card.cdr_file_status.value.lower()
 
     def test_gather_emits_cdr_forcing_file(self, tmp_path):
         wiz = _new_wizard()
-        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
 
         kw = wiz._gather()
 
-        assert kw["cdr"]["cdr_forcing_file"] == wiz._cdr_forcing_file
+        assert kw["cdr"]["cdr_forcing_file"] == wiz.run_card._cdr_forcing_file
         assert kw["cdr"]["mode"] == "netcdf"
         assert kw["cdr"]["cdr_forcing"] is None
 
     def test_clear_resets_state(self, tmp_path):
         wiz = _new_wizard()
-        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
 
-        wiz._on_cdr_file_clear(None)
+        wiz.run_card._on_cdr_file_clear(None)
 
-        assert wiz._cdr_forcing_file is None
-        assert wiz.cdr_file_path.value == ""
+        assert wiz.run_card._cdr_forcing_file is None
+        assert wiz.run_card.cdr_file_path.value == ""
         # Still in netcdf mode with nothing attached -> the not-attached hint.
-        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+        assert "no file attached yet" in wiz.run_card.cdr_file_status.value.lower()
         assert wiz._gather()["cdr"]["cdr_forcing_file"] is None
 
     def test_round_trips_through_populate_from(self, tmp_path):
         wiz = _new_wizard()
-        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
         assert wiz.config is not None
         cfg = wiz.config
         assert cfg.cdr.mode == "netcdf"
@@ -3125,9 +3144,9 @@ class TestCdrFileAttach:
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
 
-        assert wiz2.cdr_mode_dd.value == "netcdf"
-        assert wiz2._cdr_forcing_file == wiz._cdr_forcing_file
-        assert "attached" in wiz2.cdr_file_status.value.lower()
+        assert wiz2.run_card.cdr_mode_dd.value == "netcdf"
+        assert wiz2.run_card._cdr_forcing_file == wiz.run_card._cdr_forcing_file
+        assert "attached" in wiz2.run_card.cdr_file_status.value.lower()
         assert wiz2.config is not None
 
     def test_round_trips_through_populate_from_with_missing_file(self, tmp_path):
@@ -3135,24 +3154,24 @@ class TestCdrFileAttach:
         rehashes) and surfaces a warning instead of blocking the load.
         """
         wiz = _new_wizard()
-        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
         assert wiz.config is not None
         cfg = wiz.config
-        original_file_dict = dict(wiz._cdr_forcing_file)
+        original_file_dict = dict(wiz.run_card._cdr_forcing_file)
 
         p.unlink()  # the file no longer exists at its recorded path
 
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
 
-        assert wiz2.cdr_mode_dd.value == "netcdf"
+        assert wiz2.run_card.cdr_mode_dd.value == "netcdf"
         # hash preserved from the blueprint, not recomputed (the file is gone --
         # recomputing would raise or silently produce a different hash).
-        assert wiz2._cdr_forcing_file == original_file_dict
-        assert "not found" in wiz2.cdr_file_status.value.lower()
+        assert wiz2.run_card._cdr_forcing_file == original_file_dict
+        assert "not found" in wiz2.run_card.cdr_file_status.value.lower()
 
     def test_mode_switch_away_from_netcdf_clears_attached_cdr_file(self, tmp_path):
         """Leaving "netcdf" mode clears the attached file (see _apply_cdr_mode's
@@ -3163,17 +3182,17 @@ class TestCdrFileAttach:
         covered by test_legacy_forcing_spec_cdr_embed_routes_to_yaml_mode).
         """
         wiz = _new_wizard()
-        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
-        assert wiz._cdr_forcing_file is not None
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card._on_cdr_file_attach(None)
+        assert wiz.run_card._cdr_forcing_file is not None
 
-        wiz.cdr_mode_dd.value = "none"
+        wiz.run_card.cdr_mode_dd.value = "none"
 
-        assert wiz._cdr_forcing_file is None
-        assert wiz.cdr_file_path.value == ""
-        assert wiz.cdr_file_status.value == ""
+        assert wiz.run_card._cdr_forcing_file is None
+        assert wiz.run_card.cdr_file_path.value == ""
+        assert wiz.run_card.cdr_file_status.value == ""
 
     def test_legacy_forcing_spec_cdr_embed_routes_to_yaml_mode(
         self, tmp_path, monkeypatch
@@ -3181,15 +3200,15 @@ class TestCdrFileAttach:
         """A ForcingSpec predating the CdrSpec split that still embeds a
         ``cdr_forcing`` block (see ``_split_forcing_data``) is routed into the
         CDR box as if uploaded as a YAML -- CDR is otherwise untouched by a
-        ForcingSpec pick (it's an independently composable spec, see
-        self.cdr_mode_dd).
+        ForcingSpec pick (it's an independently composable spec, see the Run
+        card's cdr_mode_dd).
         """
         wiz = _new_wizard()
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz.cdr_mode_dd.value = "netcdf"
-        wiz._on_cdr_file_attach(None)
-        assert wiz._cdr_forcing_file is not None
+        wiz.run_card.cdr_file_path.value = str(p)
+        wiz.run_card.cdr_mode_dd.value = "netcdf"
+        wiz.run_card._on_cdr_file_attach(None)
+        assert wiz.run_card._cdr_forcing_file is not None
 
         fake_spec = dict(wiz.catalog.forcing_data(wiz.forcing_dd.value))
         fake_spec["cdr_forcing"] = {"releases": []}
@@ -3197,10 +3216,10 @@ class TestCdrFileAttach:
 
         wiz._on_forcing_spec(None)
 
-        assert wiz.cdr_mode_dd.value == "yaml"
-        assert wiz._cdr_forcing == {"releases": []}
-        assert wiz._cdr_forcing_file is None
-        assert "legacy ForcingSpec" in wiz.cdr_status.value
+        assert wiz.run_card.cdr_mode_dd.value == "yaml"
+        assert wiz.run_card._cdr_forcing == {"releases": []}
+        assert wiz.run_card._cdr_forcing_file is None
+        assert "legacy ForcingSpec" in wiz.run_card.cdr_status.value
 
 
 class TestRiverCustomFileAttach:
@@ -3539,8 +3558,8 @@ def test_sticky_bar_reflects_model_and_validity_after_rebuild():
     "Valid" (not "Invalid") status chip for a config that resolves cleanly.
     """
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
     assert wiz.model_card.model_dd.value in wiz.sticky_bar.value
@@ -3953,7 +3972,7 @@ def test_saving_after_an_edit_restamps_the_blueprint(tmp_path):
     wiz = _saving_wizard(tmp_path / "bp.yaml")
     first = _save(wiz)
 
-    wiz.end.value = date(2012, 1, 3)  # a longer run: results-affecting
+    wiz.run_card.end.value = date(2012, 1, 3)  # a longer run: results-affecting
     second = _save(wiz)
 
     assert second.content_hash != first.content_hash
@@ -4000,7 +4019,7 @@ def test_rebuild_preview_and_download_do_not_advance_the_carried_provenance(caps
     carried = wiz._carried_provenance
     assert carried == ForgeProvenance()
 
-    wiz.end.value = date(2012, 1, 3)  # content differs from anything recorded
+    wiz.run_card.end.value = date(2012, 1, 3)  # content differs from anything recorded
     capsys.readouterr()  # drop what the earlier rebuilds printed
     wiz._rebuild()
     preview = capsys.readouterr().out
@@ -4121,9 +4140,9 @@ class TestCdrLiteSavedModel:
         assert "unmodified" not in wiz.save_model_status.value
 
         wiz2 = ForgeBlueprintWizard(catalog)
-        wiz2.start.value = date(2012, 1, 1)
-        wiz2.end.value = date(2012, 1, 2)
-        wiz2.use_pio_chk.value = False
+        wiz2.run_card.start.value = date(2012, 1, 1)
+        wiz2.run_card.end.value = date(2012, 1, 2)
+        wiz2.run_card.use_pio_chk.value = False
         wiz2.model_card.model_dd.value = "my-cdr-lite-model"
         assert wiz2.model_card.bgc_dd.value == "cdr_lite"
         assert _display(wiz2.model_card.cs_group) == ""
@@ -4170,8 +4189,8 @@ def _saved_wizard(tmp_path, *, hooks=None):
     assert Path(wiz.catalog.workplans_dir).is_relative_to(tmp_path)
     if hooks is not None:
         app.set_workplan_hooks(hooks)
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True
@@ -4189,7 +4208,7 @@ def test_saved_blueprint_survives_a_rebuild_and_not_an_edit(tmp_path):
     assert wiz._saved_path() == (tmp_path / "bp.yaml").resolve()
     wiz._rebuild()
     assert wiz._saved_path() == (tmp_path / "bp.yaml").resolve()
-    wiz.end.value = date(2012, 1, 3)
+    wiz.run_card.end.value = date(2012, 1, 3)
     assert wiz._saved_path() is None
 
 
@@ -4243,15 +4262,15 @@ def test_next_steps_follow_the_saved_state(tmp_path):
     assert str((tmp_path / "bp.yaml").resolve()) in wiz.next_status.value
     wiz._rebuild()
     assert not any(b.disabled for b in _next_buttons(wiz))
-    wiz.end.value = date(2012, 1, 3)
+    wiz.run_card.end.value = date(2012, 1, 3)
     assert all(b.disabled for b in _next_buttons(wiz))
     assert "has changed" in wiz.next_status.value
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.end.value = date(2012, 1, 2)
     assert not any(b.disabled for b in _next_buttons(wiz))
     wiz.save_path.value = str(tmp_path / "other.yaml")
     assert all(b.disabled for b in _next_buttons(wiz))
     wiz.save_path.value = str(tmp_path / "bp.yaml")
-    wiz.start.value = None
+    wiz.run_card.start.value = None
     wiz._rebuild()
     assert wiz.config is None
     assert all(b.disabled for b in _next_buttons(wiz))
@@ -4331,7 +4350,7 @@ def test_save_workplan_asks_before_replacing_a_different_file(tmp_path):
     target.write_text("different: true\n")
     wiz._on_save_workplan(None)
     assert wiz._workplan_confirm == target
-    wiz.end.value = date(2012, 1, 3)
+    wiz.run_card.end.value = date(2012, 1, 3)
     assert wiz._workplan_confirm is None
     assert wiz.save_workplan_btn.description == "Save workplan"
 

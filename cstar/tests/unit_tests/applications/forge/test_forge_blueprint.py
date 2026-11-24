@@ -7962,7 +7962,9 @@ class TestForgeBlueprintWizard:
         wiz = self._wizard()
         default_name = wiz.config.name
         assert wiz.name.value == default_name  # auto-backfilled
-        wiz.npx.value = wiz.npx.value + 1  # change an input the default depends on
+        wiz.run_card.npx.value = (
+            wiz.run_card.npx.value + 1
+        )  # change an input the default depends on
         assert wiz.config.name != default_name
         assert wiz.name.value == wiz.config.name  # still tracking the new default
 
@@ -7971,7 +7973,9 @@ class TestForgeBlueprintWizard:
         default_name = wiz.config.name
         wiz.name.value = "my-custom-run"
         assert wiz.config.name == "my-custom-run"
-        wiz.npx.value = wiz.npx.value + 1  # would change the derived default
+        wiz.run_card.npx.value = (
+            wiz.run_card.npx.value + 1
+        )  # would change the derived default
         assert wiz.config.name == "my-custom-run"  # but the override sticks
         assert wiz.config.name != default_name
 
@@ -7981,7 +7985,7 @@ class TestForgeBlueprintWizard:
         assert derived == default_blueprint_description(wiz.config)
         assert wiz.description.value == derived  # auto-backfilled
         assert wiz._description_touched is False
-        wiz.end.value = wiz.end.value + timedelta(days=3)
+        wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         assert wiz.config.description != derived
         assert wiz.description.value == wiz.config.description  # still tracking
 
@@ -7993,8 +7997,8 @@ class TestForgeBlueprintWizard:
         wiz.description.value = "Gulf of Guinea spin-up"
         assert wiz.description.value == "Gulf of Guinea spin-up"
         assert wiz.config.description == "Gulf of Guinea spin-up"
-        wiz.end.value = wiz.end.value + timedelta(days=3)
-        wiz.npx.value = wiz.npx.value + 1
+        wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
+        wiz.run_card.npx.value = wiz.run_card.npx.value + 1
         assert wiz.description.value == "Gulf of Guinea spin-up"
         assert wiz.config.description == "Gulf of Guinea spin-up"
 
@@ -8031,7 +8035,7 @@ class TestForgeBlueprintWizard:
         wiz = self._load_with_description(tmp_path, "Toy run for the CDR tutorial")
         assert wiz.description.value == "Toy run for the CDR tutorial"
         assert wiz.config.description == "Toy run for the CDR tutorial"
-        wiz.end.value = wiz.end.value + timedelta(days=3)
+        wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         assert wiz.config.description == "Toy run for the CDR tutorial"
 
     @pytest.mark.parametrize(
@@ -8049,7 +8053,7 @@ class TestForgeBlueprintWizard:
         assert wiz.config.description == default_blueprint_description(wiz.config)
         assert wiz.description.value == wiz.config.description
         before = wiz.config.description
-        wiz.end.value = wiz.end.value + timedelta(days=3)
+        wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         assert wiz.config.description != before
         assert wiz.description.value == wiz.config.description
 
@@ -8484,7 +8488,7 @@ class TestForgeBlueprintWizard:
         accepting the value (see project memory for the load-back bug pattern).
         """
         w1 = self._wizard()
-        w1.model_ref_date.value = date(2015, 6, 15)
+        w1.run_card.model_ref_date.value = date(2015, 6, 15)
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
@@ -8493,7 +8497,7 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.model_ref_date.value == date(2015, 6, 15)
+        assert w2.run_card.model_ref_date.value == date(2015, 6, 15)
 
     def test_grid_extended_options_persist_through_load(self, tmp_path):
         """hmin/close_narrow_channels/mask_shapefile are grid_kwargs entries with
@@ -9169,15 +9173,15 @@ class TestForgeBlueprintWizard:
         ipywidgets version's own read-only-ness (see class docstring).
         """
         wiz = self._wizard()
-        real_upload = wiz.cdr_upload
-        wiz.cdr_upload = _ReadOnlyValueGuard(real_upload)
+        real_upload = wiz.run_card.cdr_upload
+        wiz.run_card.cdr_upload = _ReadOnlyValueGuard(real_upload)
         try:
-            wiz._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
-            wiz._on_cdr_clear(None)  # must not raise TraitError
+            wiz.run_card._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+            wiz.run_card._on_cdr_clear(None)  # must not raise TraitError
         finally:
-            wiz.cdr_upload = real_upload
-        assert wiz._cdr_forcing is None
-        assert wiz.cdr_status.value == ""
+            wiz.run_card.cdr_upload = real_upload
+        assert wiz.run_card._cdr_forcing is None
+        assert wiz.run_card.cdr_status.value == ""
 
     def test_loading_blueprint_with_cdr_forcing_does_not_raise(self, tmp_path):
         """Regression: loading a saved blueprint that has `cdr_forcing` set used to
@@ -9187,10 +9191,10 @@ class TestForgeBlueprintWizard:
         `_populate_from`, loading `.../ccs-4km_64procs.forge_blueprint.yaml`).
         """
         w1 = self._wizard()
-        w1.cdr_mode_dd.value = "yaml"
-        w1._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+        w1.run_card.cdr_mode_dd.value = "yaml"
+        w1.run_card._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
         w1._rebuild()
-        assert w1.config.cdr.cdr_forcing == w1._cdr_forcing
+        assert w1.config.cdr.cdr_forcing == w1.run_card._cdr_forcing
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -9198,15 +9202,15 @@ class TestForgeBlueprintWizard:
         w1._on_save(None)
 
         w2 = self._wizard()
-        real_upload = w2.cdr_upload
-        w2.cdr_upload = _ReadOnlyValueGuard(real_upload)
+        real_upload = w2.run_card.cdr_upload
+        w2.run_card.cdr_upload = _ReadOnlyValueGuard(real_upload)
         try:
             w2.load_path.value = str(p)
             w2._on_load_path(None)  # must not raise TraitError
         finally:
-            w2.cdr_upload = real_upload
+            w2.run_card.cdr_upload = real_upload
         assert "forge-st-err" not in w2.load_status.value
-        assert w2._cdr_forcing == w1._cdr_forcing
+        assert w2.run_card._cdr_forcing == w1.run_card._cdr_forcing
 
     def test_download_link_encodes_the_config(self):
         """The browser-download link (used by Voilà) carries the resolved YAML."""
@@ -9764,8 +9768,8 @@ class TestSaveModifiedSpecsToCatalog:
     def _save_every_spec(self, wiz):
         """Save each of the five specs under a ``my-<kind>`` name."""
         wiz._boundaries_touched = True  # not exercising boundary derivation here
-        wiz.cdr_mode_dd.value = "yaml"
-        wiz._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+        wiz.run_card.cdr_mode_dd.value = "yaml"
+        wiz.run_card._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
         wiz._rebuild()
         for kind in ("model", "domain", "forcing", "output", "cdr"):
             getattr(wiz, f"save_{kind}_name").value = f"my-{kind}"
@@ -9917,7 +9921,7 @@ class TestSaveModifiedSpecsToCatalog:
         # deviations (the default pio-dev spec already declares both).
         wiz.model_card.show_archived_models.value = True
         wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
-        wiz.use_pio_chk.value = True
+        wiz.run_card.use_pio_chk.value = True
         wiz.model_card.roms_ref.value = "main"
         assert wiz.config.composition.model.modified is True  # spec deviation
 
@@ -9938,7 +9942,7 @@ class TestSaveModifiedSpecsToCatalog:
         # this is the part that actually failed for the reported bug.
         wiz2 = self._wizard(isolated_catalog)
         wiz2.model_card.model_dd.value = spec_name
-        assert wiz2.use_pio_chk.value is True
+        assert wiz2.run_card.use_pio_chk.value is True
         assert wiz2.model_card.roms_ref.value == "main"
         assert wiz2.config.model_settings["cppdefs"]["use_pio"] is True
         assert wiz2.config.code.pio is not None
@@ -9951,7 +9955,7 @@ class TestSaveModifiedSpecsToCatalog:
         from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
-        wiz.use_pio_chk.value = True
+        wiz.run_card.use_pio_chk.value = True
         # Simulate the pre-fix writer: a spec saved without the live use_pio.
         isolated_catalog.register_model_from_settings(
             "no-pio",
@@ -9980,7 +9984,7 @@ class TestSaveModifiedSpecsToCatalog:
             "stale-ref",
             _model_owned_settings(wiz.config.model_settings),
             isolated_catalog.model_path(wiz.model_card.model_dd.value),
-            use_pio=wiz.use_pio_chk.value,
+            use_pio=wiz.run_card.use_pio_chk.value,
             roms_ref=None,
         )
         assert wiz._verify_spec_roundtrip("model", "stale-ref") is False
@@ -10000,10 +10004,10 @@ class TestSaveModifiedSpecsToCatalog:
         wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
         assert wiz.config.composition.model.modified is False
 
-        wiz.use_pio_chk.value = not wiz.use_pio_chk.value
+        wiz.run_card.use_pio_chk.value = not wiz.run_card.use_pio_chk.value
         assert wiz.config.composition.model.modified is True
 
-        wiz.use_pio_chk.value = not wiz.use_pio_chk.value  # flip back
+        wiz.run_card.use_pio_chk.value = not wiz.run_card.use_pio_chk.value  # flip back
         assert wiz.config.composition.model.modified is False
 
         wiz.model_card.roms_ref.value = "main"
@@ -10066,7 +10070,7 @@ class TestSaveModifiedSpecsToCatalog:
             "stale-marbl-ref",
             _model_owned_settings(wiz.config.model_settings),
             isolated_catalog.model_path(wiz.model_card.model_dd.value),
-            use_pio=wiz.use_pio_chk.value,
+            use_pio=wiz.run_card.use_pio_chk.value,
             roms_ref=wiz.model_card.roms_ref.value.strip() or None,
             marbl_ref=None,
         )
@@ -10160,9 +10164,9 @@ class TestSaveModifiedSpecsToCatalog:
         pattern as output/model/domain/forcing (see class docstring).
         """
         wiz = self._wizard(isolated_catalog)
-        wiz.cdr_mode_dd.value = "yaml"
+        wiz.run_card.cdr_mode_dd.value = "yaml"
         fake_cdr = {"releases": [{"lon": 1.0, "lat": 2.0}]}
-        wiz._cdr_forcing = fake_cdr
+        wiz.run_card._cdr_forcing = fake_cdr
         wiz._rebuild()
         assert wiz.config.cdr.cdr_forcing == fake_cdr
         assert wiz.config.composition.cdr.modified is False  # <custom>: moot
@@ -10177,13 +10181,13 @@ class TestSaveModifiedSpecsToCatalog:
             "cdr_forcing": fake_cdr,
             "cdr_forcing_file": None,
         }
-        assert wiz.cdr_dd.value == "my-cdr-spec"
+        assert wiz.run_card.cdr_dd.value == "my-cdr-spec"
         assert wiz.config.composition.cdr.modified is False
         assert "✓" in wiz.save_cdr_status.value
 
     def test_save_cdr_spec_refuses_mode_none(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
-        assert wiz.cdr_mode_dd.value == "none"
+        assert wiz.run_card.cdr_mode_dd.value == "none"
 
         wiz.save_cdr_name.value = "should-not-be-saved"
         wiz._on_save_cdr(None)
@@ -10219,15 +10223,15 @@ class TestSaveModifiedSpecsToCatalog:
         )
         wiz = self._wizard(isolated_catalog)
 
-        wiz.cdr_dd.value = "my-simple-cdr"
+        wiz.run_card.cdr_dd.value = "my-simple-cdr"
 
-        assert wiz.cdr_mode_dd.value == "simple"
-        assert wiz.cdr_simple_name.value == "test_release"
-        assert wiz.cdr_simple_lat.value == 12.0
-        assert wiz.cdr_simple_lon.value == 34.0
+        assert wiz.run_card.cdr_mode_dd.value == "simple"
+        assert wiz.run_card.cdr_simple_name.value == "test_release"
+        assert wiz.run_card.cdr_simple_lat.value == 12.0
+        assert wiz.run_card.cdr_simple_lon.value == 34.0
         assert wiz.config.composition.cdr.modified is False
 
-        wiz.cdr_simple_lat.value = 99.0
+        wiz.run_card.cdr_simple_lat.value = 99.0
 
         assert wiz.config.composition.cdr.modified is True
 
@@ -10237,7 +10241,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         if "gulf-guinea-toy" in _dd_values(wiz.domain_dd):
             wiz.domain_dd.value = "gulf-guinea-toy"
-        wiz.npx.value = wiz.npx.value + 1
+        wiz.run_card.npx.value = wiz.run_card.npx.value + 1
         assert wiz.config.composition.domain.modified is True
 
         before_overrides = dict(wiz._overrides)
@@ -10362,7 +10366,7 @@ class TestSaveModifiedSpecsToCatalog:
 
     def test_config_invalid_refuses(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
-        wiz.start.value = None
+        wiz.run_card.start.value = None
         wiz._rebuild()
         assert wiz.config is None
         wiz.save_output_name.value = "whatever"

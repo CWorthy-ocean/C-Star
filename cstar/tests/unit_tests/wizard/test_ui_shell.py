@@ -200,8 +200,8 @@ def test_open_in_the_workplan_builder_adds_the_steps_and_switches_page(tmp_path)
     blueprint_page = shell.pages[0][1]
     wiz = blueprint_page.inner
     assert Path(wiz.catalog.workplans_dir).is_relative_to(tmp_path)
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True
