@@ -2694,7 +2694,7 @@ _STICKY_STEPS = (
     ("run", "Run"),
     ("output", "Output"),
     ("advanced", "Advanced"),
-    ("review", "Review"),
+    ("review", "Save"),
     ("next", "Next steps"),
 )
 
