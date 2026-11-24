@@ -9155,9 +9155,9 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         w.load_path.value = "/nonexistent/forge_blueprint.yaml"
         w._on_load_path(None)
-        assert "color:#b00" in w.load_status.value
+        assert "forge-st-err" in w.load_status.value
         w._load_bytes(b"not: [valid spec config")
-        assert "color:#b00" in w.load_status.value
+        assert "forge-st-err" in w.load_status.value
 
     def test_cdr_clear_button_resets_upload_value_without_error(self):
         """Regression: clicking the CDR 'clear' button used to do
@@ -9204,7 +9204,7 @@ class TestForgeBlueprintWizard:
             w2._on_load_path(None)  # must not raise TraitError
         finally:
             w2.cdr_upload = real_upload
-        assert "color:#b00" not in w2.load_status.value
+        assert "forge-st-err" not in w2.load_status.value
         assert w2._cdr_forcing == w1._cdr_forcing
 
     def test_download_link_encodes_the_config(self):
@@ -10346,7 +10346,7 @@ class TestSaveModifiedSpecsToCatalog:
         before = list(isolated_catalog.output_names)
         wiz.save_output_name.value = "bad name!!"
         wiz._on_save_output(None)
-        assert "color:#b00" in wiz.save_output_status.value
+        assert "forge-st-err" in wiz.save_output_status.value
         assert isolated_catalog.output_names == before
 
     def test_name_collision_refuses(self, isolated_catalog):
