@@ -498,6 +498,62 @@ def offline_remote_files() -> Generator[None]:
 
 
 ################################################################################
+# Widget cleanup
+################################################################################
+
+
+def _open_widgets() -> dict[str, Any]:
+    """Every open ipywidgets widget by model id, or nothing before ipywidgets loads.
+
+    ipywidgets keeps each widget in this registry, and the comm manager keeps its
+    comm, until the widget is closed, so without a close every wizard a test builds
+    lives until the session ends. The registry is private: its public accessor,
+    `Widget.widgets`, is deprecated, and `Widget.close_all` would also close the
+    widgets of module-scoped fixtures.
+    """
+    module = sys.modules.get("ipywidgets.widgets.widget")
+    return module._instances if module is not None else {}
+
+
+def _close_widgets(model_ids: Iterable[str]) -> None:
+    open_widgets = _open_widgets()
+    for model_id in model_ids:
+        if (widget := open_widgets.get(model_id)) is not None:
+            widget.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _close_module_widgets() -> Generator[frozenset[str]]:
+    """Close the widgets a test module's tests and fixtures left open, at its end.
+
+    Yields the widgets open when the module started, which it leaves alone. A
+    widget fixture broader than module scope would be closed at the end of the
+    first module that uses it, so keep widget fixtures module-scoped or narrower.
+    """
+    before = frozenset(_open_widgets())
+    yield before
+    _close_widgets(set(_open_widgets()) - before)
+
+
+@pytest.fixture(autouse=True)
+def _close_test_widgets(_close_module_widgets: frozenset[str]) -> Generator[None]:
+    """Close the widgets each unit test opened when the test ends.
+
+    A test that starts with widgets its module opened earlier (a module-scoped
+    wizard shared by its tests) may have attached new widgets to them. A closed
+    widget has no model id, so an open container holding one raises
+    AttributeError the next time it sends its children; such a test's widgets
+    are left for `_close_module_widgets`. Module-scoped fixtures are set up
+    before this one, so their widgets are never counted as the test's own.
+    """
+    before = set(_open_widgets())
+    yield
+    if before - _close_module_widgets:
+        return
+    _close_widgets(set(_open_widgets()) - before)
+
+
+################################################################################
 # SourceData
 ################################################################################
 
