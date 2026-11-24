@@ -296,7 +296,7 @@ model_settings:
     output_period_his_dia: 86400
     nrpf_his_dia: 1
     wrt_avg_dia: false
-    output_period_avg_dia: 60
+    output_period_avg_dia: 86400
     nrpf_avg_dia: 1
   blk_frc:
     interp_frc: 0
@@ -608,5 +608,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:29dfac88b7f65ad73a9902294a5edcf74414314966226dd9791385872555bc54
+  content_hash: bp-v2:2b310dd2cbdb4e65ce6d68994cb51be6331016901c12702a6ab947a48823aa80
   notes: null
