@@ -76,9 +76,13 @@ sections:
     required: false
 
   # --- forcing subsections -----------------------------------------------------
-  forcing.ic.interpolation:
-    title: Interpolation
-    desc: How the source data is mapped onto the model grid.
+  forcing.physics:
+    title: Physics
+    desc: Temperature, salinity, velocities and sea surface height.
+    required: true
+  forcing.bgc:
+    title: Biogeochemistry
+    desc: The MARBL tracers, from one or more sources.
     required: false
   forcing.surface.co2:
     title: Atmospheric CO2
@@ -88,10 +92,6 @@ sections:
     title: Surface forcing sources
     desc: The atmospheric, biogeochemical and restoring datasets that force the ocean surface.
     required: true
-  forcing.boundary.interpolation:
-    title: Interpolation
-    desc: How the source data is mapped onto the model grid.
-    required: false
 
   # --- run subsections ---------------------------------------------------------
   run.window:
@@ -496,7 +496,7 @@ fields:
   ic.ic_name:
     label: Initial conditions
     required: true
-    hint: Logical source name for physics initial conditions, e.g.
+    hint: The dataset the physics initial conditions are built from, such as GLORYS.
   ic.ic_layout:
     label: Initial conditions layout
     symbol: glorys_layout
@@ -543,7 +543,7 @@ fields:
   boundary.boundary_name:
     label: Boundary conditions
     required: true
-    hint: Logical source name for boundary conditions, e.g.
+    hint: The dataset the physics boundary conditions are built from, such as GLORYS.
   boundary.boundary_layout:
     label: Boundary layout
     symbol: glorys_layout
