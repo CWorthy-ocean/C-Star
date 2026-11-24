@@ -663,6 +663,13 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     border-color: {branding.LINE_2};
     background: #fff;
 }}
+/* a forcing-row box its pane's note asks the user to fill (refresh_bgc_notes) */
+.forge-app .forge-need input {{
+    border-color: {branding.AMBER};
+    background: {branding.TINT_AMBER};
+}}
+/* the sticky bar's Invalid chip, a link to the card that owns the problem */
+.forge-app .forge-status-link {{ text-decoration: none; }}
 .forge-out-label .widget-html-content {{ font-size: 13px; padding: 3px 0; line-height: 1.3; }}
 .forge-out-label .sym {{
     display: block;
