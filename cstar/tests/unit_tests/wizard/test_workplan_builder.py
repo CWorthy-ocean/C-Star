@@ -68,8 +68,18 @@ def _no_live_system(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def page(bp_app: ForgeBlueprintWizardApp) -> WorkplanBuilderPage:
-    """A fresh Workplan page per test, so no state leaks between tests."""
+def page(
+    bp_app: ForgeBlueprintWizardApp,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> WorkplanBuilderPage:
+    """A fresh Workplan page per test, so no state leaks between tests.
+
+    Without a writable catalog the page saves to the current directory, so
+    each test runs from its ``tmp_path``: such a save lands there, not in the
+    checkout.
+    """
+    monkeypatch.chdir(tmp_path)
     return WorkplanBuilderPage(bp_app)
 
 
@@ -1270,6 +1280,8 @@ def test_saved_workplans_are_listed_and_loadable(page, roms_bp):
     _path_step(page.panes[0], "run", roms_bp)
     target = Path(page.save_path.value)
     assert target.name == "listed.yaml"
+    # the default lands in the test catalog, never the current directory
+    assert target.parent == Path(page.catalog.workplans_dir)
     page._on_save()
     assert str(target) in _values(page.load_dd)
     page._new()
