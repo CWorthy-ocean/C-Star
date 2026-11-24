@@ -29,6 +29,65 @@ if TYPE_CHECKING:
 SHELL_MAX_WIDTH = "1600px"
 #: Height of the sticky status bar: where a pinned preview pane docks beneath it.
 STICKY_BAR_HEIGHT = "56px"
+#: The same once the bar's step links wrap onto a second line (one more 26px row).
+STICKY_BAR_HEIGHT_WRAPPED = "82px"
+
+#: The host colours ipywidgets' own controls read (input boxes, checkbox and radio
+#: labels, the run log's output areas), at JupyterLab 4's light-theme values. The
+#: wizard's palette assumes a light page, so ``.forge-app`` sets these and stays
+#: light inside a dark JupyterLab theme too. ipywidgets declares the
+#: ``--jp-widgets-*`` colours on ``:root`` from the theme colours, so they resolve
+#: there; they are declared again here to resolve against the values above them.
+_LIGHT_HOST_COLORS = {
+    "--jp-layout-color0": "#fff",
+    "--jp-layout-color1": "#fff",
+    "--jp-layout-color2": "#eee",
+    "--jp-layout-color3": "#bdbdbd",
+    "--jp-layout-color4": "#757575",
+    "--jp-ui-font-color0": "#000",
+    "--jp-ui-font-color1": "rgba(0, 0, 0, 0.87)",
+    "--jp-ui-font-color2": "rgba(0, 0, 0, 0.54)",
+    "--jp-ui-font-color3": "rgba(0, 0, 0, 0.38)",
+    "--jp-ui-inverse-font-color0": "#fff",
+    "--jp-ui-inverse-font-color1": "#fff",
+    "--jp-content-font-color0": "#000",
+    "--jp-content-font-color1": "rgba(0, 0, 0, 0.87)",
+    "--jp-content-font-color2": "rgba(0, 0, 0, 0.54)",
+    "--jp-content-font-color3": "rgba(0, 0, 0, 0.38)",
+    "--jp-content-link-color": "#0d47a1",
+    "--jp-content-link-visited-color": "#7b1fa2",
+    # the light theme leaves this unset, so links fall back to the link colour
+    "--jp-content-link-hover-color": "var(--jp-content-link-color)",
+    "--jp-border-color0": "#bdbdbd",
+    "--jp-border-color1": "#bdbdbd",
+    "--jp-border-color2": "#e0e0e0",
+    "--jp-border-color3": "#eee",
+    "--jp-brand-color0": "#0d47a1",
+    "--jp-brand-color1": "#1976d2",
+    "--jp-brand-color2": "#64b5f6",
+    "--jp-error-color0": "#b71c1c",
+    "--jp-error-color1": "#d32f2f",
+    "--jp-warn-color0": "#e65100",
+    "--jp-warn-color1": "#f57c00",
+    "--jp-success-color0": "#1b5e20",
+    "--jp-success-color1": "#388e3c",
+    "--jp-info-color0": "#006064",
+    "--jp-info-color1": "#0097a7",
+    "--jp-rendermime-error-background": "#fdd",
+    "--jp-widgets-color": "var(--jp-content-font-color1)",
+    "--jp-widgets-label-color": "var(--jp-widgets-color)",
+    "--jp-widgets-readout-color": "var(--jp-widgets-color)",
+    "--jp-widgets-input-color": "var(--jp-ui-font-color1)",
+    "--jp-widgets-input-background-color": "var(--jp-layout-color1)",
+    "--jp-widgets-input-border-color": "var(--jp-border-color1)",
+    "--jp-widgets-input-focus-border-color": "var(--jp-brand-color2)",
+    "--jp-widgets-slider-handle-border-color": "var(--jp-border-color1)",
+    "--jp-widgets-slider-handle-background-color": "var(--jp-layout-color1)",
+    "--jp-widgets-slider-active-handle-color": "var(--jp-brand-color1)",
+}
+_LIGHT_HOST_DECLARATIONS = "\n".join(
+    f"    {name}: {value};" for name, value in _LIGHT_HOST_COLORS.items()
+)
 
 #: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap it with
 #: :func:`style_widget`, which also installs the number-box mouse-wheel guard that
@@ -39,6 +98,22 @@ body[data-voila] {{ background: {branding.GREY}; }}
 /* the page column: shell root only -- the wizard root also carries .forge-app
    (so the notebook path is styled) and must not get its own max-width/padding */
 body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; padding: 0 24px; }}
+
+/* the wizard is light in any host theme: native controls and scrollbars too
+   (color-scheme), and ipywidgets' controls through the host colours. The header
+   too, for when branding_display() shows it above a wizard, outside .forge-app */
+.{branding.HEADER_CLASS},
+.forge-app {{
+    color-scheme: light;
+{_LIGHT_HOST_DECLARATIONS}
+}}
+/* in a dark JupyterLab, the outermost wizard root brings Voila's light page with
+   it, so the text that sits on the page (header, intro, catalog bar) reads */
+body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
+    background: {branding.GREY};
+    border-radius: 6px;
+    padding: 0 12px 12px;
+}}
 
 .forge-app, .forge-app .widget-label, .forge-app .widget-html-content,
 .forge-app .jupyter-button, .forge-app input, .forge-app select,
@@ -154,15 +229,30 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 .forge-app .forge-field .widget-hbox > .widget-text {{ flex: 0 1 auto; min-width: 0; }}
 .forge-app .forge-field .widget-hbox > .jupyter-button {{ flex: none; }}
 .forge-app .forge-field .widget-hbox > .widget-checkbox {{ width: auto; margin-right: 22px; }}
-/* field_grid: two columns, one in a narrow card body */
-.forge-app .forge-fgrid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+/* field_grid: two columns, one in a narrow card body. Rows keep their own height
+   at the top when the grid is stretched taller (beside a drawn grid preview, the
+   geometry row stretches it to the image's height and the rows spread apart) */
+.forge-app .forge-fgrid {{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+}}
 @container (max-width: 760px) {{
     .forge-app .forge-fgrid {{ grid-template-columns: minmax(0, 1fr); }}
 }}
-/* under 1000px the grid preview moves below the geometry fields */
-@container (max-width: 1000px) {{
+/* the Grid geometry fields beside the grid preview: the fields keep the ~680px
+   their two columns need (label, box, unit and hint), the preview column gives
+   way first, down to its image's 400px floor; under 1100px the preview moves
+   below the fields */
+.forge-app .forge-geo-row > .forge-fgrid {{ flex: 1 1 680px; min-width: 680px; }}
+.forge-app .forge-geo-row > :last-child {{ flex: 0 1 620px; }}
+@container (max-width: 1100px) {{
     .forge-app .forge-geo-row {{ flex-wrap: wrap; row-gap: 8px; }}
-    .forge-app .forge-geo-row > .forge-fgrid {{ flex: 1 1 100%; }}
+    .forge-app .forge-geo-row > .forge-fgrid {{ flex: 1 1 100%; min-width: 0; }}
+}}
+/* under 1000px the CDR plot moves below the CDR release panels */
+@container (max-width: 1000px) {{
+    .forge-app .forge-cdr-row {{ flex-wrap: wrap; row-gap: 8px; }}
+    .forge-app .forge-cdr-row > :first-child {{ flex: 1 1 100%; }}
 }}
 .forge-app .forge-hint {{
     font-size: 12px;
@@ -212,8 +302,10 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     padding-top: 16px;
     border-top: 1px solid {branding.LINE_2};
 }}
-/* ...except for a subsection that opens its card body or pane */
-.forge-app .widget-vbox:first-child > .forge-sub:first-child {{
+/* ...except for a subsection that opens its card body or pane. Hidden siblings
+   (a card body starts with its error banner, display:none until there is a
+   problem) don't count, or Run setup's first subsection got the rule */
+.forge-app .widget-vbox:nth-child(1 of :not([style*="display: none"])) > .forge-sub:first-child {{
     border-top: 0;
     margin-top: 2px;
     padding-top: 0;
@@ -247,8 +339,9 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
    own node (see the card header comment above for why). */
 .forge-app .forge-sticky .widget-html-content {{
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 4px 10px;
     white-space: nowrap;
 }}
 .forge-app .forge-sticky a.step {{
@@ -264,7 +357,23 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     white-space: nowrap;
 }}
 .forge-app .forge-sticky a.step:hover {{ background: {branding.TINT_BLUE}; }}
-.forge-app .forge-sticky .summary {{ white-space: nowrap; }}
+/* in a narrow window the step links wrap onto a second line, so every card stays
+   one click away; the run summary takes what room is left on its line (a zero
+   basis: it never pushes anything onto another line) and ellipsises */
+.forge-app .forge-sticky .summary {{
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}}
+/* the status chip keeps to the right edge, even on a line of its own */
+.forge-app .forge-sticky .widget-html-content > :last-child {{ margin-left: auto; }}
+/* once the blueprint page's eight step links and the chip leave the run summary
+   too little room to read, it goes (the cards say the same) */
+@container forge-sticky (max-width: 900px) {{
+    .forge-app.forge-wizard .forge-sticky .summary {{ display: none; }}
+}}
 /* the status HTML shrinks (and ellipsises) before the download button does.
    min-width:0 alone leaves its no-wrap run summary in the page's min-content
    width (~1450px, more with long names); contain:inline-size takes it out. */
@@ -272,6 +381,7 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     flex: 1 1 0;
     min-width: 0;
     contain: inline-size;
+    container: forge-sticky / inline-size;
 }}
 .forge-app .forge-sticky > .widget-html:first-child .widget-html-content {{
     overflow: hidden;
@@ -368,6 +478,14 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     position: sticky;
     bottom: 0;
     box-shadow: 0 -6px 12px -8px rgba(0, 0, 0, 0.35);
+}}
+/* in a narrow window the Workplan page's sticky bar can wrap onto a second line
+   (its six step links, status chip and download button need ~780px of window), so
+   a pinned top preview docks below two lines: a gap while the bar still fits one
+   line beats covering the preview's controls. Sticky is Voila-only (see below),
+   where the page follows the window. */
+@media (max-width: 820px) {{
+    body[data-voila] .forge-app .forge-side-top.forge-pinned {{ top: {STICKY_BAR_HEIGHT_WRAPPED}; }}
 }}
 .forge-app .forge-pane-controls {{ align-items: center; gap: 14px; flex-wrap: wrap; }}
 .forge-app .forge-side-right .forge-pane-body {{ flex-direction: column !important; }}
@@ -535,12 +653,26 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     box-shadow: none;
 }}
 
-/* Advanced-settings output-stream table (grouped write/period/records rows; its
-   one column template is set in _build_output_table, so Write/Period/Records line
-   up down the whole card). Header cells share one fixed height and are quiet:
-   no per-cell underline. */
-.forge-app .forge-out-table {{ margin: 4px 0 8px; }}
+/* Advanced-settings output-stream table (grouped write/period/records rows from
+   _build_output_table). One column template (label | Write | Period | Records |
+   the stream's file readout and extras), so Write/Period/Records line up down the
+   whole card: the middle columns sit at their maximum until the card is too
+   narrow, then shrink. Header cells share one fixed height and are quiet: no
+   per-cell underline. */
+.forge-app .forge-out-table {{
+    margin: 4px 0 8px;
+    grid-template-columns: minmax(160px, 1.3fr) minmax(70px, 150px) minmax(130px, 190px) minmax(130px, 150px) minmax(120px, 1.2fr);
+}}
 .forge-app .forge-out-th {{ align-self: end; }}
+/* in a narrow card (the five columns need ~660px, more inside a pane) each row's
+   readout and extras move to a line of their own, under Write..Records */
+@container (max-width: 720px) {{
+    .forge-app .forge-out-table {{
+        grid-template-columns: minmax(120px, 1.3fr) minmax(120px, 150px) minmax(130px, 190px) minmax(120px, 150px);
+    }}
+    .forge-app .forge-out-table > .forge-out-x {{ grid-column: 2 / -1; }}
+    .forge-app .forge-out-table > .forge-out-th.forge-out-x {{ display: none; }}
+}}
 /* a stream's extras (e.g. CDR output's Averaging dropdown) fit the last column,
    their label ellipsised */
 .forge-app .forge-out-table > .widget-hbox {{ min-width: 0; flex-wrap: wrap; }}
@@ -686,6 +818,30 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 }}
 .forge-var-title {{ font-size: 12.5px; font-weight: 600; margin: 10px 0 4px; }}
 .forge-app .forge-var-grid .widget-checkbox {{ width: auto; }}
+/* variable checkboxes: four columns, three in a narrower card, two in a narrow
+   one, so a typical label ("Sea surface height (zeta)") fits on its line */
+.forge-app .forge-var-grid {{ grid-template-columns: repeat(4, minmax(0, 1fr)); }}
+@container (max-width: 1150px) {{
+    .forge-app .forge-var-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+}}
+@container (max-width: 760px) {{
+    .forge-app .forge-var-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+}}
+/* a longer label wraps under itself instead of ellipsising (variable grids and
+   the output table's stacked write flags); a one-line label keeps the 28px row */
+.forge-app :is(.forge-var-grid, .forge-out-write-stack) .widget-checkbox {{
+    height: auto;
+    min-height: 28px;
+}}
+.forge-app :is(.forge-var-grid, .forge-out-write-stack) .widget-label-basic {{
+    display: flex;
+    align-items: baseline;
+    height: auto;
+    padding: 5px 0;
+    line-height: 18px;
+    white-space: normal;
+}}
+.forge-app :is(.forge-var-grid, .forge-out-write-stack) .widget-label-basic > input {{ flex: none; }}
 """
 
 

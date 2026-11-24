@@ -1647,13 +1647,6 @@ _HOSTED_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
 _HOSTED_KEYS = frozenset(key for keys in _HOSTED_FIELDS.values() for key in keys)
 
 
-# The output tables' one column template (label | Write | Period | Records | the
-# stream's extras), so Write/Period/Records line up down the whole card: the middle
-# columns sit at their maximum until the card is too narrow, then shrink.
-_OUTPUT_TABLE_COLUMNS = (
-    "minmax(160px, 1.3fr) minmax(70px, 150px) minmax(130px, 190px) "
-    "minmax(130px, 150px) minmax(120px, 1.2fr)"
-)
 # Output-table rows whose stream writes a record at the run's first step as well
 # as one per period (ucla-roms basic_output.F90 and bgc_io.F90 write history at the
 # first step; averages and the rest only once a period has passed).
@@ -1825,6 +1818,7 @@ def _build_output_table(
     for cell in header_cells:
         cell.add_class("forge-out-th")
     header_cells[1].add_class("forge-out-center")
+    header_cells[4].add_class("forge-out-x")
     cells: list[Any] = list(header_cells)
 
     for row in rows:
@@ -1887,15 +1881,16 @@ def _build_output_table(
                 # The label sizes to its text (and ellipsises in the cell).
                 extra.style.description_width = "initial"
         consumed.update(present_extras)
-        cells.append(W.HBox([readout.files_html, *extras]))
+        extras_cell = W.HBox([readout.files_html, *extras])
+        # In a narrow card this cell moves to a line of its own (see WIZARD_CSS).
+        extras_cell.add_class("forge-out-x")
+        cells.append(extras_cell)
 
+    # The column template is the stylesheet's (`forge-out-table`), so a narrow
+    # card can change it.
     table = W.GridBox(
         cells,
-        layout=W.Layout(
-            grid_template_columns=_OUTPUT_TABLE_COLUMNS,
-            grid_gap="0 12px",
-            align_items="center",
-        ),
+        layout=W.Layout(grid_gap="0 12px", align_items="center"),
     )
     table.add_class("forge-out-table")
     return table
@@ -1922,13 +1917,8 @@ def _build_variable_grids(
         if not present:
             continue
         boxes = [built[k] for k in present]
-        grid = W.GridBox(
-            boxes,
-            layout=W.Layout(
-                grid_template_columns="repeat(4, minmax(0, 1fr))",
-                grid_gap="2px 16px",
-            ),
-        )
+        # Columns come from the stylesheet (`forge-var-grid`): fewer in a narrow card.
+        grid = W.GridBox(boxes, layout=W.Layout(grid_gap="2px 16px"))
         grid.add_class("forge-var-grid")
         consumed.update(present)
         if len(boxes) < _VARIABLE_GRID_COLLAPSE_AT:
@@ -6127,6 +6117,8 @@ class ForgeBlueprintWizard:
             description="This grid is a parent (enter child grid info below).",
             indent=False,
             tooltip=_tip("nesting", "nest_enable"),
+            # sized to its label: the default 300px cut the sentence off
+            layout=W.Layout(width="auto"),
         )
         self.nest_help = W.HTML(
             "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
@@ -6206,6 +6198,8 @@ class ForgeBlueprintWizard:
             description="This is a child grid (enter parent grid info below).",
             indent=False,
             tooltip=_tip("nesting", "parent_enable"),
+            # sized to its label: the default 300px cut the sentence off
+            layout=W.Layout(width="auto"),
         )
         self.parent_help = W.HTML(
             "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
@@ -6383,9 +6377,13 @@ class ForgeBlueprintWizard:
             "automatically when a domain is selected from the catalog.",
         )
         self.plot_status = W.HTML("Click Refresh preview to draw the grid.")
+        # width 100% of its column (400-600px): a fixed-size image would hold its
+        # column at 600px and squeeze the fields beside it
         self.plot_img = W.Image(
             format="png",
-            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+            layout=W.Layout(
+                width="100%", min_width="400px", max_width="600px", display="none"
+            ),
         )
 
         # --- output / preview ---
@@ -6717,9 +6715,12 @@ class ForgeBlueprintWizard:
             options=[], description="Release:", style={"description_width": "110px"}
         )
         self.cdr_plot_release_dd.layout.display = "none"  # shown only if >1 release
+        # sized to its column like the grid preview (self.plot_img)
         self.cdr_plot_img = W.Image(
             format="png",
-            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+            layout=W.Layout(
+                width="100%", min_width="400px", max_width="600px", display="none"
+            ),
         )
         self.cdr_plot_box = W.VBox(
             [
@@ -10342,12 +10343,10 @@ class ForgeBlueprintWizard:
                     f"<a class='forge-status-link' "
                     f"href='#forge-sec-{problems[0].card}'>{status_chip}</a>"
                 )
-        # `sp` (flex:1, see WIZARD_CSS) eats the remaining width so the status
-        # chip sits at the row's true right edge, next to the download button.
+        # The summary fills the rest of its line (see WIZARD_CSS), so the status
+        # chip sits at the row's right edge, next to the download button.
         self.sticky_bar.value = (
-            f"{step_links}<span class='summary'>{summary}</span>"
-            "<span class='sp'></span>"
-            f"{status_chip}"
+            f"{step_links}<span class='summary'>{summary}</span>{status_chip}"
         )
 
         for key, banner in self.card_errors.items():
@@ -11461,15 +11460,14 @@ class ForgeBlueprintWizard:
             )
             for k in (_GRID_INT + _GRID_FLOAT)
         ]
-        # Fixed-width preview column so the button caption and the empty-state
-        # hint never get squeezed by the two-column field grid beside them.
+        # The stylesheet sizes the fields and the preview column (`forge-geo-row`
+        # in WIZARD_CSS): the fields keep their room, and in a narrow card the
+        # preview moves below them.
         grid_plot_col = W.VBox(
             [self.plot_btn, self.plot_status, self.plot_img],
-            layout=W.Layout(padding="0 0 0 20px", flex="0 0 380px"),
+            layout=W.Layout(padding="0 0 0 20px"),
         )
         geometry_grid = components.field_grid(W, geometry_rows)
-        geometry_grid.layout.flex = "1 1 auto"
-        # In a narrow card the preview moves below the fields (see WIZARD_CSS).
         geometry_row = W.HBox([geometry_grid, grid_plot_col])
         geometry_row.add_class("forge-geo-row")
         geometry_sub = components.subsection(W, "grid.geometry", geometry_row)
@@ -11650,6 +11648,21 @@ class ForgeBlueprintWizard:
             chips_widget=self.card_chips["forcing"],
         )
 
+        cdr_row = W.HBox(
+            [
+                W.VBox(
+                    [
+                        self.cdr_simple_box,
+                        self.cdr_yaml_box,
+                        self.cdr_netcdf_box,
+                        self.cdr_upscaled_box,
+                    ]
+                ),
+                self.cdr_plot_box,
+            ]
+        )
+        cdr_row.add_class("forge-cdr-row")
+
         run_card = components.card(
             W,
             "run",
@@ -11694,20 +11707,9 @@ class ForgeBlueprintWizard:
                 ),
                 self.cdr_lite_hint,
                 # Per-mode panels on the left, plot column on the right --
-                # the same side-by-side arrangement as the Grid card.
-                W.HBox(
-                    [
-                        W.VBox(
-                            [
-                                self.cdr_simple_box,
-                                self.cdr_yaml_box,
-                                self.cdr_netcdf_box,
-                                self.cdr_upscaled_box,
-                            ]
-                        ),
-                        self.cdr_plot_box,
-                    ]
-                ),
+                # the same side-by-side arrangement as the Grid card, and the
+                # plot moves below them in a narrow card (see WIZARD_CSS).
+                cdr_row,
             ),
             num=4,
             chips_widget=self.card_chips["run"],

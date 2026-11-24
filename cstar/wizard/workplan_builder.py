@@ -2519,8 +2519,11 @@ class WorkplanBuilderPage:
         )
         self.upload = W.FileUpload(accept=".yml,.yaml", multiple=False)
         self.upload_btn = W.Button(description=_caption("load", "Load"), icon="upload")
+        # flex none: a long load status beside it squeezed its caption to "N…"
         self.new_btn = W.Button(
-            description=_caption("new", "New workplan"), icon="file"
+            description=_caption("new", "New workplan"),
+            icon="file",
+            layout=W.Layout(flex="none"),
         )
         self.load_status = W.HTML("")
         self.load_btn.on_click(lambda _b: self._load_saved())
@@ -4342,7 +4345,7 @@ class WorkplanBuilderPage:
             f"{len(self.panes)} step(s)"
         )
         self.sticky_bar.value = (
-            f"{links}<span class='summary'>{summary}</span><span class='sp'></span>"
+            f"{links}<span class='summary'>{summary}</span>"
             + components.chip(
                 "● Valid" if valid else "● Invalid", "ok" if valid else "warn"
             )
