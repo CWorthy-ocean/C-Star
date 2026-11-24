@@ -8,8 +8,9 @@ pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
 
+from cstar.wizard.forcing_editor import _ForcingEditor
 from cstar.wizard.ui import labels
-from cstar.wizard.wizard import ForgeBlueprintWizard, _ForcingEditor
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 # The 11 grid kwargs shared by the main/child/parent grids (see
 # cstar.wizard.wizard._GRID_INT/_GRID_FLOAT/_SCOORD).
@@ -238,7 +239,7 @@ def test_required_top_level_sections_flagged_required():
 # ---------------------------------------------------------------------------
 
 # The row categories _ForcingEditor._make_row's generic add/remove machinery
-# manages (see cstar.wizard.wizard._ROW_CATEGORIES). "boundary"
+# manages (see cstar.wizard.forcing_editor._ROW_CATEGORIES). "boundary"
 # itself is excluded -- boundary's physics source is a required scalar (the
 # boundary.* pane), not a row list; only "boundary_bgc" is row-based.
 _ROW_CATEGORY_SEEDS: dict[str, dict] = {

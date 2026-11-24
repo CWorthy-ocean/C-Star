@@ -19,12 +19,8 @@ import xarray as xr
 import yaml
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
-from cstar.wizard.wizard import (
-    ForgeBlueprintWizard,
-    _merge_loaded_kwargs,
-    _parse_constants,
-    _parse_options,
-)
+from cstar.wizard.forcing_editor import _parse_constants, _parse_options
+from cstar.wizard.wizard import ForgeBlueprintWizard, _merge_loaded_kwargs
 
 _REPO = Path(__file__).resolve().parents[4]
 _WIO_RELEASE = _REPO / "docs/tutorials/forge_blueprint_wio_release.yaml"

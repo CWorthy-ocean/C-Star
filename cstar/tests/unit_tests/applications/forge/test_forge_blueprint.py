@@ -8751,7 +8751,7 @@ class TestForgeBlueprintWizard:
             "ALK": 2300.0,
             "CHL": 0.3,
         }
-        from cstar.wizard.wizard import _parse_constants
+        from cstar.wizard.forcing_editor import _parse_constants
 
         fe2 = w2._forcing_editor
         assert _parse_constants(fe2._rows["ic_bgc"][0]["constants"].value) == {

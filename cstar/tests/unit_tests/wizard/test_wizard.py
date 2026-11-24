@@ -44,6 +44,7 @@ from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.fields import _base_type, _is_optional_numeric, _make_field_widget
+from cstar.wizard.forcing_editor import _BOUNDARY_NONE, _IC_NONE, _ForcingEditor
 from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
     _FORCING_CARD,
@@ -60,15 +61,12 @@ from cstar.wizard.settings_editor import (
     _SettingsEditor,
 )
 from cstar.wizard.wizard import (
-    _BOUNDARY_NONE,
-    _IC_NONE,
     _STICKY_STEPS,
     WIZARD_TOOL,
     ForgeBlueprintWizard,
     ForgeBlueprintWizardApp,
     WorkplanHooks,
     _drain_stream_buffer,
-    _ForcingEditor,
     _is_output_key,
 )
 
@@ -6119,6 +6117,7 @@ class TestGridFileAttach:
         cached dict, never recomputing the digest.
         """
         import cstar.applications.forge.user_files as user_files_mod
+        import cstar.wizard.forcing_editor as forcing_editor_mod
         import cstar.wizard.wizard as wizard_mod
 
         calls = {"n": 0}
@@ -6129,6 +6128,7 @@ class TestGridFileAttach:
             return real_hash(path)
 
         monkeypatch.setattr(wizard_mod, "hash_netcdf_contents", _counting_hash)
+        monkeypatch.setattr(forcing_editor_mod, "hash_netcdf_contents", _counting_hash)
         monkeypatch.setattr(user_files_mod, "hash_netcdf_contents", _counting_hash)
 
         wiz = _new_wizard()
