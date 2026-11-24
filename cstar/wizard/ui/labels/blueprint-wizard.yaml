@@ -24,7 +24,7 @@ sections:
     required: true
   run:
     title: Run setup
-    desc: The simulation time window, time step, processor layout, and optional carbon dioxide removal forcing.
+    desc: The simulation time window, processor layout, and optional carbon dioxide removal forcing.
     required: true
   output:
     title: Output
@@ -384,6 +384,8 @@ fields:
     label: Forcing preset
     required: true
     hint: Selects a named forcing spec from the catalog to seed all forcing fields.
+  co2_mode:
+    label: Air CO2
   cdr_dd:
     label: CDR preset
     hint: Selects a named CDR spec from the catalog to seed the CDR mode and fields below, or leave as custom to author one by hand.
@@ -391,6 +393,24 @@ fields:
     label: CDR mode
   cdr_simple_name:
     label: CDR release name
+  cdr_simple_lat:
+    label: Latitude
+    unit: °N
+  cdr_simple_lon:
+    label: Longitude
+    unit: °E
+  cdr_simple_depth:
+    label: Depth
+    unit: m
+  cdr_simple_hsc:
+    label: Horizontal Gaussian scale
+    unit: m
+  cdr_simple_vsc:
+    label: Vertical Gaussian scale
+    unit: m
+  cdr_simple_flux:
+    label: ALK tracer flux
+    unit: meq/s
   cdr_simple_start:
     label: CDR release start
   cdr_simple_end:
@@ -588,7 +608,7 @@ fields:
     label: Constant atmospheric xCO2
     symbol: xco2air_default
     unit: ppm
-    hint: The atmospheric CO2 mole fraction MARBL uses for the whole run when atmospheric CO2 is Static (cppdefs.co2_tvarying off). 284.7 ppm is the pre-industrial average.
+    hint: MARBL uses this value for the whole run. 284.7 ppm is the pre-industrial average.
 
   # ===========================================================================
   # buttons.<name> -- button captions (examples only; filled in later)
