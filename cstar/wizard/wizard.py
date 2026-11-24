@@ -1727,21 +1727,22 @@ class _StreamReadout:
 
     def render(self, _change: Any = None) -> None:
         period = _widget_number(self.period)
-        live = (
-            self.period.layout.display != "none"
-            and not self.period.disabled
-            and period is not None
-            and period > 0
-        )
-        model_time = _model_time_text(period) if live and period else ""
-        self.period_html.value = f"= {model_time}" if model_time else ""
-        self.files_html.value = self._files_text(period) if live else ""
-
-    def _files_text(self, period: float | None) -> str:
-        n_records = _widget_number(self.records) if self.records is not None else None
         if (
             period is None
-            or not n_records
+            or period <= 0
+            or self.period.disabled
+            or self.period.layout.display == "none"
+        ):
+            self.period_html.value = self.files_html.value = ""
+            return
+        model_time = _model_time_text(period)
+        self.period_html.value = f"= {model_time}" if model_time else ""
+        self.files_html.value = self._files_text(period)
+
+    def _files_text(self, period: float) -> str:
+        n_records = _widget_number(self.records) if self.records is not None else None
+        if (
+            not n_records
             or n_records < 1
             or not self.run_seconds
             or (self.write is not None and not self.write.value)
@@ -3067,14 +3068,18 @@ def _dump_options(options: Any) -> str:
         return ""
 
 
-def _options_editor(W, value: Any, description: str = "options:"):
-    """A compact JSON Textarea for an item's `options` passthrough dict."""
+def _options_editor(
+    W, value: Any, description: str = "options:", *, height: str | None = "48px"
+):
+    """A compact JSON Textarea for an item's `options` passthrough dict; a forcing
+    row passes ``height=None`` (its tile sets the height, label above the box).
+    """
     return W.Textarea(
         value=_dump_options(value),
         description=description,
         placeholder=_OPTIONS_PLACEHOLDER,
         style={"description_width": "initial"},
-        layout=W.Layout(width="420px", height="48px"),
+        layout=W.Layout(width="420px", height=height),
     )
 
 
@@ -4475,9 +4480,11 @@ class _ForcingEditor:
         # widgets), so no per-row editor for either.
         if cat not in ("ic_bgc", "boundary_bgc"):
             w["options"] = _options_editor(
-                W, item.get("options"), description=_row_desc("options", "options")
+                W,
+                item.get("options"),
+                description=_row_desc("options", "options"),
+                height=None,
             )
-            w["options"].layout.height = None  # the row tile sets its height
         remove = W.Button(
             description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item"
         )

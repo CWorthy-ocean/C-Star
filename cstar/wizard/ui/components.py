@@ -17,7 +17,7 @@ from __future__ import annotations
 import functools
 import html
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from cstar.wizard.ui import branding
 from cstar.wizard.ui.labels import label_for, section_for
@@ -901,7 +901,7 @@ class Pill:
     """
 
     text: str
-    kind: str = ""
+    kind: Literal["", "mod", "off", "warn"] = ""
 
 
 @dataclass(frozen=True)
