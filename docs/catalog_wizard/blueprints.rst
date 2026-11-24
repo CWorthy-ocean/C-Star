@@ -135,24 +135,48 @@ Advanced settings
    :width: 100%
 
 Review and export
-   The resolved blueprint as YAML, with validation messages. From here you
-   can **Download** the file, **Save** it to your catalog, save any spec you
-   modified as a new named catalog entry, or run the blueprint through the
-   C-Star command line. To run this blueprint as part of a workplan, build
-   one on the Workplan page. **Run** executes ``cstar blueprint run`` on the
-   machine the wizard is running on, so on a cluster's login node use it only
-   for toy domains; for real domains save the blueprint and submit it with
-   ``cstar blueprint submit`` (see :doc:`../applications/blueprints`).
+   The resolved blueprint as YAML, with validation messages. Give it a
+   name, then **Download** the file or **Save** it to your catalog.
 
 .. figure:: ../images/wizard-review.png
-   :alt: The Review and export section: validation result, resolved YAML, download, save and run
+   :alt: The Review and export section: validation result, resolved YAML, name, download and save
    :width: 100%
+
+Next steps
+   What to do with the saved blueprint. The workplan and Run Forge buttons
+   stay disabled until the blueprint is saved, and again whenever you change
+   it after saving.
+
+   **Run it as a workplan.** Most runs need two steps: Forge builds the input
+   files and a UCLA-ROMS blueprint, then UCLA-ROMS runs it. **Save workplan**
+   writes a workplan with those two steps to your catalog, named after the
+   blueprint, and offers it as a download. Submit it with:
+
+   .. code-block:: console
+
+      cstar workplan submit ~/cstar/catalog/workplans/<name>.yaml
+
+   **Open in the Workplan builder** adds the same two steps to the
+   :doc:`Workplan page <workplans>`, where you can add steps and compute
+   settings and submit it.
+
+   **Run Forge here** runs ``cstar blueprint run`` on the saved blueprint in
+   the wizard's own session. It builds the input files and the UCLA-ROMS
+   blueprint but does not run UCLA-ROMS. On a cluster's login node use it
+   only for toy domains; for real domains submit a workplan, or submit the
+   blueprint with ``cstar blueprint submit`` (see
+   :doc:`../applications/blueprints`).
+
+   **Save specs to the catalog** saves any spec you modified as a new named
+   catalog entry, to reuse in other blueprints.
 
 What happens next
 -----------------
 
-Blueprints you save, and specs you register, land in your own writable
+Blueprints, workplans and specs you save land in your own writable
 catalog layer, ``~/cstar/catalog`` by default (see :doc:`catalog`).
-Process the blueprint with ``cstar blueprint run`` as described in
-:doc:`../applications/forge/blueprint`, or add it to a workplan on the
+Submit the workplan from **Next steps** as described in
+:doc:`../workplans/index`, process the blueprint on its own with
+``cstar blueprint run`` as described in
+:doc:`../applications/forge/blueprint`, or build a larger workplan on the
 :doc:`Workplan page <workplans>`.

@@ -23,7 +23,6 @@ import html
 import json
 import sys
 import tempfile
-import threading
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -91,7 +90,7 @@ from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
 from cstar.wizard.ui import components
-from cstar.wizard.ui.catalog_bar import CONFIRM_TIMEOUT
+from cstar.wizard.ui.catalog_bar import schedule_confirm_reset
 from cstar.wizard.ui.labels import label_for, section_for
 from cstar.wizard.wizard import (
     _STREAM_READ_SIZE,
@@ -1923,6 +1922,61 @@ class _StepPane:
         self._passthrough_compute = rest
 
 
+def forge_then_run_steps(
+    path: str | Path, names: tuple[str, str] = (FORGE, UCLA_ROMS)
+) -> Generated:
+    """The "forge, then run" steps for the forge blueprint at ``path``.
+
+    A forge step, then a run of the blueprint it emits, sized from that
+    blueprint's partitioning (see :func:`~cstar.orchestration.patterns.forge_then_run`).
+
+    Raises
+    ------
+    ValueError
+        When ``path`` is not a readable forge blueprint.
+    """
+    emitted = emitted_for(path, FORGE)
+    if emitted is None:
+        raise ValueError(f"cannot read a forge blueprint at {str(path)!r}")
+    return forge_then_run(Path(path), emitted, names=names)
+
+
+def forge_then_run_workplan(path: str | Path, name: str) -> Workplan:
+    """A workplan that forges the blueprint at ``path``, then runs what it emits.
+
+    The workplan is named after the blueprint (``name``, as a slug): the
+    workplan name is its run-id.
+
+    Raises
+    ------
+    ValueError
+        When ``path`` is not a readable forge blueprint, or ``name`` has nothing
+        to make a slug of.
+    """
+    generated = forge_then_run_steps(path)
+    return Workplan(
+        name=slugify(name),
+        description=f"Build the inputs of {name} with Forge, then run UCLA-ROMS.",
+        runs=generated.runs,
+        steps=generated.steps,
+    )
+
+
+def default_workplan_path(catalog: Any, name: str, fallback_dir: Path) -> Path:
+    """Where a workplan called ``name`` is saved by default.
+
+    The catalog's ``workplans/<slug>.yaml``, so the Workplan page lists it, or
+    ``fallback_dir/<slug>.yaml`` when there is no writable catalog.
+    """
+    try:
+        slug = slugify(name)
+    except ValueError:
+        slug = "workplan"
+    if catalog is not None and not getattr(catalog, "read_only", False):
+        return Path(catalog.workplans_dir) / f"{slug}.yaml"
+    return fallback_dir / f"{slug}.yaml"
+
+
 # ---------------------------------------------------------------------------
 # the page
 # ---------------------------------------------------------------------------
@@ -2101,13 +2155,8 @@ class _BaseChooser:
         if not path:
             raise ValueError("choose the base blueprint")
         if app == FORGE:
-            emitted = emitted_for(path, FORGE)
-            if emitted is None:
-                raise ValueError(f"cannot read a forge blueprint at {path!r}")
             names = page.unique_names(FORGE, UCLA_ROMS)
-            forge, run = forge_then_run(
-                Path(path), emitted, names=(names[0], names[1])
-            ).steps
+            forge, run = forge_then_run_steps(path, (names[0], names[1])).steps
             return run, [forge]
         if app != UCLA_ROMS:
             raise ValueError(
@@ -2331,11 +2380,13 @@ class WorkplanBuilderPage:
         self._build_run()
         self._build_layout()
         with self.suspended():
-            self._refresh_saved()
+            self.refresh_saved()
             self._sync_compute()
             self.add_step()
             self._refresh_recipes()
         self._rebuild()
+        # every later rebuild follows a user action (see add_forge_then_run)
+        self._changed_since_start = False
 
     # ---- state access ----------------------------------------------------
     @property
@@ -2473,7 +2524,7 @@ class WorkplanBuilderPage:
         )
         self.load_status = W.HTML("")
         self.load_btn.on_click(lambda _b: self._load_saved())
-        self.refresh_saved_btn.on_click(lambda _b: self._refresh_saved())
+        self.refresh_saved_btn.on_click(lambda _b: self.refresh_saved())
         self.load_path_btn.on_click(
             lambda _b: self._load_from_path(self.load_path.value)
         )
@@ -2487,7 +2538,8 @@ class WorkplanBuilderPage:
             return {}
         return {p.stem: p for p in sorted(Path(directory).glob("*.yaml"))}
 
-    def _refresh_saved(self) -> None:
+    def refresh_saved(self) -> None:
+        """Reload the Load list from the catalog's saved workplans."""
         saved = self.saved_workplans()
         with self.suspended():
             self.load_dd.options = [(n, str(p)) for n, p in saved.items()]
@@ -2497,7 +2549,7 @@ class WorkplanBuilderPage:
         self.load_status.value = f"<span class='{kind}'>{_esc(message)}</span>"
 
     def _load_saved(self) -> None:
-        self._refresh_saved()
+        self.refresh_saved()
         if self.load_dd.value:
             self._load_from_path(self.load_dd.value)
 
@@ -2570,6 +2622,7 @@ class WorkplanBuilderPage:
             self._populate(None)
         self._set_load_status("Started a new workplan.")
         self._rebuild()
+        self._changed_since_start = False
 
     def _populate(self, workplan: Workplan | None, *, fresh: bool = True) -> None:
         """Fill every widget from ``workplan`` (``None`` = a blank one step plan).
@@ -3173,15 +3226,8 @@ class WorkplanBuilderPage:
 
     def default_save_path(self) -> Path:
         """Where Save writes by default: the catalog's ``workplans/<slug>.yaml``."""
-        try:
-            slug = slugify(self.name.value)
-        except ValueError:
-            slug = "workplan"
-        catalog = self.catalog
-        if catalog is not None and not getattr(catalog, "read_only", False):
-            return Path(catalog.workplans_dir) / f"{slug}.yaml"
         base = self.loaded_from.parent if self.loaded_from else Path.cwd()
-        return base / f"{slug}.yaml"
+        return default_workplan_path(self.catalog, self.name.value, base)
 
     def _sync_save_path(self) -> None:
         if self._save_touched:
@@ -3197,17 +3243,7 @@ class WorkplanBuilderPage:
 
     def _schedule_reset(self) -> Any:
         """Reset the confirm state after the timeout (on the loop when one runs)."""
-        import asyncio
-
-        try:
-            return asyncio.get_running_loop().call_later(
-                CONFIRM_TIMEOUT, self._reset_confirm
-            )
-        except RuntimeError:
-            timer = threading.Timer(CONFIRM_TIMEOUT, self._reset_confirm)
-            timer.daemon = True
-            timer.start()
-            return timer
+        return schedule_confirm_reset(self._reset_confirm)
 
     def _is_loaded_file(self, target: Path) -> bool:
         try:
@@ -3251,7 +3287,7 @@ class WorkplanBuilderPage:
         self.save_status.value = (
             f"<span class='forge-msg-ok'>Saved {_esc(target)}</span>"
         )
-        self._refresh_saved()
+        self.refresh_saved()
         return target
 
     # ---- recipes card ----------------------------------------------------
@@ -3519,11 +3555,60 @@ class WorkplanBuilderPage:
         )
         if not path:
             raise ValueError("choose a forge blueprint")
-        emitted = emitted_for(path, FORGE)
-        if emitted is None:
-            raise ValueError(f"cannot read a forge blueprint at {path!r}")
         forge_name, run_name = self.unique_names(FORGE, UCLA_ROMS)
-        return forge_then_run(Path(path), emitted, names=(forge_name, run_name))
+        return forge_then_run_steps(path, (forge_name, run_name))
+
+    def add_forge_then_run(self, blueprint_path: str | Path, name: str) -> None:
+        """Add the "forge, then run" steps for the forge blueprint at ``blueprint_path``.
+
+        The Blueprint page calls this to hand its saved blueprint over. A page
+        not edited since it opened (or since New) becomes the workplan the
+        Blueprint page's Save workplan writes, named after the blueprint
+        (``name``); otherwise the two steps are appended under unique names, as
+        the "forge, then run" recipe adds them, and the draft keeps its name. A
+        draft that already forges ``blueprint_path`` is left as it is.
+
+        Raises
+        ------
+        ValueError
+            When ``blueprint_path`` is not a readable forge blueprint.
+        """
+        if self._forges(blueprint_path):
+            self._set_load_status(
+                f"This workplan already forges {blueprint_path}; nothing added."
+            )
+            return
+        if not self._changed_since_start:
+            workplan = forge_then_run_workplan(blueprint_path, name)
+            with self.suspended():
+                self.loaded_from, self.original, self.changes, self.dropped = (
+                    None,
+                    None,
+                    [],
+                    [],
+                )
+                self._populate(workplan)
+            self._rebuild()
+            steps = workplan.steps
+        else:
+            forge_name, run_name = self.unique_names(FORGE, UCLA_ROMS)
+            generated = forge_then_run_steps(blueprint_path, (forge_name, run_name))
+            self._append_generated(generated)
+            steps = generated.steps
+        self._set_load_status(
+            f"Added steps {', '.join(s.name for s in steps)} for {blueprint_path}."
+        )
+
+    def _forges(self, blueprint_path: str | Path) -> bool:
+        """Whether a step of the draft already runs Forge on ``blueprint_path``."""
+        target = Path(blueprint_path).expanduser().resolve()
+        for pane in self.panes:
+            if pane.app != FORGE:
+                continue
+            path, _problems = pane.resolve()
+            if path and Path(path).expanduser().resolve() == target:
+                return True
+        return False
 
     def _upscale(self) -> Generated:
         raise ValueError(
@@ -4194,6 +4279,7 @@ class WorkplanBuilderPage:
         """Regather the draft and refresh every derived display."""
         if self.is_suspended:
             return
+        self._changed_since_start = True
         with self.suspended():
             for pane in self.panes:
                 pane.refresh_choices()

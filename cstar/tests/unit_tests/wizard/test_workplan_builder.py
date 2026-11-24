@@ -1558,6 +1558,99 @@ def test_forge_then_run_recipe_adds_forge_and_deferred_steps(page, tmp_path):
     assert "cannot read a forge blueprint" in page.forge_status.value
 
 
+def _forge_bp_path(page: WorkplanBuilderPage) -> Path:
+    return Path(page.catalog.blueprint_path(wb.FORGE, _FORGE_BP))
+
+
+def test_forge_then_run_workplan_is_named_after_the_blueprint(page, tmp_path):
+    """The Blueprint page's Save workplan: the recipe's two steps, as a workplan
+    whose name (its run-id) is the blueprint name as a slug.
+    """
+    path = _forge_bp_path(page)
+    workplan = wb.forge_then_run_workplan(path, "WIO toy.v2")
+    assert workplan.name == "wio-toy-v2"
+    assert workplan.description
+    forge, run = workplan.steps
+    assert (forge.name, run.name) == ("forge", "ucla_roms")
+    assert forge.application == "forge"
+    assert forge.blueprint_path == str(path.resolve())
+    # the forge step is sized from the forge blueprint at submit time
+    assert forge.compute_overrides == {}
+    assert run.is_deferred and run.blueprint_path.from_step == "forge"
+    assert run.blueprint_path.filename == f"B_{_FORGE_BP}.yaml"
+    assert run.depends_on == ["forge"]
+    assert run.compute_overrides == {"slurm": {"num_cpus": 10}}
+    target = tmp_path / "wp.yaml"
+    target.write_text(wb.yaml_text(workplan))
+    assert deserialize(target, Workplan) == workplan
+
+
+def test_forge_then_run_workplan_refuses_what_it_cannot_build(page, tmp_path):
+    with pytest.raises(ValueError, match="cannot read a forge blueprint"):
+        wb.forge_then_run_workplan(tmp_path / "missing.yaml", "demo")
+    with pytest.raises(ValueError):
+        wb.forge_then_run_workplan(_forge_bp_path(page), "!!!")
+
+
+def test_default_workplan_path_prefers_a_writable_catalog(tmp_path):
+    fallback = tmp_path / "beside"
+    writable = _StubCatalog(tmp_path)
+    assert wb.default_workplan_path(writable, "My Run", fallback) == (
+        tmp_path / "workplans" / "my-run.yaml"
+    )
+    read_only = _StubCatalog(tmp_path, read_only=True)
+    assert wb.default_workplan_path(read_only, "My Run", fallback) == (
+        fallback / "my-run.yaml"
+    )
+    assert wb.default_workplan_path(None, "!!!", fallback) == fallback / "workplan.yaml"
+
+
+def test_add_forge_then_run_fills_an_untouched_page(page):
+    path = _forge_bp_path(page)
+    page.add_forge_then_run(path, "WIO toy")
+    assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
+    assert page.name.value == "wio-toy"
+    assert page.draft is not None
+    assert [s.name for s in page.draft.steps] == ["forge", "ucla_roms"]
+    assert "forge, ucla_roms" in page.load_status.value
+    # New returns the page to its starting state, which is replaced again
+    page._new()
+    page.add_forge_then_run(path, "other")
+    assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
+    assert page.name.value == "other"
+
+
+def test_add_forge_then_run_appends_to_an_edited_page(page):
+    path = _forge_bp_path(page)
+    _name_page(page, "mine")
+    first = page.panes[0].name.value
+    page.add_forge_then_run(path, "WIO toy")
+    assert [p.name.value for p in page.panes] == [first, "forge", "ucla_roms"]
+    assert page.name.value == "mine"
+
+
+def test_add_forge_then_run_adds_a_blueprint_once(page):
+    """A second hand-over of the same blueprint adds nothing, on a page it filled
+    or one it appended to.
+    """
+    path = _forge_bp_path(page)
+    page.add_forge_then_run(path, "WIO toy")
+    page.add_forge_then_run(path, "WIO toy")
+    assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
+    assert "already forges" in page.load_status.value
+    page.panes[0].name.value = "make-inputs"
+    page.add_forge_then_run(path, "WIO toy")
+    assert len(page.panes) == 2
+
+
+def test_add_forge_then_run_refuses_an_unreadable_blueprint(page, tmp_path):
+    before = [p.name.value for p in page.panes]
+    with pytest.raises(ValueError, match="cannot read a forge blueprint"):
+        page.add_forge_then_run(tmp_path / "missing.yaml", "demo")
+    assert [p.name.value for p in page.panes] == before
+    assert page.name.value == ""
+
+
 def test_upscale_recipe_refuses_as_not_yet_supported(page, roms_bp):
     _roms_page(page, roms_bp, "inner")
     outer = page.add_step("outer")

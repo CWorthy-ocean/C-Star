@@ -54,6 +54,8 @@ from cstar.wizard.wizard import (
     _STICKY_STEPS,
     WIZARD_TOOL,
     ForgeBlueprintWizard,
+    ForgeBlueprintWizardApp,
+    WorkplanHooks,
     _applies_in,
     _base_type,
     _drain_stream_buffer,
@@ -6755,8 +6757,8 @@ def test_widget_root_has_forge_wizard_class():
 
 
 def test_every_card_key_is_findable():
-    """Every one of the eight cards (start/model/grid/forcing/run/output/advanced/
-    review) is reachable from the root via its ``forge_key``.
+    """Every one of the nine cards (start/model/grid/forcing/run/output/advanced/
+    review/next) is reachable from the root via its ``forge_key``.
     """
     wiz = ForgeBlueprintWizard()
     root = wiz.widget
@@ -6769,6 +6771,7 @@ def test_every_card_key_is_findable():
         "output",
         "advanced",
         "review",
+        "next",
     ):
         assert _find_card(root, key) is not None, f"missing card {key!r}"
 
@@ -7680,6 +7683,9 @@ def test_catalog_bar_loads_a_single_url_as_one_read_only_store(monkeypatch):
             self.catalog = catalog
             self.widget = w.Label("inner")
 
+        def set_workplan_hooks(self, hooks):
+            pass
+
     monkeypatch.setattr("cstar.catalog.domain_catalog.DomainCatalog", fake_store)
     monkeypatch.setattr("cstar.catalog.domain_catalog.build_catalog_stack", fake_stack)
     monkeypatch.setattr(wizard_module, "ForgeBlueprintWizard", FakeWizard)
@@ -8260,3 +8266,231 @@ class TestCdrLiteCdrPanel:
         wiz._on_cdr_file_attach(None)
 
         assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+
+
+# ===========================================================================
+# Card 8: Next steps (saved-blueprint gate, workplan save, run pane)
+# ===========================================================================
+
+
+def _saved_wizard(tmp_path, *, hooks=None):
+    """A valid wizard over a throwaway catalog, saved to ``tmp_path/bp.yaml``."""
+    app = ForgeBlueprintWizardApp(str(tmp_path / "catalog"))
+    wiz = app.inner
+    assert wiz is not None
+    assert Path(wiz.catalog.workplans_dir).is_relative_to(tmp_path)
+    if hooks is not None:
+        app.set_workplan_hooks(hooks)
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True
+    return wiz
+
+
+def _next_buttons(wiz):
+    return (wiz.save_workplan_btn, wiz.open_workplan_btn, wiz.run_btn)
+
+
+def test_saved_blueprint_survives_a_rebuild_and_not_an_edit(tmp_path):
+    wiz = _saved_wizard(tmp_path)
+    assert wiz._saved_path() is None
+    wiz._on_save(None)
+    assert wiz._saved_path() == (tmp_path / "bp.yaml").resolve()
+    wiz._rebuild()
+    assert wiz._saved_path() == (tmp_path / "bp.yaml").resolve()
+    wiz.end.value = date(2012, 1, 3)
+    assert wiz._saved_path() is None
+
+
+def test_card_seven_ends_at_save_and_card_eight_holds_the_rest():
+    wiz = ForgeBlueprintWizard()
+    root = wiz.widget
+    review = {id(w) for w in _descendants(_find_card(root, "review"))}
+    nxt = {id(w) for w in _descendants(_find_card(root, "next"))}
+    for w in (wiz.run_btn, wiz.save_specs_accordion, wiz.run_forge_pane):
+        assert id(w) not in review
+        assert id(w) in nxt
+    for w in (wiz.next_status, wiz.save_workplan_btn, wiz.open_workplan_btn):
+        assert id(w) not in review
+        assert id(w) in nxt
+    texts = " ".join(
+        getattr(w, "value", "")
+        for w in _descendants(_find_card(root, "review"))
+        if isinstance(getattr(w, "value", None), str)
+    )
+    assert "Workplan page" not in texts
+    assert "Optional" in _find_card(root, "next").forge_header.value
+
+
+def test_card_eight_panes_start_closed_with_their_summaries():
+    wiz = ForgeBlueprintWizard()
+    _ = wiz.widget
+    for pane in (wiz.run_forge_pane, wiz.save_specs_accordion):
+        assert pane.selected_index is None
+    assert "inputs and UCLA-ROMS blueprint only" in wiz.run_forge_pane.get_title()
+    assert "reuse this model" in wiz.save_specs_accordion.get_title()
+    sub = _find_section(wiz.widget, "Run it as a workplan")
+    assert sub is not None
+    assert not hasattr(sub, "selected_index")
+
+
+def test_next_steps_follow_the_saved_state(tmp_path):
+    wiz = _saved_wizard(tmp_path)
+    assert all(b.disabled for b in _next_buttons(wiz))
+    assert "Save the blueprint above first" in wiz.next_status.value
+    wiz._on_save(None)
+    assert not any(b.disabled for b in _next_buttons(wiz))
+    assert str((tmp_path / "bp.yaml").resolve()) in wiz.next_status.value
+    wiz._rebuild()
+    assert not any(b.disabled for b in _next_buttons(wiz))
+    wiz.end.value = date(2012, 1, 3)
+    assert all(b.disabled for b in _next_buttons(wiz))
+    assert "has changed" in wiz.next_status.value
+    wiz.end.value = date(2012, 1, 2)
+    assert not any(b.disabled for b in _next_buttons(wiz))
+    wiz.save_path.value = str(tmp_path / "other.yaml")
+    assert all(b.disabled for b in _next_buttons(wiz))
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz.start.value = None
+    wiz._rebuild()
+    assert wiz.config is None
+    assert all(b.disabled for b in _next_buttons(wiz))
+
+
+def test_a_run_in_progress_keeps_run_disabled_through_a_rebuild(tmp_path):
+    wiz = _saved_wizard(tmp_path)
+    wiz._on_save(None)
+    wiz._run_in_progress = True
+    wiz._rebuild()
+    assert wiz.run_btn.disabled
+    wiz._run_in_progress = False
+    wiz._rebuild()
+    assert not wiz.run_btn.disabled
+
+
+def _load_workplan(path):
+    from cstar.orchestration.models import Workplan
+
+    raw = yaml.safe_load(path.read_text())
+    raw.pop("$schema", None)
+    return Workplan.model_validate(raw)
+
+
+def test_save_workplan_writes_the_forge_then_run_workplan(tmp_path):
+    from cstar.base.utils import slugify
+    from cstar.orchestration.models import DeferredBlueprintRef
+
+    calls = []
+    wiz = _saved_wizard(
+        tmp_path,
+        hooks=WorkplanHooks(
+            open_steps=lambda p, n: None, saved=lambda: calls.append(1)
+        ),
+    )
+    wiz._on_save(None)
+    wiz._on_save_workplan(None)
+    assert wiz.config is not None
+    slug = slugify(wiz.config.name)
+    target = Path(wiz.catalog.workplans_dir) / f"{slug}.yaml"
+    assert target.exists(), wiz.workplan_status.value
+    plan = _load_workplan(target)
+    assert plan.name == slug
+    forge, run = plan.steps
+    assert [forge.name, run.name] == ["forge", "ucla_roms"]
+    assert forge.application == "forge"
+    assert Path(str(forge.blueprint_path)) == (tmp_path / "bp.yaml").resolve()
+    assert not forge.compute_overrides
+    assert run.depends_on == ["forge"]
+    assert isinstance(run.blueprint_path, DeferredBlueprintRef)
+    assert run.blueprint_path.from_step == "forge"
+    assert run.compute_overrides["slurm"]["num_cpus"] == wiz.config.n_procs
+    assert "download=" in wiz.workplan_download.value
+    assert calls == [1]
+    assert "cstar workplan submit" in wiz.workplan_status.value
+
+
+def test_save_workplan_asks_before_replacing_a_different_file(tmp_path):
+    wiz = _saved_wizard(tmp_path)
+    wiz._on_save(None)
+    wiz._on_save_workplan(None)
+    target = next(Path(wiz.catalog.workplans_dir).glob("*.yaml"))
+    good = target.read_text()
+    target.write_text("different: true\n")
+    wiz._on_save_workplan(None)
+    assert wiz.save_workplan_btn.description == "Confirm overwrite"
+    assert wiz.save_workplan_btn.button_style == "danger"
+    assert target.read_text() == "different: true\n"
+    wiz._on_save_workplan(None)
+    assert target.read_text() == good
+    assert wiz.save_workplan_btn.description == "Save workplan"
+    assert wiz.save_workplan_btn.button_style == "primary"
+    # identical text: no confirm
+    wiz._on_save_workplan(None)
+    assert wiz.save_workplan_btn.description == "Save workplan"
+    # an edit disarms
+    target.write_text("different: true\n")
+    wiz._on_save_workplan(None)
+    assert wiz._workplan_confirm == target
+    wiz.end.value = date(2012, 1, 3)
+    assert wiz._workplan_confirm is None
+    assert wiz.save_workplan_btn.description == "Save workplan"
+
+
+def test_save_workplan_without_a_current_save_is_refused(tmp_path):
+    wiz = _saved_wizard(tmp_path)
+    wiz._on_save_workplan(None)
+    assert "Save the blueprint above first" in wiz.workplan_status.value
+    assert not list(Path(wiz.catalog.workplans_dir).glob("*.yaml"))
+    wiz._on_save(None)
+    (tmp_path / "bp.yaml").unlink()
+    wiz._on_save_workplan(None)
+    assert "gone" in wiz.workplan_status.value
+
+
+def test_open_in_builder_is_hidden_without_hooks(tmp_path):
+    assert ForgeBlueprintWizard().open_workplan_btn.layout.display == "none"
+    app = ForgeBlueprintWizardApp(str(tmp_path / "catalog"))
+    assert app.inner is not None
+    assert app.inner.open_workplan_btn.layout.display == "none"
+    hooks = WorkplanHooks(open_steps=lambda p, n: None, saved=lambda: None)
+    app.set_workplan_hooks(hooks)
+    assert app.inner.open_workplan_btn.layout.display == ""
+    app._load(str(tmp_path / "catalog"))
+    assert app.inner._workplan_hooks is hooks
+    assert app.inner.open_workplan_btn.layout.display == ""
+
+
+def test_open_in_builder_calls_the_hook(tmp_path):
+    seen = []
+
+    def open_steps(path, name):
+        seen.append((path, name))
+        if len(seen) > 1:
+            raise ValueError("no good")
+
+    wiz = _saved_wizard(
+        tmp_path, hooks=WorkplanHooks(open_steps=open_steps, saved=lambda: None)
+    )
+    wiz._on_save(None)
+    wiz._on_open_workplan(None)
+    assert seen == [((tmp_path / "bp.yaml").resolve(), wiz.config.name)]
+    assert "Opened the Workplan page" in wiz.workplan_status.value
+    wiz._on_open_workplan(None)
+    assert "no good" in wiz.workplan_status.value
+
+
+def test_run_log_lands_while_the_pane_is_collapsed(monkeypatch, tmp_path):
+    import asyncio
+
+    wiz = _saved_wizard(tmp_path)
+    _ = wiz.widget
+    wiz.run_forge_pane.selected_index = None
+
+    async def _fake(*args, **kwargs):
+        return _FakeProcess([b"line one\n"], returncode=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake)
+    wiz._on_run(None)
+    assert "line one" in "".join(o["text"] for o in wiz.run_output.outputs)
