@@ -34,7 +34,7 @@ import warnings
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel
@@ -116,7 +116,7 @@ from cstar.base.env import (
 )
 from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
-from cstar.wizard.ui.catalog_bar import CatalogBar
+from cstar.wizard.ui.catalog_bar import CatalogBar, schedule_confirm_reset
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
 
 if TYPE_CHECKING:
@@ -2695,7 +2695,8 @@ _STICKY_STEPS = (
     ("run", "Run"),
     ("output", "Output"),
     ("advanced", "Advanced"),
-    ("review", "Review"),
+    ("review", "Save"),
+    ("next", "Next steps"),
 )
 
 # Valid source names per (category, type).  Drives name dropdowns in the forcing editor.
@@ -5494,6 +5495,30 @@ def _plot_topography_source(name: str, path: str) -> tuple[dict[str, str] | None
     )
 
 
+_SAVE_FIRST = "Save the blueprint above first."
+"""Card 8's message while the blueprint is not saved as it stands."""
+
+
+class _SavedBlueprint(NamedTuple):
+    """The last blueprint file the wizard wrote, and what it wrote."""
+
+    requested: Path  #: the Save path the save was made with, as given
+    path: Path  #: the file written, resolved
+    text: str  #: ``to_yaml_str()`` of the config written
+
+
+class WorkplanHooks(NamedTuple):
+    """What the Blueprint page needs from a Workplan page, when it sits beside one."""
+
+    open_steps: Callable[[Path, str], None]
+    """Add the forge-then-run steps for (saved blueprint path, blueprint name) to the
+    Workplan page and show that page. May raise ``ValueError``."""
+
+    saved: Callable[[], None]
+    """A workplan file was written into the catalog: refresh the Workplan page's
+    Load list."""
+
+
 class ForgeBlueprintWizard:
     """Build/curate a :class:`ForgeBlueprint` interactively. ``self.config`` holds the
     latest successfully-resolved config (``None`` while inputs are invalid).
@@ -6501,6 +6526,24 @@ class ForgeBlueprintWizard:
         self.run_btn = W.Button(description="Run", icon="play")
         self.run_status = W.HTML("")
 
+        # --- next steps: what to do with the saved blueprint ---
+        self.next_status = W.HTML("")
+        self.save_workplan_btn = W.Button(
+            description="Save workplan", icon="save", button_style="primary"
+        )
+        self.open_workplan_btn = W.Button(
+            description="Open in the Workplan builder",
+            icon="arrow-right",
+            layout=W.Layout(display="none"),
+        )
+        self.workplan_status = W.HTML("")
+        self.workplan_download = W.HTML("")
+        self._run_in_progress = False
+        self._workplan_hooks: WorkplanHooks | None = None
+        self._workplan_confirm: Path | None = None
+        self._workplan_confirm_timer: Any = None
+        self._saved_blueprint: _SavedBlueprint | None = None
+
         # Keep the run log pinned to the LATEST lines instead of snapping to the
         # top on every append. Two cooperating pieces (verified live in voila):
         # 1. display=flex + column-reverse on this node anchors its scroll
@@ -6590,6 +6633,8 @@ class ForgeBlueprintWizard:
         self.save_forcing_btn.on_click(self._on_save_forcing)
         self.save_cdr_btn.on_click(self._on_save_cdr)
         self.run_btn.on_click(self._on_run)
+        self.save_workplan_btn.on_click(self._on_save_workplan)
+        self.open_workplan_btn.on_click(self._on_open_workplan)
         self.load_btn.on_click(self._on_load_path)
         self.load_catalog_btn.on_click(self._on_load_from_catalog)
         self.upload.observe(self._on_upload, names="value")
@@ -6698,6 +6743,7 @@ class ForgeBlueprintWizard:
         if getattr(self, "_suspended", False):
             return
         self._save_path_touched = True
+        self._sync_next_steps()
 
     def _dd_options(
         self,
@@ -9944,6 +9990,7 @@ class ForgeBlueprintWizard:
         self._retitle_settings_editor()
         if self.editor is not None:
             self.editor.set_run_window(self._run_window_seconds())
+        self._sync_next_steps()
 
     def _run_window_seconds(self) -> float | None:
         """The run window's length in seconds, or ``None`` while it is unset or
@@ -10301,7 +10348,154 @@ class ForgeBlueprintWizard:
         self._carried_provenance = stamped.provenance
         self.config = stamped
         self._refresh_download_links(stamped)
+        self._saved_blueprint = _SavedBlueprint(
+            Path(path), Path(written).expanduser().resolve(), stamped.to_yaml_str()
+        )
+        self._sync_next_steps()
         return written
+
+    def _saved_path(self) -> Path | None:
+        """The file the current config was last saved to, or ``None`` when there is
+        no such file: nothing saved yet, the config edited since, or the Save path
+        changed. Compared in memory (this runs on every rebuild), so a file deleted
+        or edited on disk is not noticed here.
+        """
+        saved = self._saved_blueprint
+        if (
+            self.config is None
+            or saved is None
+            or Path(self.save_path.value) != saved.requested
+            or self.config.to_yaml_str() != saved.text
+        ):
+            return None
+        return saved.path
+
+    # ---- next steps ------------------------------------------------------------
+    def set_workplan_hooks(self, hooks: WorkplanHooks | None) -> None:
+        """Connect this page to a Workplan page (or disconnect it with ``None``).
+
+        Without hooks only "Save workplan" shows: there is no page to open.
+        """
+        self._workplan_hooks = hooks
+        self.open_workplan_btn.layout.display = "" if hooks else "none"
+        self._sync_next_steps()
+
+    def _sync_next_steps(self) -> None:
+        """Make card 8 follow whether the blueprint above is saved and current."""
+        path = self._saved_path()
+        ready = path is not None
+        saved = self._saved_blueprint
+        if path is not None:
+            note = f"Saved to <code>{html.escape(str(path))}</code>."
+        elif saved is not None and self.config is not None:
+            note = (
+                f"{_SAVE_FIRST} It has changed since you saved it to "
+                f"<code>{html.escape(str(saved.path))}</code>."
+            )
+        else:
+            note = _SAVE_FIRST
+        self.next_status.value = f"<span class='forge-hint'>{note}</span>"
+        self.save_workplan_btn.disabled = self.open_workplan_btn.disabled = not ready
+        self.run_btn.disabled = self._run_in_progress or not ready
+        if not ready:
+            self.workplan_download.value = ""
+            self._reset_workplan_confirm()
+
+    def _workplan_msg(self, kind: str, message: str) -> None:
+        self.workplan_status.value = f"<span class='forge-msg-{kind}'>{message}</span>"
+
+    def _reset_workplan_confirm(self) -> None:
+        """Disarm the overwrite confirm: cancel its timer, restore the button."""
+        if self._workplan_confirm_timer is not None:
+            self._workplan_confirm_timer.cancel()
+        self._workplan_confirm = self._workplan_confirm_timer = None
+        self.save_workplan_btn.description = "Save workplan"
+        self.save_workplan_btn.button_style = "primary"
+
+    def _on_save_workplan(self, _btn: Any) -> None:
+        """Write the forge-then-run workplan for the saved blueprint to the catalog's
+        ``workplans/`` (beside the blueprint when there is no writable catalog), and
+        offer it for download. Replacing a different file takes a second click.
+        """
+        from cstar.wizard.workplan_builder import (
+            WorkplanBuilderPage,
+            default_workplan_path,
+            forge_then_run_workplan,
+            yaml_text,
+        )
+
+        path = self._saved_path()
+        if path is None or self.config is None:
+            self._workplan_msg("err", _SAVE_FIRST)
+            return
+        if not path.exists():
+            self._workplan_msg(
+                "err",
+                f"The saved blueprint <code>{html.escape(str(path))}</code> is "
+                "gone; save it again above.",
+            )
+            return
+        try:
+            workplan = forge_then_run_workplan(path, self.config.name)
+        except ValueError as exc:
+            self._workplan_msg("err", html.escape(str(exc)))
+            return
+        text = yaml_text(workplan)
+        target = default_workplan_path(self.catalog, workplan.name, path.parent)
+        shown = html.escape(str(target))
+        if target.exists() and self._workplan_confirm != target:
+            try:
+                differs = target.read_text() != text
+            except OSError:
+                differs = True
+            if differs:
+                self._reset_workplan_confirm()
+                self._workplan_confirm = target
+                self.save_workplan_btn.description = "Confirm overwrite"
+                self.save_workplan_btn.button_style = "danger"
+                self._workplan_confirm_timer = schedule_confirm_reset(
+                    self._reset_workplan_confirm
+                )
+                self._workplan_msg(
+                    "warn",
+                    f"A different workplan is already saved at <code>{shown}</code>. "
+                    "Click Confirm overwrite to replace it.",
+                )
+                return
+        self._reset_workplan_confirm()
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+        except OSError as exc:
+            self._workplan_msg("err", html.escape(f"{type(exc).__name__}: {exc}"))
+            return
+        self._workplan_msg(
+            "ok",
+            f"Saved <code>{shown}</code>. Submit it with <code>cstar workplan submit "
+            f"{shown}</code>, or open it in the Workplan builder to add compute "
+            "settings.",
+        )
+        self.workplan_download.value = WorkplanBuilderPage._download_html(
+            workplan, text
+        )
+        if self._workplan_hooks is not None:
+            self._workplan_hooks.saved()
+
+    def _on_open_workplan(self, _btn: Any) -> None:
+        """Add the forge and run steps for the saved blueprint to the Workplan page."""
+        hooks = self._workplan_hooks
+        path = self._saved_path()
+        if hooks is None or path is None or self.config is None:
+            self._workplan_msg("err", _SAVE_FIRST)
+            return
+        try:
+            hooks.open_steps(path, self.config.name)
+        except ValueError as exc:
+            self._workplan_msg("err", html.escape(str(exc)))
+            return
+        self._workplan_msg(
+            "ok", "Opened the Workplan page with the forge and run steps."
+        )
 
     def _on_save(self, _):
         if not self._ensure_boundaries_derived():
@@ -10680,6 +10874,7 @@ class ForgeBlueprintWizard:
         """
         import asyncio
 
+        self._run_in_progress = True
         self.run_btn.disabled = True
         self.run_output.clear_output(wait=True)
         self.run_status.value = "<i>saving blueprint…</i>"
@@ -10732,16 +10927,17 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}{where}</span>"
             )
         finally:
-            self.run_btn.disabled = False
+            self._run_in_progress = False
+            self._sync_next_steps()
 
     # ---- layout / display ----------------------------------------------------
     @property
     def widget(self):
         """The wizard's root widget: a ``forge-app``/``forge-wizard`` ``W.VBox``
-        of a sticky status bar, an intro line, and the eight cards (Start,
-        Model, Grid, Forcing, Run, Output, Advanced, Review). Built once and cached in
-        ``self._root`` -- repeated access returns the same tree, so widgets
-        placed in it keep their identity across a rebuild.
+        of a sticky status bar, an intro line, and the nine cards (Start,
+        Model, Grid, Forcing, Run, Output, Advanced, Review, Next steps). Built
+        once and cached in ``self._root`` -- repeated access returns the same
+        tree, so widgets placed in it keep their identity across a rebuild.
         """
         if self._root is not None:
             return self._root
@@ -11125,7 +11321,10 @@ class ForgeBlueprintWizard:
                     ),
                 ]
             ),
-            section_for("review.save_specs").title,
+            components.accordion_title(
+                section_for("next.save_specs").title,
+                components.Pill(section_for("next.save_specs").desc, "off"),
+            ),
         )
 
         review_card = components.card(
@@ -11141,23 +11340,52 @@ class ForgeBlueprintWizard:
                 W, "save_path", self.save_path, extra=(self.save_btn,)
             ),
             self.save_status,
-            self.save_specs_accordion,
-            components.subsection(
-                W,
-                "review.run",
-                self.run_warning,
-                self.run_later_note,
-                W.HBox([self.run_btn, self.run_status]),
-                self._run_log_style,
-                self.run_output,
-            ),
-            W.HTML(
-                "<span style='color:#666'>ℹ To run this blueprint as part of a "
-                "workplan, build one on the Workplan page.</span>"
-            ),
             num=7,
             chips_widget=self.card_chips["review"],
             required_chip=False,
+        )
+
+        run_forge = section_for("next.run_forge")
+        self.run_forge_pane = components.collapsible(
+            W,
+            W.VBox(
+                [
+                    W.HTML(
+                        "<p class='forge-hint'>Runs Forge in this session to build "
+                        "the input files and the UCLA-ROMS blueprint. It does not "
+                        "run UCLA-ROMS; to do both, use a workplan above.</p>"
+                    ),
+                    self.run_warning,
+                    self.run_later_note,
+                    W.HBox([self.run_btn, self.run_status]),
+                    self._run_log_style,
+                    self.run_output,
+                ]
+            ),
+            components.accordion_title(
+                run_forge.title, components.Pill(run_forge.desc, "off")
+            ),
+        )
+        workplan_sub = components.subsection(
+            W,
+            "next.workplan",
+            W.HTML(
+                "<p class='forge-hint'>Most runs need both steps: Forge builds the "
+                "inputs and the UCLA-ROMS blueprint, then UCLA-ROMS runs it. Save a "
+                "workplan that does both.</p>"
+            ),
+            W.HBox([self.save_workplan_btn, self.open_workplan_btn]),
+            self.workplan_status,
+            self.workplan_download,
+        )
+        next_card = components.card(
+            W,
+            "next",
+            self.next_status,
+            workplan_sub,
+            self.run_forge_pane,
+            self.save_specs_accordion,
+            num=8,
         )
 
         root = W.VBox(
@@ -11173,6 +11401,7 @@ class ForgeBlueprintWizard:
                 output_card,
                 advanced_card,
                 review_card,
+                next_card,
             ]
         )
         root.add_class("forge-app")
@@ -11214,6 +11443,7 @@ class ForgeBlueprintWizardApp:
 
         self.W = W
         self.inner: ForgeBlueprintWizard | None = None
+        self._workplan_hooks: WorkplanHooks | None = None
 
         self._bar = CatalogBar(W, on_reload=self._load)
 
@@ -11224,6 +11454,12 @@ class ForgeBlueprintWizardApp:
     def widget(self) -> Any:
         """The app's root widget: the catalog bar above the wizard's own widget."""
         return self._outer
+
+    def set_workplan_hooks(self, hooks: WorkplanHooks | None) -> None:
+        """Connect the wizard (now and after each Reload) to a Workplan page."""
+        self._workplan_hooks = hooks
+        if self.inner is not None:
+            self.inner.set_workplan_hooks(hooks)
 
     def _load(self, catalog_root_value: str | None) -> None:
         from cstar.catalog.domain_catalog import (
@@ -11262,6 +11498,7 @@ class ForgeBlueprintWizardApp:
             self._bar.set_error(val, exc)
             return
 
+        inner.set_workplan_hooks(self._workplan_hooks)
         self.inner = inner
         self._bar.set_status_for(cat)
         self._outer.children = [self._bar.widget, inner.widget]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ pytest.importorskip("ipywidgets")
 import ipywidgets as W
 import zmq
 
+from cstar.base.utils import slugify
 from cstar.wizard.ui import shell as shell_module
 from cstar.wizard.ui.shell import (
     AppShell,
@@ -168,3 +171,22 @@ def test_app_lifts_iopub_limit(build):
     with patch.object(shell_module, "queue_iopub_instead_of_dropping") as lift:
         build()
     lift.assert_called_once_with()
+
+
+def test_open_in_the_workplan_builder_adds_the_steps_and_switches_page(tmp_path):
+    shell = app(catalog_root=str(tmp_path / "catalog"))
+    blueprint_page = shell.pages[0][1]
+    wiz = blueprint_page.inner
+    assert Path(wiz.catalog.workplans_dir).is_relative_to(tmp_path)
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True
+    wiz._on_save(None)
+    wiz._on_open_workplan(None)
+    assert shell.nav.index == 1
+    assert shell.stack.selected_index == 1
+    page = shell.pages[1][1]
+    assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
+    assert page.name.value == slugify(wiz.config.name)

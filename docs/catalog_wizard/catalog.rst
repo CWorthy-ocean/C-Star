@@ -101,7 +101,8 @@ Adding your own entries
 -----------------------
 
 The simplest way is through the wizard: edit a spec in its section and use
-**Save specs to catalog** in the Review section to store it under a new name.
+**Save specs to the catalog** in the Next steps section to store it under a
+new name.
 You can also create the YAML file by hand, following a bundled entry of the
 same kind as a template; the catalog is rescanned when the wizard is
 reloaded.

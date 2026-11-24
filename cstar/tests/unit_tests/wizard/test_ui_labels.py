@@ -66,6 +66,7 @@ _REQUIRED_SECTION_IDS = (
     "output",
     "advanced",
     "review",
+    "next",
     "grid.geometry",
     "grid.vertical",
     "grid.bathymetry",
@@ -75,8 +76,9 @@ _REQUIRED_SECTION_IDS = (
     "run.window",
     "run.partitioning",
     "run.cdr",
-    "review.save_specs",
-    "review.run",
+    "next.workplan",
+    "next.run_forge",
+    "next.save_specs",
 )
 
 
@@ -212,7 +214,7 @@ def test_all_required_section_ids_present():
 def test_required_top_level_sections_flagged_required():
     for key in ("model", "grid", "forcing", "run"):
         assert labels.section_for(key).required is True
-    for key in ("start", "advanced", "review"):
+    for key in ("start", "advanced", "review", "next"):
         assert labels.section_for(key).required is False
 
 

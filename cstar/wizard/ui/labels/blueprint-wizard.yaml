@@ -36,7 +36,11 @@ sections:
     required: false
   review:
     title: Review and export
-    desc: Check the resolved blueprint, then download it or save it to the catalog.
+    desc: Check the resolved blueprint, then save it or download it.
+    required: false
+  next:
+    title: Next steps
+    desc: Run the saved blueprint as a workplan, build its inputs here, or save its specs to the catalog.
     required: false
 
   # --- model subsections --------------------------------------------------------
@@ -103,14 +107,18 @@ sections:
     desc: Optional carbon dioxide removal forcing, imported or hand-authored.
     required: false
 
-  # --- review subsections --------------------------------------------------------
-  review.save_specs:
-    title: Save specs to catalog
-    desc: Save any modified model, domain, forcing, output, or CDR spec as a new named catalog entry.
+  # --- next steps subsections --------------------------------------------------------
+  next.workplan:
+    title: Run it as a workplan
+    desc: Forge the inputs, then run UCLA-ROMS, as one workplan.
     required: false
-  review.run:
-    title: Run
-    desc: Invoke the C-Star CLI on the saved blueprint.
+  next.run_forge:
+    title: Run Forge here
+    desc: inputs and UCLA-ROMS blueprint only · runs on this machine
+    required: false
+  next.save_specs:
+    title: Save specs to the catalog
+    desc: reuse this model, domain or forcing setup in other blueprints
     required: false
 
   # --- example: an Advanced-settings section (namespace exercised, not exhaustive) ---

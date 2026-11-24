@@ -9,9 +9,12 @@ may be raw ipywidgets widgets or any object exposing a ``.widget`` property
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cstar.wizard.ui import branding, components
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _carries_style(widgets: list[Any]) -> bool:
@@ -72,6 +75,16 @@ class AppShell:
         self.root = W.VBox([*style_children, header, self.nav, self.stack])
         self.root.add_class("forge-app")
         self.root.add_class("forge-shell")
+
+    def show(self, title: str) -> None:
+        """Bring the page called ``title`` to the front.
+
+        Sets the nav and the stack both: ``jslink`` only syncs them in a
+        browser, and a kernel with no frontend attached must switch too.
+        """
+        index = [t for t, _ in self.pages].index(title)
+        self.nav.index = index
+        self.stack.selected_index = index
 
     def display(self) -> None:
         """Display the shell's root widget."""
@@ -143,14 +156,19 @@ def app(catalog_root: str | None = None) -> AppShell:
     The Workplan page shares the Blueprint page's app (and so its catalog).
     Imports are lazy (both pages, in turn, lazily import ipywidgets).
     """
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.wizard import ForgeBlueprintWizardApp, WorkplanHooks
     from cstar.wizard.workplan_builder import WorkplanBuilderPage
 
     queue_iopub_instead_of_dropping()
     blueprint_page = ForgeBlueprintWizardApp(catalog_root)
-    return AppShell(
-        [
-            ("Blueprint", blueprint_page),
-            ("Workplan", WorkplanBuilderPage(blueprint_page)),
-        ]
+    workplan_page = WorkplanBuilderPage(blueprint_page)
+    shell = AppShell([("Blueprint", blueprint_page), ("Workplan", workplan_page)])
+
+    def open_steps(blueprint_path: Path, name: str) -> None:
+        workplan_page.add_forge_then_run(blueprint_path, name)
+        shell.show("Workplan")
+
+    blueprint_page.set_workplan_hooks(
+        WorkplanHooks(open_steps=open_steps, saved=workplan_page.refresh_saved)
     )
+    return shell

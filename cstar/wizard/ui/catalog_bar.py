@@ -24,8 +24,27 @@ if TYPE_CHECKING:
 #: Strips HTML tags from a status string to build its ``title=`` plain-text.
 _TAG_RE = re.compile(r"<[^>]+>")
 
-#: Seconds the "Confirm reload" state stays armed before resetting.
+#: Seconds a two-click confirm (reload, overwrite) stays armed before resetting.
 CONFIRM_TIMEOUT = 5.0
+
+
+def schedule_confirm_reset(reset: Callable[[], None]) -> Any:
+    """Arrange for ``reset`` to run after :data:`CONFIRM_TIMEOUT` seconds.
+
+    Widget state must be mutated on the kernel's event-loop thread for the
+    update to reach the frontend reliably, so when a loop is running (the
+    normal ipykernel case) the reset is scheduled with ``call_later`` on it.
+    Only when no loop is running (plain Python, tests) does this fall back to
+    a daemon ``threading.Timer``. Both returned handles expose ``cancel()``.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        timer = threading.Timer(CONFIRM_TIMEOUT, reset)
+        timer.daemon = True
+        timer.start()
+        return timer
+    return loop.call_later(CONFIRM_TIMEOUT, reset)
 
 
 class CatalogBar:
@@ -133,23 +152,8 @@ class CatalogBar:
         self._confirm_timer = None
 
     def _schedule_reset(self) -> Any:
-        """Arrange for `_reset_confirm` to run after ``CONFIRM_TIMEOUT`` seconds.
-
-        Widget state must be mutated on the kernel's event-loop thread for the
-        update to reach the frontend reliably, so when a loop is running (the
-        normal ipykernel case) the reset is scheduled with ``call_later`` on
-        it. Only when no loop is running (plain Python, tests) does this fall
-        back to a daemon ``threading.Timer``. Both returned handles expose
-        ``cancel()``.
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            timer = threading.Timer(CONFIRM_TIMEOUT, self._reset_confirm)
-            timer.daemon = True
-            timer.start()
-            return timer
-        return loop.call_later(CONFIRM_TIMEOUT, self._reset_confirm)
+        """Arrange for `_reset_confirm` to run after ``CONFIRM_TIMEOUT`` seconds."""
+        return schedule_confirm_reset(self._reset_confirm)
 
     def _on_reload_click(self, _btn: Any) -> None:
         """Handle a reload-button click: arm on the first click, confirm on the second."""
