@@ -1620,6 +1620,117 @@ _HOSTED_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
 _HOSTED_KEYS = frozenset(key for keys in _HOSTED_FIELDS.values() for key in keys)
 
 
+# The output tables' one column template (label | Write | Period | Records | the
+# stream's extras), so Write/Period/Records line up down the whole card: the middle
+# columns sit at their maximum until the card is too narrow, then shrink.
+_OUTPUT_TABLE_COLUMNS = (
+    "minmax(160px, 1.3fr) minmax(70px, 150px) minmax(130px, 190px) "
+    "minmax(130px, 150px) minmax(120px, 1.2fr)"
+)
+# Output-table rows whose stream writes a record at the run's first step as well
+# as one per period (ucla-roms basic_output.F90 and bgc_io.F90 write history at the
+# first step; averages and the rest only once a period has passed).
+_INITIAL_RECORD_PERIODS = frozenset(
+    {
+        ("ocean_vars", "output_period_his"),
+        ("bgc", "output_period_his"),
+        ("bgc", "output_period_his_dia"),
+    }
+)
+# A _VARIABLE_GRIDS list of at least this many variables is a collapsible pane.
+_VARIABLE_GRID_COLLAPSE_AT = 8
+# (section, _VARIABLE_GRIDS title) -> the output-table Write flag of the stream
+# that list belongs to, for the pane's "this stream is off" note.
+_VARIABLE_GRID_STREAMS: dict[tuple[str, str], str] = {
+    ("ocean_vars", "Variables in history files"): "wrt_file_his",
+    ("ocean_vars", "Variables in average files"): "wrt_file_avg",
+}
+
+
+def _model_time_text(seconds: float) -> str:
+    """``seconds`` in the largest whole unit (``"1 day"``, ``"6 hours"``,
+    ``"90 minutes"``), or ``""`` when it is not a whole number of minutes.
+    """
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if seconds >= size and seconds % size == 0:
+            n = int(seconds // size)
+            return f"{n} {unit}{'' if n == 1 else 's'}"
+    return ""
+
+
+def _widget_number(widget: Any) -> float | None:
+    """A number widget's value as a float, or ``None`` when it holds none."""
+    try:
+        return float(widget.value)
+    except (TypeError, ValueError):
+        return None
+
+
+class _StreamReadout:
+    """The readouts of one output-table row: its period in model time ("= 1 day")
+    beside the period box and, once the wizard gives the run window
+    (``_SettingsEditor.set_run_window``), how long each file spans and how many
+    files the run writes. Both follow the row's widgets as they change, and say
+    nothing while the period box is hidden or fixed by a monthly cadence; the file
+    count also waits for a written stream with a records-per-file box.
+    """
+
+    def __init__(
+        self,
+        W: Any,
+        period: Any,
+        records: Any | None,
+        write: Any | None,
+        *,
+        initial_record: bool,
+    ) -> None:
+        self.period, self.records, self.write = period, records, write
+        self.initial_record = initial_record
+        self.run_seconds: float | None = None
+        self.period_html = W.HTML()
+        self.period_html.add_class("forge-out-per")
+        self.files_html = W.HTML()
+        self.files_html.add_class("forge-out-files")
+        for widget in (period, records, write):
+            if widget is not None:
+                widget.observe(self.render, names="value")
+        period.observe(self.render, names="disabled")
+        period.layout.observe(self.render, names="display")
+        self.render()
+
+    def render(self, _change: Any = None) -> None:
+        period = _widget_number(self.period)
+        live = (
+            self.period.layout.display != "none"
+            and not self.period.disabled
+            and period is not None
+            and period > 0
+        )
+        model_time = _model_time_text(period) if live and period else ""
+        self.period_html.value = f"= {model_time}" if model_time else ""
+        self.files_html.value = self._files_text(period) if live else ""
+
+    def _files_text(self, period: float | None) -> str:
+        n_records = _widget_number(self.records) if self.records is not None else None
+        if (
+            period is None
+            or not n_records
+            or n_records < 1
+            or not self.run_seconds
+            or (self.write is not None and not self.write.value)
+        ):
+            return ""
+        per_file = int(n_records)
+        span = period * per_file
+        records = int(self.run_seconds // period) + (1 if self.initial_record else 0)
+        files = max(1, -(-records // per_file))  # ceiling division
+        held = _model_time_text(span) or f"{span:g} s"
+        return (
+            f"each file holds {held} · {files} file{'' if files == 1 else 's'} "
+            "over this run"
+        )
+
+
 def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = None):
     """Prepare an already-built settings widget for a table cell.
 
@@ -1636,7 +1747,11 @@ def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = 
 
 
 def _build_output_table(
-    W, section: str, built: dict[_FieldKey, Any], consumed: set[_FieldKey]
+    W,
+    section: str,
+    built: dict[_FieldKey, Any],
+    consumed: set[_FieldKey],
+    readouts: list[_StreamReadout] | None = None,
 ) -> Any | None:
     """A ``W.GridBox`` (class ``forge-out-table``) collecting ``section``'s
     eligible :data:`_OUTPUT_TABLES` rows into one Write / Period / Records
@@ -1651,6 +1766,7 @@ def _build_output_table(
     plain flat-list fallback skips them. Widgets are REUSED, never rebuilt:
     the write/period/records widget's ``description``/``layout.width`` are
     tweaked in place (registry identity in ``self._widgets`` is untouched).
+    Each row's :class:`_StreamReadout` is appended to ``readouts``.
     """
     # A row qualifies when its period field (and its write flag, if it names
     # one) was built; records/extra cells are optional because some fields
@@ -1707,26 +1823,42 @@ def _build_output_table(
             consumed.update(present_extras)
             present_extras = []
 
-        cells.append(_as_table_cell(built[period_key], width="120px"))
+        has_records = records_key is not None and records_key in built
+        readout = _StreamReadout(
+            W,
+            built[period_key],
+            built[records_key] if has_records else None,
+            built[write_key] if write_key is not None else None,
+            initial_record=(section, period_key) in _INITIAL_RECORD_PERIODS,
+        )
+        if readouts is not None:
+            readouts.append(readout)
+        period_cell = W.HBox(
+            [_as_table_cell(built[period_key], width="96px"), readout.period_html]
+        )
+        period_cell.add_class("forge-out-period")
+        cells.append(period_cell)
         consumed.add(period_key)
 
-        if records_key is not None and records_key in built:
+        if has_records:
             cells.append(_as_table_cell(built[records_key], width="120px"))
             consumed.add(records_key)
         else:
             cells.append(W.HTML("<span class='sym'>—</span>"))
 
         extras = [built[k] for k in present_extras]
+        for extra in extras:
+            if not isinstance(extra, W.Checkbox):
+                # The label sizes to its text (and ellipsises in the cell).
+                extra.style.description_width = "initial"
         consumed.update(present_extras)
-        cells.append(W.HBox(extras))
+        cells.append(W.HBox([readout.files_html, *extras]))
 
     table = W.GridBox(
         cells,
         layout=W.Layout(
-            grid_template_columns=(
-                "minmax(200px, 1.4fr) minmax(70px, auto) 140px 140px minmax(0, 1.2fr)"
-            ),
-            grid_gap="4px 12px",
+            grid_template_columns=_OUTPUT_TABLE_COLUMNS,
+            grid_gap="0 12px",
             align_items="center",
         ),
     )
@@ -1737,9 +1869,12 @@ def _build_output_table(
 def _build_variable_grids(
     W, section: str, built: dict[_FieldKey, Any], consumed: set[_FieldKey]
 ) -> list[Any]:
-    """A title + ``W.GridBox`` (class ``forge-var-grid``) pair per
-    :data:`_VARIABLE_GRIDS` entry with at least one field present in
-    ``built``, as a flat ``[title, grid, title, grid, ...]`` list.
+    """A ``W.GridBox`` of checkboxes (class ``forge-var-grid``) per
+    :data:`_VARIABLE_GRIDS` entry with at least one field present in ``built``:
+    a list of :data:`_VARIABLE_GRID_COLLAPSE_AT` or more variables as a closed
+    collapsible pane titled with a live "n of m selected" (and a note while its
+    stream, :data:`_VARIABLE_GRID_STREAMS`, is not written), a shorter one under a
+    small title, as a flat list of widgets.
 
     Only the fields actually present are rendered (a grid can list more
     fields than a given ``settings_cls`` models); consumed keys are added to
@@ -1751,17 +1886,38 @@ def _build_variable_grids(
         present = [k for k in keys if k in built and k not in consumed]
         if not present:
             continue
-        out.append(W.HTML(f"<div class='forge-var-title'>{title}</div>"))
+        boxes = [built[k] for k in present]
         grid = W.GridBox(
-            [built[k] for k in present],
+            boxes,
             layout=W.Layout(
                 grid_template_columns="repeat(4, minmax(0, 1fr))",
                 grid_gap="2px 16px",
             ),
         )
         grid.add_class("forge-var-grid")
-        out.append(grid)
         consumed.update(present)
+        if len(boxes) < _VARIABLE_GRID_COLLAPSE_AT:
+            out.append(W.HTML(f"<div class='forge-var-title'>{title}</div>"))
+            out.append(grid)
+            continue
+        write_key = _VARIABLE_GRID_STREAMS.get((section, title))
+        write = built.get(write_key) if write_key is not None else None
+        pane = components.collapsible(W, grid, title)
+
+        def _retitle(
+            _change: Any = None, pane=pane, title=title, boxes=boxes, write=write
+        ) -> None:
+            n = sum(bool(box.value) for box in boxes)
+            pills = [components.Pill(f"{n} of {len(boxes)} selected")]
+            if write is not None and not write.value:
+                pills.append(components.Pill("not written: this stream is off", "off"))
+            pane.set_title(components.accordion_title(title, *pills))
+
+        for widget in (*boxes, write):
+            if widget is not None:
+                widget.observe(_retitle, names="value")
+        _retitle()
+        out.append(pane)
     return out
 
 
@@ -1997,6 +2153,8 @@ class _SettingsEditor:
         # _register_field_rule_observers) so a sync-driven value push never mutates
         # a sibling widget the way a real user edit is allowed to.
         self._syncing_internal = False
+        # One per output-table row, refreshed when the run window changes.
+        self._readouts: list[_StreamReadout] = []
         panes, titles = [], []
         for title, members in _ADVANCED_CATEGORIES:
             blocks = self._build_group(title, members, model_settings)
@@ -2043,6 +2201,15 @@ class _SettingsEditor:
                 )
         self._register_field_rule_observers()
         self._apply_field_rules()
+
+    def set_run_window(self, seconds: float | None) -> None:
+        """Give the output tables the run's length in seconds (``None`` when the run
+        window is not set), for their file-count readouts.
+        """
+        for readout in self._readouts:
+            if readout.run_seconds != seconds:
+                readout.run_seconds = seconds
+                readout.render()
 
     @property
     def _pane_sections(self) -> dict[str, list[str]]:
@@ -2406,7 +2573,7 @@ class _SettingsEditor:
         # _build_variable_grids), and whatever's left over renders as the
         # plain flat list, exactly as before this pane grouping existed.
         consumed: set[_FieldKey] = set()
-        table = _build_output_table(W, section, built, consumed)
+        table = _build_output_table(W, section, built, consumed, self._readouts)
         grids = _build_variable_grids(W, section, built, consumed)
         rest = [w for key, w in built.items() if key not in consumed]
         body: list[Any] = []
@@ -9611,6 +9778,20 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is not None:
             self._forcing_editor.retitle(self._forcing_summary)
         self._retitle_settings_editor()
+        if self.editor is not None:
+            self.editor.set_run_window(self._run_window_seconds())
+
+    def _run_window_seconds(self) -> float | None:
+        """The run window's length in seconds, or ``None`` while it is unset or
+        empty.
+        """
+        if self.start.value is None or self.end.value is None:
+            return None
+        seconds = (
+            self._run_datetime("end", self.end.value)
+            - self._run_datetime("start", self.start.value)
+        ).total_seconds()
+        return seconds if seconds > 0 else None
 
     def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
         """Point both download links at ``cfg``, stamped once so they agree.
@@ -10470,11 +10651,10 @@ class ForgeBlueprintWizard:
         )
         geometry_grid = components.field_grid(W, geometry_rows)
         geometry_grid.layout.flex = "1 1 auto"
-        geometry_sub = components.subsection(
-            W,
-            "grid.geometry",
-            W.HBox([geometry_grid, grid_plot_col]),
-        )
+        # In a narrow card the preview moves below the fields (see WIZARD_CSS).
+        geometry_row = W.HBox([geometry_grid, grid_plot_col])
+        geometry_row.add_class("forge-geo-row")
+        geometry_sub = components.subsection(W, "grid.geometry", geometry_row)
         vertical_sub = components.subsection(
             W,
             "grid.vertical",

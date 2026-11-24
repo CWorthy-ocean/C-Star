@@ -154,16 +154,15 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 .forge-app .forge-field .widget-hbox > .widget-text {{ flex: 0 1 auto; min-width: 0; }}
 .forge-app .forge-field .widget-hbox > .jupyter-button {{ flex: none; }}
 .forge-app .forge-field .widget-hbox > .widget-checkbox {{ width: auto; margin-right: 22px; }}
-/* narrow card body: field_grid drops to one column (!important beats field_grid's
-   inline grid_template_columns; PR 2 moves it) */
+/* field_grid: two columns, one in a narrow card body */
+.forge-app .forge-fgrid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
 @container (max-width: 760px) {{
-    .forge-app .widget-gridbox:has(> .forge-field) {{ grid-template-columns: minmax(0, 1fr) !important; }}
+    .forge-app .forge-fgrid {{ grid-template-columns: minmax(0, 1fr); }}
 }}
-/* under 1000px the grid preview moves below the geometry fields (PR 2 replaces
-   this :has() selector with a class on that HBox) */
+/* under 1000px the grid preview moves below the geometry fields */
 @container (max-width: 1000px) {{
-    .forge-app .widget-hbox:has(> .widget-gridbox > .forge-field) {{ flex-wrap: wrap; row-gap: 8px; }}
-    .forge-app .widget-hbox:has(> .widget-gridbox > .forge-field) > .widget-gridbox {{ flex: 1 1 100%; }}
+    .forge-app .forge-geo-row {{ flex-wrap: wrap; row-gap: 8px; }}
+    .forge-app .forge-geo-row > .forge-fgrid {{ flex: 1 1 100%; }}
 }}
 .forge-app .forge-hint {{
     font-size: 12px;
@@ -529,31 +528,30 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     box-shadow: none;
 }}
 
-/* Advanced-settings output-stream table (grouped write/period/records rows).
-   One column template for every table, so Write/Period/Records line up down
-   the whole card; the middle columns sit at their maximum until the card is
-   too narrow, then shrink to their 120px inputs. !important beats
-   _build_output_table's inline grid_template_columns and grid_gap row gap
-   (PR 2 moves these into Python).
-   Header cells share one fixed height and are quiet: no per-cell underline. */
-.forge-app .forge-out-table {{
-    grid-template-columns:
-        minmax(160px, 1.3fr) minmax(70px, 150px) minmax(130px, 190px) minmax(130px, 150px)
-        minmax(120px, 1.2fr) !important;
-    row-gap: 0 !important;
-    margin: 4px 0 8px;
-}}
+/* Advanced-settings output-stream table (grouped write/period/records rows; its
+   one column template is set in _build_output_table, so Write/Period/Records line
+   up down the whole card). Header cells share one fixed height and are quiet:
+   no per-cell underline. */
+.forge-app .forge-out-table {{ margin: 4px 0 8px; }}
 .forge-app .forge-out-th {{ align-self: end; }}
-/* a stream's extras (e.g. CDR output's Averaging dropdown) fit the last column:
-   !important beats _make_field_widget's inline 260px description_width (PR 2 moves it) */
+/* a stream's extras (e.g. CDR output's Averaging dropdown) fit the last column,
+   their label ellipsised */
 .forge-app .forge-out-table > .widget-hbox {{ min-width: 0; flex-wrap: wrap; }}
 .forge-app .forge-out-table > .widget-hbox > .widget-inline-hbox {{ max-width: 100%; }}
 .forge-app .forge-out-table > .widget-hbox > .widget-inline-hbox > .widget-label {{
-    width: auto !important;
     flex: 0 1 auto;
     min-width: 0;
 }}
 .forge-app .forge-out-table > .widget-hbox > .widget-inline-hbox > :is(input, select) {{ min-width: 0; }}
+/* the period box with its model-time readout, and the per-stream file readout */
+.forge-app .forge-out-period {{ align-items: center; column-gap: 8px; }}
+.forge-app .forge-out-per .widget-html-content,
+.forge-app .forge-out-files .widget-html-content {{
+    font-size: 12px;
+    color: {branding.INK_2};
+    white-space: nowrap;
+}}
+.forge-app .forge-out-files {{ margin-right: 14px; }}
 .forge-out-th .widget-html-content {{
     font-size: 11px;
     text-transform: uppercase;
@@ -790,14 +788,18 @@ def field_row(
 
 
 def field_grid(W: Any, rows: list, cols: int = 2) -> Any:
-    """A ``W.GridBox`` laying out ``rows`` (e.g. :func:`field_row` results) in ``cols`` columns."""
-    return W.GridBox(
-        rows,
-        layout=W.Layout(
-            grid_template_columns=f"repeat({cols}, minmax(0, 1fr))",
-            grid_gap="0 28px",
-        ),
-    )
+    """A ``W.GridBox`` (class ``forge-fgrid``) laying out ``rows`` (e.g.
+    :func:`field_row` results) in ``cols`` columns.
+
+    Two columns, the usual case, come from the stylesheet, which drops them to
+    one in a narrow card; any other count is set on the grid and kept at every
+    width.
+    """
+    grid = W.GridBox(rows, layout=W.Layout(grid_gap="0 28px"))
+    grid.add_class("forge-fgrid")
+    if cols != 2:
+        grid.layout.grid_template_columns = f"repeat({cols}, minmax(0, 1fr))"
+    return grid
 
 
 def subsection(
