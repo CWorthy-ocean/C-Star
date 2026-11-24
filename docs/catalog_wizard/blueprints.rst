@@ -62,7 +62,7 @@ Domain and grid
    parent or child domain.
 
 .. figure:: ../images/wizard-domain.png
-   :alt: The Domain and grid section: grid geometry, vertical coordinate, bathymetry, derived values and nesting
+   :alt: The Domain and grid section: grid geometry beside a drawn grid preview, vertical coordinate, bathymetry, derived values and nesting
    :width: 100%
 
 Boundaries and forcing
