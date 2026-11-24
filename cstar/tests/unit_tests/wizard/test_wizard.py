@@ -917,7 +917,9 @@ def test_blend_with_auto_coarse_mode_surfaces_the_forcing_error():
     row["coarse_grid_mode"].value = "auto"
     assert wiz.config is None
     assert "Invalid blueprint" in wiz.derived.value
-    assert "validation error for Forcing" in wiz.derived.value
+    assert wiz.card_errors["forcing"].layout.display == ""
+    assert "Surface forcing, row 1" in wiz.card_errors["forcing"].value
+    assert "1 problem" in wiz.card_chips["forcing"].value
 
 
 # ===========================================================================
@@ -1698,8 +1700,9 @@ def test_specs_section_has_forcing_and_output_dropdowns():
     output_card = _find_card(wiz.widget, "output")
     assert output_card is not None
     body = output_card.children[-1]  # the card body (children: anchor, header, body)
-    assert wiz.output_dd in list(_descendants(body.children[0]))
-    assert wiz.output_editor_box is body.children[1]
+    assert body.children[0] is wiz.card_errors["output"]  # atop every card body
+    assert wiz.output_dd in list(_descendants(body.children[1]))
+    assert wiz.output_editor_box is body.children[2]
 
 
 def test_roms_ref_prefilled_and_placed_next_to_model_dropdown():
@@ -6684,7 +6687,8 @@ class TestRiverCustomFileAttach:
         w["name"].value = "CUSTOM_FILE"
         wiz._rebuild()
         assert wiz.config is None  # nothing attached yet -> invalid, as before
-        assert "ValidationError" in wiz.derived.value
+        assert "Invalid blueprint" in wiz.derived.value
+        assert "CUSTOM_FILE" in wiz.card_errors["forcing"].value
 
         w["custom_file_path"].value = str(_write_tiny_netcdf(tmp_path / "river.nc"))
         wiz._rebuild()

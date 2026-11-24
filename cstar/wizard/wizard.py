@@ -31,13 +31,14 @@ import re
 import types
 import typing
 import warnings
+from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from cstar.applications.forge.blueprint import (
     DEFAULT_APPLICATION,
@@ -120,7 +121,7 @@ from cstar.wizard.ui.catalog_bar import CatalogBar, schedule_confirm_reset
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection
+    from collections.abc import Callable, Collection, Sequence
 
 WIZARD_TOOL: Final[str] = "wizard"
 """The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
@@ -2699,6 +2700,273 @@ _STICKY_STEPS = (
     ("next", "Next steps"),
 )
 
+# ---------------------------------------------------------------------------
+# An invalid blueprint's message: the card that owns it, in the wizard's words
+# ---------------------------------------------------------------------------
+
+# The card (a `_STICKY_STEPS` key) that owns each part of a blueprint, so a
+# blueprint that does not resolve says so on the card the user fixes it in (see
+# `_blueprint_problems`). Keys are dotted blueprint paths -- where a pydantic error
+# sits, or the path Forge's own messages start with -- and the place names the
+# wizard's own messages start with. The longest key that starts the text wins, so
+# ``domain.partitioning`` (the Run card's processor layout) beats ``domain``.
+# ``model_settings.<section>.<field>`` is placed by field (see `_settings_card`).
+_ERROR_CARDS: dict[str, str] = {
+    "run": "run",
+    "description": "run",
+    "cdr": "run",
+    "partitioning": "run",
+    "domain.partitioning": "run",
+    "domain": "grid",
+    "forcing": "forcing",
+    "initial_conditions": "forcing",
+    "boundary": "forcing",
+    "surface": "forcing",
+    "tidal": "forcing",
+    "river": "forcing",
+    "bgc_mode": "model",
+    "code": "model",
+    "carbonate_sensitivity": "model",
+    "carbonate sensitivities": "model",
+    **dict.fromkeys(_CATEGORY_TITLES.values(), "forcing"),
+}
+_ERROR_CARD_KEYS = sorted(_ERROR_CARDS, key=len, reverse=True)
+# What may follow a key for it to start the text: a path goes on (".", "["), or a
+# message goes on about it.
+_ERROR_KEY_ENDS = frozenset(".[,:=( ")
+
+# Where each Forge section model sits in a blueprint. Forge builds most sections on
+# their own before the blueprint itself, so a pydantic error's location is relative
+# to the model that raised (the error's ``title``), not to the blueprint.
+_ERROR_MODEL_PATHS: dict[str, str] = {
+    "ForgeBlueprint": "",
+    "RunWindow": "run",
+    "Domain": "domain",
+    "OpenBoundaries": "domain.open_boundaries",
+    "Partitioning": "domain.partitioning",
+    "Forcing": "forcing",
+    "InitialConditions": "initial_conditions",
+    "BoundaryForcing": "forcing.boundary",
+    "SurfaceForcingItem": "forcing.surface",
+    "SurfaceBlend": "forcing.surface",
+    "SurfaceBlendFallback": "forcing.surface",
+    "TidalForcingItem": "forcing.tidal",
+    "RiverForcingItem": "forcing.river",
+    "BgcSourceItem": "forcing",
+    "SourceSpec": "forcing",
+    "CdrSpec": "cdr",
+    "CarbonateSensitivitySpec": "carbonate_sensitivity",
+}
+
+# The forcing editor's row category behind each list path in a blueprint, so a
+# message about ``initial_conditions.bgc_sources[0]`` names the row the editor shows
+# ("BGC initial conditions, row 1"), and one about a dotted list path as a whole
+# names its pane ("BGC initial conditions").
+_ROW_PATHS: dict[str, str] = {
+    "initial_conditions.bgc_sources": "ic_bgc",
+    "forcing.boundary.bgc_sources": "boundary_bgc",
+    "boundary.bgc_sources": "boundary_bgc",
+    "forcing.surface": "surface",
+    "surface": "surface",
+    "forcing.tidal": "tidal",
+    "tidal": "tidal",
+    "forcing.river": "river",
+    "river": "river",
+}
+_ROW_PATH_RE = re.compile(
+    r"(?<![\w.])("
+    + "|".join(re.escape(p) for p in sorted(_ROW_PATHS, key=len, reverse=True))
+    + r")(?:\[(\d+)\](?:\.(\w+))?|(?![\w.]))"
+)
+# A snake_case name (one with an underscore), which a message may use for a box.
+_FIELD_NAME_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+# Forge's refusals of BGC sources that do not partition the tracers (see
+# `_require_partitioned_bgc_use_vars` in the Forge blueprint), which the wizard says
+# in its own words (see `_use_vars_rule`).
+_MISSING_USE_VARS_RE = re.compile(
+    r"(\S+) \(source='([^']*)'\) has no use_vars, but multiple bgc_sources"
+)
+_SHARED_USE_VARS_RE = re.compile(
+    r"(\S+) \(source='[^']*'\) and bgc_sources\[(\d+)\] \(source='[^']*'\) "
+    r"both claim '([^']*)' via use_vars"
+)
+# How much of one problem a card banner shows; the preview has the full message.
+_PROBLEM_CHARS = 600
+_SUMMARY_CHARS = 200
+
+
+@dataclass(frozen=True)
+class _BlueprintProblem:
+    """One reason the blueprint does not resolve: the card that owns it (a
+    `_STICKY_STEPS` key) and what to fix, in the wizard's words (plain text).
+    """
+
+    card: str
+    text: str
+
+
+def _settings_card(section: str, field: str | None) -> str:
+    """The card that shows the ``(section, field)`` setting."""
+    if _in_output_card(section, field):
+        return "output"
+    if _in_model_card(section, field):
+        return "model"
+    if _in_forcing_card(section, field):
+        return "forcing"
+    return "advanced"
+
+
+def _error_card(text: str) -> str | None:
+    """The card that owns the blueprint path or wizard place ``text`` starts with
+    (see `_ERROR_CARDS`), or ``None`` when it starts with neither.
+    """
+    if text.startswith("model_settings."):
+        section, _, rest = text.removeprefix("model_settings.").partition(".")
+        field = re.match(r"\w*", rest)
+        return _settings_card(section, field[0] if field and field[0] else None)
+    for key in _ERROR_CARD_KEYS:
+        if text.startswith(key) and (
+            len(text) == len(key) or text[len(key)] in _ERROR_KEY_ENDS
+        ):
+            return _ERROR_CARDS[key]
+    return None
+
+
+def _row_place(cat: str, n: int) -> str:
+    """Row ``n`` (1-based) of the forcing editor's ``cat`` rows, as the editor
+    shows it ("Surface forcing, row 2").
+    """
+    return f"{_CATEGORY_TITLES.get(cat, cat)}, row {n}"
+
+
+def _row_field_label(name: str) -> str | None:
+    """The forcing row box behind field ``name`` (``use_vars`` -> "Variables to
+    read"), or ``None`` when no row box has that name.
+    """
+    key = f"forcing.row.{name}"
+    return label_for(key).label if key in known_keys() else None
+
+
+def _use_vars_rule() -> str:
+    """What Forge asks of two or more BGC sources, in the wizard's words."""
+    label = _row_desc("use_vars", "use_vars")
+    return (
+        f"With two or more sources, give each one its {label}, so each tracer "
+        "comes from one source."
+    )
+
+
+def _wizard_words(text: str) -> str:
+    """``text`` with the blueprint paths and field names it uses replaced by the
+    place and label the wizard shows: ``initial_conditions.bgc_sources[0]`` ->
+    "BGC initial conditions, row 1", ``use_vars`` -> "Variables to read". Forge's
+    refusal of BGC sources that do not partition the tracers is reworded whole.
+    """
+    if m := _MISSING_USE_VARS_RE.match(text):
+        label = _row_desc("use_vars", "use_vars")
+        return f"{_wizard_words(m[1])} ({m[2]}) has no {label}. {_use_vars_rule()}"
+    if m := _SHARED_USE_VARS_RE.match(text):
+        return (
+            f"{_wizard_words(m[1])} and row {int(m[2]) + 1} both read {m[3]}. "
+            "List each variable under one source only."
+        )
+
+    def row(m: re.Match[str]) -> str:
+        cat = _ROW_PATHS[m[1]]
+        if m[2] is None:  # the whole list: a bare word ("river") may be prose
+            return _CATEGORY_TITLES[cat] if "." in m[1] else m[0]
+        place = _row_place(cat, int(m[2]) + 1)
+        if m[3]:
+            place += f", {_row_field_label(m[3]) or m[3]}"
+        return place
+
+    text = _ROW_PATH_RE.sub(row, text)
+    return _FIELD_NAME_RE.sub(lambda m: _row_field_label(m[0]) or m[0], text)
+
+
+def _message_lines(text: str) -> list[str]:
+    """``text``'s non-blank lines, stripped, without the "- " that starts each
+    finding of a message listing them one per line under a lead-in ending in ":".
+    """
+    lines = (line.strip().removeprefix("- ") for line in text.splitlines())
+    return [line for line in lines if line]
+
+
+def _error_path(base: str, loc: tuple[int | str, ...]) -> str:
+    """A pydantic error location under ``base``, as a dotted blueprint path."""
+    path = base
+    for part in loc:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path = f"{path}.{part}" if path else str(part)
+    return path
+
+
+def _blueprint_problems(exc: Exception) -> list[_BlueprintProblem]:
+    """Why building the blueprint raised ``exc``: one problem per pydantic error
+    (one for any other exception), each placed on the card that owns it.
+
+    The card comes from the path the message starts with (Forge's own messages
+    name one, and the wizard's name its place) or, for a message that lists its
+    findings as "  - " lines, the first of those that names one; else from where
+    the error sits. A problem none of these places goes to Review.
+    """
+    if not isinstance(exc, ValidationError):
+        message = str(exc)
+        card = next(filter(None, map(_error_card, _message_lines(message))), "review")
+        return [_BlueprintProblem(card, _wizard_words(message))]
+    base = _ERROR_MODEL_PATHS.get(exc.title, "")
+    problems = []
+    for err in exc.errors():
+        # A validator's own ValueError, without pydantic's "Value error, " prefix.
+        cause = (err.get("ctx") or {}).get("error")
+        message = str(cause) if cause is not None else err["msg"]
+        path = _error_path(base, err["loc"])
+        text = _wizard_words(message)
+        owner = _error_card(message)
+        if owner is None:
+            owner = _error_card(path) or "review"
+            # Where in the section; the card itself says which section.
+            if err["loc"]:
+                text = f"{_wizard_words(path)}: {text}"
+        problems.append(_BlueprintProblem(owner, text))
+    return problems
+
+
+def _problem_html(text: str, limit: int, cut_note: str) -> str:
+    """``text`` escaped, its line breaks kept; past ``limit`` characters it is cut
+    and ``cut_note`` (HTML, pointing at the full message) follows.
+    """
+    if len(text) <= limit:
+        return html.escape(text).replace("\n", "<br>")
+    cut = html.escape(text[: limit - 1].rstrip()).replace("\n", "<br>")
+    return f"{cut}…{cut_note}"
+
+
+def _problem_summary(problems: Sequence[_BlueprintProblem]) -> str:
+    """Review's one-line HTML summary of why the blueprint does not resolve: the
+    first problem's first line, and a link to the card that owns it.
+    """
+    if not problems:
+        return ""
+    first = problems[0]
+    lines = _message_lines(first.text) or [""]
+    # A message that lists its findings: its lead-in and the first of them.
+    shown = 2 if lines[0].endswith(":") else 1
+    line = " ".join(lines[:shown])
+    cut_note = " — full message in the preview below"
+    text = _problem_html(line, _SUMMARY_CHARS, cut_note)
+    if len(lines) > shown and len(line) <= _SUMMARY_CHARS:  # not cut, but more
+        text += cut_note
+    if len(problems) > 1:
+        text += f" (and {len(problems) - 1} more)"
+    if first.card == "review":
+        return text
+    title = section_for(first.card).title
+    return f"{title}: {text} <a href='#forge-sec-{first.card}'>Go to {title}</a>"
+
+
 # Valid source names per (category, type).  Drives name dropdowns in the forcing editor.
 # "boundary"/"boundary_bgc" have no `type` dropdown of their own (physics is a
 # required scalar, bgc is its own row-list -- see BoundaryForcing), so both are keyed
@@ -3017,6 +3285,11 @@ def _parse_options(text: str) -> dict[str, Any]:
             f"must be a JSON object ({{...}}), not {type(parsed).__name__}"
         )
     return parsed
+
+
+def _use_vars_list(text: str) -> list[str]:
+    """The variables a BGC row's "Variables to read" box lists, comma-separated."""
+    return [p.strip() for p in text.split(",") if p.strip()]
 
 
 def _parse_field(parser: Callable[[str], Any], text: str, where: str) -> Any:
@@ -3845,6 +4118,12 @@ class _ForcingEditor:
             co2_index,
             co2_static,
         )
+        # The BGC panes' note on sources that do not partition the tracers (see
+        # `refresh_bgc_notes`); `_render` puts it above the rows.
+        self._bgc_notes: dict[str, Any] = {}
+        for cat in ("ic_bgc", "boundary_bgc"):
+            self._bgc_notes[cat] = components.banner_widget(W, "warn", "")
+            self._bgc_notes[cat].layout.display = "none"
         self._containers: dict[str, Any] = {}
         for cat in _ROW_CATEGORIES:
             self._containers[cat] = W.VBox([])
@@ -4762,6 +5041,8 @@ class _ForcingEditor:
         elif cat == "boundary_bgc":
             extra = [self._sync_to_ic_btn]
         lead = [self.co2_block, self._surface_rows_header] if cat == "surface" else []
+        if cat in self._bgc_notes:
+            lead.append(self._bgc_notes[cat])
         buttons = W.HBox([add, *extra])
         buttons.add_class("forge-row-btns")
         self._containers[cat].children = [*lead, *boxes, buttons]
@@ -4900,10 +5181,8 @@ class _ForcingEditor:
         item = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value
-        if "use_vars" in w and w["use_vars"].value.strip():
-            item["use_vars"] = [
-                p.strip() for p in w["use_vars"].value.split(",") if p.strip()
-            ]
+        if "use_vars" in w and (use_vars := _use_vars_list(w["use_vars"].value)):
+            item["use_vars"] = use_vars
         if "correct_radiation" in w and w["correct_radiation"].value:
             item["correct_radiation"] = True
         if "wind_dropoff" in w and w["wind_dropoff"].value:
@@ -5027,11 +5306,10 @@ class _ForcingEditor:
         """Where row ``w`` of ``cat`` sits, as the editor shows it
         ("Surface forcing, row 2"), for a message about one of its boxes.
         """
-        title = _CATEGORY_TITLES.get(cat, cat)
         for n, row in enumerate(self._rows.get(cat, []), start=1):
             if row is w:
-                return f"{title}, row {n}"
-        return title
+                return _row_place(cat, n)
+        return _CATEGORY_TITLES.get(cat, cat)
 
     def gather(self) -> dict[str, Any]:
         items = {
@@ -5268,6 +5546,60 @@ class _ForcingEditor:
         self._acc = acc
         self._cat_order = cat_order
         return acc
+
+    def refresh_bgc_notes(self) -> None:
+        """Warn on the BGC panes, before Forge refuses the blueprint, when two or
+        more sources do not partition the tracers, and mark the boxes to fix.
+
+        Mirrors Forge's ``_require_partitioned_bgc_use_vars``: with two or more
+        sources each one needs its own "Variables to read", and no variable may be
+        read twice. Only for a section the blueprint carries (IC or boundary not
+        "(none)"); a child grid's boundary rows are already cleared.
+        """
+        carried = {
+            "ic_bgc": self.ic_name.value != _IC_NONE,
+            "boundary_bgc": self.boundary_name.value != _BOUNDARY_NONE,
+        }
+        label = _row_desc("use_vars", "use_vars")
+        for cat, note in self._bgc_notes.items():
+            rows = self._rows[cat]
+            lines: list[str] = []
+            flagged: set[int] = set()
+            if carried[cat] and len(rows) > 1:
+                read_by: dict[str, int] = {}
+                for n, w in enumerate(rows, start=1):
+                    use_vars = _use_vars_list(w["use_vars"].value)
+                    name = w["name"].value
+                    if not use_vars:
+                        source = f" ({html.escape(name)})" if name else ""
+                        lines.append(f"Row {n}{source} has no {label}.")
+                        flagged.add(n)
+                    for var in use_vars:
+                        if var in read_by:
+                            other = read_by[var]
+                            lines.append(
+                                f"Row {n} lists {html.escape(var)} twice."
+                                if other == n
+                                else f"Rows {other} and {n} both read "
+                                f"{html.escape(var)}; list it under one source only."
+                            )
+                            flagged.update((other, n))
+                        read_by.setdefault(var, n)
+            for n, w in enumerate(rows, start=1):
+                if n in flagged:
+                    w["use_vars"].add_class("forge-need")
+                else:
+                    w["use_vars"].remove_class("forge-need")
+            if lines:
+                # One block: the banner lays out its children side by side.
+                note.value = components.banner(
+                    "warn",
+                    f"<div>{html.escape(_use_vars_rule())}<br>{'<br>'.join(lines)}</div>",
+                )
+                note.layout.display = ""
+            else:
+                note.value = ""
+                note.layout.display = "none"
 
     def retitle(self, summary_for) -> None:
         """Refresh each pane's header with its live summary pills and a quiet
@@ -6592,6 +6924,12 @@ class ForgeBlueprintWizard:
                 "review",
             )
         }
+        # What stops the blueprint resolving, on the card that owns it (see
+        # `_update_status`); Review's one-line summary is `derived`.
+        self.card_errors: dict[str, Any] = {}
+        for key in ("model", "grid", "forcing", "run", "output", "advanced"):
+            self.card_errors[key] = components.banner_widget(W, "err", "")
+            self.card_errors[key].layout.display = "none"
         self.grid_lock_banner = components.banner_widget(
             W,
             "warn",
@@ -7456,13 +7794,16 @@ class ForgeBlueprintWizard:
         return names[0] if names else None
 
     def _forcing_modified(self) -> bool:
-        """Whether the forcing editor deviates from the last catalog pick."""
+        """Whether the forcing editor deviates from the last catalog pick. A box
+        the editor cannot read counts as an edit: the pick's own boxes always read.
+        """
         editor = self._forcing_editor
-        return (
-            editor is not None
-            and self._forcing_seed is not None
-            and editor.gather() != self._forcing_seed
-        )
+        if editor is None or self._forcing_seed is None:
+            return False
+        try:
+            return editor.gather() != self._forcing_seed
+        except ValueError:
+            return True
 
     @property
     def _active_overrides(self) -> dict[Any, Any]:
@@ -7535,10 +7876,7 @@ class ForgeBlueprintWizard:
             return
         old_default = self._default_forcing_spec(change["old"])
         new_default = self._default_forcing_spec(change["new"])
-        try:
-            forcing_modified = self._forcing_modified()
-        except ValueError:  # a box the editor cannot read counts as an edit
-            forcing_modified = True
+        forcing_modified = self._forcing_modified()
         if (
             self.forcing_dd.value == old_default
             and new_default != old_default
@@ -9597,7 +9935,10 @@ class ForgeBlueprintWizard:
             self.download_link.value = ""
             self.download_link_review.value = ""
             self._show_unresolved_editor()
-            self._update_status(None)
+            self._update_status(
+                None,
+                problems=[_BlueprintProblem("run", "Set the start and end dates.")],
+            )
             return
         try:
             cfg = build_forge_blueprint(**self._gather())
@@ -9607,12 +9948,13 @@ class ForgeBlueprintWizard:
             self.download_link_review.value = ""
             with self.preview:
                 print(f"{type(exc).__name__}: {exc}")
-            lines = f"{type(exc).__name__}: {exc}".splitlines()
-            error = lines[0][:200]
-            if len(lines) > 1 or len(lines[0]) > len(error):
-                error += " — full message in the preview below"
+            problems = _blueprint_problems(exc)
+            self.derived.value = components.banner(
+                "err",
+                f"<div><b>Invalid blueprint.</b> {_problem_summary(problems)}</div>",
+            )
             self._show_unresolved_editor()
-            self._update_status(None, error=error)
+            self._update_status(None, problems=problems)
             return
 
         # v_sponge is cheap (pure arithmetic on grid spacing, no grid build) --
@@ -9890,22 +10232,21 @@ class ForgeBlueprintWizard:
             header.value = editor.header_html(group, section, n_mod)
 
     def _update_status(
-        self, cfg: ForgeBlueprint | None, error: str | None = None
+        self,
+        cfg: ForgeBlueprint | None,
+        *,
+        problems: Sequence[_BlueprintProblem] = (),
     ) -> None:
-        """Refresh the sticky bar, per-card status chips, and the forcing/advanced/
-        output titles from the outcome of a `_rebuild` call.
+        """Refresh the sticky bar, the per-card status chips and error banners, and
+        the forcing/advanced/output titles from the outcome of a `_rebuild` call.
 
-        Called at the end of every `_rebuild` path: on success with the
-        resolved ``cfg``; on a missing-dates or build/validation failure with
-        ``cfg=None`` (and, for a real exception, a one-line ``error``
-        description that becomes `derived`'s banner).
+        Called at the end of every `_rebuild` path: on success with the resolved
+        ``cfg``; on missing dates or a build/validation failure with ``cfg=None``
+        and the ``problems`` that stop the blueprint resolving. Only the card that
+        owns a problem shows it, with a problem chip and a banner atop its body;
+        every other card keeps its own state.
         """
         valid = cfg is not None
-        if error is not None:
-            self.derived.value = components.banner(
-                "err", f"<b>Invalid blueprint.</b> {error}"
-            )
-
         model_name = self.model_dd.value or "—"
         step_links = "".join(
             f"<a class='step' href='#forge-sec-{key}'>{i} {title}</a>"
@@ -9923,6 +10264,12 @@ class ForgeBlueprintWizard:
         else:
             summary = f"Model <b>{model_name}</b>"
             status_chip = components.chip("● Invalid", "warn")
+            if problems:
+                # Jumps to the card that owns the (first) problem.
+                status_chip = (
+                    f"<a class='forge-status-link' "
+                    f"href='#forge-sec-{problems[0].card}'>{status_chip}</a>"
+                )
         # `sp` (flex:1, see WIZARD_CSS) eats the remaining width so the status
         # chip sits at the row's true right edge, next to the download button.
         self.sticky_bar.value = (
@@ -9931,14 +10278,38 @@ class ForgeBlueprintWizard:
             f"{status_chip}"
         )
 
+        for key, banner in self.card_errors.items():
+            texts = [p.text for p in problems if p.card == key]
+            banner.layout.display = "" if texts else "none"
+            banner.value = (
+                components.banner(
+                    "err",
+                    # One block: the banner lays out its children side by side.
+                    "<div><b>Fix this to make the blueprint valid.</b><br>"
+                    + "<br>".join(
+                        _problem_html(
+                            text,
+                            _PROBLEM_CHARS,
+                            " <a href='#forge-sec-review'>Full message in the "
+                            "Review preview</a>",
+                        )
+                        for text in texts
+                    )
+                    + "</div>",
+                )
+                if texts
+                else ""
+            )
+
         chips = self.card_chips
-        complete_or_invalid = (
-            components.chip("● Complete", "ok")
-            if valid
-            else components.chip("● Invalid", "warn")
-        )
-        chips["model"].value = complete_or_invalid
-        chips["run"].value = complete_or_invalid
+        # A card that owns a problem says so in place of its usual state.
+        problem_chips = {
+            key: components.chip(f"● {n} problem{'' if n == 1 else 's'}", "warn")
+            for key, n in Counter(p.card for p in problems).items()
+        }
+        complete = components.chip("● Complete", "ok")
+        chips["model"].value = problem_chips.get("model", complete)
+        chips["run"].value = problem_chips.get("run", complete)
         chips["review"].value = (
             components.chip("● Ready", "ok")
             if valid
@@ -9946,9 +10317,10 @@ class ForgeBlueprintWizard:
         )
         if not self._boundaries_derived and not self._boundaries_touched:
             n = 1 + (1 if not self._v_sponge_touched else 0)
-            chips["grid"].value = components.chip(f"● {n} fields to check", "warn")
+            grid_chip = components.chip(f"● {n} fields to check", "warn")
         else:
-            chips["grid"].value = components.chip("● Complete", "ok")
+            grid_chip = complete
+        chips["grid"].value = problem_chips.get("grid", grid_chip)
         # Placement, not OutputSpec ownership: the two chips partition the overrides
         # the Model and Forcing cards do not show; the Forcing card's (its static
         # CO2) count as a forcing change.
@@ -9957,23 +10329,29 @@ class ForgeBlueprintWizard:
         n_model = sum(1 for key in active if _in_model_card(*key))
         n_forcing = sum(1 for key in active if _in_forcing_card(*key))
         n_advanced = len(active) - n_output - n_model - n_forcing
-        forcing_modified = bool(
-            cfg is not None and cfg.composition.forcing.modified
+        # From the editor itself when the build failed, which has no composition.
+        forcing_modified = (
+            cfg.composition.forcing.modified
+            if cfg is not None
+            else self._forcing_modified()
         ) or bool(n_forcing)
-        chips["forcing"].value = (
+        chips["forcing"].value = problem_chips.get(
+            "forcing",
             components.chip("● Modified", "info")
             if forcing_modified
-            else components.chip("At preset defaults", "def")
+            else components.chip("At preset defaults", "def"),
         )
-        chips["output"].value = (
+        chips["output"].value = problem_chips.get(
+            "output",
             components.chip(f"● {n_output} modified", "info")
             if n_output
-            else components.chip("At preset defaults", "def")
+            else components.chip("At preset defaults", "def"),
         )
-        chips["advanced"].value = (
+        chips["advanced"].value = problem_chips.get(
+            "advanced",
             components.chip(f"● {n_advanced} modified", "info")
             if n_advanced
-            else components.chip("All defaults", "def")
+            else components.chip("All defaults", "def"),
         )
 
         preset_name = (
@@ -9986,6 +10364,7 @@ class ForgeBlueprintWizard:
             "sections show their current values.",
         )
         if self._forcing_editor is not None:
+            self._forcing_editor.refresh_bgc_notes()
             self._forcing_editor.retitle(self._forcing_summary)
         self._retitle_settings_editor()
         if self.editor is not None:
@@ -10983,6 +11362,7 @@ class ForgeBlueprintWizard:
         model_card = components.card(
             W,
             "model",
+            self.card_errors["model"],
             components.field_row(
                 W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
             ),
@@ -11169,6 +11549,7 @@ class ForgeBlueprintWizard:
         grid_card = components.card(
             W,
             "grid",
+            self.card_errors["grid"],
             components.field_grid(
                 W,
                 [
@@ -11190,6 +11571,7 @@ class ForgeBlueprintWizard:
         forcing_card = components.card(
             W,
             "forcing",
+            self.card_errors["forcing"],
             self.forcing_banner,
             self.forcing_box,
             num=3,
@@ -11199,6 +11581,7 @@ class ForgeBlueprintWizard:
         run_card = components.card(
             W,
             "run",
+            self.card_errors["run"],
             components.subsection(
                 W,
                 "run.window",
@@ -11261,6 +11644,7 @@ class ForgeBlueprintWizard:
         output_card = components.card(
             W,
             "output",
+            self.card_errors["output"],
             components.field_row(W, "output_dd", self.output_dd),
             self.output_editor_box,
             num=5,
@@ -11270,6 +11654,7 @@ class ForgeBlueprintWizard:
         advanced_card = components.card(
             W,
             "advanced",
+            self.card_errors["advanced"],
             self.editor_box,
             num=6,
             chips_widget=self.card_chips["advanced"],
