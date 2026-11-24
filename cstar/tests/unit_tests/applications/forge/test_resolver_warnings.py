@@ -185,7 +185,7 @@ def test_the_wizard_shows_the_zero_bgc_warning_in_its_status():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     editor = wiz._forcing_editor
     assert editor is not None
     assert "no BGC sources" not in wiz.validation.value

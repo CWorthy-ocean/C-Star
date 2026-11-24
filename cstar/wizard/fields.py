@@ -1,4 +1,5 @@
-"""Help text, field widgets and attached-file helpers shared across the wizard.
+"""Help text, field widgets, catalog dropdowns and attached-file helpers shared
+across the wizard.
 
 The wizard's cards, its forcing and settings editors and the Workplan page all use
 these. Like the rest of :mod:`cstar.wizard`, nothing here imports ``ipywidgets`` at
@@ -11,10 +12,13 @@ import re
 import types
 import typing
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from typing import TYPE_CHECKING, Any, get_args, get_origin
 
 from cstar.base.digest import short_digest
 from cstar.wizard.ui import components
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 # ===========================================================================
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
@@ -771,6 +775,76 @@ def _parse_optional_number(text: str, base: type) -> Any:
         return base(text)
     except ValueError:
         return text
+
+
+# ===========================================================================
+# Catalog dropdowns: the spec pickers of every card (model, domain, forcing, ...)
+# ===========================================================================
+
+
+def _dd_options(
+    catalog: Any,
+    names: list[str],
+    kind: str,
+    *,
+    prefix: list[str] | None = None,
+    archived: Collection[str] = (),
+) -> list:
+    """Badge dropdown ``options`` with their source layer when it isn't the
+    top (writable) one -- ipywidgets-homogeneous.
+
+    ipywidgets' ``Dropdown`` requires ``options`` to be either ALL bare
+    values or ALL ``(label, value)`` 2-tuples: ``_make_options`` only takes
+    the "pairs" branch when *every* entry is a 2-tuple, so a mix silently
+    falls through to treating each element (tuples included) as a literal
+    value, and ``dd.value`` ends up holding a raw ``(label, value)`` tuple
+    instead of the bare name. So: if no *names* entry needs a badge, this
+    returns plain names unchanged (matching pre-layering behavior, safe to
+    mix with a plain sentinel like domain_dd's ``"<custom>"``); otherwise
+    *every* entry -- including any *prefix* sentinels -- is emitted as an
+    explicit ``(label, value)`` tuple so the whole list stays homogeneous.
+    ``dd.value`` is always the bare name/sentinel either way.
+
+    A ``KeyError`` from ``entry_source`` (name absent, shouldn't happen for
+    names drawn from the same catalog) is treated as "no badge". Names in
+    *archived* are labelled ``archived``, combined with the layer badge as
+    ``name (layer, archived)``.
+    """
+    prefix = prefix or []
+    entry_source = getattr(catalog, "entry_source", None)
+    top = getattr(catalog, "top", None)
+    top_label = top.label if top is not None else None
+
+    badges: dict[str, list[str]] = {}
+    if entry_source is not None:
+        for name in names:
+            try:
+                source = entry_source(kind, name)
+            except KeyError:
+                continue
+            if source != top_label:
+                badges[name] = [source]
+    for name in names:
+        if name in archived:
+            badges.setdefault(name, []).append("archived")
+
+    if not badges:
+        return [*prefix, *names]
+
+    options: list[Any] = [(p, p) for p in prefix]
+    for name in names:
+        label = f"{name} ({', '.join(badges[name])})" if name in badges else name
+        options.append((label, name))
+    return options
+
+
+def _dd_values(dd: Any) -> list:
+    """Bare values of a dropdown's ``options``, whether badged
+    ``(label, value)`` tuples (see ``_dd_options``) or plain strings
+    (ipywidgets' label == value shorthand). Use this instead of reading
+    ``dd.options`` directly for membership tests / indexing.
+    """
+    return [o[1] if isinstance(o, tuple) else o for o in dd.options]
 
 
 # ===========================================================================

@@ -171,7 +171,7 @@ def test_only_marbl_shows_the_block_and_writes_mbl_co2():
     editor = _editor(wiz)
     assert editor.co2_mode.value == _CO2_TIME_VARYING
 
-    wiz.bgc_dd.value = "none"
+    wiz.model_card.bgc_dd.value = "none"
     assert wiz._forcing_editor is editor
     assert not _shown(editor.co2_block)
     assert not any("CO2" in text for text in _summary(wiz))
@@ -179,7 +179,7 @@ def test_only_marbl_shows_the_block_and_writes_mbl_co2():
     assert "MBL_co2" not in [item["source"]["name"] for item in surface]
     assert editor.co2_mode.value == _CO2_TIME_VARYING
 
-    wiz.bgc_dd.value = "marbl"
+    wiz.model_card.bgc_dd.value = "marbl"
     assert _shown(editor.co2_block)
     assert "MBL_co2" in _surface(wiz)
 

@@ -189,8 +189,12 @@ def test_every_bare_field_key_is_a_wizard_attribute(wizard):
     fields = labels.glossary()["fields"]
     bare_keys = [k for k in fields if "." not in k]
     assert bare_keys, "expected at least one bare (non-namespaced) field key"
+    # A card component (``wizard.model_card``, ...) owns its widgets.
+    owners = [wizard, *(v for k, v in vars(wizard).items() if k.endswith("_card"))]
     for key in bare_keys:
-        assert hasattr(wizard, key), f"ForgeBlueprintWizard has no attribute {key!r}"
+        assert any(hasattr(o, key) for o in owners), (
+            f"neither ForgeBlueprintWizard nor a card has an attribute {key!r}"
+        )
 
 
 def test_every_grid_key_is_one_of_the_11_grid_kwargs():

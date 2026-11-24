@@ -30,6 +30,7 @@ from cstar.catalog.domain_catalog import (
     spec_entry_name,
     user_catalog_root,
 )
+from cstar.wizard.fields import _dd_options, _dd_values
 
 
 @pytest.mark.parametrize(
@@ -653,7 +654,7 @@ class TestLayeredCatalog:
         layered = LayeredCatalog([top, bottom])
 
         wiz = ForgeBlueprintWizard(catalog=layered)
-        options = wiz._dd_options(layered.domain_names, "domain")
+        options = _dd_options(wiz.catalog, layered.domain_names, "domain")
         # Some entries need a badge (bottom-sourced), so ipywidgets homogeneity
         # requires every entry -- including the un-badged top-only one -- to be
         # emitted as an explicit (label, value) tuple.
@@ -662,7 +663,7 @@ class TestLayeredCatalog:
         assert label_by_value["top-only-domain"] == "top-only-domain"  # no badge
         assert label_by_value["gulf-guinea-toy"] == "gulf-guinea-toy (bundled)"
         # dd_values recovers the bare names regardless of the tuple-badging.
-        assert set(ForgeBlueprintWizard._dd_values(wiz.domain_dd)) >= {
+        assert set(_dd_values(wiz.domain_dd)) >= {
             "top-only-domain",
             "gulf-guinea-toy",
         }
@@ -693,7 +694,7 @@ class TestLayeredCatalog:
         assert not hasattr(cat, "entry_source")
 
         wiz = ForgeBlueprintWizard(catalog=cat)
-        options = wiz._dd_options(cat.domain_names, "domain")
+        options = _dd_options(wiz.catalog, cat.domain_names, "domain")
         assert all(isinstance(o, str) for o in options)
         assert all(isinstance(o, str) for o in wiz.domain_dd.options)
 

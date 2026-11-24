@@ -43,6 +43,7 @@ from cstar.tests.unit_tests.wizard.helpers import (
     _strip_bgc_forcing,
 )
 from cstar.wizard.app import ForgeBlueprintWizardApp
+from cstar.wizard.fields import _dd_options, _dd_values
 from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
     _OUTPUT_CARD,
@@ -208,7 +209,7 @@ def test_wizard_smoke_assembles_widget():
 def test_load_catalog_dropdown_populated_from_catalog():
     """The 'From catalog' picker offers the bundled forge blueprints and is enabled."""
     wiz = ForgeBlueprintWizard()
-    values = wiz._dd_values(wiz.load_catalog_dd)
+    values = _dd_values(wiz.load_catalog_dd)
     assert "wio-toy-simple" in values
     # bundled catalog is non-empty, so the load button is not greyed out
     assert wiz.load_catalog_btn.disabled is False
@@ -381,7 +382,7 @@ def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
     for ws in list(fe._rows["ic_bgc"]):
         fe._remove("ic_bgc", ws)
 
-    wiz.bgc_dd.value = "none"
+    wiz.model_card.bgc_dd.value = "none"
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
     assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
@@ -413,7 +414,7 @@ def test_bgc_dd_none_with_non_default_bgc_forcing_surfaces_error_legibly():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz.forcing_dd.value = "glorys-era5-esper"
-    wiz.bgc_dd.value = "none"
+    wiz.model_card.bgc_dd.value = "none"
     wiz._rebuild()
     assert wiz.forcing_dd.value == "glorys-era5-esper"
     assert wiz.config is None
@@ -487,7 +488,7 @@ class TestBgcModeForcingDefault:
         import shutil
 
         from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
-        from cstar.wizard.wizard import _DEFAULT_MODEL
+        from cstar.wizard.model_card import _DEFAULT_MODEL
 
         root = tmp_path / "catalog"
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
@@ -497,14 +498,14 @@ class TestBgcModeForcingDefault:
         model_yaml.write_text(text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite"))
 
         wiz = ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=root))
-        assert wiz.bgc_dd.value == "cdr_lite"
+        assert wiz.model_card.bgc_dd.value == "cdr_lite"
         assert wiz.forcing_dd.value == self.PHYSICS
 
     @pytest.mark.parametrize("mode", ["none", "cdr_lite"])
     def test_leaving_marbl_switches_the_untouched_default_to_physics(self, mode):
         wiz = self._wizard()
         wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
-        wiz.bgc_dd.value = mode
+        wiz.model_card.bgc_dd.value = mode
         assert wiz.forcing_dd.value == self.PHYSICS
         assert wiz.config is not None, wiz.derived.value
         assert wiz.config.composition.forcing.name == self.PHYSICS
@@ -512,17 +513,17 @@ class TestBgcModeForcingDefault:
 
     def test_entering_marbl_switches_the_untouched_physics_spec_back(self):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         assert wiz.forcing_dd.value == self.PHYSICS
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert wiz.forcing_dd.value == self.UNIFIED
         assert wiz.config is not None, wiz.derived.value
 
     def test_between_modes_without_marbl_nothing_switches(self, monkeypatch):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         calls = self._count_resolves(monkeypatch)
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.forcing_dd.value == self.PHYSICS
         assert len(calls) == 1
 
@@ -530,39 +531,39 @@ class TestBgcModeForcingDefault:
     def test_one_resolve_per_mode_change(self, monkeypatch, mode):
         wiz = self._wizard()
         calls = self._count_resolves(monkeypatch)
-        wiz.bgc_dd.value = mode  # switches the forcing too
+        wiz.model_card.bgc_dd.value = mode  # switches the forcing too
         assert len(calls) == 1
         calls.clear()
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert len(calls) == 1
 
     def test_one_resolve_when_the_forcing_stays(self, monkeypatch):
         wiz = self._wizard()
         wiz.forcing_dd.value = "glorys-era5-esper"
         calls = self._count_resolves(monkeypatch)
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         assert len(calls) == 1
 
     def test_an_edited_forcing_is_left_alone(self):
         wiz = self._wizard()
         wiz._forcing_editor._add("surface")
         assert wiz._forcing_modified()
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         assert wiz.forcing_dd.value == self.UNIFIED
 
     def test_a_non_default_spec_is_left_alone(self):
         wiz = self._wizard()
         wiz.forcing_dd.value = "glorys-era5-esper"
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         assert wiz.forcing_dd.value == "glorys-era5-esper"
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert wiz.forcing_dd.value == "glorys-era5-esper"
 
     def test_nothing_switches_while_suspended(self, monkeypatch):
         wiz = self._wizard()
         calls = self._count_resolves(monkeypatch)
         with wiz._suspend():
-            wiz.bgc_dd.value = "none"
+            wiz.model_card.bgc_dd.value = "none"
         assert wiz.forcing_dd.value == self.UNIFIED
         assert calls == []
 
@@ -583,7 +584,7 @@ class TestBgcModeForcingDefault:
         w2 = self._wizard()
         w2.load_path.value = str(path)
         w2._on_load_path(None)
-        assert w2.bgc_dd.value == "none"
+        assert w2.model_card.bgc_dd.value == "none"
         assert w2.forcing_dd.value == self.UNIFIED
 
 
@@ -611,12 +612,12 @@ class TestBgcModeSettings:
         wiz = self._wizard()
         assert wiz.editor._bgc_mode == "marbl"
         assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         assert wiz._editor_key.bgc_mode == "cdr_lite"
         assert wiz.editor._bgc_mode == "cdr_lite"
         assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
 
     def test_marbl_only_overrides_are_hidden_on_leaving_marbl(self):
@@ -629,7 +630,7 @@ class TestBgcModeSettings:
         assert "1 modified" in wiz.card_chips["output"].value
         assert "2 modified" in wiz.card_chips["advanced"].value
 
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
 
         # the user's record keeps all three; only the applicable one is active,
         # beside the wizard's carbonate-sensitivity default (a Model-card setting)
@@ -658,9 +659,9 @@ class TestBgcModeSettings:
             "cppdefs": {"nhy_forcing": False},
         }
 
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config.composition.overrides == _INTERP_HOLD
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
 
         assert wiz.config is not None, wiz.derived.value
         assert wiz.config.composition.overrides == marbl_overrides
@@ -672,9 +673,9 @@ class TestBgcModeSettings:
 
     def test_overrides_are_kept_between_modes_that_share_them(self):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert ("cdr_lite_output", "wrt_alk") in wiz._active_overrides
 
     def test_a_suspended_mode_change_loses_nothing(self):
@@ -684,7 +685,7 @@ class TestBgcModeSettings:
         wiz = self._wizard()
         self._toggle(wiz, ("bgc", "wrt_his"))
         with wiz._suspend():
-            wiz.bgc_dd.value = "cdr_lite"
+            wiz.model_card.bgc_dd.value = "cdr_lite"
         assert ("bgc", "wrt_his") in wiz._overrides
         wiz._rebuild()  # (resolve fails: a load would also have set the forcing)
         assert ("bgc", "wrt_his") in wiz._overrides
@@ -702,7 +703,7 @@ class TestBgcModeSettings:
         self._toggle(wiz, ("bgc", "wrt_his"))
         marbl_editor = wiz.editor
 
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
 
         assert wiz.config is None
         assert wiz.editor is not marbl_editor and not wiz._editor_key.resolved
@@ -730,7 +731,7 @@ class TestBgcModeSettings:
         assert wiz.output_editor_box.children == (wiz.editor.output_box,)
         assert wiz.config.composition.overrides == _INTERP_HOLD
 
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert wiz.config.composition.overrides == {
             "bgc": {"wrt_his": wiz.config.model_settings["bgc"]["wrt_his"]}
         }
@@ -779,7 +780,7 @@ class TestBgcModeSettings:
 
     def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         wiz.cdr_mode_dd.value = "none"
         self._toggle(wiz, ("bgc", "wrt_his"))
         assert wiz.config is not None, wiz.derived.value
@@ -797,7 +798,7 @@ class TestBgcModeSettings:
         next save carry neither flag.
         """
         wiz = self._wizard()
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         settings = copy.deepcopy(wiz.config.model_settings)
         settings["cdr_output"]["do_cdr_output"] = True
@@ -822,7 +823,7 @@ class TestBgcModeSettings:
 
     def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         master = wiz.editor._widgets[_LITE_STREAM][0]
         assert master.value is True
@@ -837,7 +838,7 @@ class TestBgcModeSettings:
 
     def test_round_trips_a_cdr_lite_blueprint_with_overrides(self):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         self._toggle(wiz, ("cppdefs", "sponge_tune"))
         self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
         assert wiz.config is not None, wiz.derived.value
@@ -845,7 +846,7 @@ class TestBgcModeSettings:
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(wiz.config)
 
-        assert wiz2.bgc_dd.value == "cdr_lite"
+        assert wiz2.model_card.bgc_dd.value == "cdr_lite"
         assert wiz2._overrides == wiz._overrides
         assert wiz2._editor_key.bgc_mode == "cdr_lite"
         assert wiz2.config is not None, wiz2.derived.value
@@ -854,8 +855,10 @@ class TestBgcModeSettings:
 
 def test_dd_options_labels_archived_names_homogeneously():
     wiz = ForgeBlueprintWizard()
-    assert wiz._dd_options(["a", "b"], "model") == ["a", "b"]
-    options = wiz._dd_options(["a", "b"], "model", prefix=["<custom>"], archived=["b"])
+    assert _dd_options(wiz.catalog, ["a", "b"], "model") == ["a", "b"]
+    options = _dd_options(
+        wiz.catalog, ["a", "b"], "model", prefix=["<custom>"], archived=["b"]
+    )
     assert options == [
         ("<custom>", "<custom>"),
         ("a", "a"),
@@ -865,23 +868,23 @@ def test_dd_options_labels_archived_names_homogeneously():
 
 def test_unchecking_show_archived_keeps_an_archived_selection():
     wiz = ForgeBlueprintWizard()
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     overrides = {("param", "nt_passive"): 1}
     wiz._overrides = dict(overrides)
 
-    wiz.show_archived_models.value = False
+    wiz.model_card.show_archived_models.value = False
 
-    assert wiz.model_dd.value == "roms-marbl-0.7-default"
-    assert "roms-marbl-0.7-default" in wiz._dd_values(wiz.model_dd)
-    assert "roms-marbl-0.6-default" not in wiz._dd_values(wiz.model_dd)
+    assert wiz.model_card.model_dd.value == "roms-marbl-0.7-default"
+    assert "roms-marbl-0.7-default" in _dd_values(wiz.model_card.model_dd)
+    assert "roms-marbl-0.6-default" not in _dd_values(wiz.model_card.model_dd)
     # re-optioning is not a model switch: overrides are kept
     assert wiz._overrides == overrides
 
-    wiz.model_dd.value = "roms-marbl-0.14-default"
-    wiz.show_archived_models.value = True
-    wiz.show_archived_models.value = False
-    assert "roms-marbl-0.7-default" not in wiz._dd_values(wiz.model_dd)
+    wiz.model_card.model_dd.value = "roms-marbl-0.14-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.show_archived_models.value = False
+    assert "roms-marbl-0.7-default" not in _dd_values(wiz.model_card.model_dd)
 
 
 def test_use_pio_chk_emit_is_unconditional():
@@ -1872,7 +1875,7 @@ def test_cdr_plot_of_the_simple_release_follows_the_bgc_mode(
     assert wiz.cdr_plot_img.value
 
     # A BGC-mode switch changes what the resolver would generate: drop the plot.
-    wiz.bgc_dd.value = "marbl"
+    wiz.model_card.bgc_dd.value = "marbl"
     assert wiz._cdr_plot_object is None
     wiz._on_cdr_plot_generate(None)
     assert wiz._cdr_plot_object.tracer_set == "marbl"
@@ -1925,7 +1928,7 @@ def test_cdr_plot_of_an_attached_file_survives_a_bgc_mode_change(
     built = wiz._cdr_plot_object
     assert built is not None
 
-    wiz.bgc_dd.value = "marbl"
+    wiz.model_card.bgc_dd.value = "marbl"
 
     assert wiz._cdr_plot_object is built
     assert wiz.cdr_plot_img.value
@@ -1995,15 +1998,15 @@ def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.roms_ref.value = "0.2.0"
+    wiz.model_card.roms_ref.value = "0.2.0"
     wiz._rebuild()
     assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
 
-    wiz.roms_ref.value = "0.5.0"
+    wiz.model_card.roms_ref.value = "0.5.0"
     wiz._rebuild()
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
-    wiz.roms_ref.value = "0.2.0"  # back across the boundary
+    wiz.model_card.roms_ref.value = "0.2.0"  # back across the boundary
     wiz._rebuild()
     assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
 
@@ -2061,8 +2064,8 @@ def test_advection_cppdefs_editable_only_for_models_that_declare_them():
     for key in ("parabolic_splines", "upstream_ts_land_curv"):
         assert "0.8.0" in wiz.editor._widgets[("cppdefs", key)][0].tooltip
 
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     wiz._rebuild()
     assert "parabolic_splines" not in wiz.config.model_settings["cppdefs"]
     assert "upstream_ts_land_curv" not in wiz.config.model_settings["cppdefs"]
@@ -2116,14 +2119,14 @@ def test_0_12_model_declares_the_time_interpolation_key():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.12-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
     assert _INTERP_KEY not in wiz.editor._widgets
 
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.11-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.11-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert "cdr_lite" not in wiz.config.model_settings
@@ -2142,7 +2145,7 @@ class TestCarbonateSensitivityTimeInterpolation:
         wiz.end.value = date(2012, 1, 2)
         wiz.use_pio_chk.value = False
         wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         return wiz
 
@@ -2151,16 +2154,19 @@ class TestCarbonateSensitivityTimeInterpolation:
         return wiz.editor._widgets[_INTERP_KEY][0]
 
     def test_cdr_lite_starts_with_the_hold_in_the_model_card(self):
-        from cstar.wizard.wizard import _DEFAULT_MODEL
+        from cstar.wizard.model_card import _DEFAULT_MODEL
 
         wiz = self._wizard()
-        assert wiz.model_dd.value == _DEFAULT_MODEL
+        assert wiz.model_card.model_dd.value == _DEFAULT_MODEL
         checkbox = self._checkbox(wiz)
         assert checkbox.value is False
-        assert wiz.cs_interp_box.children == (wiz.editor.model_box, wiz.cs_interp_note)
-        assert checkbox in _descendants(wiz.cs_group)
+        assert wiz.model_card.cs_interp_box.children == (
+            wiz.editor.model_box,
+            wiz.model_card.cs_interp_note,
+        )
+        assert checkbox in _descendants(wiz.model_card.cs_group)
         assert checkbox not in _descendants(wiz.editor_box)
-        assert "time-averaged by default" in wiz.cs_interp_note.value
+        assert "time-averaged by default" in wiz.model_card.cs_interp_note.value
         assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
         assert wiz.config.composition.overrides == _INTERP_HOLD
         # an honest deviation from the ModelSpec, but not an Advanced-pane edit
@@ -2169,18 +2175,18 @@ class TestCarbonateSensitivityTimeInterpolation:
 
     def test_marbl_keeps_the_model_spec_value_and_shows_no_switch(self):
         wiz = self._wizard()
-        wiz.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "marbl"
         assert wiz.config is not None, wiz.derived.value
         assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
         assert wiz.config.composition.overrides == {}
-        assert wiz.cs_interp_box.children == ()
+        assert wiz.model_card.cs_interp_box.children == ()
 
     def test_a_user_choice_survives_mode_switches(self):
         wiz = self._wizard()
         self._checkbox(wiz).value = True
         assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
-        wiz.bgc_dd.value = "marbl"
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "marbl"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         assert self._checkbox(wiz).value is True
         assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
@@ -2189,25 +2195,25 @@ class TestCarbonateSensitivityTimeInterpolation:
     def test_a_model_pick_seeds_the_default_again(self):
         wiz = self._wizard()
         self._checkbox(wiz).value = True
-        wiz.show_archived_models.value = True
-        wiz.model_dd.value = "roms-marbl-0.11-default"
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.show_archived_models.value = True
+        wiz.model_card.model_dd.value = "roms-marbl-0.11-default"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         assert _INTERP_KEY not in wiz.editor._widgets  # no such switch before 0.12
         assert _INTERP_KEY not in wiz._overrides
-        assert wiz.cs_interp_box.children == ()
+        assert wiz.model_card.cs_interp_box.children == ()
 
-        wiz.model_dd.value = "roms-marbl-0.12-default"
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.model_dd.value = "roms-marbl-0.12-default"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
         assert self._checkbox(wiz).value is False
 
     def test_an_older_roms_ref_drops_the_default_instead_of_failing(self):
         wiz = self._wizard()
-        wiz.roms_ref.value = "0.11.0"
+        wiz.model_card.roms_ref.value = "0.11.0"
         assert wiz.config is not None, wiz.derived.value
         assert _INTERP_KEY not in wiz._overrides
-        wiz.roms_ref.value = ""
+        wiz.model_card.roms_ref.value = ""
         assert wiz.config is not None, wiz.derived.value
         assert self._checkbox(wiz).value is False
 
@@ -2221,13 +2227,16 @@ class TestCarbonateSensitivityTimeInterpolation:
         wiz.start.value = date(2012, 1, 1)
         wiz.end.value = date(2012, 1, 2)
         wiz.use_pio_chk.value = False
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is None
 
         checkbox = self._checkbox(wiz)
         assert checkbox.value is False
-        assert wiz.cs_interp_box.children == (wiz.editor.model_box, wiz.cs_interp_note)
-        assert checkbox in _descendants(wiz.cs_group)
+        assert wiz.model_card.cs_interp_box.children == (
+            wiz.editor.model_box,
+            wiz.model_card.cs_interp_note,
+        )
+        assert checkbox in _descendants(wiz.model_card.cs_group)
         for box in (wiz.editor_box, wiz.output_editor_box):
             (placeholder,) = box.children
             assert "once the blueprint is valid" in placeholder.value
@@ -2251,19 +2260,19 @@ class TestCarbonateSensitivityTimeInterpolation:
         wiz.start.value = date(2012, 1, 1)
         wiz.end.value = date(2012, 1, 2)
         wiz.use_pio_chk.value = False
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is None
-        assert wiz.cs_interp_box.children
+        assert wiz.model_card.cs_interp_box.children
 
         if pick == "model":
-            wiz.show_archived_models.value = True
-            wiz.model_dd.value = "roms-marbl-0.11-default"
-            wiz.bgc_dd.value = "cdr_lite"
+            wiz.model_card.show_archived_models.value = True
+            wiz.model_card.model_dd.value = "roms-marbl-0.11-default"
+            wiz.model_card.bgc_dd.value = "cdr_lite"
         else:
-            wiz.roms_ref.value = "0.11.0"
+            wiz.model_card.roms_ref.value = "0.11.0"
 
         assert wiz.config is None
-        assert wiz.cs_interp_box.children == ()
+        assert wiz.model_card.cs_interp_box.children == ()
         assert _INTERP_KEY not in wiz._overrides
 
     def test_a_loaded_blueprint_keeps_its_own_value(self):
@@ -2294,8 +2303,8 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
 
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.6-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.6-default"
     wiz._rebuild()
     assert "cdr_lite_output" not in wiz.config.model_settings
     assert "cdr_gas_exch_output" not in wiz.config.model_settings
@@ -2305,7 +2314,7 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
         "do_cdr_gas_exch_output",
     ) not in wiz.editor._widgets
 
-    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     wiz._rebuild()
     assert "cdr_lite_output" in wiz.config.model_settings
     assert "cdr_gas_exch_output" in wiz.config.model_settings
@@ -2339,7 +2348,7 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
             {"cdr_carbonate_sensitivity_time_interpolation": True},
         ),
     ):
-        wiz.model_dd.value = model
+        wiz.model_card.model_dd.value = model
         wiz._rebuild()
         assert "cdr_lite_output" in wiz.config.model_settings
         assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
@@ -2369,8 +2378,8 @@ def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     wiz._overrides[("param", "nt_cdr_oae")] = 2
     wiz._overrides[("param", "nt_cdr_dor")] = 1
     wiz._rebuild()
@@ -2405,8 +2414,8 @@ def test_constant_fe_widgets_built_for_the_0_11_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.11-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.11-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz.config.model_settings["marbl_bgc"]["use_constant_fe"] is False
@@ -2430,8 +2439,8 @@ def test_constant_fe_widgets_absent_for_the_0_10_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.show_archived_models.value = True
-    wiz.model_dd.value = "roms-marbl-0.10-default"
+    wiz.model_card.show_archived_models.value = True
+    wiz.model_card.model_dd.value = "roms-marbl-0.10-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert "use_constant_fe" not in wiz.config.model_settings["marbl_bgc"]
@@ -2452,7 +2461,7 @@ def test_v_sponge_trc_widget_built_for_the_0_13_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
@@ -2475,7 +2484,7 @@ def test_v_sponge_trc_widget_absent_for_the_0_12_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.12-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert "v_sponge_trc" not in wiz.config.model_settings["v_sponge"]
@@ -2491,7 +2500,7 @@ def test_v_sponge_trc_edit_reaches_the_blueprint_beside_the_domain_v_sponge():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     wiz._rebuild()
     assert wiz.config is not None
     v_sponge = wiz.config.model_settings["v_sponge"]["v_sponge"]
@@ -2538,7 +2547,7 @@ def test_avg_ts_widgets_built_in_the_averages_grid_for_the_0_14_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.14-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.14-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz._editor_key.settings_cls is RunTimeSettingsV0_14_0
@@ -2574,7 +2583,7 @@ def test_avg_ts_widgets_absent_for_the_0_13_model():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
@@ -2614,7 +2623,7 @@ def _implicit_fs_wizard(model: str) -> ForgeBlueprintWizard:
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.model_dd.value = model
+    wiz.model_card.model_dd.value = model
     wiz._rebuild()
     return wiz
 
@@ -2692,7 +2701,7 @@ def test_implicit_choice_does_not_survive_a_switch_to_the_0_14_model():
     wiz.editor._widgets[("implicit_fs", "fs_mode")][0].value = "implicit"
     assert wiz.config.model_settings["implicit_fs"]["fs_mode"] == "implicit"
 
-    wiz.model_dd.value = "roms-marbl-0.14-default"
+    wiz.model_card.model_dd.value = "roms-marbl-0.14-default"
     assert ("implicit_fs", "fs_mode") not in wiz._overrides
     assert wiz.config is not None
     assert "implicit_fs" not in wiz.config.model_settings
@@ -2707,7 +2716,7 @@ def test_implicit_choice_with_an_older_ucla_roms_version_is_reported():
     wiz.editor._widgets[("implicit_fs", "fs_mode")][0].value = "implicit"
     assert "Blueprint is valid" in wiz.validation.value
 
-    wiz.roms_ref.value = "0.14.0"
+    wiz.model_card.roms_ref.value = "0.14.0"
     wiz._rebuild()
     assert "implicit_fs needs ucla-roms >= 0.15.0" in wiz.validation.value
     assert "Blueprint is valid" not in wiz.validation.value
@@ -2850,9 +2859,7 @@ def test_domain_modified_reflects_deviation_from_catalog_pick():
     track modification at all).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[
-        1
-    ]  # first real catalog domain
+    wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]  # first real catalog domain
     assert wiz.config.composition.domain.origin == "catalog"
     assert wiz.config.composition.domain.modified is False
 
@@ -3014,7 +3021,7 @@ def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
+    wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
     wiz.npx.value = wiz.npx.value + 1  # deviate domain
     wiz._overrides[("lateral_visc", "visc2")] = 99.0  # deviate model
     wiz._rebuild()
@@ -3724,7 +3731,7 @@ class TestComputeDt:
         wiz = _new_wizard()
         expected = self._resolver_dt(wiz)
         _strip_bgc_forcing(wiz)
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is None
         wiz.dt.value = 1.0
         wiz._on_compute_dt(None)
@@ -4005,9 +4012,7 @@ class TestGridFileAttach:
         wiz._on_grid_file_attach(None)
         assert wiz._grid_file is not None
 
-        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[
-            1
-        ]  # first real catalog domain
+        wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]  # first real catalog domain
 
         assert wiz._grid_file is None
         assert wiz.grid_w["nx"].disabled is False
@@ -4561,7 +4566,7 @@ def test_sticky_bar_reflects_model_and_validity_after_rebuild():
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
-    assert wiz.model_dd.value in wiz.sticky_bar.value
+    assert wiz.model_card.model_dd.value in wiz.sticky_bar.value
     assert "● Valid" in wiz.sticky_bar.value
 
 
@@ -5142,7 +5147,7 @@ class TestCdrLiteSavedModel:
         assert data["model_settings"]["cdr_lite"][_INTERP_KEY[1]] is True
         assert "✓" in wiz.save_model_status.value
         assert "round-trip" not in wiz.save_model_status.value
-        assert wiz.model_dd.value == "my-cdr-lite-model"
+        assert wiz.model_card.model_dd.value == "my-cdr-lite-model"
         # The run keeps the hold, which deviates from the saved spec exactly as it
         # does from the bundled one, so the status must not claim otherwise.
         assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
@@ -5154,10 +5159,10 @@ class TestCdrLiteSavedModel:
         wiz2.start.value = date(2012, 1, 1)
         wiz2.end.value = date(2012, 1, 2)
         wiz2.use_pio_chk.value = False
-        wiz2.model_dd.value = "my-cdr-lite-model"
-        assert wiz2.bgc_dd.value == "cdr_lite"
-        assert _display(wiz2.cs_group) == ""
-        wiz2.bgc_dd.value = "marbl"
+        wiz2.model_card.model_dd.value = "my-cdr-lite-model"
+        assert wiz2.model_card.bgc_dd.value == "cdr_lite"
+        assert _display(wiz2.model_card.cs_group) == ""
+        wiz2.model_card.bgc_dd.value = "marbl"
         assert wiz2.config is not None, wiz2.derived.value
 
     def test_a_hold_the_user_set_stays_out_of_the_saved_spec(self, tmp_path):
@@ -5194,17 +5199,17 @@ class TestCdrLiteCdrPanel:
         assert wiz.cdr_lite_hint in _descendants(run_card)
 
         assert _display(wiz.cdr_lite_hint) == "none"
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         assert _display(wiz.cdr_lite_hint) == ""
         assert "tracer_set: cdr_lite" in wiz.cdr_lite_hint.value
         assert "required" in wiz.cdr_lite_hint.value
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         assert _display(wiz.cdr_lite_hint) == "none"
 
     def test_netcdf_without_cdr_tracers_warns_in_cdr_lite_mode(self, tmp_path):
         p = _write_cdr_netcdf_with_tracers(tmp_path / "cdr.nc", ["temp", "salt", "ALK"])
         wiz = _new_wizard()
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         wiz.cdr_mode_dd.value = "netcdf"
         wiz.cdr_file_path.value = str(p)
         wiz._on_cdr_file_attach(None)
@@ -5217,7 +5222,7 @@ class TestCdrLiteCdrPanel:
             tmp_path / "cdr.nc", ["temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1"]
         )
         wiz = _new_wizard()
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         wiz.cdr_mode_dd.value = "netcdf"
         wiz.cdr_file_path.value = str(p)
         wiz._on_cdr_file_attach(None)
@@ -5546,7 +5551,7 @@ class TestChildNestingMetadata:
             "grid_kwargs_child": {**self._CHILD_GRID, "metadata": {"period": 1800.0}},
         }
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
+        wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
 
         assert wiz.nest_enable.value is True
         assert wiz.nest_period.value == 1800.0
@@ -5560,7 +5565,7 @@ class TestChildNestingMetadata:
             "grid_kwargs_child": {**self._CHILD_GRID, "metadata": {"prefix": "a_b"}},
         }
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
+        wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
 
         assert "Invalid child domain" in wiz.derived.value
         assert wiz.nest_period.value == 900.0

@@ -77,6 +77,7 @@ from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import OverrideTransform
 from cstar.roms.precheck import NamelistConsistencyError
 from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
+from cstar.wizard.fields import _dd_values
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
 _MODEL_PATH = _BUNDLED_CATALOG / "specs" / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
@@ -7830,7 +7831,7 @@ class TestForgeBlueprintWizard:
 
     def test_selecting_catalog_domain_prefills_and_resolves(self):
         wiz = self._wizard()
-        if "gulf-guinea-toy" not in wiz._dd_values(wiz.domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(wiz.domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         wiz.domain_dd.value = "gulf-guinea-toy"  # triggers prefill + rebuild
         cfg = wiz.config
@@ -8068,7 +8069,7 @@ class TestForgeBlueprintWizard:
         resolved config round-trip (the #7 load affordance).
         """
         w1 = self._wizard()
-        if "gulf-guinea-toy" in w1._dd_values(w1.domain_dd):
+        if "gulf-guinea-toy" in _dd_values(w1.domain_dd):
             w1.domain_dd.value = "gulf-guinea-toy"
         w1.name.value = "my-custom-run"
         p = tmp_path / "forge_blueprint.yaml"
@@ -8265,7 +8266,7 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         # nrpf_rst exists only pre ucla-roms 0.5.0; pin a legacy ref so the
         # editor generates the widget (the default model pins "main" -> latest).
-        w.roms_ref.value = "0.2.0"
+        w.model_card.roms_ref.value = "0.2.0"
         w._rebuild()
         wrt = w.editor._widgets[("ocean_vars", "wrt_file_rst")][0]
         monthly = w.editor._widgets[("ocean_vars", "monthly_restarts")][0]
@@ -8367,7 +8368,7 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         # nrpf_rst exists only pre ucla-roms 0.5.0; pin a legacy ref so the
         # editor generates the widget (the default model pins "main" -> latest).
-        w.roms_ref.value = "0.2.0"
+        w.model_card.roms_ref.value = "0.2.0"
         w._rebuild()
         w._syncing = True
         try:
@@ -8557,7 +8558,7 @@ class TestForgeBlueprintWizard:
         # ForcingSpec must always be an explicit catalog selection now -- no more
         # "<model default>" fallback -- so the default-selected entry is already
         # origin="catalog" from construction.
-        if "glorys-era5-unified" not in w._dd_values(w.forcing_dd):
+        if "glorys-era5-unified" not in _dd_values(w.forcing_dd):
             pytest.skip("example ForcingSpec not in catalog")
         assert w.forcing_dd.value == "glorys-era5-unified"
         assert w.config.composition.forcing.origin == "catalog"
@@ -8585,7 +8586,7 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         # OutputSpec must always be an explicit catalog selection now -- no more
         # "<model default>" fallback.
-        if "standard" not in w._dd_values(w.output_dd):
+        if "standard" not in _dd_values(w.output_dd):
             pytest.skip("example OutputSpec not in catalog")
         # 'daily-restarts' is the preselected default (_DEFAULT_OUTPUT_SPEC);
         # 'standard' remains selectable for back-compat.
@@ -8604,7 +8605,7 @@ class TestForgeBlueprintWizard:
 
     def test_output_spec_round_trips_through_load(self, tmp_path):
         w1 = self._wizard()
-        if "standard" not in w1._dd_values(w1.output_dd):
+        if "standard" not in _dd_values(w1.output_dd):
             pytest.skip("example OutputSpec not in catalog")
         w1.output_dd.value = "standard"
         p = tmp_path / "forge_blueprint.yaml"
@@ -8809,7 +8810,7 @@ class TestForgeBlueprintWizard:
 
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in w._dd_values(w.nest_domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(w.nest_domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         w.nest_domain_dd.value = "gulf-guinea-toy"  # prefills child + enables nesting
         assert w.nest_enable.value is True
@@ -8863,7 +8864,7 @@ class TestForgeBlueprintWizard:
 
     def test_parent_from_domain_dropdown_prefills_parent(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in w._dd_values(w.parent_domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(w.parent_domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         w.parent_domain_dd.value = "gulf-guinea-toy"  # prefills parent + enables it
         assert w.parent_enable.value is True
@@ -8966,7 +8967,7 @@ class TestForgeBlueprintWizard:
         which a pick made while parented takes after the boundary rows are cleared.
         """
         w = self._wizard()
-        if "glorys-era5-glodap-woa" not in w._dd_values(w.forcing_dd):
+        if "glorys-era5-glodap-woa" not in _dd_values(w.forcing_dd):
             pytest.skip("glorys-era5-glodap-woa ForcingSpec not in catalog")
         w.parent_enable.value = True
         w.forcing_dd.value = "glorys-era5-glodap-woa"
@@ -8987,7 +8988,7 @@ class TestForgeBlueprintWizard:
         the IC default and boundary BGC rows itself.
         """
         w = self._wizard()
-        if "gulf-guinea-toy" not in w._dd_values(w.domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(w.domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         boundary_bgc = w.config.forcing.boundary.bgc_sources
         w.parent_enable.value = True
@@ -9023,11 +9024,11 @@ class TestForgeBlueprintWizard:
         strip that already happens in ``_on_forcing_spec``.
         """
         w = self._wizard()
-        if "simple-bgc-demo" not in w._dd_values(w.forcing_dd):
+        if "simple-bgc-demo" not in _dd_values(w.forcing_dd):
             pytest.skip("simple-bgc-demo ForcingSpec not in catalog")
         w.parent_enable.value = True
         assert w.config.forcing.initial_conditions is None
-        other = next(v for v in w._dd_values(w.forcing_dd) if v != w.forcing_dd.value)
+        other = next(v for v in _dd_values(w.forcing_dd) if v != w.forcing_dd.value)
         w.forcing_dd.value = other
         assert w._forcing_editor.ic_name.value == "(none)"
         assert w.config.forcing.initial_conditions is None
@@ -9049,7 +9050,7 @@ class TestForgeBlueprintWizard:
 
     def test_roms_ref_gather_and_default_round_trip(self, tmp_path):
         w1 = self._wizard()
-        w1.roms_ref.value = "pio-refdate"
+        w1.model_card.roms_ref.value = "pio-refdate"
         assert w1.config.code.roms.commit == "pio-refdate"
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -9058,7 +9059,7 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.roms_ref.value == "pio-refdate"
+        assert w2.model_card.roms_ref.value == "pio-refdate"
         assert w2.config.code.roms.commit == "pio-refdate"
 
     def test_roms_ref_prefilled_with_model_default_and_editable(self, tmp_path):
@@ -9068,31 +9069,31 @@ class TestForgeBlueprintWizard:
         (not blank); an actual edit/override round-trips through save/reload too.
         """
         w1 = self._wizard()
-        default_ref = w1._model_default_roms_ref()
+        default_ref = w1.model_card.default_roms_ref()
         assert default_ref  # this model.yaml pins a commit
-        assert w1.roms_ref.value == default_ref
+        assert w1.model_card.roms_ref.value == default_ref
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
-        w2.roms_ref.value = "stale-value-from-a-prior-load"
+        w2.model_card.roms_ref.value = "stale-value-from-a-prior-load"
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.roms_ref.value == default_ref
+        assert w2.model_card.roms_ref.value == default_ref
 
         # An actual override round-trips through save/reload unchanged.
-        w1.roms_ref.value = "my-custom-branch"
+        w1.model_card.roms_ref.value = "my-custom-branch"
         w1._on_save(None)
         w3 = self._wizard()
         w3.load_path.value = str(p)
         w3._on_load_path(None)
-        assert w3.roms_ref.value == "my-custom-branch"
+        assert w3.model_card.roms_ref.value == "my-custom-branch"
 
     def test_marbl_ref_gather_and_default_round_trip(self, tmp_path):
         w1 = self._wizard()
-        w1.marbl_ref.value = "marbl0.99.0"
+        w1.model_card.marbl_ref.value = "marbl0.99.0"
         assert w1.config.code.marbl.commit == "marbl0.99.0"
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -9101,7 +9102,7 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.marbl_ref.value == "marbl0.99.0"
+        assert w2.model_card.marbl_ref.value == "marbl0.99.0"
         assert w2.config.code.marbl.commit == "marbl0.99.0"
 
     def test_marbl_ref_prefilled_with_model_default_and_editable(self, tmp_path):
@@ -9110,27 +9111,27 @@ class TestForgeBlueprintWizard:
         same default (not blank), and an override round-trips through save/reload.
         """
         w1 = self._wizard()
-        default_ref = w1._model_default_marbl_ref()
+        default_ref = w1.model_card.default_marbl_ref()
         assert default_ref  # this model.yaml pins a MARBL tag
-        assert w1.marbl_ref.value == default_ref
+        assert w1.model_card.marbl_ref.value == default_ref
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
-        w2.marbl_ref.value = "stale-value-from-a-prior-load"
+        w2.model_card.marbl_ref.value = "stale-value-from-a-prior-load"
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.marbl_ref.value == default_ref
+        assert w2.model_card.marbl_ref.value == default_ref
 
         # An actual override round-trips through save/reload unchanged.
-        w1.marbl_ref.value = "my-custom-marbl-branch"
+        w1.model_card.marbl_ref.value = "my-custom-marbl-branch"
         w1._on_save(None)
         w3 = self._wizard()
         w3.load_path.value = str(p)
         w3._on_load_path(None)
-        assert w3.marbl_ref.value == "my-custom-marbl-branch"
+        assert w3.model_card.marbl_ref.value == "my-custom-marbl-branch"
 
     def test_loading_file_with_bad_settings_is_flagged(self, tmp_path):
         import yaml
@@ -9786,7 +9787,7 @@ class TestSaveModifiedSpecsToCatalog:
         a ModelSpec keeps the description of the spec it was saved from.
         """
         wiz = self._wizard(isolated_catalog)
-        base_model = wiz.model_dd.value
+        base_model = wiz.model_card.model_dd.value
         base_description = isolated_catalog.model_data(base_model)["description"]
         assert wiz.description.value == wiz.config.description  # derived
 
@@ -9837,7 +9838,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         wiz._overrides[("ocean_vars", "wrt_file_his")] = True
         wiz._overrides[("bgc", "wrt_his")] = False
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         assert wiz.config is not None, wiz.derived.value
         assert wiz.config.composition.output.modified is True
 
@@ -9858,7 +9859,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz._on_save_model(None)
 
         assert "my-model" in isolated_catalog.model_names
-        assert wiz.model_dd.value == "my-model"
+        assert wiz.model_card.model_dd.value == "my-model"
         assert wiz.config.composition.model.modified is False
 
     def test_save_model_spec_without_marbl_keeps_base_bgc_tracer_count(
@@ -9879,7 +9880,7 @@ class TestSaveModifiedSpecsToCatalog:
         for ws in list(fe._rows["river"]):
             if "include_bgc" in ws:
                 ws["include_bgc"].value = False
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
         wiz._rebuild()
         assert wiz.config is not None, wiz.derived.value
         assert wiz.config.model_settings["param"]["ntrc_bio"] == 0
@@ -9898,7 +9899,7 @@ class TestSaveModifiedSpecsToCatalog:
         # A blank roms_ref means "clone the base pin" -- must not itself count
         # as a deviation.
         wiz = self._wizard(isolated_catalog)
-        wiz.roms_ref.value = ""
+        wiz.model_card.roms_ref.value = ""
 
         wiz.save_model_name.value = "my-model-blank-ref"
         wiz._on_save_model(None)
@@ -9914,10 +9915,10 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         # Pin a spec where use_pio=True / roms_ref="main" are genuine
         # deviations (the default pio-dev spec already declares both).
-        wiz.show_archived_models.value = True
-        wiz.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.model_card.show_archived_models.value = True
+        wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.use_pio_chk.value = True
-        wiz.roms_ref.value = "main"
+        wiz.model_card.roms_ref.value = "main"
         assert wiz.config.composition.model.modified is True  # spec deviation
 
         wiz.save_model_name.value = spec_name
@@ -9929,16 +9930,16 @@ class TestSaveModifiedSpecsToCatalog:
         assert "branch" not in data["code"]["roms"]
         assert data["code"]["pio"] is not None
 
-        assert wiz.model_dd.value == spec_name
+        assert wiz.model_card.model_dd.value == spec_name
         assert wiz.config.composition.model.modified is False
         assert "✓" in wiz.save_model_status.value
 
         # A fresh wizard picking this ModelSpec must reload the same toggles --
         # this is the part that actually failed for the reported bug.
         wiz2 = self._wizard(isolated_catalog)
-        wiz2.model_dd.value = spec_name
+        wiz2.model_card.model_dd.value = spec_name
         assert wiz2.use_pio_chk.value is True
-        assert wiz2.roms_ref.value == "main"
+        assert wiz2.model_card.roms_ref.value == "main"
         assert wiz2.config.model_settings["cppdefs"]["use_pio"] is True
         assert wiz2.config.code.pio is not None
         assert wiz2.config.code.roms.commit == "main"
@@ -9955,9 +9956,9 @@ class TestSaveModifiedSpecsToCatalog:
         isolated_catalog.register_model_from_settings(
             "no-pio",
             _model_owned_settings(wiz.config.model_settings),
-            isolated_catalog.model_path(wiz.model_dd.value),
+            isolated_catalog.model_path(wiz.model_card.model_dd.value),
             use_pio=False,
-            roms_ref=wiz.roms_ref.value.strip() or None,
+            roms_ref=wiz.model_card.roms_ref.value.strip() or None,
         )
         assert wiz._verify_spec_roundtrip("model", "no-pio") is False
 
@@ -9971,14 +9972,14 @@ class TestSaveModifiedSpecsToCatalog:
         # Pin a spec whose base pin is NOT "main", so a spec that drops the
         # live roms_ref actually loses information (pio-dev's base pin is
         # already "main", which would make the roundtrip spuriously succeed).
-        wiz.show_archived_models.value = True
-        wiz.model_dd.value = "cson_roms-marbl_v0.1"
-        wiz.roms_ref.value = "main"
+        wiz.model_card.show_archived_models.value = True
+        wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.model_card.roms_ref.value = "main"
         # Simulate the pre-fix writer: a spec saved without the live roms_ref.
         isolated_catalog.register_model_from_settings(
             "stale-ref",
             _model_owned_settings(wiz.config.model_settings),
-            isolated_catalog.model_path(wiz.model_dd.value),
+            isolated_catalog.model_path(wiz.model_card.model_dd.value),
             use_pio=wiz.use_pio_chk.value,
             roms_ref=None,
         )
@@ -9995,8 +9996,8 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         # Pin a spec whose base pin is NOT "main", so roms_ref="main" below is
         # a real deviation (pio-dev, the default, already pins "main").
-        wiz.show_archived_models.value = True
-        wiz.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.model_card.show_archived_models.value = True
+        wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
         assert wiz.config.composition.model.modified is False
 
         wiz.use_pio_chk.value = not wiz.use_pio_chk.value
@@ -10005,24 +10006,28 @@ class TestSaveModifiedSpecsToCatalog:
         wiz.use_pio_chk.value = not wiz.use_pio_chk.value  # flip back
         assert wiz.config.composition.model.modified is False
 
-        wiz.roms_ref.value = "main"
+        wiz.model_card.roms_ref.value = "main"
         assert wiz.config.composition.model.modified is True
 
-        wiz.roms_ref.value = ""  # blank => clone the base pin, not a deviation
+        wiz.model_card.roms_ref.value = (
+            ""  # blank => clone the base pin, not a deviation
+        )
         assert wiz.config.composition.model.modified is False
 
-        wiz.marbl_ref.value = "some-marbl-branch"
+        wiz.model_card.marbl_ref.value = "some-marbl-branch"
         assert wiz.config.composition.model.modified is True
 
-        wiz.marbl_ref.value = ""  # blank => clone the base pin, not a deviation
+        wiz.model_card.marbl_ref.value = (
+            ""  # blank => clone the base pin, not a deviation
+        )
         assert wiz.config.composition.model.modified is False
 
     def test_save_model_spec_persists_marbl_ref(self, isolated_catalog):
         spec_name = "marbl-ref-test"
         wiz = self._wizard(isolated_catalog)
-        wiz.show_archived_models.value = True
-        wiz.model_dd.value = "cson_roms-marbl_v0.1"
-        wiz.marbl_ref.value = "my-marbl-tag"
+        wiz.model_card.show_archived_models.value = True
+        wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.model_card.marbl_ref.value = "my-marbl-tag"
         assert wiz.config.composition.model.modified is True  # spec deviation
 
         wiz.save_model_name.value = spec_name
@@ -10036,14 +10041,14 @@ class TestSaveModifiedSpecsToCatalog:
             == "https://github.com/CWorthy-ocean/MARBL.git"
         )
 
-        assert wiz.model_dd.value == spec_name
+        assert wiz.model_card.model_dd.value == spec_name
         assert wiz.config.composition.model.modified is False
         assert "✓" in wiz.save_model_status.value
 
         # A fresh wizard picking this ModelSpec must reload the same ref.
         wiz2 = self._wizard(isolated_catalog)
-        wiz2.model_dd.value = spec_name
-        assert wiz2.marbl_ref.value == "my-marbl-tag"
+        wiz2.model_card.model_dd.value = spec_name
+        assert wiz2.model_card.marbl_ref.value == "my-marbl-tag"
         assert wiz2.config.code.marbl.commit == "my-marbl-tag"
 
     def test_verify_model_roundtrip_false_when_spec_loses_marbl_ref(
@@ -10053,16 +10058,16 @@ class TestSaveModifiedSpecsToCatalog:
         from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
-        wiz.show_archived_models.value = True
-        wiz.model_dd.value = "cson_roms-marbl_v0.1"
-        wiz.marbl_ref.value = "some-other-marbl-tag"
+        wiz.model_card.show_archived_models.value = True
+        wiz.model_card.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.model_card.marbl_ref.value = "some-other-marbl-tag"
         # Simulate a pre-fix writer: a spec saved without the live marbl_ref.
         isolated_catalog.register_model_from_settings(
             "stale-marbl-ref",
             _model_owned_settings(wiz.config.model_settings),
-            isolated_catalog.model_path(wiz.model_dd.value),
+            isolated_catalog.model_path(wiz.model_card.model_dd.value),
             use_pio=wiz.use_pio_chk.value,
-            roms_ref=wiz.roms_ref.value.strip() or None,
+            roms_ref=wiz.model_card.roms_ref.value.strip() or None,
             marbl_ref=None,
         )
         assert wiz._verify_spec_roundtrip("model", "stale-marbl-ref") is False
@@ -10230,14 +10235,14 @@ class TestSaveModifiedSpecsToCatalog:
         self, isolated_catalog
     ):
         wiz = self._wizard(isolated_catalog)
-        if "gulf-guinea-toy" in wiz._dd_values(wiz.domain_dd):
+        if "gulf-guinea-toy" in _dd_values(wiz.domain_dd):
             wiz.domain_dd.value = "gulf-guinea-toy"
         wiz.npx.value = wiz.npx.value + 1
         assert wiz.config.composition.domain.modified is True
 
         before_overrides = dict(wiz._overrides)
         before_forcing_seed = wiz._forcing_seed
-        before_model_dd = wiz.model_dd.value
+        before_model_dd = wiz.model_card.model_dd.value
         before_output_dd = wiz.output_dd.value
 
         wiz.save_domain_name.value = "my-domain"
@@ -10249,7 +10254,7 @@ class TestSaveModifiedSpecsToCatalog:
         # no-clobber: every OTHER spec's state is untouched by the domain save.
         assert wiz._overrides == before_overrides
         assert wiz._forcing_seed == before_forcing_seed
-        assert wiz.model_dd.value == before_model_dd
+        assert wiz.model_card.model_dd.value == before_model_dd
         assert wiz.output_dd.value == before_output_dd
 
     def test_save_domain_spec_persists_v_sponge_when_touched(self, isolated_catalog):

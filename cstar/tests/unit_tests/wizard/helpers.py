@@ -89,6 +89,6 @@ def _cdr_lite_wizard(catalog=None):
     wiz.end.value = date(2012, 1, 2)
     wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
     _strip_bgc_forcing(wiz)
-    wiz.bgc_dd.value = "cdr_lite"
+    wiz.model_card.bgc_dd.value = "cdr_lite"
     wiz.cdr_mode_dd.value = "simple"
     return wiz

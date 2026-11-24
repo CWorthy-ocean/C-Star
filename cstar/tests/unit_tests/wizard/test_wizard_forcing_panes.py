@@ -106,7 +106,7 @@ def test_a_physics_only_model_hides_empty_bgc_sections():
     for cat in ("ic_bgc", "boundary_bgc"):
         for row in list(editor._rows[cat]):
             editor._remove(cat, row)
-    wiz.bgc_dd.value = "none"
+    wiz.model_card.bgc_dd.value = "none"
     wiz._update_status(wiz.config)
     for cat in ("ic_bgc", "boundary_bgc"):
         assert not _shown(editor._bgc_sections[cat])
@@ -150,7 +150,7 @@ def test_without_marbl_a_bgc_setting_off_its_default_keeps_the_section_shown(pre
 
 def test_adding_a_bgc_source_on_a_physics_only_model_shows_it_in_the_header():
     wiz = _wizard()
-    wiz.bgc_dd.value = "none"
+    wiz.model_card.bgc_dd.value = "none"
     editor = wiz._forcing_editor
     for cat in ("ic_bgc", "boundary_bgc"):
         assert not editor._rows[cat]
