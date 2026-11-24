@@ -492,10 +492,14 @@ def test_output_tables_take_their_columns_from_the_stylesheet(shared_wizard):
         cells = list(table.children)
         assert len(cells) % 5 == 0
         assert all("forge-out-x" in c._dom_classes for c in cells[4::5])
-        assert not any("forge-out-x" in c._dom_classes for i, c in enumerate(cells) if i % 5 != 4)
+        assert not any(
+            "forge-out-x" in c._dom_classes for i, c in enumerate(cells) if i % 5 != 4
+        )
     assert "grid-template-columns:" in _declarations_of(".forge-app .forge-out-table")
     narrow = _at_rule_block("@container (max-width: 720px)")
-    assert ".forge-app .forge-out-table > .forge-out-x { grid-column: 2 / -1; }" in narrow
+    assert (
+        ".forge-app .forge-out-table > .forge-out-x { grid-column: 2 / -1; }" in narrow
+    )
     assert ".forge-out-th.forge-out-x { display: none; }" in narrow
 
 
@@ -507,7 +511,9 @@ def test_variable_grids_drop_columns_in_narrower_cards(shared_wizard):
     assert grids
     assert all(g.layout.grid_template_columns is None for g in grids)
     assert "repeat(4, minmax(0, 1fr))" in _declarations_of(".forge-app .forge-var-grid")
-    assert "repeat(3, minmax(0, 1fr))" in _at_rule_block("@container (max-width: 1150px)")
+    assert "repeat(3, minmax(0, 1fr))" in _at_rule_block(
+        "@container (max-width: 1150px)"
+    )
     assert ".forge-var-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in (
         _at_rule_block("@container (max-width: 760px)")
     )
@@ -533,4 +539,3 @@ def _declarations_of(selector: str) -> str:
     match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", components.WIZARD_CSS)
     assert match, f"no rule for {selector}"
     return match.group(1)
-

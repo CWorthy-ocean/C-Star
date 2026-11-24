@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 
 #: A 1x1 transparent GIF: an image that loads at once, for :data:`_SCROLL_TOP_JS`.
-_BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+_BLANK_GIF = (
+    "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+)
 
 #: Scrolls the shell's top into view once the image has loaded, by which time the
 #: page just brought to the front has replaced the old one. ``scrollIntoView``

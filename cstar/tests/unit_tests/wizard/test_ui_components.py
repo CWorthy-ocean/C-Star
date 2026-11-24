@@ -388,9 +388,7 @@ def test_dark_jupyterlab_gets_a_light_page_behind_the_wizard():
     """Text on the page (header, intro, catalog bar) needs a light background in a
     dark JupyterLab; only the outermost wizard root gets it.
     """
-    selector = (
-        'body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app)'
-    )
+    selector = 'body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app)'
     assert f"background: {C.branding.GREY};" in _declarations(selector)
     header = C.branding.header_css()
     assert (
