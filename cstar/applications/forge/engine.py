@@ -140,10 +140,10 @@ PROCESSING_FILLED_SECTIONS = (
 # ``bgc_mode: cdr_lite``.
 #
 # The grid step also writes values read off the grids and the partitioning it built
-# (``param`` sizes and tiles, the child's vertical coordinates in ``extract_data``,
-# the ``cppdefs.obc_*`` switches), and each surface step writes ``interp_frc`` from
-# whether roms-tools put that file on the coarse grid. Those leaves carry, in place
-# of ``None``, the blueprint field that controls them. Their stored values are
+# (``param`` sizes and tiles, the child's vertical coordinates and extraction period
+# in ``extract_data``, the ``cppdefs.obc_*`` switches), and each surface step writes
+# ``interp_frc`` from whether roms-tools put that file on the coarse grid. Those
+# leaves carry, in place of ``None``, the blueprint field that controls them. Their stored values are
 # replaced like the rest, and an explicit override (``build_forge_blueprint``'s
 # ``run_time_overrides``/``compile_time_overrides``, recorded with the wizard's in
 # ``composition.overrides``) that contradicts the value is refused by
@@ -205,8 +205,11 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, dict[str, str | None]] = {
     "blk_frc": {"interp_frc": _COARSE_GRID_MODE},
     "bgc": {"interp_frc": _COARSE_GRID_MODE},
     "extract_data": {
-        leaf: f"domain.grid_kwargs_child.{kwarg}"
-        for kwarg, leaf in CHILD_VERTICAL_KWARGS.items()
+        **{
+            leaf: f"domain.grid_kwargs_child.{kwarg}"
+            for kwarg, leaf in CHILD_VERTICAL_KWARGS.items()
+        },
+        "extract_period": "domain.metadata_child.period",
     },
     "cppdefs": {
         f"obc_{side}": f"domain.open_boundaries.{side}"
@@ -245,6 +248,8 @@ def known_derived_values(cfg: ForgeBlueprint) -> dict[str, dict[str, Any]]:
     for kwarg, leaf in CHILD_VERTICAL_KWARGS.items():
         if kwarg in child:
             known["extract_data"][leaf] = child[kwarg]
+    if domain.is_parent:
+        known["extract_data"]["extract_period"] = domain.child_extract_period
     # Every surface step must agree on interp_frc (the generator refuses a mix), so
     # one item with an explicit mode fixes the value for all of them: "always"
     # writes the file on the coarse grid, "never" on the model grid. A BGC item
@@ -445,16 +450,12 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         code_spec=cfg.code,
         grid_file=cfg.domain.grid_file,
     )
-    # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
-    # block (which the ForgeBlueprint stores separately) — re-embed it.
     if cfg.domain.grid_kwargs_child is not None:
-        child = dict(cfg.domain.grid_kwargs_child)
-        meta = dict(cfg.domain.metadata_child or {})
-        if cfg.domain.nesting_include_pressure_fluxes:
-            meta["include_pressure_fluxes"] = True
-        if meta:
-            child["metadata"] = meta
-        kwargs["grid_kwargs_child"] = child
+        kwargs["grid_kwargs_child"] = dict(cfg.domain.grid_kwargs_child)
+        kwargs["nesting_period"] = cfg.domain.child_extract_period
+    kwargs["nesting_include_pressure_fluxes"] = (
+        cfg.domain.nesting_include_pressure_fluxes
+    )
     if cfg.domain.grid_kwargs_parent is not None:
         kwargs["grid_kwargs_parent"] = dict(cfg.domain.grid_kwargs_parent)
     return kwargs

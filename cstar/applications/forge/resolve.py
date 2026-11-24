@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any, get_args
 import yaml
 
 from cstar.applications.forge.blueprint import (
+    NESTING_PERIOD_DEFAULT,
     PLACEHOLDER_DESCRIPTION,
     BgcSourceItem,
     BoundaryForcing,
@@ -65,6 +66,7 @@ from cstar.applications.forge.blueprint import (
     UserProvidedFile,
     infer_cdr_mode,
     sanitize_name,
+    split_child_nesting_metadata,
     vert_kwargs_from_grid_kwargs,
 )
 from cstar.applications.forge.engine import (
@@ -563,7 +565,7 @@ _EXTRACT_DATA_DEFAULT: dict[str, Any] = {
     "theta_s_chd": 5.0,
     "theta_b_chd": 2.0,
     "hc_chd": 250.0,
-    "extract_period": 3600.0,
+    "extract_period": NESTING_PERIOD_DEFAULT,
     "extract_root_name": "child",
 }
 
@@ -1009,6 +1011,11 @@ def build_forge_blueprint(
     ``cdr_forcing_file``. Raises ``ValueError`` when the build is not
     ``bgc_mode == "cdr_lite"`` or sets ``cdr_lite.cdr_online_carbonate_sensitivity``.
     """
+    grid_kwargs_child, metadata_child, nesting_include_pressure_fluxes = (
+        split_child_nesting_metadata(
+            grid_kwargs_child, metadata_child, nesting_include_pressure_fluxes
+        )
+    )
     if cdr is not None and (
         cdr_forcing is not None
         or cdr_forcing_yaml is not None
@@ -1352,7 +1359,9 @@ def build_forge_blueprint(
         for kwarg, leaf in CHILD_VERTICAL_KWARGS.items():
             extract[leaf] = grid_kwargs_child[kwarg]
         period = (metadata_child or {}).get("period")
-        extract["extract_period"] = float(period) if period is not None else 3600.0
+        extract["extract_period"] = (
+            float(period) if period is not None else NESTING_PERIOD_DEFAULT
+        )
         settings["extract_data"] = extract
 
     # OutputSpec spec: deep-merge the output-settings selection over the model
