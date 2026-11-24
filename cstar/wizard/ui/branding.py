@@ -109,14 +109,19 @@ VOILA_BODY = "body[data-voila]"
 def themed_rule(selector: str, table: Mapping[str, tuple[str, str]]) -> str:
     """CSS declaring ``table``'s light values on ``selector`` and its dark ones where the host is dark.
 
-    Each block also sets ``color-scheme``, so native controls and scrollbars
-    match. ``selector`` may be a selector list.
+    The dark blocks hold only the entries whose dark value differs; the rest
+    (and a ``var()`` reference, which resolves against the dark values on the
+    same element) come from the light block. Each block also sets
+    ``color-scheme``, so native controls and scrollbars match. ``selector`` may
+    be a selector list.
     """
 
     def block(sel: str, scheme: str, column: int, indent: str = "") -> str:
         lines = [f"{indent}{sel} {{", f"{indent}    color-scheme: {scheme};"]
         lines += [
-            f"{indent}    {name}: {pair[column]};" for name, pair in table.items()
+            f"{indent}    {name}: {pair[column]};"
+            for name, pair in table.items()
+            if column == 0 or pair[1] != pair[0]
         ]
         return "\n".join([*lines, f"{indent}}}"])
 

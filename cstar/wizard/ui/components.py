@@ -32,6 +32,21 @@ STICKY_BAR_HEIGHT = "56px"
 #: The same once the bar's step links wrap onto a second line (one more 26px row).
 STICKY_BAR_HEIGHT_WRAPPED = "82px"
 
+#: ipywidgets' own colour variables, derived from the host colours below: the
+#: same in both themes.
+_WIDGET_COLORS = {
+    "--jp-widgets-color": "var(--jp-content-font-color1)",
+    "--jp-widgets-label-color": "var(--jp-widgets-color)",
+    "--jp-widgets-readout-color": "var(--jp-widgets-color)",
+    "--jp-widgets-input-color": "var(--jp-ui-font-color1)",
+    "--jp-widgets-input-background-color": "var(--jp-layout-color1)",
+    "--jp-widgets-input-border-color": "var(--jp-border-color1)",
+    "--jp-widgets-input-focus-border-color": "var(--jp-brand-color2)",
+    "--jp-widgets-slider-handle-border-color": "var(--jp-border-color1)",
+    "--jp-widgets-slider-handle-background-color": "var(--jp-layout-color1)",
+    "--jp-widgets-slider-active-handle-color": "var(--jp-brand-color1)",
+}
+
 #: The host colours ipywidgets' own controls read (input boxes, checkbox and radio
 #: labels, the run log's output areas), as ``(light, dark)`` pairs at JupyterLab
 #: 4.6's theme-light and theme-dark values. ``.forge-app`` declares the column that
@@ -76,21 +91,7 @@ _HOST_COLORS: dict[str, tuple[str, str]] = {
     "--jp-info-color0": ("#006064", "#0097a7"),
     "--jp-info-color1": ("#0097a7", "#00bcd4"),
     "--jp-rendermime-error-background": ("#fdd", "rgba(244, 67, 54, 0.28)"),
-    **{
-        name: (value, value)
-        for name, value in {
-            "--jp-widgets-color": "var(--jp-content-font-color1)",
-            "--jp-widgets-label-color": "var(--jp-widgets-color)",
-            "--jp-widgets-readout-color": "var(--jp-widgets-color)",
-            "--jp-widgets-input-color": "var(--jp-ui-font-color1)",
-            "--jp-widgets-input-background-color": "var(--jp-layout-color1)",
-            "--jp-widgets-input-border-color": "var(--jp-border-color1)",
-            "--jp-widgets-input-focus-border-color": "var(--jp-brand-color2)",
-            "--jp-widgets-slider-handle-border-color": "var(--jp-border-color1)",
-            "--jp-widgets-slider-handle-background-color": "var(--jp-layout-color1)",
-            "--jp-widgets-slider-active-handle-color": "var(--jp-brand-color1)",
-        }.items()
-    },
+    **{name: (value, value) for name, value in _WIDGET_COLORS.items()},
 }
 
 #: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap it with

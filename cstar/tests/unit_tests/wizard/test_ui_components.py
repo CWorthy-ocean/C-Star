@@ -388,8 +388,11 @@ def test_wizard_follows_the_host_theme():
         assert "color-scheme: dark;" in block
     for name, (light_value, dark_value) in table.items():
         assert f"{name}: {light_value};" in light
-        assert f"{name}: {dark_value};" in dark_lab
-        assert f"{name}: {dark_value};" in dark_voila
+        for dark in (dark_lab, dark_voila):
+            # a value the same in both themes comes from the light block alone
+            assert (f"{name}:" in dark) == (dark_value != light_value)
+            if dark_value != light_value:
+                assert f"{name}: {dark_value};" in dark
     for name in (
         "--jp-widgets-label-color",
         "--jp-widgets-input-color",
