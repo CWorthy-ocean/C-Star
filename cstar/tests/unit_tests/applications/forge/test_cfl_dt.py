@@ -1,17 +1,15 @@
 """The CFL time step the resolver derives when ``dt`` is not given."""
 
 import math
-from pathlib import Path
 
 import pytest
 import yaml
 
 from cstar.applications.forge.resolve import cfl_dt
 from cstar.applications.forge.util import MAX_DERIVED_DT, compute_timestep_from_cfl
+from cstar.base.env import BUNDLED_CATALOG_ROOT
 
-_DOMAIN_SPECS = (
-    Path(__file__).parents[4] / "catalog" / "bundled" / "specs" / "DomainSpec"
-)
+_DOMAIN_SPECS = BUNDLED_CATALOG_ROOT / "specs" / "DomainSpec"
 
 
 def _cfl_estimate(size_km: float, n: int) -> float:

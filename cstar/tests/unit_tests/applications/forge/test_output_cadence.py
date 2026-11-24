@@ -6,13 +6,12 @@
 
 import logging
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
-import cstar.catalog
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.applications.forge.resolve import build_forge_blueprint
+from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.roms.precheck import MAX_MARBL_TIMESTEP, NamelistConsistencyError
 
@@ -193,7 +192,7 @@ class TestBundledDomainOutputMatrix:
     """
 
     def test_covers_every_bundled_spec(self):
-        specs = Path(cstar.catalog.__file__).parent / "bundled" / "specs"
+        specs = BUNDLED_CATALOG_ROOT / "specs"
         assert {p.stem for p in (specs / "DomainSpec").glob("*.yaml")} == set(
             _BUNDLED_DOMAINS
         )

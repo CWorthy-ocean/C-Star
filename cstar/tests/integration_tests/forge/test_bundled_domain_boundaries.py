@@ -22,16 +22,14 @@ import roms_tools as rt
 import yaml
 from roms_tools.setup.utils import get_boundary_coords
 
-import cstar
 from cstar.applications.forge.blueprint import (
     OpenBoundaries,
     TopographySource,
     grid_build_kwargs,
 )
+from cstar.base.env import BUNDLED_CATALOG_ROOT
 
-DOMAIN_SPEC_DIR = (
-    Path(cstar.__file__).parent / "catalog" / "bundled" / "specs" / "DomainSpec"
-)
+DOMAIN_SPEC_DIR = BUNDLED_CATALOG_ROOT / "specs" / "DomainSpec"
 DOMAIN_SPECS = sorted(DOMAIN_SPEC_DIR.glob("*.yaml"))
 assert DOMAIN_SPECS, f"no DomainSpec files under {DOMAIN_SPEC_DIR}: the glob is stale"
 
