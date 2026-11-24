@@ -130,6 +130,40 @@ def test_show_bgc_false_keeps_a_section_with_rows_and_removing_the_last_hides_it
     assert _shown(editor._bgc_sections["ic_bgc"])
 
 
+@pytest.mark.parametrize("prefix", ["ic", "boundary"])
+def test_without_marbl_a_bgc_setting_off_its_default_keeps_the_section_shown(prefix):
+    """The blueprint still carries these settings, so they stay where they can be
+    seen and reset.
+    """
+    cat = f"{prefix}_bgc"
+    editor = _ForcingEditor(W, {}, on_change=lambda: None)
+    editor.show_bgc(False)
+    assert not editor._rows[cat]
+    assert not _shown(editor._bgc_sections[cat])
+
+    groom = getattr(editor, f"{prefix}_groom")
+    groom.value = False
+    assert _shown(editor._bgc_sections[cat])
+    groom.value = True
+    assert not _shown(editor._bgc_sections[cat])
+
+    interp = getattr(editor, f"{prefix}_bgc_interp")
+    interp.value = "density"
+    assert _shown(editor._bgc_sections[cat])
+
+
+def test_adding_a_bgc_source_on_a_physics_only_model_shows_it_in_the_header():
+    wiz = _wizard()
+    wiz.bgc_dd.value = "none"
+    editor = wiz._forcing_editor
+    assert not editor._rows["ic_bgc"]
+    assert not _shown(editor._bgc_sections["ic_bgc"])
+
+    editor._add("ic_bgc")  # its on_change rebuilds, which retitles the panes
+    assert _shown(editor._bgc_sections["ic_bgc"])
+    assert any(t.startswith("BGC") for t, _ in _pills(wiz, 0))
+
+
 def test_a_bgc_source_that_does_not_partition_adds_a_warn_pill_until_fixed():
     wiz = _wizard()
     editor = wiz._forcing_editor

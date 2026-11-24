@@ -4185,6 +4185,9 @@ class _ForcingEditor:
             )
             for cat in ("ic_bgc", "boundary_bgc")
         }
+        for cat in self._bgc_sections:
+            for w in self._bgc_setting_widgets(cat):
+                w.observe(lambda _ch: self._sync_bgc_display(), names="value")
 
         # The sections now exist; re-run so a seeded "(none)" IC/boundary hides its
         # Biogeochemistry section (the call during widget construction above could
@@ -4260,7 +4263,7 @@ class _ForcingEditor:
 
     def show_bgc(self, visible: bool) -> None:
         """Say whether the model has MARBL BGC: without it a Biogeochemistry section
-        shows only while it has rows (see :meth:`bgc_shown`).
+        shows only while it holds something (see :meth:`bgc_shown`).
         """
         self._bgc_enabled = visible
         self._sync_bgc_display()
@@ -4271,11 +4274,31 @@ class _ForcingEditor:
             return self.ic_name.value != _IC_NONE
         return self.boundary_name.value != _BOUNDARY_NONE
 
+    def _bgc_setting_widgets(self, cat: str) -> tuple[Any, Any]:
+        """*cat*'s section-wide BGC settings: the default BGC interpolation and the
+        ESPER grooming box.
+        """
+        prefix = "ic" if cat == "ic_bgc" else "boundary"
+        return getattr(self, f"{prefix}_bgc_interp"), getattr(self, f"{prefix}_groom")
+
+    def _bgc_holds_something(self, cat: str) -> bool:
+        """Whether *cat*'s Biogeochemistry section holds anything ``gather`` writes:
+        rows, or a BGC setting off its default.
+        """
+        interp, groom = self._bgc_setting_widgets(cat)
+        return (
+            bool(self._rows[cat])
+            or interp.value != BgcInterpMethod.DEPTH.value
+            or not groom.value
+        )
+
     def bgc_shown(self, cat: str) -> bool:
         """Whether *cat*'s Biogeochemistry section shows: its section is carried and
-        the model has MARBL BGC or the section has rows to show.
+        the model has MARBL BGC or the section holds something to see or reset.
         """
-        return self._bgc_carried(cat) and (self._bgc_enabled or bool(self._rows[cat]))
+        return self._bgc_carried(cat) and (
+            self._bgc_enabled or self._bgc_holds_something(cat)
+        )
 
     def _sync_bgc_display(self) -> None:
         """Show or hide each Biogeochemistry section by :meth:`bgc_shown`. Tolerates
@@ -7861,7 +7884,7 @@ class ForgeBlueprintWizard:
 
     def _sync_marbl_forcing_visibility(self, _change=None) -> None:
         """Show the forcing editor's "Atmospheric CO2" block and its Biogeochemistry
-        sections (unless they have rows) under MARBL only.
+        sections (unless they hold something) under MARBL only.
         """
         if self._forcing_editor is not None:
             marbl = self.bgc_dd.value == "marbl"
