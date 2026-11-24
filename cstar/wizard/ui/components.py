@@ -100,7 +100,9 @@ body[data-voila] {{ background: {branding.GREY}; }}
 body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; padding: 0 24px; }}
 
 /* the wizard is light in any host theme: native controls and scrollbars too
-   (color-scheme), and ipywidgets' controls through the host colours */
+   (color-scheme), and ipywidgets' controls through the host colours. The header
+   too, for when branding_display() shows it above a wizard, outside .forge-app */
+.{branding.HEADER_CLASS},
 .forge-app {{
     color-scheme: light;
 {_LIGHT_HOST_DECLARATIONS}
