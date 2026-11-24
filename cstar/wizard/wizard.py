@@ -4376,7 +4376,7 @@ class _ForcingEditor:
                 description=_row_desc("bgc_source_path", "bgc path"),
                 placeholder=_PATH_PLACEHOLDER,
                 style=small,
-                layout=W.Layout(width="220px"),
+                layout=W.Layout(width="260px"),
                 tooltip=_tip("river", "bgc_source_path"),
             )
             _temp_src = item.get("surface_forcing_source") or {}
@@ -4397,7 +4397,7 @@ class _ForcingEditor:
                 description=_row_desc("surface_forcing_source_path", "temp. path"),
                 placeholder=_PATH_PLACEHOLDER,
                 style=small,
-                layout=W.Layout(width="240px"),
+                layout=W.Layout(width="260px"),
                 tooltip=_tip("river", "surface_forcing_source_path"),
             )
             w["river_temp_smoothing_window_days"] = W.FloatText(
