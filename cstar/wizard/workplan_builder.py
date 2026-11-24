@@ -1714,8 +1714,8 @@ class _StepPane:
         return lines
 
     # ---- titles ----------------------------------------------------------
-    def title(self) -> str:
-        """``<name> · <application> · <window>`` for the accordion header."""
+    def title(self) -> components.PaneTitle:
+        """The pane header: the step name, its application and window as pills."""
         window = ""
         if self.app == UCLA_ROMS:
             facts = self.facts()
@@ -4206,8 +4206,10 @@ class WorkplanBuilderPage:
         problems, draft = self.problems, self.draft
         valid = draft is not None and not problems
         for i, pane in enumerate(self.panes):
-            flag = "  ⚠" if pane.error or pane.problem_lines else ""
-            self._accordion.set_title(i, pane.title() + flag)
+            title = pane.title()
+            if pane.error or pane.problem_lines:
+                title = title.with_pill(components.Pill("⚠ problem", "warn"))
+            self._accordion.set_title(i, title)
             pane.status.value = (
                 components.chip("● problem", "warn")
                 if pane.error or pane.problem_lines

@@ -46,6 +46,11 @@ def _surface(wiz: ForgeBlueprintWizard) -> list[str]:
     return [item.source.name for item in wiz.config.forcing.surface]
 
 
+def _summary(wiz: ForgeBlueprintWizard) -> list[str]:
+    """The Surface forcing pane header's pill texts."""
+    return [pill.text for pill in wiz._forcing_summary("surface")]
+
+
 def _shown(widget: Any) -> bool:
     return widget.layout.display != "none"
 
@@ -64,7 +69,7 @@ def test_a_spec_with_mbl_co2_loads_time_varying_in_its_own_place():
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is True
     assert not wiz._forcing_modified()
-    assert wiz._forcing_summary("surface") == "ERA5 · UNIFIED · WOA · CO2 time-varying"
+    assert _summary(wiz) == ["ERA5", "UNIFIED", "WOA", "CO2 time-varying"]
 
 
 def test_bgc_rows_no_longer_offer_mbl_co2():
@@ -78,18 +83,21 @@ def test_a_spec_without_mbl_co2_loads_static_at_the_pre_industrial_default():
     editor = _editor(wiz)
     assert editor.co2_mode.value == _CO2_STATIC
     assert _shown(editor._co2_static_box) and not _shown(editor._co2_varying_box)
-    assert "pre-industrial" in editor._co2_static_box.children[1].value
 
+    # The static value is a field row: glossary label, unit and the hint.
     widget = wiz.editor._widgets[_XCO2][0]
-    assert widget.description == "Constant atmospheric xCO2 (ppm)"
+    row = wiz.editor.forcing_box.children[0]
+    assert row.forge_key == "settings.bgc.xco2air_default"
+    assert row.forge_widget is widget
+    assert widget.description == ""
+    assert "pre-industrial" in row.children[1].children[1].value
     assert widget.value == 284.7
-    assert widget in wiz.editor.forcing_box.children[0].children
     assert wiz.editor.forcing_box in wiz.co2_static_box.children
     assert wiz.editor._group_fields[_FORCING_CARD] == {"bgc": ["xco2air_default"]}
     assert "xco2air_default" not in wiz.editor._group_fields[_BGC_PANE].get("bgc", [])
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is False
-    assert wiz._forcing_summary("surface").endswith("CO2 static")
+    assert _summary(wiz)[-1] == "CO2 static"
 
 
 def test_the_static_value_is_an_override_shown_as_a_forcing_change():
@@ -136,6 +144,14 @@ def test_the_time_varying_fields_round_trip_in_place():
         assert not _shown(row[key])
     for key in ("path", "coarse_grid_mode", "regrid_method", "options"):
         assert _shown(row[key])
+    # The custom file sits under the tile's disclosure and counts as an option.
+    assert row["path"] in row["_options"].body.children
+    assert row["_options"].get_title().startswith("Custom file and roms-tools options")
+    # path, coarse grid, regrid method and options differ from their defaults
+    assert "6 settings · 4 non-default" in row["_options"].get_title()
+    tile = editor._co2_varying_box.children[0]
+    assert "forge-frow-static" in tile.children[0]._dom_classes
+    assert row["path"] not in tile.children
 
     surface = editor.gather()["forcing"]["surface"]
     assert [item["source"]["name"] for item in surface] == ["MBL_co2", "ERA5"]
@@ -158,7 +174,7 @@ def test_only_marbl_shows_the_block_and_writes_mbl_co2():
     wiz.bgc_dd.value = "none"
     assert wiz._forcing_editor is editor
     assert not _shown(editor.co2_block)
-    assert "CO2" not in wiz._forcing_summary("surface")
+    assert not any("CO2" in text for text in _summary(wiz))
     surface = wiz._gather()["forcing_inputs"]["forcing"]["surface"]
     assert "MBL_co2" not in [item["source"]["name"] for item in surface]
     assert editor.co2_mode.value == _CO2_TIME_VARYING
@@ -166,6 +182,26 @@ def test_only_marbl_shows_the_block_and_writes_mbl_co2():
     wiz.bgc_dd.value = "marbl"
     assert _shown(editor.co2_block)
     assert "MBL_co2" in _surface(wiz)
+
+
+def test_a_custom_co2_file_survives_a_save_and_reload(tmp_path: Path):
+    """The time-varying CO2 custom file is saved and loads back into its box."""
+    wiz = _wizard()
+    wiz.load_path.value = str(
+        _BUNDLED / "blueprints" / "forge" / "wio-toy-example.yaml"
+    )
+    wiz._on_load_path(None)
+    _editor(wiz)._co2_row["path"].value = "/data/mbl.txt"
+    assert wiz.config is not None
+    saved = wiz._save_config(tmp_path / "bp.yaml")
+
+    again = _wizard()
+    again.load_path.value = str(saved)
+    again._on_load_path(None)
+    assert _editor(again)._co2_row["path"].value == "/data/mbl.txt"
+    assert again.config is not None
+    (mbl,) = (i for i in again.config.forcing.surface if i.source.name == "MBL_co2")
+    assert str(mbl.source.path) == "/data/mbl.txt"
 
 
 @pytest.mark.parametrize(

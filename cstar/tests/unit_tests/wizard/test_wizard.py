@@ -350,7 +350,7 @@ def test_boundary_bgc_add_and_remove_buttons_always_present(editor):
     editor._render("boundary_bgc")
     assert any(
         getattr(c, "description", "") == "add bgc source"
-        for c in editor._containers["boundary_bgc"].children
+        for c in _iter_widget_tree(editor._containers["boundary_bgc"])
     )
 
     editor._add("boundary_bgc")
@@ -359,7 +359,7 @@ def test_boundary_bgc_add_and_remove_buttons_always_present(editor):
     assert remove_btn.layout.display == ""
     assert any(
         getattr(c, "description", "") == "add bgc source"
-        for c in editor._containers["boundary_bgc"].children
+        for c in _iter_widget_tree(editor._containers["boundary_bgc"])
     )
 
 
@@ -3847,8 +3847,10 @@ def test_settings_editor_tooltips_prefer_the_glossary_hint():
     assert _namelist_tooltip(RunTimeSettingsV0_9_0, "bottom_drag", "rdrg2") in (
         rdrg2_tip
     )
+    from cstar.wizard.ui.labels import label_for
+
     xco2air_tip = editor._widgets[("bgc", "xco2air_default")][0].tooltip
-    assert "co2_tvarying" in xco2air_tip
+    assert label_for("settings.bgc.xco2air_default").hint in xco2air_tip
     assert "PCO2AIR_FORCING" not in xco2air_tip
 
 
@@ -7662,8 +7664,8 @@ def test_ic_pane_first_field_row_is_ic_name(editor):
     path, validate, in that order -- see ``_ForcingEditor.widget``).
     """
     acc = editor.widget
-    # `open_accordion` returns a VBox of single-pane Accordions (`.panes`).
-    ic_box = acc.panes[0].children[0]  # cat_order[0] == "initial_conditions"
+    # `open_accordion` returns a VBox of collapsible panes (`.panes`).
+    ic_box = acc.panes[0].body  # cat_order[0] == "initial_conditions"
     ic_fields = ic_box.children[0]
     first_row = ic_fields.children[0]
     assert first_row.forge_key == "ic.ic_name"
@@ -7675,7 +7677,7 @@ def test_ic_layout_display_none_hides_its_row(editor):
     does for a non-GLORYS source) hides the whole row, not just the dropdown.
     """
     acc = editor.widget
-    ic_box = acc.panes[0].children[0]
+    ic_box = acc.panes[0].body
     ic_fields = ic_box.children[0]
     layout_row = next(r for r in ic_fields.children if r.forge_key == "ic.ic_layout")
     assert layout_row.layout.display == _display(editor.ic_layout)

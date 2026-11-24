@@ -245,21 +245,58 @@ def test_card_appends_chips_widget_in_header_row():
     assert chips in header_row.children
 
 
-def test_accordion_title_joins_non_empty_parts():
-    assert (
-        C.accordion_title("Title", "summary", "chip")
-        == "Title   ·   summary   ·   chip"
+def test_accordion_title_returns_parts_and_skips_empty_pills():
+    title = C.accordion_title("Title", "GLORYS", "", C.Pill("default path", "off"))
+    assert title == C.PaneTitle(
+        "Title", (C.Pill("GLORYS"), C.Pill("default path", "off"))
     )
+    assert str(title) == "Title · GLORYS · default path"
+    assert str(C.accordion_title("Title", chip="Required")) == "Title · Required"
 
 
-def test_accordion_title_skips_empty_parts():
-    assert C.accordion_title("Title") == "Title"
-    assert C.accordion_title("Title", "", "chip") == "Title   ·   chip"
+def test_pane_title_html_escapes_and_marks_pill_kinds():
+    """Header markup: escaped title (workplan step names are user input), one
+    span per pill carrying its kind, and the quiet Required/Optional text.
+    """
+    markup = C.accordion_title(
+        "<b>step</b>", C.Pill("1 modified", "mod"), chip="Optional"
+    ).html()
+    assert "&lt;b&gt;step&lt;/b&gt;" in markup
+    assert "<b>" not in markup
+    assert "<span class='forge-pill mod'>1 modified</span>" in markup
+    assert "<span class='forge-coll-req'>Optional</span>" in markup
+
+
+def test_collapsible_toggles_its_body_and_keeps_the_body_layout():
+    body = W.HTML("body")
+    pane = C.collapsible(W, body, C.accordion_title("T", "v"))
+    assert pane.body is body
+    assert pane.selected_index is None
+    assert pane._body_box.layout.display == "none"
+    pane._hit.value = True  # a click on the header
+    assert pane.selected_index == 0
+    assert pane._body_box.layout.display == ""
+    assert "forge-coll-open" in pane._dom_classes
+    pane.selected_index = None
+    assert pane._hit.value is False
+    assert "forge-coll-open" not in pane._dom_classes
+    assert body.layout.display is None  # never touched
+
+
+def test_collapsible_set_title_skips_an_unchanged_title():
+    pane = C.collapsible(W, W.HTML("x"), "A")
+    before = pane._head_html.value
+    pane._head_html.value = "sentinel"
+    pane.set_title("A")
+    assert pane._head_html.value == "sentinel"
+    pane.set_title(C.accordion_title("A", "b"))
+    assert pane._head_html.value != before
+    assert pane._hit.description == pane.get_title() == "A · b"
 
 
 def test_open_accordion_panes_are_independent_and_retitleable():
-    """open_accordion: one single-pane Accordion per pane, all may stay open,
-    and set_title/get_title address panes by index like a plain Accordion.
+    """open_accordion: one collapsible per pane, all may stay open, and
+    set_title/get_title address panes by index.
     """
     box = C.open_accordion(W, [W.HTML("a"), W.HTML("b")], ["A", "B"])
     assert "forge-open-acc" in box._dom_classes
@@ -267,7 +304,7 @@ def test_open_accordion_panes_are_independent_and_retitleable():
     box.panes[0].selected_index = 0
     box.panes[1].selected_index = 0
     assert (box.panes[0].selected_index, box.panes[1].selected_index) == (0, 0)
-    box.set_title(1, "B · summary")
+    box.set_title(1, C.accordion_title("B", "summary"))
     assert box.get_title(1) == "B · summary"
     assert box.get_title(0) == "A"
 

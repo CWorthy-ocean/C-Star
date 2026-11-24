@@ -813,6 +813,7 @@ def _make_field_widget(
     bool_dropdown: tuple[str, str] | None = None,
     choices: tuple[str, ...] | None = None,
     optional: bool = False,
+    multiline: bool = False,
 ):
     style = {"description_width": "260px"}
     wide = W.Layout(width="560px")
@@ -873,6 +874,16 @@ def _make_field_widget(
         )
     if base is list:
         joined = ", ".join(str(x) for x in (value or []))
+        if multiline:  # a long list wraps, so all of it shows
+            return W.Textarea(
+                value=joined,
+                description=name,
+                style=style,
+                layout=wide,
+                rows=4,
+                placeholder="comma-separated",
+                **kw,
+            )
         return W.Text(
             value=joined,
             description=name,
@@ -907,7 +918,8 @@ def _read_field_widget(
     if base is float:
         return float(v)
     if base is list:
-        parts = [p.strip() for p in str(v).split(",") if p.strip()]
+        # Commas or line breaks (a multiline list box, see _make_field_widget).
+        parts = [p.strip() for p in re.split(r"[,\n]", str(v)) if p.strip()]
         out: list[int | float | str] = []
         for p in parts:
             try:
@@ -1382,6 +1394,14 @@ _TS_DIAGNOSTICS_FLAGS = (("ts_output", "wrt_temp_dia"), ("ts_output", "wrt_salt_
 # also matters in split mode); named for ``_apply_field_rules``.
 _IMPLICIT_FS_SOLVER_FIELDS = ("fs_nsub", "fs_rho_inf", "fs_tol")
 
+# List settings long enough to need a wrapping text area, so the whole list shows.
+_MULTILINE_LIST_FIELDS = frozenset(
+    {
+        ("marbl_bgc", "marbl_tracers_to_write"),
+        ("marbl_bgc", "marbl_diagnostics_to_write"),
+    }
+)
+
 # Output-stream tables for the settings editor: each namelist section
 # that models one-or-more "write this stream / how often / how many records
 # per file" triples renders those fields as a small table (see
@@ -1620,6 +1640,125 @@ _HOSTED_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
 _HOSTED_KEYS = frozenset(key for keys in _HOSTED_FIELDS.values() for key in keys)
 
 
+# The output tables' one column template (label | Write | Period | Records | the
+# stream's extras), so Write/Period/Records line up down the whole card: the middle
+# columns sit at their maximum until the card is too narrow, then shrink.
+_OUTPUT_TABLE_COLUMNS = (
+    "minmax(160px, 1.3fr) minmax(70px, 150px) minmax(130px, 190px) "
+    "minmax(130px, 150px) minmax(120px, 1.2fr)"
+)
+# Output-table rows whose stream writes a record at the run's first step as well
+# as one per period (ucla-roms basic_output.F90 and bgc_io.F90 write history at the
+# first step; averages and the rest only once a period has passed).
+_INITIAL_RECORD_PERIODS = frozenset(
+    {
+        ("ocean_vars", "output_period_his"),
+        ("bgc", "output_period_his"),
+        ("bgc", "output_period_his_dia"),
+    }
+)
+# A _VARIABLE_GRIDS list of at least this many variables is a collapsible pane.
+_VARIABLE_GRID_COLLAPSE_AT = 8
+# (section, _VARIABLE_GRIDS title) -> the output-table Write flag of the stream
+# that list belongs to, for the pane's "this stream is off" note.
+_VARIABLE_GRID_STREAMS: dict[tuple[str, str], str] = {
+    ("ocean_vars", "Variables in history files"): "wrt_file_his",
+    ("ocean_vars", "Variables in average files"): "wrt_file_avg",
+}
+
+
+def _model_time_text(seconds: float) -> str:
+    """``seconds`` in the largest whole unit (``"1 day"``, ``"6 hours"``,
+    ``"90 minutes"``), or ``""`` when it is not a whole number of minutes.
+    """
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if seconds >= size and seconds % size == 0:
+            n = int(seconds // size)
+            return f"{n} {unit}{'' if n == 1 else 's'}"
+    return ""
+
+
+def _display_round(value: float) -> float:
+    """A derived number rounded for display: one decimal, or three significant
+    digits below 1 (where one decimal could round it to zero).
+    """
+    return round(value, 1) if abs(value) >= 1 else float(f"{value:.3g}")
+
+
+def _widget_number(widget: Any) -> float | None:
+    """A number widget's value as a float, or ``None`` when it holds none."""
+    try:
+        return float(widget.value)
+    except (TypeError, ValueError):
+        return None
+
+
+class _StreamReadout:
+    """The readouts of one output-table row: its period in model time ("= 1 day")
+    beside the period box and, once the wizard gives the run window
+    (``_SettingsEditor.set_run_window``), how long each file spans and how many
+    files the run writes. Both follow the row's widgets as they change, and say
+    nothing while the period box is hidden or fixed by a monthly cadence; the file
+    count also waits for a written stream with a records-per-file box.
+    """
+
+    def __init__(
+        self,
+        W: Any,
+        period: Any,
+        records: Any | None,
+        write: Any | None,
+        *,
+        initial_record: bool,
+    ) -> None:
+        self.period, self.records, self.write = period, records, write
+        self.initial_record = initial_record
+        self.run_seconds: float | None = None
+        self.period_html = W.HTML()
+        self.period_html.add_class("forge-out-per")
+        self.files_html = W.HTML()
+        self.files_html.add_class("forge-out-files")
+        for widget in (period, records, write):
+            if widget is not None:
+                widget.observe(self.render, names="value")
+        period.observe(self.render, names="disabled")
+        period.layout.observe(self.render, names="display")
+        self.render()
+
+    def render(self, _change: Any = None) -> None:
+        period = _widget_number(self.period)
+        if (
+            period is None
+            or period <= 0
+            or self.period.disabled
+            or self.period.layout.display == "none"
+        ):
+            self.period_html.value = self.files_html.value = ""
+            return
+        model_time = _model_time_text(period)
+        self.period_html.value = f"= {model_time}" if model_time else ""
+        self.files_html.value = self._files_text(period)
+
+    def _files_text(self, period: float) -> str:
+        n_records = _widget_number(self.records) if self.records is not None else None
+        if (
+            not n_records
+            or n_records < 1
+            or not self.run_seconds
+            or (self.write is not None and not self.write.value)
+        ):
+            return ""
+        per_file = int(n_records)
+        span = period * per_file
+        records = int(self.run_seconds // period) + (1 if self.initial_record else 0)
+        files = max(1, -(-records // per_file))  # ceiling division
+        held = _model_time_text(span) or f"{span:g} s"
+        return (
+            f"each file holds {held} · {files} file{'' if files == 1 else 's'} "
+            "over this run"
+        )
+
+
 def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = None):
     """Prepare an already-built settings widget for a table cell.
 
@@ -1636,7 +1775,11 @@ def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = 
 
 
 def _build_output_table(
-    W, section: str, built: dict[_FieldKey, Any], consumed: set[_FieldKey]
+    W,
+    section: str,
+    built: dict[_FieldKey, Any],
+    consumed: set[_FieldKey],
+    readouts: list[_StreamReadout] | None = None,
 ) -> Any | None:
     """A ``W.GridBox`` (class ``forge-out-table``) collecting ``section``'s
     eligible :data:`_OUTPUT_TABLES` rows into one Write / Period / Records
@@ -1651,6 +1794,7 @@ def _build_output_table(
     plain flat-list fallback skips them. Widgets are REUSED, never rebuilt:
     the write/period/records widget's ``description``/``layout.width`` are
     tweaked in place (registry identity in ``self._widgets`` is untouched).
+    Each row's :class:`_StreamReadout` is appended to ``readouts``.
     """
     # A row qualifies when its period field (and its write flag, if it names
     # one) was built; records/extra cells are optional because some fields
@@ -1707,26 +1851,42 @@ def _build_output_table(
             consumed.update(present_extras)
             present_extras = []
 
-        cells.append(_as_table_cell(built[period_key], width="120px"))
+        has_records = records_key is not None and records_key in built
+        readout = _StreamReadout(
+            W,
+            built[period_key],
+            built[records_key] if has_records else None,
+            built[write_key] if write_key is not None else None,
+            initial_record=(section, period_key) in _INITIAL_RECORD_PERIODS,
+        )
+        if readouts is not None:
+            readouts.append(readout)
+        period_cell = W.HBox(
+            [_as_table_cell(built[period_key], width="96px"), readout.period_html]
+        )
+        period_cell.add_class("forge-out-period")
+        cells.append(period_cell)
         consumed.add(period_key)
 
-        if records_key is not None and records_key in built:
+        if has_records:
             cells.append(_as_table_cell(built[records_key], width="120px"))
             consumed.add(records_key)
         else:
             cells.append(W.HTML("<span class='sym'>—</span>"))
 
         extras = [built[k] for k in present_extras]
+        for extra in extras:
+            if not isinstance(extra, W.Checkbox):
+                # The label sizes to its text (and ellipsises in the cell).
+                extra.style.description_width = "initial"
         consumed.update(present_extras)
-        cells.append(W.HBox(extras))
+        cells.append(W.HBox([readout.files_html, *extras]))
 
     table = W.GridBox(
         cells,
         layout=W.Layout(
-            grid_template_columns=(
-                "minmax(200px, 1.4fr) minmax(70px, auto) 140px 140px minmax(0, 1.2fr)"
-            ),
-            grid_gap="4px 12px",
+            grid_template_columns=_OUTPUT_TABLE_COLUMNS,
+            grid_gap="0 12px",
             align_items="center",
         ),
     )
@@ -1737,9 +1897,12 @@ def _build_output_table(
 def _build_variable_grids(
     W, section: str, built: dict[_FieldKey, Any], consumed: set[_FieldKey]
 ) -> list[Any]:
-    """A title + ``W.GridBox`` (class ``forge-var-grid``) pair per
-    :data:`_VARIABLE_GRIDS` entry with at least one field present in
-    ``built``, as a flat ``[title, grid, title, grid, ...]`` list.
+    """A ``W.GridBox`` of checkboxes (class ``forge-var-grid``) per
+    :data:`_VARIABLE_GRIDS` entry with at least one field present in ``built``:
+    a list of :data:`_VARIABLE_GRID_COLLAPSE_AT` or more variables as a closed
+    collapsible pane titled with a live "n of m selected" (and a note while its
+    stream, :data:`_VARIABLE_GRID_STREAMS`, is not written), a shorter one under a
+    small title, as a flat list of widgets.
 
     Only the fields actually present are rendered (a grid can list more
     fields than a given ``settings_cls`` models); consumed keys are added to
@@ -1751,17 +1914,38 @@ def _build_variable_grids(
         present = [k for k in keys if k in built and k not in consumed]
         if not present:
             continue
-        out.append(W.HTML(f"<div class='forge-var-title'>{title}</div>"))
+        boxes = [built[k] for k in present]
         grid = W.GridBox(
-            [built[k] for k in present],
+            boxes,
             layout=W.Layout(
                 grid_template_columns="repeat(4, minmax(0, 1fr))",
                 grid_gap="2px 16px",
             ),
         )
         grid.add_class("forge-var-grid")
-        out.append(grid)
         consumed.update(present)
+        if len(boxes) < _VARIABLE_GRID_COLLAPSE_AT:
+            out.append(W.HTML(f"<div class='forge-var-title'>{title}</div>"))
+            out.append(grid)
+            continue
+        write_key = _VARIABLE_GRID_STREAMS.get((section, title))
+        write = built.get(write_key) if write_key is not None else None
+        pane = components.collapsible(W, grid, title)
+
+        def _retitle(
+            _change: Any = None, pane=pane, title=title, boxes=boxes, write=write
+        ) -> None:
+            n = sum(bool(box.value) for box in boxes)
+            pills = [components.Pill(f"{n} of {len(boxes)} selected")]
+            if write is not None and not write.value:
+                pills.append(components.Pill("not written: this stream is off", "off"))
+            pane.set_title(components.accordion_title(title, *pills))
+
+        for widget in (*boxes, write):
+            if widget is not None:
+                widget.observe(_retitle, names="value")
+        _retitle()
+        out.append(pane)
     return out
 
 
@@ -1997,6 +2181,8 @@ class _SettingsEditor:
         # _register_field_rule_observers) so a sync-driven value push never mutates
         # a sibling widget the way a real user edit is allowed to.
         self._syncing_internal = False
+        # One per output-table row, refreshed when the run window changes.
+        self._readouts: list[_StreamReadout] = []
         panes, titles = [], []
         for title, members in _ADVANCED_CATEGORIES:
             blocks = self._build_group(title, members, model_settings)
@@ -2020,14 +2206,22 @@ class _SettingsEditor:
                 _MODEL_CARD, tuple(_MODEL_CARD_FIELDS), model_settings, headers=False
             )
         )
-        # Likewise the Forcing card's: the constant atmospheric xCO2.
+        # The Forcing card's (the constant atmospheric xCO2) as field rows, labelled
+        # like the rest of its "Atmospheric CO2" block.
+        self._build_group(
+            _FORCING_CARD, tuple(_FORCING_CARD_FIELDS), model_settings, headers=False
+        )
         self.forcing_box = W.VBox(
-            self._build_group(
-                _FORCING_CARD,
-                tuple(_FORCING_CARD_FIELDS),
-                model_settings,
-                headers=False,
-            )
+            [
+                components.field_row(
+                    W,
+                    f"settings.{section}.{field}",
+                    self._widgets[(section, field)][0],
+                    width="120px",
+                )
+                for section, fields in self._group_fields.get(_FORCING_CARD, {}).items()
+                for field in fields
+            ]
         )
         # Before the on_edit observers attach, so locking one is never an edit.
         for key, why in self._forced_on.items():
@@ -2043,6 +2237,15 @@ class _SettingsEditor:
                 )
         self._register_field_rule_observers()
         self._apply_field_rules()
+
+    def set_run_window(self, seconds: float | None) -> None:
+        """Give the output tables the run's length in seconds (``None`` when the run
+        window is not set), for their file-count readouts.
+        """
+        for readout in self._readouts:
+            if readout.run_seconds != seconds:
+                readout.run_seconds = seconds
+                readout.render()
 
     @property
     def _pane_sections(self) -> dict[str, list[str]]:
@@ -2343,6 +2546,7 @@ class _SettingsEditor:
             bool_dropdown=bool_dropdown,
             choices=_literal_choices(ann),
             optional=_is_optional_numeric(ann),
+            multiline=(section, key) in _MULTILINE_LIST_FIELDS,
         )
         self._widgets[(section, key)] = (w, base)
         return w
@@ -2406,7 +2610,7 @@ class _SettingsEditor:
         # _build_variable_grids), and whatever's left over renders as the
         # plain flat list, exactly as before this pane grouping existed.
         consumed: set[_FieldKey] = set()
-        table = _build_output_table(W, section, built, consumed)
+        table = _build_output_table(W, section, built, consumed, self._readouts)
         grids = _build_variable_grids(W, section, built, consumed)
         rest = [w for key, w in built.items() if key not in consumed]
         body: list[Any] = []
@@ -2472,7 +2676,7 @@ _CATEGORY_TITLES: dict[str, str] = {
 }
 
 # Forcing categories a blueprint cannot resolve without (the rest are optional
-# add-ons) -- drives the REQUIRED/optional chip in `_ForcingEditor.retitle`.
+# add-ons) -- drives the Required/Optional in `_ForcingEditor.retitle`.
 _REQUIRED_FORCING_CATEGORIES = frozenset(
     {"initial_conditions", "ic_bgc", "surface", "boundary", "boundary_bgc"}
 )
@@ -2573,15 +2777,66 @@ _ESPER_METHOD_OPTS = ["", "lir", "nn", "mixed"]
 _ESPER_EQUATION_OPTS = ["", "8", "16"]
 
 
-def _row_desc(key: str, default: str, *, colon: bool = True) -> str:
+def _row_desc(key: str, default: str) -> str:
     """Per-row widget description text: the glossary label for
     ``forcing.row.<key>`` (falling back to ``default``, the historical
-    hardcoded caption), with a trailing colon for text/dropdown/number
-    widgets (``colon=True``, the default) or bare for checkboxes
-    (``colon=False``).
+    hardcoded caption). No trailing colon: a row tile sets each label above its
+    box.
     """
-    label = label_for(f"forcing.row.{key}", default=default).label
-    return f"{label}:" if colon else label
+    return label_for(f"forcing.row.{key}", default=default).label
+
+
+_ROW_REGRID_DEFAULTS = {"prefill": "", "regrid_method": "", "extrap_method": ""}
+# The fields of a repeatable forcing row that sit under its options disclosure
+# (_ROW_OPTIONS_TITLES) rather than on its first line, by row category, each with
+# the widget value that leaves it at its default: the disclosure counts the shown
+# ones and how many differ, _make_row seeds a missing field from it, and
+# _gather_item omits a field still at it. Every other field of a row is a primary
+# one. The BGC source rows (ic_bgc, boundary_bgc) have nothing to split.
+_ROW_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
+    "surface": {
+        "coarse_grid_mode": SurfaceForcingItem.model_fields[
+            "coarse_grid_mode"
+        ].default.value,
+        "blend_fallback": _BLEND_NONE,
+        "blend_fallback_correct_radiation": SurfaceBlendFallback.model_fields[
+            "correct_radiation"
+        ].default,
+        "blend_width_km": SurfaceBlend.model_fields["width_km"].default,
+        "blend_profile": SurfaceBlend.model_fields["profile"].default.value,
+        **_ROW_REGRID_DEFAULTS,
+        "options": "",
+    },
+    "tidal": {**_ROW_REGRID_DEFAULTS, "options": ""},
+    "river": {
+        "convert_to_climatology": RiverForcingItem.model_fields[
+            "convert_to_climatology"
+        ].default.value,
+        "coast_snap_buffer_km": 0.0,  # unset: the dataset's own buffer
+        "domain_edge_buffer": RiverForcingItem.model_fields[
+            "domain_edge_buffer"
+        ].default,
+        "surface_forcing_source_name": "",
+        "surface_forcing_source_path": "",
+        "river_temp_smoothing_window_days": RiverForcingItem.model_fields[
+            "river_temp_smoothing_window_days"
+        ].default,
+        "options": "",
+    },
+}
+_ROW_OPTIONS_TITLES = {"river": "River options"}
+_ROW_OPTIONS_TITLE = "Regridding & roms-tools options"
+# A row whose custom-file box sits under its disclosure too (the time-varying CO2).
+_ROW_OPTIONS_WITH_FILE_TITLE = "Custom file and roms-tools options"
+
+
+def _row_option_changed(default: Any, value: Any) -> bool:
+    """Whether an options-disclosure field's ``value`` differs from its ``default``
+    (blank text counts as unset).
+    """
+    if isinstance(default, str):
+        return str(value).strip() != default
+    return value != default
 
 
 def _add_regrid_widgets(W, w: dict[str, Any], cat: str, item: dict[str, Any], small):
@@ -2683,7 +2938,7 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
         description=_row_desc("constants", "constants"),
         placeholder="key=value pairs, e.g. Fe=3.0e-3, ALK=2300",
         style=small,
-        layout=W.Layout(width="320px", height="48px"),
+        layout=W.Layout(width="320px"),
         tooltip=_tip(cat, "constants"),
     )
     _method_val = str(src.get("esper_method") or "")
@@ -2710,11 +2965,8 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
     )
     w["esper_salinity_conditioning"] = W.Checkbox(
         value=bool(src.get("esper_salinity_conditioning", False)),
-        description=_row_desc(
-            "esper_salinity_conditioning", "condition salinity", colon=False
-        ),
+        description=_row_desc("esper_salinity_conditioning", "condition salinity"),
         indent=False,
-        layout=W.Layout(width="200px"),
         tooltip=_tip(cat, "esper_salinity_conditioning"),
     )
 
@@ -2724,6 +2976,14 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
 # small JSON editor per item — visible and round-tripped — rather than hidden. This is
 # the advanced/transitional hatch; promoting a knob to a typed field gives it a proper
 # widget above.
+# What an empty optional box shows, by what blank means there. Grey text reading
+# "(default)" looked like a value already filled in.
+_PATH_PLACEHOLDER = "Leave blank to use the default"
+_BLEND_M_PLACEHOLDER = "Leave blank for the default depth"
+# A nested grid's topography file: blank follows its topography source dropdown
+# (this grid's file when that reads "(same as this grid)").
+_NESTED_TOPO_PATH_PLACEHOLDER = "Leave blank to use the source above"
+
 _OPTIONS_PLACEHOLDER = (
     'advanced roms-tools kwargs (JSON object), e.g. {"chunks": {"time": 1}}'
 )
@@ -2818,14 +3078,18 @@ def _dump_options(options: Any) -> str:
         return ""
 
 
-def _options_editor(W, value: Any, description: str = "options:"):
-    """A compact JSON Textarea for an item's `options` passthrough dict."""
+def _options_editor(
+    W, value: Any, description: str = "options:", *, height: str | None = "48px"
+):
+    """A compact JSON Textarea for an item's `options` passthrough dict; a forcing
+    row passes ``height=None`` (its tile sets the height, label above the box).
+    """
     return W.Textarea(
         value=_dump_options(value),
         description=description,
         placeholder=_OPTIONS_PLACEHOLDER,
         style={"description_width": "initial"},
-        layout=W.Layout(width="420px", height="48px"),
+        layout=W.Layout(width="420px", height=height),
     )
 
 
@@ -3160,6 +3424,10 @@ def _row_seed_items(
 
 _CO2_SOURCE = BgcSurfaceSource.MBL_CO2.value
 """The surface source that forces MARBL's atmospheric CO2 in time."""
+# What the time-varying CO2 tile shows in place of a Source box.
+_CO2_SOURCE_TEXT = (
+    "NOAA marine boundary layer CO2 record, 1979 to 2024 (Forge downloads it)"
+)
 _CO2_STATIC = "static"
 _CO2_TIME_VARYING = "time-varying"
 _CO2_MODE_OPTS = (
@@ -3234,7 +3502,7 @@ class _ForcingEditor:
         self.ic_path = W.Text(
             value=str((ic.get("source") or {}).get("path") or ""),
             description="IC path:",
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
             tooltip=_tip("ic", "path"),
@@ -3316,7 +3584,7 @@ class _ForcingEditor:
         self.ic_bottom_fill_blend_m = W.Text(
             value=_blend_m_text(ic.get("bottom_fill_blend_m")),
             description="bottom blend (m):",
-            placeholder="(default)",
+            placeholder=_BLEND_M_PLACEHOLDER,
             style={"description_width": "110px"},
             tooltip=_tip("ic", "bottom_fill_blend_m"),
         )
@@ -3405,7 +3673,7 @@ class _ForcingEditor:
         self.boundary_path = W.Text(
             value=str(_boundary_source.get("path") or ""),
             description="boundary path:",
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
             tooltip=_tip("boundary", "path"),
@@ -3458,7 +3726,7 @@ class _ForcingEditor:
         self.boundary_bottom_fill_blend_m = W.Text(
             value=_blend_m_text(boundary_block.get("bottom_fill_blend_m")),
             description="bottom blend (m):",
-            placeholder="(default)",
+            placeholder=_BLEND_M_PLACEHOLDER,
             style={"description_width": "110px"},
             tooltip=_tip("boundary", "bottom_fill_blend_m"),
         )
@@ -3599,7 +3867,9 @@ class _ForcingEditor:
         seed = copy.deepcopy(item) if item is not None else {}
         seed["type"] = SurfaceType.BGC.value
         seed.setdefault("source", {}).update(name=_CO2_SOURCE, climatology=False)
-        self._co2_row = self._make_row("surface", seed, fixed_source=_CO2_SOURCE)
+        self._co2_row = self._make_row(
+            "surface", seed, fixed_source=_CO2_SOURCE, path_in_options=True
+        )
         for key in ("type", "name", "climatology"):
             self._co2_row[key].layout.display = "none"
         self.co2_mode = W.RadioButtons(
@@ -3608,28 +3878,22 @@ class _ForcingEditor:
             layout=W.Layout(width="auto"),
         )
         self._co2_static_box = W.VBox(
-            [
-                co2_static if co2_static is not None else W.VBox([]),
-                W.HTML(
-                    "<div class='forge-hint'>284.7 ppm is the pre-industrial "
-                    "average. MARBL uses this value for the whole run.</div>"
-                ),
-            ]
+            [co2_static if co2_static is not None else W.VBox([])]
         )
-        self._co2_varying_box = W.VBox(
-            [
-                self._row_box(self._co2_row, removable=False),
-                W.HTML(
-                    "<div class='forge-hint'>Forge downloads NOAA's marine "
-                    "boundary layer CO2 record (1979 to 2024) unless you give a "
-                    "path, and MARBL follows it through the run.</div>"
-                ),
-            ]
+        # The source as text where other rows have their Source box, so the tile
+        # does not read as a box to fill in; its custom file is an option.
+        co2_tile = self._row_box(self._co2_row, removable=False)
+        source = W.HTML(
+            f"<div class='forge-frow-static-l'>{html.escape(_row_desc('name', 'src'))}"
+            f"</div><div class='forge-frow-static-v'>{_CO2_SOURCE_TEXT}</div>"
         )
+        source.add_class("forge-frow-static")
+        co2_tile.children = (source, *co2_tile.children)
+        self._co2_varying_box = W.VBox([co2_tile])
         self.co2_block = components.subsection(
             W,
             "forcing.surface.co2",
-            self.co2_mode,
+            components.field_row(W, "forcing.co2.mode", self.co2_mode),
             self._co2_static_box,
             self._co2_varying_box,
         )
@@ -3793,7 +4057,7 @@ class _ForcingEditor:
                 )
             ),
             description=_row_desc(
-                "blend_fallback_correct_radiation", "fallback corr_rad", colon=False
+                "blend_fallback_correct_radiation", "fallback corr_rad"
             ),
             indent=False,
             tooltip=_tip("surface", "blend_fallback_correct_radiation"),
@@ -3855,11 +4119,17 @@ class _ForcingEditor:
         w["blend_fallback"].observe(_on_fallback_change, names="value")
 
     def _make_row(
-        self, cat: str, item: dict[str, Any], *, fixed_source: str | None = None
+        self,
+        cat: str,
+        item: dict[str, Any],
+        *,
+        fixed_source: str | None = None,
+        path_in_options: bool = False,
     ):
         """One editable row for an item of *cat*. *fixed_source* pins the source
         name (the "Atmospheric CO2" block's ``MBL_co2`` row, a source the row
-        dropdowns do not offer).
+        dropdowns do not offer); *path_in_options* puts its custom-file box under
+        the row's options disclosure (see ``_add_row_options``).
         """
         W = self.W
         src = item.get("source") or {}
@@ -3896,7 +4166,7 @@ class _ForcingEditor:
         w["path"] = W.Text(
             value=str(src.get("path") or ""),
             description=_row_desc("path", "path"),
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             style=small,
             layout=W.Layout(width="260px"),
             tooltip=_tip(cat, "path"),
@@ -3932,10 +4202,8 @@ class _ForcingEditor:
         if cat in ("surface", "boundary_bgc", "ic_bgc"):
             w["climatology"] = W.Checkbox(
                 value=bool(src.get("climatology", False)),
-                description=_row_desc("climatology", "climatology", colon=False),
+                description=_row_desc("climatology", "climatology"),
                 indent=False,
-                # Wider than the default so the longer label isn't clipped.
-                layout=W.Layout(width="130px"),
                 # "boundary_bgc" has no own tooltip entry -- reuse "boundary"'s.
                 tooltip=_tip(
                     "boundary" if cat == "boundary_bgc" else cat, "climatology"
@@ -4007,19 +4275,22 @@ class _ForcingEditor:
         if cat == "surface":
             w["correct_radiation"] = W.Checkbox(
                 value=bool(item.get("correct_radiation", False)),
-                description=_row_desc("correct_radiation", "corr_rad", colon=False),
+                description=_row_desc("correct_radiation", "corr_rad"),
                 indent=False,
                 tooltip=_tip("surface", "correct_radiation"),
             )
             w["wind_dropoff"] = W.Checkbox(
                 value=bool(item.get("wind_dropoff", False)),
-                description=_row_desc("wind_dropoff", "wind_dropoff", colon=False),
+                description=_row_desc("wind_dropoff", "wind_dropoff"),
                 indent=False,
                 tooltip=_tip("surface", "wind_dropoff"),
             )
             w["coarse_grid_mode"] = W.Dropdown(
                 options=_COARSE_MODES,
-                value=item.get("coarse_grid_mode", "auto"),
+                value=item.get(
+                    "coarse_grid_mode",
+                    _ROW_OPTION_DEFAULTS["surface"]["coarse_grid_mode"],
+                ),
                 description=_row_desc("coarse_grid_mode", "coarse"),
                 style=small,
                 layout=W.Layout(width="190px"),
@@ -4047,27 +4318,26 @@ class _ForcingEditor:
         if cat == "river":
             w["climatology"] = W.Checkbox(
                 value=bool(src.get("climatology", False)),
-                description=_row_desc("climatology", "climatology", colon=False),
+                description=_row_desc("climatology", "climatology"),
                 indent=False,
-                # Wider than the default so the longer label isn't clipped.
-                layout=W.Layout(width="130px"),
                 tooltip=_tip("river", "climatology"),
             )
             w["include_bgc"] = W.Checkbox(
                 value=bool(item.get("include_bgc", False)),
-                description=_row_desc("include_bgc", "bgc", colon=False),
+                description=_row_desc("include_bgc", "bgc"),
                 indent=False,
                 tooltip=_tip("river", "include_bgc"),
             )
             _ctc_opts = [e.value for e in ClimatologyMode]
+            river_defaults = _ROW_OPTION_DEFAULTS["river"]
             _ctc_val = item.get(
-                "convert_to_climatology", ClimatologyMode.IF_ANY_MISSING.value
+                "convert_to_climatology", river_defaults["convert_to_climatology"]
             )
             w["convert_to_climatology"] = W.Dropdown(
                 options=_ctc_opts,
                 value=_ctc_val
                 if _ctc_val in _ctc_opts
-                else ClimatologyMode.IF_ANY_MISSING.value,
+                else river_defaults["convert_to_climatology"],
                 description=_row_desc("convert_to_climatology", "clim mode"),
                 style=small,
                 layout=W.Layout(width="210px"),
@@ -4081,7 +4351,9 @@ class _ForcingEditor:
                 tooltip=_tip("river", "coast_snap_buffer_km"),
             )
             w["domain_edge_buffer"] = W.IntText(
-                value=int(item.get("domain_edge_buffer", 20)),
+                value=int(
+                    item.get("domain_edge_buffer", river_defaults["domain_edge_buffer"])
+                ),
                 description=_row_desc("domain_edge_buffer", "edge buffer"),
                 style=small,
                 layout=W.Layout(width="180px"),
@@ -4102,9 +4374,9 @@ class _ForcingEditor:
             w["bgc_source_path"] = W.Text(
                 value=str(_bgc_src.get("path") or ""),
                 description=_row_desc("bgc_source_path", "bgc path"),
-                placeholder="(default)",
+                placeholder=_PATH_PLACEHOLDER,
                 style=small,
-                layout=W.Layout(width="220px"),
+                layout=W.Layout(width="260px"),
                 tooltip=_tip("river", "bgc_source_path"),
             )
             _temp_src = item.get("surface_forcing_source") or {}
@@ -4123,13 +4395,18 @@ class _ForcingEditor:
             w["surface_forcing_source_path"] = W.Text(
                 value=str(_temp_src.get("path") or ""),
                 description=_row_desc("surface_forcing_source_path", "temp. path"),
-                placeholder="(default)",
+                placeholder=_PATH_PLACEHOLDER,
                 style=small,
-                layout=W.Layout(width="240px"),
+                layout=W.Layout(width="260px"),
                 tooltip=_tip("river", "surface_forcing_source_path"),
             )
             w["river_temp_smoothing_window_days"] = W.FloatText(
-                value=float(item.get("river_temp_smoothing_window_days", 30.0)),
+                value=float(
+                    item.get(
+                        "river_temp_smoothing_window_days",
+                        river_defaults["river_temp_smoothing_window_days"],
+                    )
+                ),
                 description=_row_desc(
                     "river_temp_smoothing_window_days", "temp. smoothing (days)"
                 ),
@@ -4178,6 +4455,9 @@ class _ForcingEditor:
                     # temp-source dropdown itself has no other gate -- it's simply
                     # unconditional on custom-mode, like domain_edge_buffer.
                     "surface_forcing_source_name",
+                    # A custom-file item takes no roms-tools options (see
+                    # _gather_item), so its passthrough box goes too.
+                    "options",
                 ):
                     ws[key].layout.display = "none" if is_custom else ""
                 for key in (
@@ -4222,7 +4502,10 @@ class _ForcingEditor:
         # widgets), so no per-row editor for either.
         if cat not in ("ic_bgc", "boundary_bgc"):
             w["options"] = _options_editor(
-                W, item.get("options"), description=_row_desc("options", "options")
+                W,
+                item.get("options"),
+                description=_row_desc("options", "options"),
+                height=None,
             )
         remove = W.Button(
             description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item"
@@ -4371,7 +4654,59 @@ class _ForcingEditor:
             w["_maybe_attach_custom_file"] = _maybe_attach_river_custom_file
             _sync_river_custom_visibility()
         self._apply_row_visibility(w)
+        self._add_row_options(cat, w, with_path=path_in_options)
         return w
+
+    def _add_row_options(
+        self, cat: str, w: dict[str, Any], *, with_path: bool = False
+    ) -> None:
+        """Put *cat*'s option fields of row ``w`` (:data:`_ROW_OPTION_DEFAULTS`),
+        and its custom-file box too when ``with_path`` (blank: the default dataset),
+        under a disclosure kept in ``w["_options"]``, titled with how many it shows
+        and how many differ from their defaults (a preset may set some: "non-default",
+        not "changed"); hidden while it shows none (a custom-file river). Built once
+        per row, so ``_render`` keeps it open.
+        """
+        defaults = {
+            **({"path": ""} if with_path else {}),
+            **_ROW_OPTION_DEFAULTS.get(cat, {}),
+        }
+        keys = [k for k in w if k in defaults]
+        if not keys:
+            return
+        W = self.W
+        title = (
+            _ROW_OPTIONS_WITH_FILE_TITLE
+            if with_path
+            else _ROW_OPTIONS_TITLES.get(cat, _ROW_OPTIONS_TITLE)
+        )
+        body = W.HBox(
+            [w[k] for k in keys],
+            layout=W.Layout(flex_flow="row wrap", align_items="flex-end"),
+        )
+        body.add_class("forge-frow-opts")
+        pane = components.collapsible(W, body, title, variant="inline")
+
+        def _retitle(_change: Any = None) -> None:
+            shown = [k for k in keys if w[k].layout.display != "none"]
+            changed = sum(_row_option_changed(defaults[k], w[k].value) for k in shown)
+            n = f"{len(shown)} setting{'' if len(shown) == 1 else 's'}"
+            pane.set_title(
+                components.accordion_title(
+                    title,
+                    components.Pill(f"{n} · {changed} non-default", "mod")
+                    if changed
+                    else components.Pill(f"{n} · defaults", "off"),
+                )
+            )
+            pane.layout.display = "" if shown else "none"
+
+        for k in keys:
+            w[k].observe(_retitle, names="value")
+            w[k].layout.observe(_retitle, names="display")
+        _retitle()
+        w["_options"] = pane
+        w["_option_keys"] = tuple(keys)
 
     def _row_box(self, w, *, removable: bool = True):
         # `type` (when present) drives the other options in the row, so show it first.
@@ -4385,19 +4720,23 @@ class _ForcingEditor:
         # data rather than widgets. Filter by prefix so a future carry cannot be
         # forgotten here and end up handed to HBox as a child. A row that is not
         # *removable* (the "Atmospheric CO2" block's) gets no remove button.
-        keys = [k for k in w if not k.startswith("_")]
+        option_keys = w.get("_option_keys", ())
+        keys = [k for k in w if not k.startswith("_") and k not in option_keys]
         if "type" in keys:
             keys = ["type", *[k for k in keys if k != "type"]]
         w["_remove_btn"].layout.display = ""
         lead = [w["_remove_btn"]] if removable else []
+        # The option fields (see _add_row_options) follow on their own line.
+        trail = [w["_options"]] if "_options" in w else []
         # Wrap onto further lines instead of overflowing horizontally: a fully
-        # populated row (source, path, climatology, constants, ESPER, options…)
-        # is wider than any sensible page.
+        # populated row (source, path, climatology, constants, ESPER…) is wider
+        # than any sensible page. Fields align on their input boxes, since each
+        # label sits above its box.
         row = self.W.HBox(
-            [*lead, *(w[k] for k in keys)],
-            layout=self.W.Layout(flex_flow="row wrap", align_items="flex-start"),
+            [*lead, *(w[k] for k in keys), *trail],
+            layout=self.W.Layout(flex_flow="row wrap", align_items="flex-end"),
         )
-        row.add_class("forge-frow")  # divider + spacing between wrapped rows
+        row.add_class("forge-frow")  # a tile per row
         return row
 
     def _render(self, cat: str):
@@ -4416,7 +4755,9 @@ class _ForcingEditor:
         elif cat == "boundary_bgc":
             extra = [self._sync_to_ic_btn]
         lead = [self.co2_block, self._surface_rows_header] if cat == "surface" else []
-        self._containers[cat].children = [*lead, *boxes, add, *extra]
+        buttons = W.HBox([add, *extra])
+        buttons.add_class("forge-row-btns")
+        self._containers[cat].children = [*lead, *boxes, buttons]
 
     def clear_category(self, cat: str):
         """Remove all rows for a row category (e.g. ``"boundary_bgc"`` for a
@@ -4533,8 +4874,7 @@ class _ForcingEditor:
             constants = _parse_field(
                 _parse_constants,
                 w["constants"].value,
-                f"{self._row_label(cat, w)}, "
-                f"{_row_desc('constants', 'constants', colon=False)}",
+                f"{self._row_label(cat, w)}, {_row_desc('constants', 'constants')}",
             )
             if constants:
                 src["constants"] = constants
@@ -4649,7 +4989,10 @@ class _ForcingEditor:
                 w.get("surface_forcing_source_name")
                 and w["surface_forcing_source_name"].value
             )
-            if window != 30.0 and (visible or window > 0):
+            default_window = _ROW_OPTION_DEFAULTS["river"][
+                "river_temp_smoothing_window_days"
+            ]
+            if window != default_window and (visible or window > 0):
                 item["river_temp_smoothing_window_days"] = window
         if "convert_to_climatology" in w:
             item["convert_to_climatology"] = w["convert_to_climatology"].value
@@ -4657,15 +5000,17 @@ class _ForcingEditor:
             "coast_snap_buffer_km" in w and w["coast_snap_buffer_km"].value
         ):  # 0.0 = leave unset
             item["coast_snap_buffer_km"] = float(w["coast_snap_buffer_km"].value)
-        if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != 20:
+        default_edge = _ROW_OPTION_DEFAULTS["river"]["domain_edge_buffer"]
+        if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != (
+            default_edge
+        ):
             item["domain_edge_buffer"] = int(w["domain_edge_buffer"].value)
         item.update(copy.deepcopy(w.get("_carried") or {}))
         if "options" in w:  # advanced passthrough; omit when empty
             opts = _parse_field(
                 _parse_options,
                 w["options"].value,
-                f"{self._row_label(cat, w)}, "
-                f"{_row_desc('options', 'options', colon=False)}",
+                f"{self._row_label(cat, w)}, {_row_desc('options', 'options')}",
             )
             if opts:
                 item["options"] = opts
@@ -4918,22 +5263,20 @@ class _ForcingEditor:
         return acc
 
     def retitle(self, summary_for) -> None:
-        """Refresh each pane's accordion title with a live summary and a
-        REQUIRED/optional chip (see :func:`cstar.wizard.ui.components.accordion_title`).
+        """Refresh each pane's header with its live summary pills and a quiet
+        Required/Optional (see :func:`cstar.wizard.ui.components.accordion_title`).
 
-        ``summary_for(cat)`` returns the short (<= 60 char) summary text for
-        category ``cat``; a no-op before ``widget`` has been built.
+        ``summary_for(cat)`` returns the pills for category ``cat``; a no-op
+        before ``widget`` has been built.
         """
         if getattr(self, "_acc", None) is None:
             return
         for i, cat in enumerate(self._cat_order):
-            chip_text = (
-                "REQUIRED" if cat in _REQUIRED_FORCING_CATEGORIES else "optional"
-            )
+            chip = "Required" if cat in _REQUIRED_FORCING_CATEGORIES else "Optional"
             self._acc.set_title(
                 i,
                 components.accordion_title(
-                    _CATEGORY_TITLES.get(cat, cat), summary_for(cat), chip_text
+                    _CATEGORY_TITLES.get(cat, cat), *summary_for(cat), chip=chip
                 ),
             )
 
@@ -5411,7 +5754,7 @@ class ForgeBlueprintWizard:
             description="child topo path:",
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
-            placeholder="(default)",
+            placeholder=_NESTED_TOPO_PATH_PLACEHOLDER,
             tooltip=_tip("nesting", "child_topo_path"),
         )
         self.nest_period = W.FloatText(
@@ -5491,7 +5834,7 @@ class ForgeBlueprintWizard:
             description="parent topo path:",
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
-            placeholder="(default)",
+            placeholder=_NESTED_TOPO_PATH_PLACEHOLDER,
             tooltip=_tip("nesting", "parent_topo_path"),
         )
         # --- parent plot (this grid's boundary within its parent) ---
@@ -5567,7 +5910,7 @@ class ForgeBlueprintWizard:
             description="topo path:",
             style={"description_width": "120px"},
             layout=W.Layout(width="380px"),
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             tooltip=_tip("grid", "topography_path"),
         )
 
@@ -5779,49 +6122,19 @@ class ForgeBlueprintWizard:
         # which must call it explicitly since suspended observers are no-ops).
         self._cdr_mode_active: str | None = None
 
-        def _cdr_field(value, desc, unit, *, width="300px"):
-            """A FloatText plus an adjacent units label -- ipywidgets' own
-            ``description`` has no room for a units suffix on top of a label.
-
-            ``width`` is the WHOLE widget (label + input): the 170px
-            description_width is carved out of it, so it must comfortably
-            exceed 170px or the input box collapses to zero width.
-            """
-            w = W.FloatText(
-                value=value,
-                description=desc,
-                style={"description_width": "170px"},
-                layout=W.Layout(width=width),
-            )
-            return w, W.HBox([w, W.HTML(f"<span style='color:#666'>{unit}</span>")])
-
         # --- CDR mode "simple": a single hand-authored tracer-perturbation
         # release, compiled into a roms-tools CDRForcing kwargs dict at gather
-        # time (see _simple_cdr_forcing_dict). ---
-        self.cdr_simple_name = W.Text(
-            value="my_cdr",
-            description="Name:",
-            style={"description_width": "170px"},
-            layout=W.Layout(width="340px"),
-        )
-        self.cdr_simple_lat, _cdr_lat_row = _cdr_field(0.0, "Latitude:", "°N")
-        self.cdr_simple_lon, _cdr_lon_row = _cdr_field(0.0, "Longitude:", "°E")
-        self.cdr_simple_depth, _cdr_depth_row = _cdr_field(1.0, "Depth:", "m")
-        self.cdr_simple_hsc, _cdr_hsc_row = _cdr_field(
-            10.0, "Gaussian Scale (horizontal):", "m"
-        )
-        self.cdr_simple_vsc, _cdr_vsc_row = _cdr_field(
-            10.0, "Gaussian Scale (vertical):", "m"
-        )
-        self.cdr_simple_flux, _cdr_flux_row = _cdr_field(
-            2 * 10**6, "ALK tracer flux:", "meq/s", width="320px"
-        )
-        self.cdr_simple_start = W.DatePicker(
-            description="Start:", style={"description_width": "170px"}
-        )
-        self.cdr_simple_end = W.DatePicker(
-            description="End:", style={"description_width": "170px"}
-        )
+        # time (see _simple_cdr_forcing_dict). Laid out as field rows (labels and
+        # units from the glossary) in cdr_simple_box below. ---
+        self.cdr_simple_name = W.Text(value="my_cdr", layout=W.Layout(width="220px"))
+        self.cdr_simple_lat = W.FloatText(value=0.0)
+        self.cdr_simple_lon = W.FloatText(value=0.0)
+        self.cdr_simple_depth = W.FloatText(value=1.0)
+        self.cdr_simple_hsc = W.FloatText(value=10.0)
+        self.cdr_simple_vsc = W.FloatText(value=10.0)
+        self.cdr_simple_flux = W.FloatText(value=2 * 10**6)
+        self.cdr_simple_start = W.DatePicker()
+        self.cdr_simple_end = W.DatePicker()
         self._cdr_simple_fields = (
             self.cdr_simple_name,
             self.cdr_simple_lat,
@@ -5856,15 +6169,20 @@ class ForgeBlueprintWizard:
             [
                 self.cdr_simple_note,
                 self.cdr_simple_replace_btn,
-                self.cdr_simple_name,
-                _cdr_lat_row,
-                _cdr_lon_row,
-                _cdr_depth_row,
-                _cdr_hsc_row,
-                _cdr_vsc_row,
-                _cdr_flux_row,
-                self.cdr_simple_start,
-                self.cdr_simple_end,
+                components.field_row(W, "cdr_simple_name", self.cdr_simple_name),
+                *(
+                    components.field_row(W, key, widget, width="140px")
+                    for key, widget in (
+                        ("cdr_simple_lat", self.cdr_simple_lat),
+                        ("cdr_simple_lon", self.cdr_simple_lon),
+                        ("cdr_simple_depth", self.cdr_simple_depth),
+                        ("cdr_simple_hsc", self.cdr_simple_hsc),
+                        ("cdr_simple_vsc", self.cdr_simple_vsc),
+                        ("cdr_simple_flux", self.cdr_simple_flux),
+                    )
+                ),
+                components.field_row(W, "cdr_simple_start", self.cdr_simple_start),
+                components.field_row(W, "cdr_simple_end", self.cdr_simple_end),
             ]
         )
 
@@ -6062,6 +6380,9 @@ class ForgeBlueprintWizard:
         # _boundaries_derived tracks whether that's happened since the last
         # grid-affecting edit -- see _on_grid_kwarg_change/_on_derive_domain_properties.
         self._v_sponge_touched = False
+        # The full grid-derived v_sponge the widget shows rounded (see
+        # _show_derived_v_sponge), so a snapshot keeps its precision.
+        self._v_sponge_derived: float | None = None
         self._boundaries_touched = False
         self._boundaries_derived = False
         # What the widgets cannot hold of the last loaded blueprint or DomainSpec,
@@ -6696,6 +7017,28 @@ class ForgeBlueprintWizard:
         self._boundaries_touched = True
         self.derive_status.value = ""
         self._rebuild()
+
+    def _show_derived_v_sponge(self, value: float) -> None:
+        """Show the grid-derived sponge viscosity ``value`` rounded for display
+        (8333.333333333332 reads 8333.3), keeping the full value for
+        `_v_sponge_value`. The blueprint never takes it from the widget while it
+        is derived: the resolver derives it again from ``v_sponge=None``.
+        """
+        self._v_sponge_derived = value
+        self.v_sponge.value = _display_round(value)
+
+    def _v_sponge_value(self) -> float:
+        """The sponge viscosity the widget stands for: the full derived value while
+        it is untouched and shows that value rounded, else what it holds.
+        """
+        derived = self._v_sponge_derived
+        if (
+            not self._v_sponge_touched
+            and derived is not None
+            and self.v_sponge.value == _display_round(derived)
+        ):
+            return derived
+        return float(self.v_sponge.value)
 
     def _on_v_sponge_edit(self, _change):
         if getattr(self, "_suspended", False):
@@ -7538,7 +7881,7 @@ class ForgeBlueprintWizard:
             "grid_w": {k: w.value for k, w in self.grid_w.items()},
             "scoord_chk": self.scoord_chk.value,
             "bnd": {d: w.value for d, w in self.bnd.items()},
-            "v_sponge": self.v_sponge.value,
+            "v_sponge": self._v_sponge_value(),
             "dt": self.dt.value,
             "npx": self.npx.value,
             "npy": self.npy.value,
@@ -9150,7 +9493,7 @@ class ForgeBlueprintWizard:
         # write doesn't itself flip _v_sponge_touched (see _on_v_sponge_edit).
         if not self._v_sponge_touched:
             with self._suspend():
-                self.v_sponge.value = float(cfg.domain.v_sponge)
+                self._show_derived_v_sponge(float(cfg.domain.v_sponge))
 
         # Advanced/Output settings editor: every section is editable. The resolver
         # composes a baseline from the specs; the user's manual edits are a sparse
@@ -9336,29 +9679,32 @@ class ForgeBlueprintWizard:
             print(cfg.to_yaml_str())
         self._update_status(cfg)
 
-    def _forcing_summary(self, cat: str) -> str:
-        """A short (<= 60 char) summary of the current state of forcing
-        category ``cat``, for its accordion title (see `_update_status`).
+    def _forcing_summary(self, cat: str) -> tuple[components.Pill, ...]:
+        """The current state of forcing category ``cat`` as pills for its pane
+        header (see `_update_status`): the source names, with a default path or an
+        empty category muted.
         """
         fe = self._forcing_editor
         if fe is None:
-            return ""
+            return ()
+        none = (components.Pill("none", "off"),)
         if cat in ("initial_conditions", "boundary"):
             is_ic = cat == "initial_conditions"
             name_w = fe.ic_name if is_ic else fe.boundary_name
             path_w = fe.ic_path if is_ic else fe.boundary_path
             none_val = _IC_NONE if is_ic else _BOUNDARY_NONE
             if name_w.value == none_val:
-                summary = "none"
-            else:
-                loc = "custom path" if path_w.value.strip() else "default path"
-                summary = f"{name_w.value} · {loc}"
-        else:
-            names = [row["name"].value for row in fe._rows.get(cat, [])]
-            if cat == "surface" and self.bgc_dd.value == "marbl":
-                names.append(f"CO2 {fe.co2_mode.value}")
-            summary = " · ".join(names) if names else "none"
-        return summary[:60]
+                return none
+            if path_w.value.strip():
+                return (components.Pill(name_w.value), components.Pill("custom path"))
+            return (
+                components.Pill(name_w.value),
+                components.Pill("default path", "off"),
+            )
+        pills = [components.Pill(row["name"].value) for row in fe._rows.get(cat, [])]
+        if cat == "surface" and self.bgc_dd.value == "marbl":
+            pills.append(components.Pill(f"CO2 {fe.co2_mode.value}"))
+        return tuple(pills) or none
 
     def _retitle_settings_editor(self) -> None:
         """Refresh each settings container's titles with its field count and how many
@@ -9379,12 +9725,16 @@ class ForgeBlueprintWizard:
                 sum(1 for k in active if k in keys),
             )
 
-        def title(name: str, fields_by_section: dict[str, list[str | None]]) -> str:
+        def title(
+            name: str, fields_by_section: dict[str, list[str | None]]
+        ) -> components.PaneTitle:
             n_fields, n_mod = counts(fields_by_section)
             return components.accordion_title(
                 name,
                 f"{n_fields} settings",
-                f"{n_mod} modified" if n_mod else "all defaults",
+                components.Pill(f"{n_mod} modified", "mod")
+                if n_mod
+                else components.Pill("all defaults", "off"),
             )
 
         for i, name in enumerate(editor._pane_sections):
@@ -9503,6 +9853,20 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is not None:
             self._forcing_editor.retitle(self._forcing_summary)
         self._retitle_settings_editor()
+        if self.editor is not None:
+            self.editor.set_run_window(self._run_window_seconds())
+
+    def _run_window_seconds(self) -> float | None:
+        """The run window's length in seconds, or ``None`` while it is unset or
+        empty.
+        """
+        if self.start.value is None or self.end.value is None:
+            return None
+        seconds = (
+            self._run_datetime("end", self.end.value)
+            - self._run_datetime("start", self.start.value)
+        ).total_seconds()
+        return seconds if seconds > 0 else None
 
     def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
         """Point both download links at ``cfg``, stamped once so they agree.
@@ -9630,7 +9994,9 @@ class ForgeBlueprintWizard:
                     if d in boundaries:
                         w.value = bool(boundaries[d])
             if not self._v_sponge_touched:
-                self.v_sponge.value = compute_v_sponge_from_grid(grid.size_x, grid.nx)
+                self._show_derived_v_sponge(
+                    compute_v_sponge_from_grid(grid.size_x, grid.nx)
+                )
         self._boundaries_derived = True
 
     def _on_derive_domain_properties(self, _):
@@ -10362,11 +10728,10 @@ class ForgeBlueprintWizard:
         )
         geometry_grid = components.field_grid(W, geometry_rows)
         geometry_grid.layout.flex = "1 1 auto"
-        geometry_sub = components.subsection(
-            W,
-            "grid.geometry",
-            W.HBox([geometry_grid, grid_plot_col]),
-        )
+        # In a narrow card the preview moves below the fields (see WIZARD_CSS).
+        geometry_row = W.HBox([geometry_grid, grid_plot_col])
+        geometry_row.add_class("forge-geo-row")
+        geometry_sub = components.subsection(W, "grid.geometry", geometry_row)
         vertical_sub = components.subsection(
             W,
             "grid.vertical",
@@ -10393,25 +10758,23 @@ class ForgeBlueprintWizard:
             ),
             components.field_row(W, "mask_shapefile", self.mask_shapefile),
         )
-        self.gridfile_accordion = W.Accordion(
-            children=[
-                W.VBox(
-                    [
-                        W.HBox(
-                            [
-                                self.grid_file_path,
-                                self.grid_file_attach_btn,
-                                self.grid_file_detach_btn,
-                            ]
-                        ),
-                        self.grid_file_upload,
-                        self.grid_file_status,
-                    ]
-                )
-            ],
-            selected_index=None,
+        self.gridfile_accordion = components.collapsible(
+            W,
+            W.VBox(
+                [
+                    W.HBox(
+                        [
+                            self.grid_file_path,
+                            self.grid_file_attach_btn,
+                            self.grid_file_detach_btn,
+                        ]
+                    ),
+                    self.grid_file_upload,
+                    self.grid_file_status,
+                ]
+            ),
+            section_for("grid.gridfile").title,
         )
-        self.gridfile_accordion.set_title(0, section_for("grid.gridfile").title)
         derived_sub = components.subsection(
             W,
             "grid.derived",
@@ -10508,11 +10871,11 @@ class ForgeBlueprintWizard:
             ),
             default_title="Parent grid",
         )
-        nesting_accordion = W.Accordion(
-            children=[W.VBox([child_section, parent_section])],
-            selected_index=None,
+        nesting_accordion = components.collapsible(
+            W,
+            W.VBox([child_section, parent_section]),
+            section_for("grid.nesting").title,
         )
-        nesting_accordion.set_title(0, section_for("grid.nesting").title)
 
         grid_card = components.card(
             W,
@@ -10624,56 +10987,54 @@ class ForgeBlueprintWizard:
             chips_widget=self.card_chips["advanced"],
         )
 
-        self.save_specs_accordion = W.Accordion(
-            children=[
-                W.VBox(
-                    [
-                        W.HTML(
-                            "<i>Promote an edited spec to a new named catalog "
-                            "entry. Only marked unmodified if the saved file "
-                            "re-resolves to the identical blueprint.</i>"
-                        ),
-                        W.HBox(
-                            [
-                                self.save_output_name,
-                                self.save_output_btn,
-                                self.save_output_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_model_name,
-                                self.save_model_btn,
-                                self.save_model_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_domain_name,
-                                self.save_domain_btn,
-                                self.save_domain_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_forcing_name,
-                                self.save_forcing_btn,
-                                self.save_forcing_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_cdr_name,
-                                self.save_cdr_btn,
-                                self.save_cdr_status,
-                            ]
-                        ),
-                    ]
-                )
-            ],
-            selected_index=None,
+        self.save_specs_accordion = components.collapsible(
+            W,
+            W.VBox(
+                [
+                    W.HTML(
+                        "<i>Promote an edited spec to a new named catalog "
+                        "entry. Only marked unmodified if the saved file "
+                        "re-resolves to the identical blueprint.</i>"
+                    ),
+                    W.HBox(
+                        [
+                            self.save_output_name,
+                            self.save_output_btn,
+                            self.save_output_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_model_name,
+                            self.save_model_btn,
+                            self.save_model_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_domain_name,
+                            self.save_domain_btn,
+                            self.save_domain_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_forcing_name,
+                            self.save_forcing_btn,
+                            self.save_forcing_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_cdr_name,
+                            self.save_cdr_btn,
+                            self.save_cdr_status,
+                        ]
+                    ),
+                ]
+            ),
+            section_for("review.save_specs").title,
         )
-        self.save_specs_accordion.set_title(0, section_for("review.save_specs").title)
 
         review_card = components.card(
             W,
