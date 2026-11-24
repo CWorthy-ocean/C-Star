@@ -452,8 +452,8 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 }}
 .forge-app .forge-coll-ht .chev {{
     flex: none;
-    width: 10px;
-    font-size: 11px;
+    width: 12px;
+    font-size: 12px;
     color: {branding.INK_2};
     transition: transform .12s;
 }}
@@ -549,9 +549,10 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 .forge-app .forge-out-files .widget-html-content {{
     font-size: 12px;
     color: {branding.INK_2};
-    white-space: nowrap;
+    line-height: 1.3;
 }}
-.forge-app .forge-out-files {{ margin-right: 14px; }}
+.forge-app .forge-out-per .widget-html-content {{ white-space: nowrap; }}
+.forge-app .forge-out-files {{ min-width: 0; margin-right: 14px; }}
 .forge-out-th .widget-html-content {{
     font-size: 11px;
     text-transform: uppercase;
