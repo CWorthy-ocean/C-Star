@@ -43,6 +43,7 @@ from cstar.applications.forge.namelist_model import (
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
+from cstar.wizard.fields import _base_type, _is_optional_numeric, _make_field_widget
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
@@ -58,14 +59,11 @@ from cstar.wizard.wizard import (
     ForgeBlueprintWizardApp,
     WorkplanHooks,
     _applies_in,
-    _base_type,
     _drain_stream_buffer,
     _ForcingEditor,
     _in_forcing_card,
     _in_output_card,
-    _is_optional_numeric,
     _is_output_key,
-    _make_field_widget,
     _namelist_tooltip,
     _output_placement,
     _section_submodel,
@@ -7903,7 +7901,7 @@ class TestCarbonateSensitivityGroup:
 
     def test_user_file_status_shows_hex_not_scheme_tag(self):
         from cstar.applications.forge.user_files import HASH_SCHEME
-        from cstar.wizard.wizard import _user_file_status_html
+        from cstar.wizard.fields import _user_file_status_html
 
         status = _user_file_status_html(
             {"location": "/x/grid.nc", "content_hash": f"{HASH_SCHEME}:" + "ab" * 32}

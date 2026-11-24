@@ -313,7 +313,7 @@ def _all_settings_section_field_names() -> dict[str, set[str]]:
     from cstar.applications.forge.namelist_model import (
         _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
     )
-    from cstar.wizard.wizard import _unwrap_type
+    from cstar.wizard.fields import _unwrap_type
 
     sections: dict[str, set[str]] = {}
     for cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.values():
