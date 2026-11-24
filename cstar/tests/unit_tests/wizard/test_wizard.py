@@ -8304,6 +8304,15 @@ def test_saved_blueprint_survives_a_rebuild_and_not_an_edit(tmp_path):
     assert wiz._saved_path() is None
 
 
+def test_saved_blueprint_accepts_a_save_path_written_unnormalized(tmp_path):
+    """A Save path that ``Path`` rewrites (a doubled slash) still counts as saved."""
+    wiz = _saved_wizard(tmp_path)
+    wiz.save_path.value = f"{tmp_path}//bp.yaml"
+    wiz._on_save(None)
+    assert wiz._saved_path() == (tmp_path / "bp.yaml").resolve()
+    assert not wiz.save_workplan_btn.disabled
+
+
 def test_card_seven_ends_at_save_and_card_eight_holds_the_rest():
     wiz = ForgeBlueprintWizard()
     root = wiz.widget

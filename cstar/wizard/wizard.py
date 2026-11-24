@@ -5501,7 +5501,7 @@ _SAVE_FIRST = "Save the blueprint above first."
 class _SavedBlueprint(NamedTuple):
     """The last blueprint file the wizard wrote, and what it wrote."""
 
-    requested: str  #: the Save path text the save was made with
+    requested: Path  #: the Save path the save was made with, as given
     path: Path  #: the file written, resolved
     text: str  #: ``to_yaml_str()`` of the config written
 
@@ -10311,7 +10311,7 @@ class ForgeBlueprintWizard:
         self.config = stamped
         self._refresh_download_links(stamped)
         self._saved_blueprint = _SavedBlueprint(
-            str(path), Path(written).expanduser().resolve(), stamped.to_yaml_str()
+            Path(path), Path(written).expanduser().resolve(), stamped.to_yaml_str()
         )
         self._sync_next_steps()
         return written
@@ -10326,7 +10326,7 @@ class ForgeBlueprintWizard:
         if (
             self.config is None
             or saved is None
-            or self.save_path.value != saved.requested
+            or Path(self.save_path.value) != saved.requested
             or self.config.to_yaml_str() != saved.text
         ):
             return None
