@@ -594,11 +594,15 @@ _GRID_FILE_VERT_KEYS = ("theta_s", "theta_b", "hc", "N")
 # --verbose``), not part of the grid.
 RUNTIME_GRID_KWARGS: frozenset[str] = frozenset({"verbose"})
 
-# grid_kwargs keys that are not rt.Grid keywords at all: a DomainSpec's
-# ``metadata`` block (``prefix``, ``period``, ``include_bgc``) holds the domain's
-# settings as a nesting child, read from ``grid_kwargs_child`` for roms-tools'
-# nesting step (``ForgeExecutor.metadata_child``).
-_NESTING_GRID_KWARGS: frozenset[str] = frozenset({"metadata"})
+CHILD_METADATA_KEY = "metadata"
+"""The grid_kwargs key of a DomainSpec's ``metadata`` block (``prefix``,
+``period``, ``include_bgc``): the domain's settings as somebody's nesting child, not
+an ``rt.Grid`` keyword. A blueprint folds a child's block into
+``Domain.metadata_child`` (:func:`split_child_nesting_metadata`); on this grid or
+its parent the block is inert."""
+
+# grid_kwargs keys that are not rt.Grid keywords at all.
+_NESTING_GRID_KWARGS: frozenset[str] = frozenset({CHILD_METADATA_KEY})
 
 
 def grid_build_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -733,10 +737,9 @@ NESTING_PERIOD_DEFAULT: float = 3600.0
 period of a child whose ``Domain.metadata_child`` states none."""
 
 # The keys a nesting child's settings may carry, as roms-tools' make_nesting_info
-# names them. A DomainSpec states them in its grid_kwargs["metadata"] block (the
-# domain's settings as somebody's child); a blueprint keeps only the period, in
-# Domain.metadata_child (see split_child_nesting_metadata).
-CHILD_METADATA_KEY = "metadata"
+# names them. A DomainSpec states them in its CHILD_METADATA_KEY block; a blueprint
+# keeps only the period, in Domain.metadata_child (see
+# split_child_nesting_metadata).
 _NESTING_METADATA_KEYS: frozenset[str] = frozenset(
     {"period", "prefix", "include_bgc", "include_pressure_fluxes"}
 )
