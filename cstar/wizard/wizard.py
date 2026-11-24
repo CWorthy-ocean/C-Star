@@ -5580,8 +5580,10 @@ class _ForcingEditor:
                 else:
                     w["use_vars"].remove_class("forge-need")
             if lines:
+                # One block: the banner lays out its children side by side.
                 note.value = components.banner(
-                    "warn", html.escape(_use_vars_rule()) + "<br>" + "<br>".join(lines)
+                    "warn",
+                    f"<div>{html.escape(_use_vars_rule())}<br>{'<br>'.join(lines)}</div>",
                 )
                 note.layout.display = ""
             else:
@@ -9816,7 +9818,8 @@ class ForgeBlueprintWizard:
                 print(f"{type(exc).__name__}: {exc}")
             problems = _blueprint_problems(exc)
             self.derived.value = components.banner(
-                "err", f"<b>Invalid blueprint.</b> {_problem_summary(problems)}"
+                "err",
+                f"<div><b>Invalid blueprint.</b> {_problem_summary(problems)}</div>",
             )
             self._show_unresolved_editor()
             self._update_status(None, problems=problems)
@@ -10142,7 +10145,8 @@ class ForgeBlueprintWizard:
             banner.value = (
                 components.banner(
                     "err",
-                    "<b>Fix this to make the blueprint valid.</b><br>"
+                    # One block: the banner lays out its children side by side.
+                    "<div><b>Fix this to make the blueprint valid.</b><br>"
                     + "<br>".join(
                         _problem_html(
                             text,
@@ -10151,7 +10155,8 @@ class ForgeBlueprintWizard:
                             "Review preview</a>",
                         )
                         for text in texts
-                    ),
+                    )
+                    + "</div>",
                 )
                 if texts
                 else ""
