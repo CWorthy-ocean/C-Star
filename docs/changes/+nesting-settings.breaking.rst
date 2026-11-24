@@ -1,0 +1,2 @@
+A nesting child's settings, in ``domain.metadata_child`` or a child domain's ``metadata`` block, now accept only ``period``, ``prefix: child``, ``include_bgc`` and ``include_pressure_fluxes``, and the period must be a positive number of seconds.
+- An override of ``extract_data.extract_period`` that differs from ``domain.metadata_child.period`` is refused; set the period in ``domain.metadata_child`` instead.
