@@ -32,6 +32,7 @@ from cstar.applications.forge.blueprint import (
     _COMPOSITION_SPEC_KINDS,
     BLEND_FALLBACK_INHERITED_FIELDS,
     FORGE_BLUEPRINT_VERSION,
+    NESTING_PERIOD_DEFAULT,
     PLACEHOLDER_DESCRIPTION,
     CarbonateSensitivitySpec,
     CdrSpec,
@@ -47,6 +48,7 @@ from cstar.applications.forge.blueprint import (
     emitted_blueprint_description,
     emitted_provenance,
     producer_ref,
+    split_child_nesting_metadata,
 )
 from cstar.applications.forge.input_generator import netcdf_basename
 from cstar.applications.forge.migration import migrate_forge_blueprint_data
@@ -3501,6 +3503,126 @@ def test_resolver_nesting_default_period():
     )
     assert cfg.model_settings["extract_data"]["extract_period"] == 3600.0
     assert cfg.model_settings["extract_data"]["n_chd"] == 15
+
+
+_NESTING_CHILD_KWARGS = dict(
+    nx=30,
+    ny=30,
+    size_x=300,
+    size_y=300,
+    center_lon=0,
+    center_lat=55,
+    rot=0,
+    N=20,
+    theta_s=6.0,
+    theta_b=3.0,
+    hc=250.0,
+)
+_CHILD_SPEC_BLOCK = {"prefix": "child", "period": 1800.0, "include_bgc": True}
+
+
+def test_resolver_folds_child_spec_metadata_block():
+    """A DomainSpec's ``metadata`` block in grid_kwargs_child sets the namelist's
+    extraction period and ``metadata_child``, and does not stay in the domain.
+    """
+    cfg = _build(
+        grid_kwargs_child={**_NESTING_CHILD_KWARGS, "metadata": dict(_CHILD_SPEC_BLOCK)}
+    )
+    assert cfg.model_settings["extract_data"]["extract_period"] == 1800.0
+    assert cfg.domain.metadata_child == {"period": 1800.0}
+    assert "metadata" not in cfg.domain.grid_kwargs_child
+
+
+def test_resolver_metadata_child_wins_over_child_spec_block():
+    base = dict(
+        grid_kwargs_child=_NESTING_CHILD_KWARGS, metadata_child={"period": 1800.0}
+    )
+    with_block = _build(
+        grid_kwargs_child={
+            **_NESTING_CHILD_KWARGS,
+            "metadata": {"prefix": "child", "period": 3600.0, "include_bgc": True},
+        },
+        metadata_child={"period": 1800.0},
+    )
+    assert with_block.model_settings["extract_data"]["extract_period"] == 1800.0
+    assert with_block.domain.metadata_child == {"period": 1800.0}
+    assert with_block.content_hash() == _build(**base).content_hash()
+
+
+class TestSplitChildNestingMetadata:
+    def test_passes_through_without_a_block(self):
+        assert split_child_nesting_metadata(None, None, False) == (None, None, False)
+        child = dict(_NESTING_CHILD_KWARGS)
+        assert split_child_nesting_metadata(child, {"period": 60.0}, False) == (
+            child,
+            {"period": 60.0},
+            False,
+        )
+
+    @pytest.mark.parametrize(
+        ("block", "match"),
+        [
+            ({"prefix": "kid"}, "prefix 'kid'"),
+            ({"colour": "red"}, "unknown key.*colour"),
+            ({"period": 0}, "period 0"),
+            ({"period": -5.0}, "period -5.0"),
+            ({"period": float("nan")}, "period nan"),
+            ({"period": float("inf")}, "period inf"),
+            ({"period": "3600"}, "period '3600'"),
+        ],
+    )
+    def test_refuses(self, block, match):
+        with pytest.raises(ValueError, match=match):
+            split_child_nesting_metadata(
+                {**_NESTING_CHILD_KWARGS, "metadata": block}, None, False
+            )
+
+    def test_pressure_fluxes_in_block_set_the_switch(self):
+        child, meta, fluxes = split_child_nesting_metadata(
+            {**_NESTING_CHILD_KWARGS, "metadata": {"include_pressure_fluxes": True}},
+            None,
+            False,
+        )
+        assert fluxes is True
+        assert meta is None
+        assert "metadata" not in child
+
+    def test_drops_include_bgc_and_default_prefix(self):
+        _, meta, _ = split_child_nesting_metadata(
+            {**_NESTING_CHILD_KWARGS, "metadata": _CHILD_SPEC_BLOCK}, None, False
+        )
+        assert meta == {"period": 1800.0}
+
+    def test_idempotent(self):
+        once = split_child_nesting_metadata(
+            {**_NESTING_CHILD_KWARGS, "metadata": _CHILD_SPEC_BLOCK},
+            None,
+            True,
+        )
+        assert split_child_nesting_metadata(*once) == once
+
+    def test_default_period_constant(self):
+        cfg = _build(grid_kwargs_child=_NESTING_CHILD_KWARGS)
+        assert cfg.domain.child_extract_period == NESTING_PERIOD_DEFAULT
+
+
+def test_blueprint_with_embedded_metadata_block_loads_folded():
+    """A blueprint written with the block still inside grid_kwargs_child (beside
+    metadata_child) loads with the block folded.
+    """
+    cfg = _build(
+        grid_kwargs_child=_NESTING_CHILD_KWARGS, metadata_child={"period": 1800.0}
+    )
+    data = cfg.model_dump(mode="json")
+    data["domain"]["grid_kwargs_child"]["metadata"] = {
+        "prefix": "child",
+        "period": 1800.0,
+        "include_bgc": True,
+    }
+    loaded = ForgeBlueprint.model_validate(data)
+    assert "metadata" not in loaded.domain.grid_kwargs_child
+    assert loaded.domain.metadata_child == {"period": 1800.0}
+    assert loaded.content_hash() == cfg.content_hash()
 
 
 def test_resolver_no_nesting_keeps_defaults():

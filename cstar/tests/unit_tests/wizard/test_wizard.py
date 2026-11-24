@@ -16,6 +16,7 @@ from typing import ClassVar
 import pytest
 import yaml
 
+import cstar
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     Forcing,
@@ -7367,11 +7368,7 @@ def test_hosted_field_overrides_keep_ownership_and_count_in_the_output_card(
         assert "modified" not in editor._headers[(_OUTPUT_CARD, "ocean_vars")].value
 
 
-def test_nest_period_loads_from_the_effective_extract_period():
-    """A blueprint whose extract_period was overridden (Advanced, before this
-    field moved to the nesting options) differs from ``metadata_child.period``;
-    loading it keeps the effective value, with nest_period its one editor.
-    """
+def _nested_config_at_1800():
     wiz = _new_wizard()
     wiz.nest_enable.value = True
     wiz.nest_period.value = 1800.0
@@ -7379,11 +7376,40 @@ def test_nest_period_loads_from_the_effective_extract_period():
     cfg = wiz.config
     assert cfg is not None, wiz.derived.value
     assert cfg.domain.metadata_child["period"] == 1800.0
+    return cfg
 
+
+def test_nest_period_loads_from_metadata_child_over_a_stale_snapshot():
+    """A stored extract_period that differs from ``metadata_child.period`` (a
+    workplan override of the domain's period, a hand edit) is a stale copy: the
+    run writes metadata_child's period, so the wizard shows and keeps that.
+    """
+    cfg = _nested_config_at_1800()
     settings = copy.deepcopy(cfg.model_settings)
     settings["extract_data"]["extract_period"] = 3600.0
     wiz2 = _new_wizard()
     wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
+
+    assert wiz2.nest_period.value == 1800.0
+    assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
+    assert wiz2._gather()["metadata_child"] == {"period": 1800.0}
+
+
+def test_nest_period_loads_an_older_files_extract_period_override():
+    """An extract_period override recorded before the field moved to the nesting
+    options (Advanced) is the period that file ran with; loading it keeps that
+    value, with nest_period its one editor, and the override is not kept.
+    """
+    cfg = _nested_config_at_1800()
+    settings = copy.deepcopy(cfg.model_settings)
+    settings["extract_data"]["extract_period"] = 3600.0
+    composition = cfg.composition.model_copy(
+        update={"overrides": {"extract_data": {"extract_period": 3600.0}}}
+    )
+    wiz2 = _new_wizard()
+    wiz2._populate_from(
+        cfg.model_copy(update={"model_settings": settings, "composition": composition})
+    )
 
     assert wiz2.nest_period.value == 3600.0
     assert wiz2.config.model_settings["extract_data"]["extract_period"] == 3600.0
@@ -8503,3 +8529,112 @@ def test_run_log_lands_while_the_pane_is_collapsed(monkeypatch, tmp_path):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake)
     wiz._on_run(None)
     assert "line one" in "".join(o["text"] for o in wiz.run_output.outputs)
+
+
+class TestChildNestingMetadata:
+    """A child spec's ``metadata`` block (a DomainSpec's description of itself as
+    a nesting child) feeds the nesting widgets; it is never kept as a second copy
+    in ``grid_kwargs_child``.
+    """
+
+    _BLOCK: ClassVar[dict] = {"period": 1800.0, "include_pressure_fluxes": True}
+    _CHILD_GRID: ClassVar[dict] = {
+        "nx": 30,
+        "ny": 40,
+        "size_x": 300.0,
+        "size_y": 400.0,
+    }
+
+    def _pick_child(self, wiz, monkeypatch, spec):
+        monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
+        monkeypatch.setattr(wiz, "_on_nest_plot", lambda _b: None)
+        wiz.nest_domain_dd.value = wiz.nest_domain_dd.options[1]
+
+    def _child_spec(self, block):
+        return {"grid_kwargs": {**self._CHILD_GRID, "metadata": dict(block)}}
+
+    def test_bundled_child_preset_leaves_no_second_copy(self, monkeypatch):
+        wiz = _new_wizard()
+        spec = yaml.safe_load(
+            (
+                Path(cstar.__file__).parent
+                / "catalog/bundled/specs/DomainSpec/NEP-4th_deg.yaml"
+            ).read_text()
+        )
+        self._pick_child(wiz, monkeypatch, spec)
+        wiz.nest_period.value = 1800.0
+        wiz._rebuild()
+        cfg = wiz.config
+        assert cfg is not None, wiz.derived.value
+
+        assert "metadata" not in cfg.domain.grid_kwargs_child
+        assert cfg.domain.metadata_child == {"period": 1800.0}
+        assert cfg.model_settings["extract_data"]["extract_period"] == 1800.0
+        assert "metadata" not in wiz._domain_spec_data()["grid_kwargs_child"]
+
+        plain = _new_wizard()
+        plain.nest_enable.value = True
+        for k, w in wiz.child_w.items():
+            plain.child_w[k].value = w.value
+        plain.child_topo_source.value = wiz.child_topo_source.value
+        plain.nest_period.value = 1800.0
+        plain._rebuild()
+        assert plain.config is not None, plain.derived.value
+        assert cfg.content_hash() == plain.config.content_hash()
+
+    def test_child_preset_period_and_pressure_fluxes_fill_the_widgets(
+        self, monkeypatch
+    ):
+        wiz = _new_wizard()
+        assert wiz.nest_period.value == 3600.0
+        self._pick_child(wiz, monkeypatch, self._child_spec(self._BLOCK))
+
+        assert wiz.nest_period.value == 1800.0
+        assert wiz.nest_pressure_fluxes.value is True
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.model_settings["extract_data"]["extract_period"] == 1800.0
+
+    def test_child_preset_without_a_period_leaves_nest_period(self, monkeypatch):
+        wiz = _new_wizard()
+        wiz.nest_period.value = 900.0
+        self._pick_child(wiz, monkeypatch, self._child_spec({"include_bgc": True}))
+        assert wiz.nest_period.value == 900.0
+
+    def test_refused_child_block_reports_and_changes_nothing(self, monkeypatch):
+        wiz = _new_wizard()
+        wiz.nest_period.value = 900.0
+        self._pick_child(wiz, monkeypatch, self._child_spec({"prefix": "a_b"}))
+
+        assert "Invalid child domain" in wiz.derived.value
+        assert wiz.nest_period.value == 900.0
+        assert wiz.nest_enable.value is False
+
+    def test_domain_spec_with_block_in_grid_kwargs_child_loads_its_period(
+        self, monkeypatch
+    ):
+        wiz = _new_wizard()
+        spec = {
+            "grid_kwargs": {"nx": 20, "ny": 20, "size_x": 200.0, "size_y": 200.0},
+            "grid_kwargs_child": {**self._CHILD_GRID, "metadata": {"period": 1800.0}},
+        }
+        monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
+        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
+
+        assert wiz.nest_enable.value is True
+        assert wiz.nest_period.value == 1800.0
+        assert "metadata" not in wiz._loaded_grid_kwargs["child"]
+
+    def test_domain_spec_with_a_refused_block_changes_nothing(self, monkeypatch):
+        wiz = _new_wizard()
+        wiz.nest_period.value = 900.0
+        spec = {
+            "grid_kwargs": {"nx": 20, "ny": 20, "size_x": 200.0, "size_y": 200.0},
+            "grid_kwargs_child": {**self._CHILD_GRID, "metadata": {"prefix": "a_b"}},
+        }
+        monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
+        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
+
+        assert "Invalid child domain" in wiz.derived.value
+        assert wiz.nest_period.value == 900.0
+        assert wiz.nest_enable.value is False

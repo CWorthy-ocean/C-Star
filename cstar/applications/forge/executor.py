@@ -25,6 +25,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -32,6 +33,8 @@ import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import input_generator, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    CHILD_METADATA_KEY,
+    NESTING_PERIOD_DEFAULT,
     RUNTIME_GRID_KWARGS,
     CarbonateSensitivitySpec,
     Forcing,
@@ -460,9 +463,12 @@ class ForgeExecutor(BaseModel):
     grid_child: rt.Grid | None = Field(
         default=None, init=False, validate_default=False, exclude=True
     )
-    metadata_child: dict[str, Any] | None = Field(
-        default=None, init=False, validate_default=False, exclude=True
-    )
+    nesting_period: float = Field(default=NESTING_PERIOD_DEFAULT, gt=0)
+    """Extraction period (seconds) of the nesting data a parent writes for its child:
+    both the ``period`` of ``nesting.nc`` and the namelist's
+    ``extract_data.extract_period``. Unused without a child."""
+    nesting_include_pressure_fluxes: bool = False
+    """Whether the nesting data includes baroclinic pressure fluxes."""
     _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
         default=None
     )
@@ -483,6 +489,25 @@ class ForgeExecutor(BaseModel):
         if self.end_date <= self.start_date:
             raise ValueError("end_date must be after start_date")
         return self
+
+    @field_validator("grid_kwargs_child")
+    @classmethod
+    def _child_settings_not_in_grid_kwargs(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Refuse a child DomainSpec's ``metadata`` block in ``grid_kwargs_child``
+        (a field validator, so before ``model_post_init`` builds the grids): the
+        nesting settings travel as ``nesting_period`` and
+        ``nesting_include_pressure_fluxes``, which ``from_forge_blueprint`` fills
+        from the validated ``Domain`` (see ``split_child_nesting_metadata``).
+        """
+        if value and CHILD_METADATA_KEY in value:
+            raise ValueError(
+                f"grid_kwargs_child carries a {CHILD_METADATA_KEY!r} block; pass the "
+                "child's settings as nesting_period/nesting_include_pressure_fluxes, "
+                "or build the executor with ForgeExecutor.from_forge_blueprint"
+            )
+        return value
 
     @model_validator(mode="after")
     def _resolve_cdr_mode(self) -> ForgeExecutor:
@@ -772,9 +797,6 @@ class ForgeExecutor(BaseModel):
                         self.grid, self.grid_child, verbose=self.verbose
                     )
 
-                if "metadata" in self.grid_kwargs_child:
-                    self.metadata_child = self.grid_kwargs_child["metadata"]
-
             # I am a parent and a child
             elif (
                 self.grid_kwargs_child is not None
@@ -793,9 +815,6 @@ class ForgeExecutor(BaseModel):
                     self.grid_child = rt.align_grids(
                         self.grid, self.grid_child, verbose=self.verbose
                     )
-
-                if "metadata" in self.grid_kwargs_child:
-                    self.metadata_child = self.grid_kwargs_child["metadata"]
 
             # I am a child but not a parent
             elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
@@ -2014,7 +2033,8 @@ class ForgeExecutor(BaseModel):
             grid=self.grid,
             grid_parent=self.grid_parent,
             grid_child=self.grid_child,
-            metadata_child=self.metadata_child,
+            nesting_period=self.nesting_period,
+            nesting_include_pressure_fluxes=self.nesting_include_pressure_fluxes,
             settings_compile_time=self._settings_compile_time,
             settings_run_time=self._settings_run_time,
             has_bgc=self._has_bgc,

@@ -78,6 +78,7 @@ from cstar.applications.forge.blueprint import (
     TidalForcingItem,
     TidalSource,
     grid_build_kwargs,
+    split_child_nesting_metadata,
 )
 from cstar.applications.forge.namelist_model import (
     CDR_OUTPUT_SECTIONS,
@@ -7234,12 +7235,23 @@ class ForgeBlueprintWizard:
         if name == "<custom>":
             return
         data = self.catalog.domain_data(name)
-        gk = data.get("grid_kwargs", {}) or {}
+        split = self._split_child_nesting(
+            data.get("grid_kwargs", {}) or {},
+            None,
+            bool(self.nest_pressure_fluxes.value),
+        )
+        if split is None:
+            return
+        gk, metadata, pressure_fluxes = split
+        gk = gk or {}
         with self._suspend():
             self.nest_enable.value = True
             # The child spec's own grid_kwargs (its hmin, its channel closing)
             # describe the child, so they go with it (see _nested_grid_kwargs).
             self._set_loaded_grid_kwargs("child", gk)
+            if (period := (metadata or {}).get("period")) is not None:
+                self.nest_period.value = float(period)
+            self.nest_pressure_fluxes.value = pressure_fluxes
             for k, w in self.child_w.items():
                 if k in gk:
                     w.value = gk[k]
@@ -7249,6 +7261,27 @@ class ForgeBlueprintWizard:
             self.child_topo_path.value = data.get("topography_path", "") or ""
         self._rebuild()
         self._on_nest_plot(None)
+
+    def _split_child_nesting(
+        self,
+        grid_kwargs_child: dict[str, Any] | None,
+        metadata_child: dict[str, Any] | None,
+        include_pressure_fluxes: bool,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, bool] | None:
+        """Fold a spec's child nesting settings out of its ``grid_kwargs_child``.
+
+        See :func:`split_child_nesting_metadata`. A spec it refuses is reported in
+        the status banner and gives ``None``, so the caller leaves the widgets be.
+        """
+        try:
+            return split_child_nesting_metadata(
+                grid_kwargs_child, metadata_child, include_pressure_fluxes
+            )
+        except ValueError as exc:
+            self.derived.value = components.banner(
+                "err", f"<b>Invalid child domain.</b> {html.escape(str(exc))}"
+            )
+            return None
 
     def _on_parent_domain(self, _change):
         """Prefill the parent grid from a selected DomainSpec (and enable it)."""
@@ -7822,6 +7855,14 @@ class ForgeBlueprintWizard:
             self._detach_grid_file()
         data = self.catalog.domain_data(name)
         gk = data.get("grid_kwargs", {}) or {}
+        split = self._split_child_nesting(
+            data.get("grid_kwargs_child"),
+            data.get("metadata_child"),
+            bool(data.get("nesting_include_pressure_fluxes", False)),
+        )
+        if split is None:
+            return
+        child, child_metadata, pressure_fluxes = split
         was_parented = self.parent_enable.value
         with self._suspend():
             self.grid_name.value = data.get("grid_name", name)
@@ -7896,7 +7937,6 @@ class ForgeBlueprintWizard:
             # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
             # from a DomainSpec (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
-            child = data.get("grid_kwargs_child")
             self._set_loaded_grid_kwargs("child", child)
             self.nest_enable.value = child is not None
             if child:
@@ -7904,12 +7944,10 @@ class ForgeBlueprintWizard:
                     if k in child:
                         w.value = child[k]
                 self._set_nested_topo_widgets("child", child)
-                period = (data.get("metadata_child") or {}).get("period")
+                period = (child_metadata or {}).get("period")
                 if period is not None:
                     self.nest_period.value = float(period)
-                self.nest_pressure_fluxes.value = bool(
-                    data.get("nesting_include_pressure_fluxes", False)
-                )
+                self.nest_pressure_fluxes.value = pressure_fluxes
             # Parent: mirrors the child block above, reading grid_kwargs_parent
             # (only present if the spec was saved with a parent grid active).
             parent = data.get("grid_kwargs_parent")
@@ -9390,13 +9428,13 @@ class ForgeBlueprintWizard:
                 if k in child:
                     w.value = child[k]
             self._set_nested_topo_widgets("child", child)
-            # The effective extraction period: an older file may carry an Advanced
-            # extract_period override that differs from metadata_child.period.
-            period = (cfg.model_settings.get("extract_data") or {}).get(
-                "extract_period"
+            # The period comes from metadata_child (generation writes the namelist's
+            # extract_period from it), except an older file's Advanced
+            # extract_period override, which that file ran with; the save then
+            # records it in metadata_child.
+            period = (cfg.composition.overrides.get("extract_data") or {}).get(
+                "extract_period", cfg.domain.child_extract_period
             )
-            if period is None:
-                period = (cfg.domain.metadata_child or {}).get("period")
             if period is not None:
                 self.nest_period.value = float(period)
         self.nest_pressure_fluxes.value = bool(

@@ -6047,36 +6047,39 @@ class TestExecutorOwnedSettings:
         assert "obc_west" in compile_time["cppdefs"]
         assert "grid" in run_time
 
-    def test_has_bgc_defaults_include_bgc_on_nesting(
+    @pytest.mark.parametrize("has_bgc", [True, False])
+    def test_include_bgc_on_nesting_follows_has_bgc(
+        self, make_input_data, sample_grid_kwargs, has_bgc
+    ):
+        data = make_input_data(
+            grid_child=rt.Grid(**sample_grid_kwargs),
+            has_bgc=has_bgc,
+        )
+        mock_nesting = self._run_grid_step(data)
+        mock_nesting.assert_called_once()
+        assert mock_nesting.call_args.kwargs["include_bgc"] is has_bgc
+
+    def test_nesting_period_reaches_nesting_file_and_namelist(
         self, make_input_data, sample_grid_kwargs
     ):
         data = make_input_data(
             grid_child=rt.Grid(**sample_grid_kwargs),
-            has_bgc=True,
+            nesting_period=1800.0,
         )
         mock_nesting = self._run_grid_step(data)
-        mock_nesting.assert_called_once()
-        assert mock_nesting.call_args.kwargs["include_bgc"] is True
+        assert mock_nesting.call_args.kwargs["period"] == 1800.0
+        assert data._settings_run_time["extract_data"]["extract_period"] == 1800.0
 
-    def test_no_bgc_omits_include_bgc_on_nesting(
-        self, make_input_data, sample_grid_kwargs
+    @pytest.mark.parametrize("fluxes", [True, False])
+    def test_nesting_pressure_fluxes_are_passed(
+        self, make_input_data, sample_grid_kwargs, fluxes
     ):
-        data = make_input_data(grid_child=rt.Grid(**sample_grid_kwargs))
-        mock_nesting = self._run_grid_step(data)
-        mock_nesting.assert_called_once()
-        assert "include_bgc" not in mock_nesting.call_args.kwargs
-
-    def test_metadata_child_include_bgc_wins_over_has_bgc(
-        self, make_input_data, sample_grid_kwargs
-    ):
-        """An explicit include_bgc in metadata_child overrides the has_bgc default."""
         data = make_input_data(
             grid_child=rt.Grid(**sample_grid_kwargs),
-            metadata_child={"include_bgc": False},
-            has_bgc=True,
+            nesting_include_pressure_fluxes=fluxes,
         )
         mock_nesting = self._run_grid_step(data)
-        assert mock_nesting.call_args.kwargs["include_bgc"] is False
+        assert mock_nesting.call_args.kwargs["include_pressure_fluxes"] is fluxes
 
     @patch("cstar.applications.forge.input_generator.rt.SurfaceForcing")
     def test_has_bgc_populates_bgc_interp_frc(

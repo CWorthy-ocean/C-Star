@@ -128,6 +128,23 @@ class TestResolverRefusesConflicts:
                 run_time_overrides={"extract_data": {"n_chd": 90}},
             )
 
+    def test_extract_period_override_names_the_blueprint_field(self) -> None:
+        with pytest.raises(ValueError, match="extract_data.extract_period") as excinfo:
+            _build(
+                grid_kwargs_child=_CHILD_GRID_KWARGS,
+                metadata_child={"period": 3600.0},
+                run_time_overrides={"extract_data": {"extract_period": 1800.0}},
+            )
+        assert "domain.metadata_child.period" in str(excinfo.value)
+
+    def test_extract_period_override_equal_to_metadata_child_is_kept(self) -> None:
+        cfg = _build(
+            grid_kwargs_child=_CHILD_GRID_KWARGS,
+            metadata_child={"period": 1800.0},
+            run_time_overrides={"extract_data": {"extract_period": 1800.0}},
+        )
+        assert cfg.model_settings["extract_data"]["extract_period"] == 1800.0
+
     def test_override_equal_to_the_derived_value_is_kept(self) -> None:
         """Re-typing the derived value records an override (the wizard does this),
         which must not be refused. The resolver records it in the composition.
