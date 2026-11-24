@@ -23,7 +23,11 @@ import yaml
 from roms_tools.setup.utils import get_boundary_coords
 
 import cstar
-from cstar.applications.forge.blueprint import OpenBoundaries, TopographySource
+from cstar.applications.forge.blueprint import (
+    OpenBoundaries,
+    TopographySource,
+    grid_build_kwargs,
+)
 
 DOMAIN_SPEC_DIR = (
     Path(cstar.__file__).parent / "catalog" / "bundled" / "specs" / "DomainSpec"
@@ -41,10 +45,10 @@ def reduced_grid_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Return ``grid_kwargs`` with at most ``MAX_CELLS`` cells along the longer axis.
 
     The extent, centre, rotation and the ratio of ``nx`` to ``ny`` (so the cell
-    shape) are kept. ``metadata`` (nesting settings), which ``rt.Grid`` rejects,
-    and ``verbose``, which the caller passes itself, are dropped.
+    shape) are kept. Forge's own keys (``metadata``, ``verbose``) are dropped, as
+    Forge drops them (:func:`grid_build_kwargs`).
     """
-    kwargs = {k: v for k, v in grid_kwargs.items() if k not in ("metadata", "verbose")}
+    kwargs = grid_build_kwargs(grid_kwargs)
     factor = max(kwargs["nx"], kwargs["ny"]) / MAX_CELLS
     if factor > 1:
         kwargs["nx"] = max(2, round(kwargs["nx"] / factor))

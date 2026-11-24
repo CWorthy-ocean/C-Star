@@ -1241,11 +1241,15 @@ class TestGridBuildErrorLabels:
         assert "Building the" not in str(ei.value)  # not re-labelled
 
 
-class TestGridKwargsVerbose:
-    """A ``verbose`` key in a grid_kwargs dict (the bundled hvalfjordur-0 and
-    ccs-12km DomainSpecs carried ``verbose: true``) once reached
-    ``rt.Grid(**grid_kwargs, verbose=self.verbose)`` as a second ``verbose`` and
-    failed the executor build with a TypeError. The executor's own flag wins.
+class TestGridKwargsForgeKeys:
+    """grid_kwargs keys that are Forge's, not ``rt.Grid``'s, never reach it.
+
+    A ``verbose`` key (the bundled hvalfjordur-0 and ccs-12km DomainSpecs carried
+    ``verbose: true``) once reached ``rt.Grid(**grid_kwargs,
+    verbose=self.verbose)`` as a second ``verbose`` and failed the executor build
+    with a TypeError; the executor's own flag wins. A ``metadata`` block (the
+    bundled GoA-10th_deg and NEP-4th_deg carry one) reached ``rt.Grid`` on every
+    path that builds this grid from its own grid_kwargs unfiltered.
     """
 
     _PARENT: ClassVar[dict] = {
@@ -1343,6 +1347,51 @@ class TestGridKwargsVerbose:
             args["grid_kwargs"]["nx"],
         ]
         assert [c.kwargs["verbose"] for c in mock_grid.call_args_list] == [False] * 3
+
+    @pytest.mark.parametrize("has_child", [False, True], ids=["alone", "with-child"])
+    def test_domain_grid_kwargs_metadata_never_reaches_rt_grid(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path, has_child
+    ):
+        """This grid's own ``metadata`` (a wizard save of GoA-10th_deg keeps it)
+        is left out of ``rt.Grid`` with no nesting and as a child's parent, the
+        two paths that passed this grid's grid_kwargs through unfiltered.
+        """
+        args = minimal_cstar_spec_builder_args
+        nesting: dict = (
+            {"grid_kwargs_child": self._CHILD, "metadata_child": {"period": 3600.0}}
+            if has_child
+            else {}
+        )
+        cfg = build_forge_blueprint(
+            model_path=_MODEL_PATH,
+            grid_name=args["grid_name"],
+            grid_kwargs={
+                **args["grid_kwargs"],
+                "metadata": {"prefix": "child", "period": 3600.0},
+            },
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            **nesting,
+        )
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        with patch(
+            "cstar.applications.forge.executor.rt.align_grids",
+            return_value=_create_grid_mock(),
+        ):
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+        calls = mock_grid.call_args_list
+        assert [c.kwargs["nx"] for c in calls][-1] == args["grid_kwargs"]["nx"]
+        assert len(calls) == (2 if has_child else 1)
+        assert not [c.kwargs for c in calls if "metadata" in c.kwargs]
 
 
 class TestForgeExecutorGetDs:

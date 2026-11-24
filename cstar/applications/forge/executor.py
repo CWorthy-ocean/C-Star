@@ -39,6 +39,7 @@ from cstar.applications.forge.blueprint import (
     UserProvidedFile,
     emitted_blueprint_description,
     emitted_blueprint_filename,
+    grid_build_kwargs,
     infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
 )
@@ -532,6 +533,9 @@ class ForgeExecutor(BaseModel):
         ``_nested_topography_pair``), and the parent is typically far larger
         than the grid the user previewed. Without the label the user is left
         checking the wrong grid against the wrong dataset's coverage.
+
+        Forge's own grid_kwargs keys (a ``verbose`` copy, a nesting ``metadata``
+        block) are left out: see :func:`grid_build_kwargs`.
         """
         ignored = sorted(RUNTIME_GRID_KWARGS & grid_kwargs.keys())
         if ignored:
@@ -541,9 +545,7 @@ class ForgeExecutor(BaseModel):
                 ", ".join(ignored),
                 self.verbose,
             )
-        build_kwargs = {
-            k: v for k, v in grid_kwargs.items() if k not in RUNTIME_GRID_KWARGS
-        }
+        build_kwargs = grid_build_kwargs(grid_kwargs)
         with mem_log(f"Grid({label})", enabled=self.verbose):
             try:
                 return rt.Grid(**build_kwargs, verbose=self.verbose)
@@ -763,11 +765,7 @@ class ForgeExecutor(BaseModel):
             # I am a parent but not a child
             if self.grid_kwargs_child is not None and self.grid_kwargs_parent is None:
                 # Make both parent and child, to make the nesting data.
-                grid_kwargs_child = {
-                    k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
-                }
-
-                self.grid_child = self._build_grid("child", grid_kwargs_child)
+                self.grid_child = self._build_grid("child", self.grid_kwargs_child)
                 self.grid = self._build_grid("self", self.grid_kwargs)
                 with mem_log("align_grids(self, child)", enabled=self.verbose):
                     self.grid_child = rt.align_grids(
@@ -782,20 +780,10 @@ class ForgeExecutor(BaseModel):
                 self.grid_kwargs_child is not None
                 and self.grid_kwargs_parent is not None
             ):
-                grid_kwargs_child = {
-                    k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
-                }
-                grid_kwargs_parent = {
-                    k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
-                }
-                grid_kwargs = {
-                    k: v for k, v in self.grid_kwargs.items() if k != "metadata"
-                }
-
                 # Adapt this grid to its parent, but create nesting data for its child
-                self.grid_parent = self._build_grid("parent", grid_kwargs_parent)
-                self.grid_child = self._build_grid("child", grid_kwargs_child)
-                self.grid = self._build_grid("self", grid_kwargs)
+                self.grid_parent = self._build_grid("parent", self.grid_kwargs_parent)
+                self.grid_child = self._build_grid("child", self.grid_kwargs_child)
+                self.grid = self._build_grid("self", self.grid_kwargs)
 
                 with mem_log("align_grids(parent, self)", enabled=self.verbose):
                     self.grid = rt.align_grids(
@@ -811,16 +799,9 @@ class ForgeExecutor(BaseModel):
 
             # I am a child but not a parent
             elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
-                grid_kwargs_parent = {
-                    k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
-                }
-                grid_kwargs = {
-                    k: v for k, v in self.grid_kwargs.items() if k != "metadata"
-                }
-
                 # Adapt this grid to its parent. no nesting data needed
-                self.grid_parent = self._build_grid("parent", grid_kwargs_parent)
-                self.grid = self._build_grid("self", grid_kwargs)
+                self.grid_parent = self._build_grid("parent", self.grid_kwargs_parent)
+                self.grid = self._build_grid("self", self.grid_kwargs)
 
                 with mem_log("align_grids(parent, self)", enabled=self.verbose):
                     self.grid = rt.align_grids(

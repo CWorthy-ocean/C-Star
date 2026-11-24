@@ -76,6 +76,7 @@ from cstar.applications.forge.blueprint import (
     SurfaceType,
     TidalForcingItem,
     TidalSource,
+    grid_build_kwargs,
 )
 from cstar.applications.forge.namelist_model import (
     CDR_OUTPUT_SECTIONS,
@@ -9579,7 +9580,9 @@ class ForgeBlueprintWizard:
 
         from roms_tools import Grid
 
-        gk = self._base_grid_kwargs()
+        # A loaded key with no widget is kept for the save (_merge_loaded_kwargs),
+        # but Forge's own keys (a nesting ``metadata`` block) are not Grid's.
+        gk = grid_build_kwargs(self._base_grid_kwargs())
         topo, self._grid_build_topo_note = self._this_grid_plot_topography()
         if topo is not None:
             gk["topography_source"] = topo
@@ -9724,7 +9727,7 @@ class ForgeBlueprintWizard:
 
             ck = {
                 k: v
-                for k, v in self._nested_grid_kwargs("child").items()
+                for k, v in grid_build_kwargs(self._nested_grid_kwargs("child")).items()
                 if k not in _NESTED_TOPO_KEYS
             }
 
@@ -9780,7 +9783,9 @@ class ForgeBlueprintWizard:
 
             pk = {
                 k: v
-                for k, v in self._nested_grid_kwargs("parent").items()
+                for k, v in grid_build_kwargs(
+                    self._nested_grid_kwargs("parent")
+                ).items()
                 if k not in _NESTED_TOPO_KEYS
             }
 
