@@ -156,12 +156,16 @@ def test_adding_a_bgc_source_on_a_physics_only_model_shows_it_in_the_header():
     wiz = _wizard()
     wiz.bgc_dd.value = "none"
     editor = wiz._forcing_editor
-    assert not editor._rows["ic_bgc"]
-    assert not _shown(editor._bgc_sections["ic_bgc"])
+    for cat in ("ic_bgc", "boundary_bgc"):
+        assert not editor._rows[cat]
+        assert not _shown(editor._bgc_sections[cat])
 
     editor._add("ic_bgc")  # its on_change rebuilds, which retitles the panes
     assert _shown(editor._bgc_sections["ic_bgc"])
-    assert any(t.startswith("BGC") for t, _ in _pills(wiz, 0))
+    assert not _shown(editor._bgc_sections["boundary_bgc"])
+    name = editor._rows["ic_bgc"][0]["name"].value
+    assert name  # a new row's source starts at the dropdown's first option
+    assert (f"BGC {name}", "") in _pills(wiz, 0)
 
 
 def test_a_bgc_source_that_does_not_partition_adds_a_warn_pill_until_fixed():
@@ -170,7 +174,8 @@ def test_a_bgc_source_that_does_not_partition_adds_a_warn_pill_until_fixed():
     editor._add("ic_bgc")
     wiz._update_status(wiz.config)
     assert editor.bgc_needs_fix("ic_bgc")
-    assert ("check BGC sources", "warn") in _pills(wiz, 0)
+    names = " + ".join(r["name"].value for r in editor._rows["ic_bgc"])
+    assert _pills(wiz, 0)[-2:] == [(f"BGC {names}", ""), ("check BGC sources", "warn")]
     assert ("check BGC sources", "warn") not in _pills(wiz, 2)
 
     editor._remove("ic_bgc", editor._rows["ic_bgc"][1])
