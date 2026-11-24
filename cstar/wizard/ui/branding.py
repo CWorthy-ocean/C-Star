@@ -128,7 +128,7 @@ def branding_display() -> None:
 
     The Voilà app gets its header from :class:`cstar.wizard.ui.shell.AppShell`,
     which calls :func:`header_html` directly. This helper remains for notebook
-    users who display :class:`~cstar.wizard.wizard.ForgeBlueprintWizardApp`
+    users who display :class:`~cstar.wizard.app.ForgeBlueprintWizardApp`
     on its own and want the same header above it: call it once, immediately
     before ``app.display()``.
     """

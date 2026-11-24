@@ -23,14 +23,13 @@ from cstar.applications.forge.blueprint import (
     RunWindow,
     _require_partitioned_bgc_use_vars,
 )
+from cstar.wizard.forcing_editor import _BOUNDARY_NONE, _ForcingEditor
 from cstar.wizard.wizard import (
-    _BOUNDARY_NONE,
     _ERROR_CARDS,
     _ERROR_MODEL_PATHS,
     _STICKY_STEPS,
     ForgeBlueprintWizard,
     _blueprint_problems,
-    _ForcingEditor,
     _wizard_words,
 )
 

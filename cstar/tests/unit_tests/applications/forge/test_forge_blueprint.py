@@ -8149,7 +8149,7 @@ class TestForgeBlueprintWizard:
         """bgc/marbl_bgc straddle physics and output: the write-controls appear in the
         Output card, the rest under Biogeochemistry (the PARTIAL_OUTPUT_SECTIONS seam).
         """
-        from cstar.wizard.wizard import _OUTPUT_CARD
+        from cstar.wizard.settings_editor import _OUTPUT_CARD
 
         w = self._wizard()
         group_fields = w.editor._group_fields
@@ -8751,7 +8751,7 @@ class TestForgeBlueprintWizard:
             "ALK": 2300.0,
             "CHL": 0.3,
         }
-        from cstar.wizard.wizard import _parse_constants
+        from cstar.wizard.forcing_editor import _parse_constants
 
         fe2 = w2._forcing_editor
         assert _parse_constants(fe2._rows["ic_bgc"][0]["constants"].value) == {
@@ -9230,7 +9230,7 @@ class TestForgeBlueprintWizardApp:
 
     def _app(self, **kwargs):
         pytest.importorskip("ipywidgets")
-        from cstar.wizard.wizard import ForgeBlueprintWizardApp
+        from cstar.wizard.app import ForgeBlueprintWizardApp
 
         return ForgeBlueprintWizardApp(**kwargs)
 
@@ -9258,7 +9258,7 @@ class TestForgeBlueprintWizardApp:
         # writable layer over bundled, matching CSTAR_CATALOG semantics),
         # so a malformed GitHub URL is the failure case now. Calls `_load`
         # directly -- the catalog bar's own reload button now requires a
-        # two-step confirm (see `cstar.wizard.wizard.CatalogBar`),
+        # two-step confirm (see `cstar.wizard.ui.catalog_bar.CatalogBar`),
         # which isn't this test's concern.
         app = self._app()
         original_inner = app.inner

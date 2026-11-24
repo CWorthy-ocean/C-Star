@@ -2,7 +2,7 @@
 
 This is a pure extraction of the widgets and status-message formatting that
 ``ForgeBlueprintWizardApp.__init__``/``_load``/``_reload`` (see
-:mod:`cstar.wizard.wizard`) build for choosing/reloading the
+:mod:`cstar.wizard.app`) build for choosing/reloading the
 domain catalog. It does not change catalog-loading behavior -- wiring
 :class:`CatalogBar` up to the App's actual ``_load`` is left to a later work
 package; ``on_reload`` here is simply invoked with the current input text.

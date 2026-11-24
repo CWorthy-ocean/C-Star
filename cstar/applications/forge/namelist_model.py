@@ -3059,7 +3059,7 @@ def version_gated_section_names() -> frozenset[str]:
     :class:`RunTimeSettingsV0_6_0`) -- from a section that's *never*
     schema-modeled by any run-time settings class at all, e.g. ``cppdefs`` (a
     compile-time settings dict with no run-time settings model counterpart).
-    The wizard's accordion editor (``_SettingsEditor``, ``forge_blueprint_wizard.py``)
+    The wizard's accordion editor (``_SettingsEditor``, ``cstar/wizard/settings_editor.py``)
     uses this to decide whether a section absent from the *active* schema
     should still render via type-inference (cppdefs: yes, always) or be
     skipped (a version-gated section under an older ref: yes, skip -- the

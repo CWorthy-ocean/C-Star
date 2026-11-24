@@ -8,12 +8,8 @@ from datetime import date
 import ipywidgets as W
 import pytest
 
-from cstar.wizard.wizard import (
-    _IC_NONE,
-    _ROW_OPTIONS_TITLE,
-    ForgeBlueprintWizard,
-    _ForcingEditor,
-)
+from cstar.wizard.forcing_editor import _IC_NONE, _ROW_OPTIONS_TITLE, _ForcingEditor
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 _TITLES = [
     "Initial conditions",

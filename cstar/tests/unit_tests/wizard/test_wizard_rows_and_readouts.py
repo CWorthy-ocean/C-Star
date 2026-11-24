@@ -17,17 +17,11 @@ from cstar.applications.forge.blueprint import (
     RiverForcingItem,
     RiverSource,
 )
+from cstar.wizard.fields import _make_field_widget, _read_field_widget
+from cstar.wizard.forcing_editor import _ROW_OPTION_DEFAULTS, _ForcingEditor
+from cstar.wizard.settings_editor import _model_time_text, _SettingsEditor
 from cstar.wizard.ui import components
-from cstar.wizard.wizard import (
-    _ROW_OPTION_DEFAULTS,
-    ForgeBlueprintWizard,
-    _display_round,
-    _ForcingEditor,
-    _make_field_widget,
-    _model_time_text,
-    _read_field_widget,
-    _SettingsEditor,
-)
+from cstar.wizard.wizard import ForgeBlueprintWizard, _display_round
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

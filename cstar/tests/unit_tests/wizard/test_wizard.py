@@ -43,33 +43,31 @@ from cstar.applications.forge.namelist_model import (
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
-from cstar.wizard.wizard import (
+from cstar.wizard.app import ForgeBlueprintWizardApp
+from cstar.wizard.fields import _base_type, _is_optional_numeric, _make_field_widget
+from cstar.wizard.forcing_editor import _BOUNDARY_NONE, _IC_NONE, _ForcingEditor
+from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
-    _BOUNDARY_NONE,
     _FORCING_CARD,
-    _IC_NONE,
     _MODEL_CARD,
     _OUTPUT_CARD,
     _OUTPUT_MORE_TITLE,
     _OUTPUT_TABLES,
-    _STICKY_STEPS,
-    WIZARD_TOOL,
-    ForgeBlueprintWizard,
-    ForgeBlueprintWizardApp,
-    WorkplanHooks,
     _applies_in,
-    _base_type,
-    _drain_stream_buffer,
-    _ForcingEditor,
     _in_forcing_card,
     _in_output_card,
-    _is_optional_numeric,
-    _is_output_key,
-    _make_field_widget,
     _namelist_tooltip,
     _output_placement,
     _section_submodel,
     _SettingsEditor,
+)
+from cstar.wizard.wizard import (
+    _STICKY_STEPS,
+    WIZARD_TOOL,
+    ForgeBlueprintWizard,
+    WorkplanHooks,
+    _drain_stream_buffer,
+    _is_output_key,
 )
 
 
@@ -6119,6 +6117,7 @@ class TestGridFileAttach:
         cached dict, never recomputing the digest.
         """
         import cstar.applications.forge.user_files as user_files_mod
+        import cstar.wizard.forcing_editor as forcing_editor_mod
         import cstar.wizard.wizard as wizard_mod
 
         calls = {"n": 0}
@@ -6129,6 +6128,7 @@ class TestGridFileAttach:
             return real_hash(path)
 
         monkeypatch.setattr(wizard_mod, "hash_netcdf_contents", _counting_hash)
+        monkeypatch.setattr(forcing_editor_mod, "hash_netcdf_contents", _counting_hash)
         monkeypatch.setattr(user_files_mod, "hash_netcdf_contents", _counting_hash)
 
         wiz = _new_wizard()
@@ -7680,7 +7680,7 @@ def test_set_grid_widgets_locked_toggles_grid_lock_banner():
 
 
 def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.app import ForgeBlueprintWizardApp
 
     app = ForgeBlueprintWizardApp()
     assert app.widget is app._outer
@@ -7688,12 +7688,21 @@ def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
     assert "forge-catalog-bar" in app._bar.widget._dom_classes
 
 
+def test_wizard_module_keeps_the_public_names_that_moved():
+    """Notebooks import these from ``cstar.wizard.wizard``; they now live elsewhere."""
+    from cstar.wizard import app, fields, settings_editor, wizard
+
+    assert wizard.ForgeBlueprintWizardApp is app.ForgeBlueprintWizardApp
+    assert wizard.HELP_TEXT is fields.HELP_TEXT
+    assert wizard.LABEL_TEXT is settings_editor.LABEL_TEXT
+
+
 def test_catalog_bar_loads_a_single_url_as_one_read_only_store(monkeypatch):
     """A URL typed in the catalog bar is one store, not split at its ``:``."""
     import ipywidgets as w
 
     from cstar.wizard import wizard as wizard_module
-    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.app import ForgeBlueprintWizardApp
 
     app = ForgeBlueprintWizardApp()
     store_calls = []
@@ -7903,7 +7912,7 @@ class TestCarbonateSensitivityGroup:
 
     def test_user_file_status_shows_hex_not_scheme_tag(self):
         from cstar.applications.forge.user_files import HASH_SCHEME
-        from cstar.wizard.wizard import _user_file_status_html
+        from cstar.wizard.fields import _user_file_status_html
 
         status = _user_file_status_html(
             {"location": "/x/grid.nc", "content_hash": f"{HASH_SCHEME}:" + "ab" * 32}

@@ -89,15 +89,13 @@ from cstar.orchestration.transforms import PLACEHOLDER_RE, mustache
 from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
+from cstar.wizard.fields import _base_type, _make_field_widget, _read_field_widget
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import schedule_confirm_reset
 from cstar.wizard.ui.labels import label_for, section_for
 from cstar.wizard.wizard import (
     _STREAM_READ_SIZE,
-    _base_type,
     _drain_stream_buffer,
-    _make_field_widget,
-    _read_field_widget,
     _schedule_coroutine,
 )
 

@@ -8,8 +8,9 @@ pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
 
+from cstar.wizard.forcing_editor import _ForcingEditor
 from cstar.wizard.ui import labels
-from cstar.wizard.wizard import ForgeBlueprintWizard, _ForcingEditor
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 # The 11 grid kwargs shared by the main/child/parent grids (see
 # cstar.wizard.wizard._GRID_INT/_GRID_FLOAT/_SCOORD).
@@ -238,7 +239,7 @@ def test_required_top_level_sections_flagged_required():
 # ---------------------------------------------------------------------------
 
 # The row categories _ForcingEditor._make_row's generic add/remove machinery
-# manages (see cstar.wizard.wizard._ROW_CATEGORIES). "boundary"
+# manages (see cstar.wizard.forcing_editor._ROW_CATEGORIES). "boundary"
 # itself is excluded -- boundary's physics source is a required scalar (the
 # boundary.* pane), not a row list; only "boundary_bgc" is row-based.
 _ROW_CATEGORY_SEEDS: dict[str, dict] = {
@@ -313,7 +314,7 @@ def _all_settings_section_field_names() -> dict[str, set[str]]:
     from cstar.applications.forge.namelist_model import (
         _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
     )
-    from cstar.wizard.wizard import _unwrap_type
+    from cstar.wizard.fields import _unwrap_type
 
     sections: dict[str, set[str]] = {}
     for cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.values():
@@ -356,13 +357,13 @@ def test_every_settings_field_key_names_a_real_namelist_field():
 
 
 def test_namelist_label_uses_glossary_override():
-    from cstar.wizard.wizard import _namelist_label
+    from cstar.wizard.settings_editor import _namelist_label
 
     assert _namelist_label("lateral_visc", "visc2") == "Horizontal viscosity"
 
 
 def test_namelist_label_falls_back_to_field_name_when_unknown():
-    from cstar.wizard.wizard import _namelist_label
+    from cstar.wizard.settings_editor import _namelist_label
 
     assert _namelist_label("lateral_visc", "not_a_real_field") == "not_a_real_field"
 
@@ -377,7 +378,7 @@ def test_output_table_and_variable_grid_fields_exist():
     Mirrors ``test_every_settings_field_key_names_a_real_namelist_field``'s glossary
     check, but for the table/grid definitions rather than the label glossary.
     """
-    from cstar.wizard.wizard import _OUTPUT_TABLES, _VARIABLE_GRIDS
+    from cstar.wizard.settings_editor import _OUTPUT_TABLES, _VARIABLE_GRIDS
 
     section_fields = _all_settings_section_field_names()
 

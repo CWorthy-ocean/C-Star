@@ -91,7 +91,11 @@ Directory map
     |   |                                        # user saves go to the user catalog layer instead)
     |   +-- domain_catalog.py          # DomainCatalog / LayeredCatalog
     +-- wizard/                        # Wizard presentation layer (shared UI kit + Voila front-end)
-    |   +-- wizard.py                      # ForgeBlueprintWizard (ipywidgets UI)
+    |   +-- wizard.py                      # ForgeBlueprintWizard (ipywidgets UI): the cards, _rebuild, save
+    |   +-- forcing_editor.py              # _ForcingEditor: the Forcing card's rows, sources and options
+    |   +-- settings_editor.py             # _SettingsEditor: namelist/cppdefs widgets and where each card shows them
+    |   +-- fields.py                      # Help text, field widgets and attached-file helpers shared by both pages
+    |   +-- app.py                         # ForgeBlueprintWizardApp: the catalog-location bar above the wizard
     |   +-- _voila_app.ipynb               # Voila app notebook -- internal; served via 'cstar forge wizard'
     |   +-- forge-blueprint-wizard.ipynb   # user-facing wizard notebook (copied out via 'cstar forge copy-notebook')
     |   +-- ui/

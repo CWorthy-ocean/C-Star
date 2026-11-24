@@ -14,14 +14,14 @@ import ipywidgets as W
 import pytest
 
 import cstar.catalog
-from cstar.wizard.wizard import (
+from cstar.wizard.forcing_editor import (
     _CO2_STATIC,
     _CO2_TIME_VARYING,
-    _FORCING_CARD,
-    ForgeBlueprintWizard,
     _ForcingEditor,
     _source_opts_for,
 )
+from cstar.wizard.settings_editor import _FORCING_CARD
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 _BUNDLED = Path(cstar.catalog.__file__).parent / "bundled"
 _XCO2 = ("bgc", "xco2air_default")

@@ -2,7 +2,7 @@
 
 Every helper that builds a widget takes the ``ipywidgets`` module as its
 first parameter, ``W`` -- the same lazy-import idiom
-``_make_field_widget(W, ...)`` uses in :mod:`cstar.wizard.wizard`
+``_make_field_widget(W, ...)`` uses in :mod:`cstar.wizard.fields`
 -- so this module itself never imports ``ipywidgets`` at module scope (it is
 an optional dependency of the package).
 
