@@ -7662,8 +7662,8 @@ def test_ic_pane_first_field_row_is_ic_name(editor):
     path, validate, in that order -- see ``_ForcingEditor.widget``).
     """
     acc = editor.widget
-    # `open_accordion` returns a VBox of single-pane Accordions (`.panes`).
-    ic_box = acc.panes[0].children[0]  # cat_order[0] == "initial_conditions"
+    # `open_accordion` returns a VBox of collapsible panes (`.panes`).
+    ic_box = acc.panes[0].body  # cat_order[0] == "initial_conditions"
     ic_fields = ic_box.children[0]
     first_row = ic_fields.children[0]
     assert first_row.forge_key == "ic.ic_name"
@@ -7675,7 +7675,7 @@ def test_ic_layout_display_none_hides_its_row(editor):
     does for a non-GLORYS source) hides the whole row, not just the dropdown.
     """
     acc = editor.widget
-    ic_box = acc.panes[0].children[0]
+    ic_box = acc.panes[0].body
     ic_fields = ic_box.children[0]
     layout_row = next(r for r in ic_fields.children if r.forge_key == "ic.ic_layout")
     assert layout_row.layout.display == _display(editor.ic_layout)

@@ -14,10 +14,16 @@ into the host JupyterLab/Voila page. It is built from the palette tokens in
 
 from __future__ import annotations
 
-from typing import Any
+import functools
+import html
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 from cstar.wizard.ui import branding
 from cstar.wizard.ui.labels import label_for, section_for
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 #: The width of the page column in Voila.
 SHELL_MAX_WIDTH = "1600px"
@@ -418,28 +424,86 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     white-space: pre;
 }}
 
-/* accordion restyle: a white header when closed; an open pane's tinted header
-   joins its bordered body so the two read as one unit */
-.forge-app .jupyter-widget-Collapse-header, .forge-app .p-Collapse-header {{
+/* collapsible panes (components.collapsible): an HTML header -- chevron, title,
+   value pills, quiet Required/Optional -- under a transparent toggle button that
+   takes the click, and a body shown while open */
+.forge-app .forge-coll {{ margin: 0 0 8px; overflow: visible; }}
+.forge-app .forge-coll-h {{ position: relative; overflow: visible; }}
+.forge-app .forge-coll-h > .forge-coll-hit {{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    cursor: pointer;
+}}
+.forge-app .forge-coll-h:has(> .forge-coll-hit:focus-visible) {{
+    outline: 2px solid {branding.LIGHT_BLUE};
+    outline-offset: 1px;
+}}
+.forge-app .forge-coll-ht {{ flex: 1 1 auto; min-width: 0; margin: 0; }}
+.forge-app .forge-coll-ht .widget-html-content {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    line-height: 20px;
+}}
+.forge-app .forge-coll-ht .chev {{
+    flex: none;
+    width: 10px;
+    font-size: 11px;
+    color: {branding.INK_2};
+    transition: transform .12s;
+}}
+.forge-app .forge-coll-open > .forge-coll-h .chev {{ transform: rotate(90deg); }}
+.forge-app .forge-coll-t {{ font-size: 13.5px; font-weight: 600; color: {branding.SOFT_BLACK}; white-space: nowrap; }}
+.forge-app .forge-coll-pills {{ display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; }}
+.forge-app .forge-coll-req {{ font-size: 12px; font-weight: 500; color: {branding.INK_3}; white-space: nowrap; }}
+.forge-app .forge-pill {{
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 4px;
+    background: #EEF0F3;
+    color: #3D3F46;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}}
+.forge-app .forge-pill.mod {{ background: {branding.TINT_BLUE}; color: {branding.BLUE}; }}
+.forge-app .forge-pill.warn {{ background: {branding.TINT_AMBER}; color: {branding.AMBER}; }}
+.forge-app .forge-pill.off {{ background: transparent; color: {branding.INK_3}; padding: 0 2px; }}
+/* a pane: white closed header; open, its tinted header joins the bordered body */
+.forge-app .forge-coll-pane > .forge-coll-h {{
     background: #fff;
-    font-weight: 600;
-    font-size: 13px;
     border: 1px solid {branding.LINE};
     border-radius: 6px;
-    padding: 10px 14px;
+    padding: 8px 14px;
 }}
-.forge-app .jupyter-widget-Collapse-open > .jupyter-widget-Collapse-header {{
+.forge-app .forge-coll-pane.forge-coll-open > .forge-coll-h {{
     background: #FAFAFB;
     border-radius: 6px 6px 0 0;
     border-bottom-color: {branding.LINE_2};
 }}
-.forge-app .jupyter-widget-Collapse-contents {{
+.forge-app .forge-coll-pane > .forge-coll-b {{
     border: 1px solid {branding.LINE};
     border-top: 0;
     border-radius: 0 0 6px 6px;
     padding: 14px 18px 16px;
 }}
-.forge-app .forge-open-acc > .widget-accordion {{ margin: 0 0 8px; }}
+/* inline: a one-line link (a forcing row's options), its body under a dashed rule */
+.forge-app .forge-coll-inline {{ flex: 1 1 100%; margin: 0; }}
+.forge-app .forge-coll-inline > .forge-coll-h {{ align-self: flex-start; }}
+.forge-app .forge-coll-inline .forge-coll-t {{ font-size: 12.5px; color: {branding.BLUE}; }}
+.forge-app .forge-coll-inline > .forge-coll-b {{
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed {branding.LINE};
+}}
 
 /* tab bar: current-tab highlight */
 .forge-app .lm-TabBar-tab.lm-mod-current, .forge-app .p-TabBar-tab.p-mod-current {{
@@ -821,31 +885,173 @@ def card(
     return box
 
 
-def accordion_title(title: str, summary: str = "", chip_text: str = "") -> str:
-    """Join ``title``/``summary``/``chip_text`` with " · " separators, skipping empties."""
-    parts = [p for p in (title, summary, chip_text) if p]
-    return "   ·   ".join(parts)
+@dataclass(frozen=True)
+class Pill:
+    """One value in a collapsible pane's header (see :class:`PaneTitle`).
+
+    ``kind`` is how it reads: ``""`` a current choice, ``"mod"`` changed from
+    its default, ``"off"`` a default or nothing (muted text, no pill), and
+    ``"warn"`` something to fix.
+    """
+
+    text: str
+    kind: str = ""
 
 
-def open_accordion(W: Any, panes: list, titles: list[str]) -> Any:
+@dataclass(frozen=True)
+class PaneTitle:
+    """A collapsible pane's header: the title, the current values as pills, and a
+    quiet ``Required``/``Optional`` at the right (``chip``, or none).
+
+    ``str()`` gives the plain-text form (parts joined with " · "), which is also
+    the header's accessible name and tooltip.
+    """
+
+    title: str
+    pills: tuple[Pill, ...] = ()
+    chip: str = ""
+
+    def __str__(self) -> str:
+        parts = [self.title, *(p.text for p in self.pills), self.chip]
+        return " · ".join(p for p in parts if p)
+
+    def with_pill(self, pill: Pill) -> PaneTitle:
+        """This title with ``pill`` added after its other pills."""
+        return replace(self, pills=(*self.pills, pill))
+
+    def html(self) -> str:
+        """The header markup: a chevron, then the escaped title, pills and chip."""
+        pills = "".join(
+            f"<span class='forge-pill {p.kind}'>{html.escape(p.text)}</span>"
+            for p in self.pills
+        )
+        chip = (
+            f"<span class='forge-coll-req'>{html.escape(self.chip)}</span>"
+            if self.chip
+            else ""
+        )
+        return (
+            "<span class='chev'>▸</span>"
+            f"<span class='forge-coll-t'>{html.escape(self.title)}</span>"
+            f"<span class='forge-coll-pills'>{pills}</span>"
+            f"<span class='sp'></span>{chip}"
+        )
+
+
+def accordion_title(title: str, *pills: str | Pill, chip: str = "") -> PaneTitle:
+    """A :class:`PaneTitle` from ``title``, its value ``pills`` (a bare string is a
+    plain pill; empty ones are skipped) and an optional ``chip``.
+    """
+    parts = tuple(p if isinstance(p, Pill) else Pill(p) for p in pills)
+    return PaneTitle(title, tuple(p for p in parts if p.text), chip)
+
+
+def _as_pane_title(title: str | PaneTitle) -> PaneTitle:
+    return title if isinstance(title, PaneTitle) else PaneTitle(title)
+
+
+@functools.cache
+def _collapsible_class(W: Any) -> type:
+    """The widget class :func:`collapsible` builds, made once per ``ipywidgets``
+    module so this module never imports ``ipywidgets`` itself.
+    """
+    import traitlets
+
+    class Collapsible(W.VBox):  # type: ignore[misc, name-defined]
+        """A pane with an HTML header that opens and closes its body.
+
+        ``selected_index`` is ``0`` while open and ``None`` while closed, as on a
+        one-pane ``W.Accordion``; the header's transparent toggle button (the
+        part that takes the click) and the body follow it.
+        """
+
+        selected_index = traitlets.Int(None, allow_none=True)
+
+        def __init__(self, body: Any, title: PaneTitle, variant: str) -> None:
+            self.body = body
+            self.title = title
+            self._head_html = W.HTML(title.html())
+            self._head_html.add_class("forge-coll-ht")
+            self._hit = W.ToggleButton(
+                value=False, description=str(title), tooltip=str(title)
+            )
+            self._hit.add_class("forge-coll-hit")
+            head = W.Box([self._head_html, self._hit])
+            head.add_class("forge-coll-h")
+            # The body sits in its own box, so opening and closing never touches
+            # the body's own layout.display (callers hide some bodies themselves).
+            self._body_box = W.VBox([body], layout=W.Layout(display="none"))
+            self._body_box.add_class("forge-coll-b")
+            super().__init__([head, self._body_box])
+            self.add_class("forge-coll")
+            self.add_class(f"forge-coll-{variant}")
+            self._hit.observe(self._on_hit, names="value")
+            self.observe(self._on_index, names="selected_index")
+
+        def _on_hit(self, change: dict) -> None:
+            self.selected_index = 0 if change["new"] else None
+
+        def _on_index(self, change: dict) -> None:
+            is_open = change["new"] is not None
+            self._hit.value = is_open
+            self._body_box.layout.display = "" if is_open else "none"
+            if is_open:
+                self.add_class("forge-coll-open")
+            else:
+                self.remove_class("forge-coll-open")
+
+        def set_title(self, title: str | PaneTitle) -> None:
+            """Show ``title`` in the header; a title equal to the current one
+            changes nothing (the wizard retitles every pane on each rebuild).
+            """
+            title = _as_pane_title(title)
+            if title == self.title:
+                return
+            self.title = title
+            self._head_html.value = title.html()
+            self._hit.description = self._hit.tooltip = str(title)
+
+        def get_title(self) -> str:
+            """The header's plain text (see :class:`PaneTitle`)."""
+            return str(self.title)
+
+    return Collapsible
+
+
+def collapsible(
+    W: Any, body: Any, title: str | PaneTitle = "", *, variant: str = "pane"
+) -> Any:
+    """A collapsible pane (class ``forge-coll``), closed, whose header is HTML.
+
+    ipywidgets 8 writes ``W.Accordion`` titles with ``textContent``, so a title
+    there can only be plain text. Here the header is a ``W.HTML`` (chevron, title,
+    value pills, quiet Required/Optional: see :class:`PaneTitle`) under a
+    transparent ``W.ToggleButton`` that takes the click. ``variant`` picks the
+    look: ``"pane"`` (a bordered panel, the forcing and Advanced panes) or
+    ``"inline"`` (a one-line link, a forcing row's options). The widget has
+    ``selected_index`` (``0`` open, ``None`` closed), ``set_title``,
+    ``get_title`` and ``body``.
+    """
+    return _collapsible_class(W)(body, _as_pane_title(title), variant)
+
+
+def open_accordion(W: Any, panes: list, titles: Sequence[str | PaneTitle]) -> Any:
     """A stack of independently collapsible panes (class ``forge-open-acc``).
 
     ``W.Accordion`` allows one open pane at a time, so opening a second pane
     collapses the first and the page jumps. This returns a ``W.VBox`` of
-    single-pane ``W.Accordion`` widgets instead -- any number may stay open --
-    while keeping the ``set_title(i, title)`` / ``get_title(i)`` surface callers
-    use to refresh titles. ``box.panes`` lists the inner accordions.
+    :func:`collapsible` panes instead -- any number may stay open -- with a
+    ``set_title(i, title)`` / ``get_title(i)`` surface for refreshing titles.
+    ``box.panes`` lists the panes (each with ``selected_index`` and ``body``).
     """
     if len(panes) != len(titles):
         raise ValueError(f"open_accordion: {len(panes)} panes but {len(titles)} titles")
-    inner = []
-    for pane, title in zip(panes, titles, strict=True):
-        acc = W.Accordion(children=[pane], selected_index=None)
-        acc.set_title(0, title)
-        inner.append(acc)
+    inner = [
+        collapsible(W, pane, title) for pane, title in zip(panes, titles, strict=True)
+    ]
     box = W.VBox(inner)
     box.add_class("forge-open-acc")
     box.panes = inner
-    box.set_title = lambda i, title: inner[i].set_title(0, title)
-    box.get_title = lambda i: inner[i].get_title(0)
+    box.set_title = lambda i, title: inner[i].set_title(title)
+    box.get_title = lambda i: inner[i].get_title()
     return box

@@ -2472,7 +2472,7 @@ _CATEGORY_TITLES: dict[str, str] = {
 }
 
 # Forcing categories a blueprint cannot resolve without (the rest are optional
-# add-ons) -- drives the REQUIRED/optional chip in `_ForcingEditor.retitle`.
+# add-ons) -- drives the Required/Optional in `_ForcingEditor.retitle`.
 _REQUIRED_FORCING_CATEGORIES = frozenset(
     {"initial_conditions", "ic_bgc", "surface", "boundary", "boundary_bgc"}
 )
@@ -4918,22 +4918,20 @@ class _ForcingEditor:
         return acc
 
     def retitle(self, summary_for) -> None:
-        """Refresh each pane's accordion title with a live summary and a
-        REQUIRED/optional chip (see :func:`cstar.wizard.ui.components.accordion_title`).
+        """Refresh each pane's header with its live summary pills and a quiet
+        Required/Optional (see :func:`cstar.wizard.ui.components.accordion_title`).
 
-        ``summary_for(cat)`` returns the short (<= 60 char) summary text for
-        category ``cat``; a no-op before ``widget`` has been built.
+        ``summary_for(cat)`` returns the pills for category ``cat``; a no-op
+        before ``widget`` has been built.
         """
         if getattr(self, "_acc", None) is None:
             return
         for i, cat in enumerate(self._cat_order):
-            chip_text = (
-                "REQUIRED" if cat in _REQUIRED_FORCING_CATEGORIES else "optional"
-            )
+            chip = "Required" if cat in _REQUIRED_FORCING_CATEGORIES else "Optional"
             self._acc.set_title(
                 i,
                 components.accordion_title(
-                    _CATEGORY_TITLES.get(cat, cat), summary_for(cat), chip_text
+                    _CATEGORY_TITLES.get(cat, cat), *summary_for(cat), chip=chip
                 ),
             )
 
@@ -9336,29 +9334,32 @@ class ForgeBlueprintWizard:
             print(cfg.to_yaml_str())
         self._update_status(cfg)
 
-    def _forcing_summary(self, cat: str) -> str:
-        """A short (<= 60 char) summary of the current state of forcing
-        category ``cat``, for its accordion title (see `_update_status`).
+    def _forcing_summary(self, cat: str) -> tuple[components.Pill, ...]:
+        """The current state of forcing category ``cat`` as pills for its pane
+        header (see `_update_status`): the source names, with a default path or an
+        empty category muted.
         """
         fe = self._forcing_editor
         if fe is None:
-            return ""
+            return ()
+        none = (components.Pill("none", "off"),)
         if cat in ("initial_conditions", "boundary"):
             is_ic = cat == "initial_conditions"
             name_w = fe.ic_name if is_ic else fe.boundary_name
             path_w = fe.ic_path if is_ic else fe.boundary_path
             none_val = _IC_NONE if is_ic else _BOUNDARY_NONE
             if name_w.value == none_val:
-                summary = "none"
-            else:
-                loc = "custom path" if path_w.value.strip() else "default path"
-                summary = f"{name_w.value} · {loc}"
-        else:
-            names = [row["name"].value for row in fe._rows.get(cat, [])]
-            if cat == "surface" and self.bgc_dd.value == "marbl":
-                names.append(f"CO2 {fe.co2_mode.value}")
-            summary = " · ".join(names) if names else "none"
-        return summary[:60]
+                return none
+            if path_w.value.strip():
+                return (components.Pill(name_w.value), components.Pill("custom path"))
+            return (
+                components.Pill(name_w.value),
+                components.Pill("default path", "off"),
+            )
+        pills = [components.Pill(row["name"].value) for row in fe._rows.get(cat, [])]
+        if cat == "surface" and self.bgc_dd.value == "marbl":
+            pills.append(components.Pill(f"CO2 {fe.co2_mode.value}"))
+        return tuple(pills) or none
 
     def _retitle_settings_editor(self) -> None:
         """Refresh each settings container's titles with its field count and how many
@@ -9379,12 +9380,16 @@ class ForgeBlueprintWizard:
                 sum(1 for k in active if k in keys),
             )
 
-        def title(name: str, fields_by_section: dict[str, list[str | None]]) -> str:
+        def title(
+            name: str, fields_by_section: dict[str, list[str | None]]
+        ) -> components.PaneTitle:
             n_fields, n_mod = counts(fields_by_section)
             return components.accordion_title(
                 name,
                 f"{n_fields} settings",
-                f"{n_mod} modified" if n_mod else "all defaults",
+                components.Pill(f"{n_mod} modified", "mod")
+                if n_mod
+                else components.Pill("all defaults", "off"),
             )
 
         for i, name in enumerate(editor._pane_sections):
@@ -10393,25 +10398,23 @@ class ForgeBlueprintWizard:
             ),
             components.field_row(W, "mask_shapefile", self.mask_shapefile),
         )
-        self.gridfile_accordion = W.Accordion(
-            children=[
-                W.VBox(
-                    [
-                        W.HBox(
-                            [
-                                self.grid_file_path,
-                                self.grid_file_attach_btn,
-                                self.grid_file_detach_btn,
-                            ]
-                        ),
-                        self.grid_file_upload,
-                        self.grid_file_status,
-                    ]
-                )
-            ],
-            selected_index=None,
+        self.gridfile_accordion = components.collapsible(
+            W,
+            W.VBox(
+                [
+                    W.HBox(
+                        [
+                            self.grid_file_path,
+                            self.grid_file_attach_btn,
+                            self.grid_file_detach_btn,
+                        ]
+                    ),
+                    self.grid_file_upload,
+                    self.grid_file_status,
+                ]
+            ),
+            section_for("grid.gridfile").title,
         )
-        self.gridfile_accordion.set_title(0, section_for("grid.gridfile").title)
         derived_sub = components.subsection(
             W,
             "grid.derived",
@@ -10508,11 +10511,11 @@ class ForgeBlueprintWizard:
             ),
             default_title="Parent grid",
         )
-        nesting_accordion = W.Accordion(
-            children=[W.VBox([child_section, parent_section])],
-            selected_index=None,
+        nesting_accordion = components.collapsible(
+            W,
+            W.VBox([child_section, parent_section]),
+            section_for("grid.nesting").title,
         )
-        nesting_accordion.set_title(0, section_for("grid.nesting").title)
 
         grid_card = components.card(
             W,
@@ -10624,56 +10627,54 @@ class ForgeBlueprintWizard:
             chips_widget=self.card_chips["advanced"],
         )
 
-        self.save_specs_accordion = W.Accordion(
-            children=[
-                W.VBox(
-                    [
-                        W.HTML(
-                            "<i>Promote an edited spec to a new named catalog "
-                            "entry. Only marked unmodified if the saved file "
-                            "re-resolves to the identical blueprint.</i>"
-                        ),
-                        W.HBox(
-                            [
-                                self.save_output_name,
-                                self.save_output_btn,
-                                self.save_output_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_model_name,
-                                self.save_model_btn,
-                                self.save_model_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_domain_name,
-                                self.save_domain_btn,
-                                self.save_domain_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_forcing_name,
-                                self.save_forcing_btn,
-                                self.save_forcing_status,
-                            ]
-                        ),
-                        W.HBox(
-                            [
-                                self.save_cdr_name,
-                                self.save_cdr_btn,
-                                self.save_cdr_status,
-                            ]
-                        ),
-                    ]
-                )
-            ],
-            selected_index=None,
+        self.save_specs_accordion = components.collapsible(
+            W,
+            W.VBox(
+                [
+                    W.HTML(
+                        "<i>Promote an edited spec to a new named catalog "
+                        "entry. Only marked unmodified if the saved file "
+                        "re-resolves to the identical blueprint.</i>"
+                    ),
+                    W.HBox(
+                        [
+                            self.save_output_name,
+                            self.save_output_btn,
+                            self.save_output_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_model_name,
+                            self.save_model_btn,
+                            self.save_model_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_domain_name,
+                            self.save_domain_btn,
+                            self.save_domain_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_forcing_name,
+                            self.save_forcing_btn,
+                            self.save_forcing_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_cdr_name,
+                            self.save_cdr_btn,
+                            self.save_cdr_status,
+                        ]
+                    ),
+                ]
+            ),
+            section_for("review.save_specs").title,
         )
-        self.save_specs_accordion.set_title(0, section_for("review.save_specs").title)
 
         review_card = components.card(
             W,
