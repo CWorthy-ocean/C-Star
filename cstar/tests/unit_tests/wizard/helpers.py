@@ -239,3 +239,27 @@ def _downloaded_yaml(link_html):
 
     payload = re.search(r"base64,([A-Za-z0-9+/=]+)", link_html).group(1)
     return yaml.safe_load(base64.b64decode(payload))
+
+
+def _write_tiny_netcdf(path: Path) -> Path:
+    """A minimal real netCDF, just for ``hash_netcdf_contents`` to hash."""
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.Dataset(
+        {"temp": (["y", "x"], np.zeros((2, 2), dtype=np.float64))},
+        attrs={"title": "tiny test file"},
+    )
+    ds.to_netcdf(path)
+    return path
+
+
+def _nested_config_at_1800():
+    wiz = _new_wizard()
+    wiz.nest_enable.value = True
+    wiz.nest_period.value = 1800.0
+    wiz._rebuild()
+    cfg = wiz.config
+    assert cfg is not None, wiz.review_card.derived.value
+    assert cfg.domain.metadata_child["period"] == 1800.0
+    return cfg
