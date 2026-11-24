@@ -16,7 +16,7 @@ import re
 import threading
 from typing import TYPE_CHECKING, Any
 
-from cstar.wizard.ui import branding
+from cstar.wizard.ui import components
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -119,29 +119,41 @@ class CatalogBar:
                 for store in cat.stores
             )
             self._set_status_html(
-                f"<span style='color:{branding.GREEN}'>Loaded {layers} -- "
-                f"{len(cat.model_names)} models, "
-                f"{n_blueprints} blueprints</span>"
+                components.status_span(
+                    "ok",
+                    f"Loaded {layers} -- "
+                    f"{len(cat.model_names)} models, "
+                    f"{n_blueprints} blueprints",
+                )
             )
             return
 
         ro_note = (
-            f" <span style='color:{branding.AMBER}'>(read-only catalog -- saves "
-            "default to the current directory)</span>"
+            " "
+            + components.status_span(
+                "warn",
+                "(read-only catalog -- saves default to the current directory)",
+            )
             if getattr(cat, "read_only", False)
             else ""
         )
         self._set_status_html(
-            f"<span style='color:{branding.GREEN}'>Loaded {cat.catalog_root} -- "
-            f"{len(cat.model_names)} models, "
-            f"{n_blueprints} blueprints</span>{ro_note}"
+            components.status_span(
+                "ok",
+                f"Loaded {cat.catalog_root} -- "
+                f"{len(cat.model_names)} models, "
+                f"{n_blueprints} blueprints",
+            )
+            + ro_note
         )
 
     def set_error(self, val: str, exc: Exception) -> None:
         """Set the status line to a load failure for input ``val``."""
         self._set_status_html(
-            f"<span style='color:{branding.BRAND_RED}'>Failed to load catalog "
-            f"{val or '(default)'!r}: {exc}</span>"
+            components.status_span(
+                "err",
+                f"Failed to load catalog {val or '(default)'!r}: {exc}",
+            )
         )
 
     def _reset_confirm(self) -> None:
