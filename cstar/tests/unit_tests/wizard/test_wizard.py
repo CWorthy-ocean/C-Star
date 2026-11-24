@@ -7365,11 +7365,7 @@ def test_hosted_field_overrides_keep_ownership_and_count_in_the_output_card(
         assert "modified" not in editor._headers[(_OUTPUT_CARD, "ocean_vars")].value
 
 
-def test_nest_period_loads_from_the_effective_extract_period():
-    """A blueprint whose extract_period was overridden (Advanced, before this
-    field moved to the nesting options) differs from ``metadata_child.period``;
-    loading it keeps the effective value, with nest_period its one editor.
-    """
+def _nested_config_at_1800():
     wiz = _new_wizard()
     wiz.nest_enable.value = True
     wiz.nest_period.value = 1800.0
@@ -7377,11 +7373,40 @@ def test_nest_period_loads_from_the_effective_extract_period():
     cfg = wiz.config
     assert cfg is not None, wiz.derived.value
     assert cfg.domain.metadata_child["period"] == 1800.0
+    return cfg
 
+
+def test_nest_period_loads_from_metadata_child_over_a_stale_snapshot():
+    """A stored extract_period that differs from ``metadata_child.period`` (a
+    workplan override of the domain's period, a hand edit) is a stale copy: the
+    run writes metadata_child's period, so the wizard shows and keeps that.
+    """
+    cfg = _nested_config_at_1800()
     settings = copy.deepcopy(cfg.model_settings)
     settings["extract_data"]["extract_period"] = 3600.0
     wiz2 = _new_wizard()
     wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
+
+    assert wiz2.nest_period.value == 1800.0
+    assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
+    assert wiz2._gather()["metadata_child"] == {"period": 1800.0}
+
+
+def test_nest_period_loads_an_older_files_extract_period_override():
+    """An extract_period override recorded before the field moved to the nesting
+    options (Advanced) is the period that file ran with; loading it keeps that
+    value, with nest_period its one editor, and the override is not kept.
+    """
+    cfg = _nested_config_at_1800()
+    settings = copy.deepcopy(cfg.model_settings)
+    settings["extract_data"]["extract_period"] = 3600.0
+    composition = cfg.composition.model_copy(
+        update={"overrides": {"extract_data": {"extract_period": 3600.0}}}
+    )
+    wiz2 = _new_wizard()
+    wiz2._populate_from(
+        cfg.model_copy(update={"model_settings": settings, "composition": composition})
+    )
 
     assert wiz2.nest_period.value == 3600.0
     assert wiz2.config.model_settings["extract_data"]["extract_period"] == 3600.0

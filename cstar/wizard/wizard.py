@@ -9382,13 +9382,13 @@ class ForgeBlueprintWizard:
                 if k in child:
                     w.value = child[k]
             self._set_nested_topo_widgets("child", child)
-            # The effective extraction period: an older file may carry an Advanced
-            # extract_period override that differs from metadata_child.period.
-            period = (cfg.model_settings.get("extract_data") or {}).get(
-                "extract_period"
+            # The period comes from metadata_child (generation writes the namelist's
+            # extract_period from it), except an older file's Advanced
+            # extract_period override, which that file ran with; the save then
+            # records it in metadata_child.
+            period = (cfg.composition.overrides.get("extract_data") or {}).get(
+                "extract_period", cfg.domain.child_extract_period
             )
-            if period is None:
-                period = (cfg.domain.metadata_child or {}).get("period")
             if period is not None:
                 self.nest_period.value = float(period)
         self.nest_pressure_fluxes.value = bool(
