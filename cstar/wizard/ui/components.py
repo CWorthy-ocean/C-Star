@@ -66,7 +66,8 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     align-items: center;
     gap: 12px;
 }}
-.forge-app .forge-card-b {{ padding: 14px 18px 16px; }}
+/* the card body is the size container for the narrow-window @container rules */
+.forge-app .forge-card-b {{ padding: 14px 18px 16px; container-type: inline-size; }}
 .forge-app .forge-card .num {{
     width: 26px;
     height: 26px;
@@ -102,6 +103,15 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 .forge-app .forge-chip.warn {{ background: {branding.TINT_AMBER}; color: {branding.AMBER}; }}
 .forge-app .forge-chip.info {{ background: {branding.TINT_BLUE}; color: {branding.BLUE}; }}
 .forge-app .forge-chip.def {{ background: {branding.LINE_2}; color: {branding.SOFT_BLACK}; }}
+/* in a card header, Required/Optional are quiet text, not a red pill that reads
+   like an error: the live status chip beside them is the header's one colour */
+.forge-app .forge-card-h .forge-chip.req,
+.forge-app .forge-card-h .forge-chip.opt {{
+    background: transparent;
+    color: {branding.INK_3};
+    font-weight: 500;
+    padding: 0 2px;
+}}
 
 /* banners */
 .forge-app .forge-banner {{
@@ -128,6 +138,26 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
     color: {branding.INK_3};
+}}
+/* fixed input widths (110-420px) and 300px-wide checkboxes inside a two-column
+   field_grid gave the card body a ~1470px min-content width: let the row's
+   tracks shrink, cap inputs at their cell, and wrap checkbox rows */
+.forge-app .forge-field > * {{ min-width: 0; }}
+.forge-app .forge-field .widget-hbox > .widget-inline-hbox {{ max-width: 100%; }}
+.forge-app .forge-field .widget-hbox:has(> .widget-checkbox) {{ flex-wrap: wrap; }}
+.forge-app .forge-field .widget-hbox > .widget-text {{ flex: 0 1 auto; min-width: 0; }}
+.forge-app .forge-field .widget-hbox > .jupyter-button {{ flex: none; }}
+.forge-app .forge-field .widget-hbox > .widget-checkbox {{ width: auto; margin-right: 22px; }}
+/* narrow card body: field_grid drops to one column (!important beats field_grid's
+   inline grid_template_columns; PR 2 moves it) */
+@container (max-width: 760px) {{
+    .forge-app .widget-gridbox:has(> .forge-field) {{ grid-template-columns: minmax(0, 1fr) !important; }}
+}}
+/* under 1000px the grid preview moves below the geometry fields (PR 2 replaces
+   this :has() selector with a class on that HBox) */
+@container (max-width: 1000px) {{
+    .forge-app .widget-hbox:has(> .widget-gridbox > .forge-field) {{ flex-wrap: wrap; row-gap: 8px; }}
+    .forge-app .widget-hbox:has(> .widget-gridbox > .forge-field) > .widget-gridbox {{ flex: 1 1 100%; }}
 }}
 .forge-app .forge-hint {{
     font-size: 12px;
@@ -160,24 +190,31 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     gap: 8px;
     margin: 8px 0 2px;
 }}
-.forge-app .forge-settings-sec .ttl {{ font-size: 13px; font-weight: 600; }}
+.forge-app .forge-settings-sec .ttl {{ font-size: 15px; font-weight: 650; color: {branding.NAVY}; }}
 .forge-app .forge-settings-sec .sym {{
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
     color: {branding.INK_3};
 }}
 
-/* subsection header */
+/* subsection header: the space and hairline go ABOVE the title, so the title
+   sits with the fields it names instead of hanging off the previous group */
 .forge-app .forge-sub {{
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 14px 0 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid {branding.LINE_2};
+    margin: 22px 0 12px;
+    padding-top: 16px;
+    border-top: 1px solid {branding.LINE_2};
+}}
+/* ...except for a subsection that opens its card body or pane */
+.forge-app .widget-vbox:first-child > .forge-sub:first-child {{
+    border-top: 0;
+    margin-top: 2px;
+    padding-top: 0;
 }}
 .forge-app .forge-sub .widget-html-content {{ display: flex; align-items: center; gap: 10px; }}
-.forge-app .forge-sub-ttl {{ font-size: 13.5px; font-weight: 600; }}
+.forge-app .forge-sub-ttl {{ font-size: 15px; font-weight: 650; color: {branding.NAVY}; }}
 .forge-app .forge-sub-sym {{
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
@@ -223,8 +260,14 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 }}
 .forge-app .forge-sticky a.step:hover {{ background: {branding.TINT_BLUE}; }}
 .forge-app .forge-sticky .summary {{ white-space: nowrap; }}
-/* the status HTML shrinks (and ellipsises) before the download button does */
-.forge-app .forge-sticky > .widget-html:first-child {{ flex: 1 1 0; min-width: 0; }}
+/* the status HTML shrinks (and ellipsises) before the download button does.
+   min-width:0 alone leaves its no-wrap run summary in the page's min-content
+   width (~1450px, more with long names); contain:inline-size takes it out. */
+.forge-app .forge-sticky > .widget-html:first-child {{
+    flex: 1 1 0;
+    min-width: 0;
+    contain: inline-size;
+}}
 .forge-app .forge-sticky > .widget-html:first-child .widget-html-content {{
     overflow: hidden;
     text-overflow: ellipsis;
@@ -245,6 +288,10 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     text-overflow: ellipsis;
 }}
 .forge-app .forge-catalog-bar > .widget-html {{ min-width: 0; }}
+/* the no-wrap "Loaded …" status: same min-content fix as the sticky bar's summary */
+.forge-app .forge-catalog-bar > .widget-html:last-child {{ contain: inline-size; }}
+/* with those minimums gone, each page fills the stack instead of sizing to content */
+.forge-app .forge-stack > .widget-box {{ flex: 1 1 0%; min-width: 0; }}
 
 /* buttons: neutral by default, brand-blue primary, red-outline danger.
    width:auto lets captions like "Use CFL value" size themselves instead of
@@ -323,6 +370,13 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 .forge-app .forge-side-bottom .forge-pane-body {{ gap: 18px; }}
 .forge-app .forge-side-top .forge-pane-body > *,
 .forge-app .forge-side-bottom .forge-pane-body > * {{ flex: 1 1 0; min-width: 0; }}
+/* side by side, both of the pane's subsections open the row: no rule above either */
+.forge-app .forge-side-top .forge-pane-body > .widget-vbox > .forge-sub:first-child,
+.forge-app .forge-side-bottom .forge-pane-body > .widget-vbox > .forge-sub:first-child {{
+    border-top: 0;
+    margin-top: 2px;
+    padding-top: 0;
+}}
 .forge-app .forge-dag .widget-html-content {{ display: block; }}
 @media (max-width: 1100px) {{
     .forge-app .forge-two-col {{ flex-direction: column !important; align-items: stretch; }}
@@ -364,15 +418,28 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     white-space: pre;
 }}
 
-/* accordion restyle */
+/* accordion restyle: a white header when closed; an open pane's tinted header
+   joins its bordered body so the two read as one unit */
 .forge-app .jupyter-widget-Collapse-header, .forge-app .p-Collapse-header {{
-    background: #FAFAFB;
+    background: #fff;
     font-weight: 600;
     font-size: 13px;
     border: 1px solid {branding.LINE};
-    border-radius: 4px;
-    padding: 8px 12px;
+    border-radius: 6px;
+    padding: 10px 14px;
 }}
+.forge-app .jupyter-widget-Collapse-open > .jupyter-widget-Collapse-header {{
+    background: #FAFAFB;
+    border-radius: 6px 6px 0 0;
+    border-bottom-color: {branding.LINE_2};
+}}
+.forge-app .jupyter-widget-Collapse-contents {{
+    border: 1px solid {branding.LINE};
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    padding: 14px 18px 16px;
+}}
+.forge-app .forge-open-acc > .widget-accordion {{ margin: 0 0 8px; }}
 
 /* tab bar: current-tab highlight */
 .forge-app .lm-TabBar-tab.lm-mod-current, .forge-app .p-TabBar-tab.p-mod-current {{
@@ -399,19 +466,37 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 }}
 
 /* Advanced-settings output-stream table (grouped write/period/records rows).
-   Header cells share one fixed height so their underline forms a single
-   guideline (the empty corner cells carry &nbsp; and the same rule). */
-.forge-app .forge-out-table {{ margin: 6px 0 12px; }}
+   One column template for every table, so Write/Period/Records line up down
+   the whole card; the middle columns sit at their maximum until the card is
+   too narrow, then shrink to their 120px inputs. !important beats
+   _build_output_table's inline grid_template_columns and grid_gap row gap
+   (PR 2 moves these into Python).
+   Header cells share one fixed height and are quiet: no per-cell underline. */
+.forge-app .forge-out-table {{
+    grid-template-columns:
+        minmax(160px, 1.3fr) minmax(70px, 150px) minmax(130px, 190px) minmax(130px, 150px)
+        minmax(120px, 1.2fr) !important;
+    row-gap: 0 !important;
+    margin: 4px 0 8px;
+}}
 .forge-app .forge-out-th {{ align-self: end; }}
+/* a stream's extras (e.g. CDR output's Averaging dropdown) fit the last column:
+   !important beats _make_field_widget's inline 260px description_width (PR 2 moves it) */
+.forge-app .forge-out-table > .widget-hbox {{ min-width: 0; flex-wrap: wrap; }}
+.forge-app .forge-out-table > .widget-hbox > .widget-inline-hbox {{ max-width: 100%; }}
+.forge-app .forge-out-table > .widget-hbox > .widget-inline-hbox > .widget-label {{
+    width: auto !important;
+    flex: 0 1 auto;
+    min-width: 0;
+}}
+.forge-app .forge-out-table > .widget-hbox > .widget-inline-hbox > :is(input, select) {{ min-width: 0; }}
 .forge-out-th .widget-html-content {{
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: .05em;
-    color: {branding.INK_2};
-    height: 22px;
+    color: {branding.INK_3};
+    height: 18px;
     line-height: 18px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid {branding.LINE};
     box-sizing: border-box;
 }}
 .forge-out-center .widget-html-content {{ text-align: center; }}
@@ -422,22 +507,86 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     margin: 0;
     padding: 0;
 }}
-/* bold divider between namelist sections inside one Advanced pane; the pane's
-   first header has none (widget-level class set in _SettingsEditor) */
+/* space and a hairline between namelist sections inside one Advanced pane, like
+   a subsection; the pane's first header has none (widget-level class set in
+   _SettingsEditor) */
 .forge-app .forge-settings-sec-w {{
-    border-top: 2px solid {branding.BLUE};
+    border-top: 1px solid {branding.LINE_2};
     margin-top: 18px;
     padding-top: 12px;
 }}
 .forge-app .forge-settings-sec-w:first-child {{ border-top: 0; margin-top: 0; padding-top: 0; }}
-/* wrapped forcing rows: breathing room and a hairline between rows */
-.forge-app .forge-frow {{
-    padding: 8px 0 10px;
-    row-gap: 6px;
-    border-bottom: 1px solid {branding.LINE_2};
+/* a namelist section's settings fill the pane in two columns, labels
+   left-aligned like field_row's (output tables, variable grids and the "More
+   output streams" panes keep their own layout) */
+.forge-app .forge-settings-sec-w ~ .widget-vbox:not(.forge-open-acc):not(:has(.forge-out-table, .forge-var-grid)) {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(460px, 100%), 1fr));
+    column-gap: 32px;
+    row-gap: 2px;
 }}
-.forge-app .forge-frow:last-of-type {{ border-bottom: 0; }}
-.forge-out-label .widget-html-content {{ font-size: 13px; }}
+.forge-app .forge-settings-sec-w ~ .widget-vbox .widget-inline-hbox > .widget-label {{ text-align: left; }}
+/* a wide setting (_make_field_widget's 560px) is capped at its column and its
+   input shrinks, instead of running past the card in a narrow window */
+.forge-app .forge-settings-sec-w ~ .widget-vbox > .widget-inline-hbox {{ max-width: 100%; }}
+.forge-app .forge-settings-sec-w ~ .widget-vbox > .widget-inline-hbox > :is(input, select) {{ min-width: 0; }}
+/* repeatable forcing rows: each row is a tile with its labels above the inputs
+   (so a field lines up from row to row), checkboxes on the input baseline, and
+   the remove button in the top-right corner. !important beats
+   _ForcingEditor._row_box's inline align_items="flex-start" (PR 2 moves it). */
+.forge-app .forge-frow {{
+    position: relative;
+    background: #FAFAFB;
+    border: 1px solid {branding.LINE_2};
+    border-radius: 6px;
+    padding: 10px 44px 12px 14px;
+    margin: 0 0 10px;
+    column-gap: 16px;
+    row-gap: 12px;
+    align-items: flex-end !important;
+}}
+.forge-app .forge-frow > .widget-inline-hbox:not(.widget-checkbox) {{
+    flex-direction: column;
+    align-items: stretch;
+    margin: 0;
+    height: auto !important;  /* beats _options_editor's inline height="48px" (PR 2 moves it) */
+}}
+.forge-app .forge-frow .widget-inline-hbox:not(.widget-checkbox) > .widget-label {{
+    max-width: none;
+    text-align: left;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: {branding.INK_2};
+    line-height: 16px;
+    height: 16px;
+    margin: 0 0 3px;
+    padding: 0;
+}}
+.forge-app .forge-frow .widget-inline-hbox > select,
+.forge-app .forge-frow .widget-inline-hbox > input {{ flex: none; height: 28px; }}
+.forge-app .forge-frow .widget-inline-hbox > textarea {{ flex: none; height: 52px; }}
+.forge-app .forge-frow .widget-checkbox {{
+    height: 28px;
+    margin: 0;
+    align-items: center;
+    width: auto !important;  /* beats _make_row's inline width="130px" on Climatology (PR 2 moves it) */
+}}
+.forge-app .forge-frow > .widget-button:first-child {{
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    height: 28px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: {branding.INK_3};
+}}
+.forge-app .forge-frow > .widget-button:first-child:hover {{
+    color: {branding.BRAND_RED};
+    border-color: {branding.LINE_2};
+    background: #fff;
+}}
+.forge-out-label .widget-html-content {{ font-size: 13px; padding: 3px 0; line-height: 1.3; }}
 .forge-out-label .sym {{
     display: block;
     font-family: Menlo, Consolas, monospace;
