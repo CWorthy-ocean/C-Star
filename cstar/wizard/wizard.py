@@ -2878,6 +2878,14 @@ def _wizard_words(text: str) -> str:
     return _FIELD_NAME_RE.sub(lambda m: _row_field_label(m[0]) or m[0], text)
 
 
+def _message_lines(text: str) -> list[str]:
+    """``text``'s non-blank lines, stripped, without the "- " that starts each
+    finding of a message listing them one per line under a lead-in ending in ":".
+    """
+    lines = (line.strip().removeprefix("- ") for line in text.splitlines())
+    return [line for line in lines if line]
+
+
 def _error_path(base: str, loc: tuple[int | str, ...]) -> str:
     """A pydantic error location under ``base``, as a dotted blueprint path."""
     path = base
@@ -2900,8 +2908,7 @@ def _blueprint_problems(exc: Exception) -> list[_BlueprintProblem]:
     """
     if not isinstance(exc, ValidationError):
         message = str(exc)
-        heads = [line.strip().removeprefix("- ") for line in message.splitlines()]
-        card = next(filter(None, map(_error_card, heads)), "review")
+        card = next(filter(None, map(_error_card, _message_lines(message))), "review")
         return [_BlueprintProblem(card, _wizard_words(message))]
     base = _ERROR_MODEL_PATHS.get(exc.title, "")
     problems = []
@@ -2938,15 +2945,13 @@ def _problem_summary(problems: Sequence[_BlueprintProblem]) -> str:
     if not problems:
         return ""
     first = problems[0]
-    lines = [ln.strip().removeprefix("- ") for ln in first.text.splitlines()]
-    lines = [ln for ln in lines if ln] or [""]
+    lines = _message_lines(first.text) or [""]
     # A message that lists its findings: its lead-in and the first of them.
-    line = " ".join(lines[:2]) if lines[0].endswith(":") else lines[0]
+    shown = 2 if lines[0].endswith(":") else 1
+    line = " ".join(lines[:shown])
     cut_note = " — full message in the preview below"
     text = _problem_html(line, _SUMMARY_CHARS, cut_note)
-    if len(lines) > (2 if lines[0].endswith(":") else 1) and not text.endswith(
-        cut_note
-    ):
+    if len(lines) > shown and len(line) <= _SUMMARY_CHARS:  # not cut, but more
         text += cut_note
     if len(problems) > 1:
         text += f" (and {len(problems) - 1} more)"
@@ -5031,7 +5036,7 @@ class _ForcingEditor:
             extra = [self._sync_to_ic_btn]
         lead = [self.co2_block, self._surface_rows_header] if cat == "surface" else []
         if cat in self._bgc_notes:
-            lead = [self._bgc_notes[cat]]
+            lead.append(self._bgc_notes[cat])
         buttons = W.HBox([add, *extra])
         buttons.add_class("forge-row-btns")
         self._containers[cat].children = [*lead, *boxes, buttons]
