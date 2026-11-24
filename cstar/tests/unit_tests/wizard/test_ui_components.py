@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("ipywidgets")
@@ -43,6 +45,26 @@ def test_wizard_css_has_no_unresolved_braces():
     # f-string; nothing should leak through unresolved.
     assert "{{" not in C.WIZARD_CSS
     assert "}}" not in C.WIZARD_CSS
+
+
+def _declarations(selector: str) -> str:
+    """The declaration block of the ``WIZARD_CSS`` rule for ``selector``."""
+    match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", C.WIZARD_CSS)
+    assert match, f"no rule for {selector}"
+    return match.group(1)
+
+
+def test_no_wrap_status_lines_do_not_set_the_page_width():
+    """The sticky bar's run summary and the catalog bar's status are no-wrap
+    lines; without inline-size containment their text set the whole page's
+    minimum width (~1450px), so narrower windows scrolled sideways.
+    """
+    for selector in (
+        ".forge-app .forge-sticky > .widget-html:first-child",
+        ".forge-app .forge-catalog-bar > .widget-html:last-child",
+    ):
+        assert "contain: inline-size;" in _declarations(selector)
+    assert "min-width: 0;" in _declarations(".forge-app .forge-stack > .widget-box")
 
 
 def test_style_widget_wraps_css_in_style_tag():

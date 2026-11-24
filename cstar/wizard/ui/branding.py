@@ -26,6 +26,7 @@ LINE_2 = "#E8E9EC"  # lighter dividers (card header rule)
 # Accent colors.
 LIGHT_BLUE = "#C0D3ED"  # focus ring
 BLUE = "#004182"  # primary action / current-tab color
+NAVY = "#00376F"  # subsection and namelist-section titles (a touch darker than BLUE)
 GREEN = "#2E7D4F"  # success / ok
 AMBER = "#B7791F"  # warning
 
