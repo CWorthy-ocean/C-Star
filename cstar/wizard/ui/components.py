@@ -503,6 +503,13 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     padding-top: 10px;
     border-top: 1px dashed {branding.LINE};
 }}
+/* a pane-level options link (initial conditions, boundary forcing) applies to
+   the whole pane, so it is set off from the subsection above it like one */
+.forge-app .forge-coll-inline.forge-sec-opts {{
+    margin-top: 18px;
+    padding-top: 12px;
+    border-top: 1px solid {branding.LINE_2};
+}}
 
 /* tab bar: current-tab highlight */
 .forge-app .lm-TabBar-tab.lm-mod-current, .forge-app .p-TabBar-tab.p-mod-current {{

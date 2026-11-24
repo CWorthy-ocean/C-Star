@@ -2670,8 +2670,10 @@ _DEFAULT_INTERP_ATTR = {
 }
 _GLORYS_LAYOUT_OPTS = ["", "regional", "global"]  # "" = not specified
 
-# Display-only accordion titles for the forcing editor's category keys -- cosmetic,
-# the internal keys above (used as dict keys/lookups everywhere else) are unchanged.
+# Each forcing category's name as the editor shows it: a pane's title is its first
+# category's (see `_FORCING_PANES`), and the rest are the places messages name
+# ("BGC initial conditions, row 1" is a Biogeochemistry row). Cosmetic: the internal
+# keys above (used as dict keys/lookups everywhere else) are unchanged.
 _CATEGORY_TITLES: dict[str, str] = {
     "initial_conditions": "Initial conditions",
     "ic_bgc": "BGC initial conditions",
@@ -2687,6 +2689,30 @@ _CATEGORY_TITLES: dict[str, str] = {
 _REQUIRED_FORCING_CATEGORIES = frozenset(
     {"initial_conditions", "ic_bgc", "surface", "boundary", "boundary_bgc"}
 )
+
+# The forcing editor's panes, in order, each with the categories it shows; a pane's
+# title is its first category's (`_CATEGORY_TITLES`), and it is Required when any of
+# its categories is (`_REQUIRED_FORCING_CATEGORIES`).
+_FORCING_PANES: tuple[tuple[str, ...], ...] = (
+    ("initial_conditions", "ic_bgc"),
+    ("surface",),
+    ("boundary", "boundary_bgc"),
+    ("tidal",),
+    ("river",),
+)
+
+# The section-wide initial-conditions/boundary settings under each pane's options
+# link, by widget-name suffix (`ic_<suffix>`, `boundary_<suffix>`), each with the
+# widget value that leaves it out of the blueprint (see `_ForcingEditor.gather`).
+_SECTION_OPTION_DEFAULTS: dict[str, Any] = {
+    "flex_time": False,
+    "validate": True,
+    "prefill": "",
+    "regrid_method": "",
+    "extrap_method": "",
+    "bottom_fill_blend_m": "",
+    "options": "",
+}
 
 # Sticky-bar step links (card key -> label), in the order the cards appear.
 _STICKY_STEPS = (
@@ -2834,7 +2860,8 @@ def _error_card(text: str) -> str | None:
 
 def _row_place(cat: str, n: int) -> str:
     """Row ``n`` (1-based) of the forcing editor's ``cat`` rows, as the editor
-    shows it ("Surface forcing, row 2").
+    shows it ("Surface forcing, row 2"); the ``ic_bgc``/``boundary_bgc`` places are
+    the Biogeochemistry rows of the Initial conditions / Boundary forcing panes.
     """
     return f"{_CATEGORY_TITLES.get(cat, cat)}, row {n}"
 
@@ -3725,6 +3752,36 @@ def _is_co2_item(item: Any) -> bool:
     )
 
 
+def _options_link(
+    W: Any, body: Any, title: str, fields: dict[str, Any], defaults: dict[str, Any]
+) -> Any:
+    """An inline disclosure of *body*, titled with how many of *fields* it shows and
+    how many differ from their *defaults* (a preset may set some: "non-default",
+    not "changed"); hidden while it shows none.
+    """
+    pane = components.collapsible(W, body, title, variant="inline")
+
+    def _retitle(_change: Any = None) -> None:
+        shown = [k for k, f in fields.items() if f.layout.display != "none"]
+        changed = sum(_row_option_changed(defaults[k], fields[k].value) for k in shown)
+        n = f"{len(shown)} setting{'' if len(shown) == 1 else 's'}"
+        pane.set_title(
+            components.accordion_title(
+                title,
+                components.Pill(f"{n} · {changed} non-default", "mod")
+                if changed
+                else components.Pill(f"{n} · defaults", "off"),
+            )
+        )
+        pane.layout.display = "" if shown else "none"
+
+    for f in fields.values():
+        f.observe(_retitle, names="value")
+        f.layout.observe(_retitle, names="display")
+    _retitle()
+    return pane
+
+
 class _ForcingEditor:
     """Editor for the forcing spec: initial conditions + per-category forcing items,
     with add/remove. ``gather()`` returns an ``inputs``-shaped dict the resolver
@@ -3742,6 +3799,7 @@ class _ForcingEditor:
     ):
         self.W = W
         self.on_change = on_change
+        self._bgc_enabled = True  # the model has MARBL BGC (see `show_bgc`)
         # Deep-copied so no `.get(...)` below can mutate the caller's dict (a
         # catalog-parsed ForcingSpec, or a resolved config's `_sources_to_inputs`
         # reconstruction), both at the current schema.
@@ -3897,6 +3955,7 @@ class _ForcingEditor:
                 self.ic_path,
                 self.ic_bgc_interp,
                 self.ic_flex_time,
+                self.ic_validate,
                 self.ic_groom,
                 self.ic_prefill,
                 self.ic_regrid_method,
@@ -3905,12 +3964,7 @@ class _ForcingEditor:
                 self.ic_options,
             ):
                 w.layout.display = "" if has_ic else "none"
-            # The pre-merge scalar ic_bgc_name/ic_bgc_clim/ic_bgc_path group is now
-            # the "ic_bgc" row list, so hide its whole pane instead. Guarded because
-            # the first call below runs before `_containers` is built.
-            ic_bgc_pane = getattr(self, "_containers", {}).get("ic_bgc")
-            if ic_bgc_pane is not None:
-                ic_bgc_pane.layout.display = "" if has_ic else "none"
+            self._sync_bgc_display()
 
         self.ic_name.observe(_sync_ic_layout_visibility, names="value")
         _sync_ic_layout_visibility()
@@ -4060,13 +4114,7 @@ class _ForcingEditor:
                 self.boundary_options,
             ):
                 w.layout.display = "" if has_boundary else "none"
-            # "boundary_bgc" is a row list, not a scalar widget group -- hide its
-            # whole pane instead (rows are NOT cleared, so switching back to a
-            # real source restores them). Guarded because the first call below
-            # runs before `_containers` is built.
-            boundary_bgc_pane = getattr(self, "_containers", {}).get("boundary_bgc")
-            if boundary_bgc_pane is not None:
-                boundary_bgc_pane.layout.display = "" if has_boundary else "none"
+            self._sync_bgc_display()
 
         self.boundary_name.observe(_sync_boundary_layout_visibility, names="value")
         _sync_boundary_layout_visibility()
@@ -4129,9 +4177,21 @@ class _ForcingEditor:
             self._containers[cat] = W.VBox([])
             self._set_rows(cat, _row_seed_items(cat, ic, forc))
 
-        # The panes now exist; re-run so a seeded "(none)" IC/boundary hides the
-        # ic_bgc/boundary_bgc pane (the call during widget construction above
-        # could not reach it yet).
+        # The rows are hidden, not cleared, with the section: switching back to a
+        # real source restores them.
+        self._bgc_sections: dict[str, Any] = {
+            cat: components.subsection(
+                W, "forcing.bgc", self._bgc_settings(cat), self._containers[cat]
+            )
+            for cat in ("ic_bgc", "boundary_bgc")
+        }
+        for cat in self._bgc_sections:
+            for w in self._bgc_setting_widgets(cat):
+                w.observe(lambda _ch: self._sync_bgc_display(), names="value")
+
+        # The sections now exist; re-run so a seeded "(none)" IC/boundary hides its
+        # Biogeochemistry section (the call during widget construction above could
+        # not reach it yet).
         _sync_ic_layout_visibility()
         _sync_boundary_layout_visibility()
 
@@ -4200,6 +4260,56 @@ class _ForcingEditor:
     def show_co2(self, visible: bool) -> None:
         """Show the "Atmospheric CO2" block (only MARBL has an air CO2)."""
         self.co2_block.layout.display = "" if visible else "none"
+
+    def show_bgc(self, visible: bool) -> None:
+        """Say whether the model has MARBL BGC: without it a Biogeochemistry section
+        shows only while it holds something (see :meth:`bgc_shown`).
+        """
+        self._bgc_enabled = visible
+        self._sync_bgc_display()
+
+    def _bgc_carried(self, cat: str) -> bool:
+        """Whether the blueprint carries *cat*'s section (IC or boundary not "(none)")."""
+        if cat == "ic_bgc":
+            return self.ic_name.value != _IC_NONE
+        return self.boundary_name.value != _BOUNDARY_NONE
+
+    def _bgc_setting_widgets(self, cat: str) -> tuple[Any, Any]:
+        """*cat*'s section-wide BGC settings: the default BGC interpolation and the
+        ESPER grooming box.
+        """
+        prefix = "ic" if cat == "ic_bgc" else "boundary"
+        return getattr(self, f"{prefix}_bgc_interp"), getattr(self, f"{prefix}_groom")
+
+    def _bgc_holds_something(self, cat: str) -> bool:
+        """Whether *cat*'s Biogeochemistry section holds anything ``gather`` writes:
+        rows, or a BGC setting off its default.
+        """
+        interp, groom = self._bgc_setting_widgets(cat)
+        return (
+            bool(self._rows[cat])
+            or interp.value != BgcInterpMethod.DEPTH.value
+            or not groom.value
+        )
+
+    def bgc_shown(self, cat: str) -> bool:
+        """Whether *cat*'s Biogeochemistry section shows: its section is carried and
+        the model has MARBL BGC or the section holds something to see or reset.
+        """
+        return self._bgc_carried(cat) and (
+            self._bgc_enabled or self._bgc_holds_something(cat)
+        )
+
+    def _sync_bgc_display(self) -> None:
+        """Show or hide each Biogeochemistry section by :meth:`bgc_shown`. Tolerates
+        the calls made while ``__init__`` is still building the sections.
+        """
+        for cat, section in getattr(self, "_bgc_sections", {}).items():
+            section.layout.display = "" if self.bgc_shown(cat) else "none"
+
+    def bgc_needs_fix(self, cat: str) -> bool:
+        """Whether *cat*'s partition note (see :meth:`refresh_bgc_notes`) is shown."""
+        return self._bgc_notes[cat].layout.display != "none"
 
     def _with_co2(self, surface: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """*surface* (the gathered rows) with the ``MBL_co2`` item added when CO2 is
@@ -4971,26 +5081,9 @@ class _ForcingEditor:
             layout=W.Layout(flex_flow="row wrap", align_items="flex-end"),
         )
         body.add_class("forge-frow-opts")
-        pane = components.collapsible(W, body, title, variant="inline")
-
-        def _retitle(_change: Any = None) -> None:
-            shown = [k for k in keys if w[k].layout.display != "none"]
-            changed = sum(_row_option_changed(defaults[k], w[k].value) for k in shown)
-            n = f"{len(shown)} setting{'' if len(shown) == 1 else 's'}"
-            pane.set_title(
-                components.accordion_title(
-                    title,
-                    components.Pill(f"{n} · {changed} non-default", "mod")
-                    if changed
-                    else components.Pill(f"{n} · defaults", "off"),
-                )
-            )
-            pane.layout.display = "" if shown else "none"
-
-        for k in keys:
-            w[k].observe(_retitle, names="value")
-            w[k].layout.observe(_retitle, names="display")
-        _retitle()
+        pane = _options_link(
+            W, body, title, {k: w[k] for k in keys}, {k: defaults[k] for k in keys}
+        )
         w["_options"] = pane
         w["_option_keys"] = tuple(keys)
 
@@ -5046,6 +5139,8 @@ class _ForcingEditor:
         buttons = W.HBox([add, *extra])
         buttons.add_class("forge-row-btns")
         self._containers[cat].children = [*lead, *boxes, buttons]
+        if cat in self._bgc_notes:
+            self._sync_bgc_display()
 
     def clear_category(self, cat: str):
         """Remove all rows for a row category (e.g. ``"boundary_bgc"`` for a
@@ -5425,147 +5520,98 @@ class _ForcingEditor:
             "forcing": forcing,
         }
 
+    def _bgc_settings(self, cat: str) -> Any:
+        """The Biogeochemistry subsection's settings row for *cat*."""
+        pre = "ic" if cat == "ic_bgc" else "boundary"
+        return components.field_grid(
+            self.W,
+            [
+                components.field_row(
+                    self.W,
+                    f"{pre}.{pre}_bgc_interp",
+                    getattr(self, f"{pre}_bgc_interp"),
+                ),
+                components.field_row(
+                    self.W, f"{pre}.{pre}_groom", getattr(self, f"{pre}_groom")
+                ),
+            ],
+        )
+
+    def _section_pane(self, prefix: str, bgc_cat: str) -> Any:
+        """The Initial conditions / Boundary forcing pane body: the physics source,
+        the Biogeochemistry sources, then the settings both share.
+        """
+        W = self.W
+
+        def row(suffix: str, **kw: Any) -> Any:
+            return components.field_row(
+                W,
+                f"{prefix}.{prefix}_{suffix}",
+                getattr(self, f"{prefix}_{suffix}"),
+                **kw,
+            )
+
+        fields = {
+            s: w
+            for s in _SECTION_OPTION_DEFAULTS
+            if (w := getattr(self, f"{prefix}_{s}", None)) is not None
+        }
+        body = W.VBox(
+            [
+                components.field_grid(W, [row(s) for s in fields if s != "options"]),
+                row("options", width="520px"),
+            ]
+        )
+        options = _options_link(
+            W,
+            body,
+            _ROW_OPTIONS_TITLE,
+            fields,
+            {s: _SECTION_OPTION_DEFAULTS[s] for s in fields},
+        )
+        options.add_class("forge-sec-opts")  # set off like a subsection
+        physics = components.subsection(
+            W,
+            "forcing.physics",
+            components.field_grid(W, [row("name"), row("layout"), row("path")]),
+        )
+        return W.VBox([physics, self._bgc_sections[bgc_cat], options])
+
     @property
     def widget(self):
         if getattr(self, "_acc", None) is not None:
             return self._acc
-        W = self.W
-        ic_fields = components.field_grid(
-            W,
-            [
-                components.field_row(W, "ic.ic_name", self.ic_name),
-                components.field_row(W, "ic.ic_layout", self.ic_layout),
-                components.field_row(W, "ic.ic_path", self.ic_path),
-                components.field_row(W, "ic.ic_validate", self.ic_validate),
-                components.field_row(W, "ic.ic_groom", self.ic_groom),
-            ],
-        )
-        ic_interp = components.subsection(
-            W,
-            "forcing.ic.interpolation",
-            components.field_grid(
-                W,
-                [
-                    components.field_row(W, "ic.ic_bgc_interp", self.ic_bgc_interp),
-                    components.field_row(W, "ic.ic_flex_time", self.ic_flex_time),
-                    components.field_row(W, "ic.ic_prefill", self.ic_prefill),
-                    components.field_row(
-                        W, "ic.ic_regrid_method", self.ic_regrid_method
-                    ),
-                    components.field_row(
-                        W, "ic.ic_extrap_method", self.ic_extrap_method
-                    ),
-                    components.field_row(
-                        W, "ic.ic_bottom_fill_blend_m", self.ic_bottom_fill_blend_m
-                    ),
-                ],
-            ),
-        )
-        ic_box = W.VBox(
-            [
-                ic_fields,
-                ic_interp,
-                components.field_row(
-                    W, "ic.ic_options", self.ic_options, width="520px"
-                ),
-            ]
-        )
-        # Structural mirror of ic_box -- BoundaryForcing.source is a required
-        # scalar, just like InitialConditions.source (see gather()/__init__).
-        boundary_fields = components.field_grid(
-            W,
-            [
-                components.field_row(W, "boundary.boundary_name", self.boundary_name),
-                components.field_row(
-                    W, "boundary.boundary_layout", self.boundary_layout
-                ),
-                components.field_row(W, "boundary.boundary_path", self.boundary_path),
-                components.field_row(
-                    W, "boundary.boundary_validate", self.boundary_validate
-                ),
-                components.field_row(W, "boundary.boundary_groom", self.boundary_groom),
-            ],
-        )
-        boundary_interp = components.subsection(
-            W,
-            "forcing.boundary.interpolation",
-            components.field_grid(
-                W,
-                [
-                    components.field_row(
-                        W, "boundary.boundary_bgc_interp", self.boundary_bgc_interp
-                    ),
-                    components.field_row(
-                        W, "boundary.boundary_prefill", self.boundary_prefill
-                    ),
-                    components.field_row(
-                        W,
-                        "boundary.boundary_regrid_method",
-                        self.boundary_regrid_method,
-                    ),
-                    components.field_row(
-                        W,
-                        "boundary.boundary_extrap_method",
-                        self.boundary_extrap_method,
-                    ),
-                    components.field_row(
-                        W,
-                        "boundary.boundary_bottom_fill_blend_m",
-                        self.boundary_bottom_fill_blend_m,
-                    ),
-                ],
-            ),
-        )
-        boundary_box = W.VBox(
-            [
-                boundary_fields,
-                boundary_interp,
-                components.field_row(
-                    W, "boundary.boundary_options", self.boundary_options, width="520px"
-                ),
-            ]
-        )
-        # "boundary_bgc" is inserted right after "boundary" for logical adjacency,
-        # mirroring how "ic_bgc" sits right after the IC physics section.
-        cat_order = [
-            "initial_conditions",
-            "ic_bgc",
-            "surface",
-            "boundary",
-            "boundary_bgc",
-            "tidal",
-            "river",
-        ]
-        pane_boxes = {"initial_conditions": ic_box, "boundary": boundary_box}
-        panes = [pane_boxes.get(cat, self._containers.get(cat)) for cat in cat_order]
+        panes = {
+            "initial_conditions": self._section_pane("ic", "ic_bgc"),
+            "boundary": self._section_pane("boundary", "boundary_bgc"),
+        }
         acc = components.open_accordion(
-            W, panes, [_CATEGORY_TITLES.get(cat, cat) for cat in cat_order]
+            self.W,
+            [
+                panes.get(cats[0], self._containers.get(cats[0]))
+                for cats in _FORCING_PANES
+            ],
+            [_CATEGORY_TITLES[cats[0]] for cats in _FORCING_PANES],
         )
-        # The IC<->boundary bgc sync buttons now live at the bottom of the
-        # "ic_bgc"/"boundary_bgc" panes themselves (see `_render`), not here.
         self._acc = acc
-        self._cat_order = cat_order
         return acc
 
     def refresh_bgc_notes(self) -> None:
-        """Warn on the BGC panes, before Forge refuses the blueprint, when two or
-        more sources do not partition the tracers, and mark the boxes to fix.
+        """Warn on the Biogeochemistry sections, before Forge refuses the blueprint,
+        when two or more sources do not partition the tracers, and mark the boxes to
+        fix.
 
         Mirrors Forge's ``_require_partitioned_bgc_use_vars``: with two or more
         sources each one needs its own "Variables to read", and no variable may be
         read twice. Only for a section the blueprint carries (IC or boundary not
         "(none)"); a child grid's boundary rows are already cleared.
         """
-        carried = {
-            "ic_bgc": self.ic_name.value != _IC_NONE,
-            "boundary_bgc": self.boundary_name.value != _BOUNDARY_NONE,
-        }
         label = _row_desc("use_vars", "use_vars")
         for cat, note in self._bgc_notes.items():
             rows = self._rows[cat]
             lines: list[str] = []
             flagged: set[int] = set()
-            if carried[cat] and len(rows) > 1:
+            if self._bgc_carried(cat) and len(rows) > 1:
                 read_by: dict[str, int] = {}
                 for n, w in enumerate(rows, start=1):
                     use_vars = _use_vars_list(w["use_vars"].value)
@@ -5605,17 +5651,24 @@ class _ForcingEditor:
         """Refresh each pane's header with its live summary pills and a quiet
         Required/Optional (see :func:`cstar.wizard.ui.components.accordion_title`).
 
-        ``summary_for(cat)`` returns the pills for category ``cat``; a no-op
-        before ``widget`` has been built.
+        ``summary_for(cat)`` returns the pills for category ``cat``; a pane that
+        shows two categories carries both categories' pills. A no-op before
+        ``widget`` has been built.
         """
         if getattr(self, "_acc", None) is None:
             return
-        for i, cat in enumerate(self._cat_order):
-            chip = "Required" if cat in _REQUIRED_FORCING_CATEGORIES else "Optional"
+        for i, cats in enumerate(_FORCING_PANES):
+            chip = (
+                "Required"
+                if _REQUIRED_FORCING_CATEGORIES.intersection(cats)
+                else "Optional"
+            )
             self._acc.set_title(
                 i,
                 components.accordion_title(
-                    _CATEGORY_TITLES.get(cat, cat), *summary_for(cat), chip=chip
+                    _CATEGORY_TITLES[cats[0]],
+                    *(pill for cat in cats for pill in summary_for(cat)),
+                    chip=chip,
                 ),
             )
 
@@ -6998,7 +7051,7 @@ class ForgeBlueprintWizard:
         self.show_archived_models.observe(self._on_show_archived_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
-        self.bgc_dd.observe(self._sync_co2_visibility, names="value")
+        self.bgc_dd.observe(self._sync_marbl_forcing_visibility, names="value")
         self.bgc_dd.observe(self._on_bgc_mode, names="value")
         self.cs_source_dd.observe(
             self._sync_carbonate_sensitivity_visibility, names="value"
@@ -7826,12 +7879,17 @@ class ForgeBlueprintWizard:
             co2_static=self.co2_static_box,
         )
         self._forcing_editor.show_co2(self.bgc_dd.value == "marbl")
+        self._forcing_editor.show_bgc(self.bgc_dd.value == "marbl")
         self.forcing_box.children = [self._forcing_editor.widget]
 
-    def _sync_co2_visibility(self, _change=None) -> None:
-        """Show the forcing editor's "Atmospheric CO2" block under MARBL only."""
+    def _sync_marbl_forcing_visibility(self, _change=None) -> None:
+        """Show the forcing editor's "Atmospheric CO2" block and its Biogeochemistry
+        sections (unless they hold something) under MARBL only.
+        """
         if self._forcing_editor is not None:
-            self._forcing_editor.show_co2(self.bgc_dd.value == "marbl")
+            marbl = self.bgc_dd.value == "marbl"
+            self._forcing_editor.show_co2(marbl)
+            self._forcing_editor.show_bgc(marbl)
 
     def _on_forcing_spec(self, _change):
         """Selecting a ForcingSpec reseeds the forcing editor. CDR is its own
@@ -10159,12 +10217,26 @@ class ForgeBlueprintWizard:
     def _forcing_summary(self, cat: str) -> tuple[components.Pill, ...]:
         """The current state of forcing category ``cat`` as pills for its pane
         header (see `_update_status`): the source names, with a default path or an
-        empty category muted.
+        empty category muted. A Biogeochemistry category (``ic_bgc``,
+        ``boundary_bgc``) adds its sources to its pane's header, none while the
+        section is hidden.
         """
         fe = self._forcing_editor
         if fe is None:
             return ()
         none = (components.Pill("none", "off"),)
+        if cat in ("ic_bgc", "boundary_bgc"):
+            if not fe.bgc_shown(cat):
+                return ()
+            names = [row["name"].value for row in fe._rows[cat]]
+            bgc: tuple[components.Pill, ...] = (
+                components.Pill("BGC " + " + ".join(names))
+                if names
+                else components.Pill("no BGC", "off"),
+            )
+            if fe.bgc_needs_fix(cat):
+                bgc += (components.Pill("check BGC sources", "warn"),)
+            return bgc
         if cat in ("initial_conditions", "boundary"):
             is_ic = cat == "initial_conditions"
             name_w = fe.ic_name if is_ic else fe.boundary_name

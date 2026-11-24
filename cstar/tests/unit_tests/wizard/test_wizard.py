@@ -1229,7 +1229,7 @@ def test_boundary_none_sentinel_gathers_null_boundary_and_hides_widgets(editor):
     assert gathered["forcing"]["boundary"] is None
     assert _display(editor.boundary_path) == "none"
     assert _display(editor.boundary_bgc_interp) == "none"
-    assert _display(editor._containers["boundary_bgc"]) == "none"
+    assert _display(editor._bgc_sections["boundary_bgc"]) == "none"
 
     # switching back to a real source restores both the gathered dict and the
     # widgets' visibility
@@ -1237,7 +1237,7 @@ def test_boundary_none_sentinel_gathers_null_boundary_and_hides_widgets(editor):
     gathered2 = editor.gather()
     assert gathered2["forcing"]["boundary"]["source"]["name"] == "GLORYS"
     assert _display(editor.boundary_path) == ""
-    assert _display(editor._containers["boundary_bgc"]) == ""
+    assert _display(editor._bgc_sections["boundary_bgc"]) == ""
 
 
 def test_boundary_none_sentinel_preserves_boundary_bgc_rows_across_switch(editor):
@@ -7741,15 +7741,18 @@ def test_blueprint_app_from_shell_builds():
 
 
 def test_ic_pane_first_field_row_is_ic_name(editor):
-    """The IC pane's first ``field_grid`` row is ``ic.ic_name`` (name, layout,
-    path, validate, in that order -- see ``_ForcingEditor.widget``).
+    """The IC pane opens with the Physics subsection, whose ``field_grid`` holds
+    name, layout, path in that order (see ``_ForcingEditor._section_pane``).
     """
     acc = editor.widget
     # `open_accordion` returns a VBox of collapsible panes (`.panes`).
-    ic_box = acc.panes[0].body  # cat_order[0] == "initial_conditions"
-    ic_fields = ic_box.children[0]
-    first_row = ic_fields.children[0]
-    assert first_row.forge_key == "ic.ic_name"
+    ic_box = acc.panes[0].body  # _FORCING_PANES[0] == initial_conditions + ic_bgc
+    physics_grid = ic_box.children[0].children[1]
+    assert [r.forge_key for r in physics_grid.children] == [
+        "ic.ic_name",
+        "ic.ic_layout",
+        "ic.ic_path",
+    ]
 
 
 def test_ic_layout_display_none_hides_its_row(editor):
@@ -7759,8 +7762,8 @@ def test_ic_layout_display_none_hides_its_row(editor):
     """
     acc = editor.widget
     ic_box = acc.panes[0].body
-    ic_fields = ic_box.children[0]
-    layout_row = next(r for r in ic_fields.children if r.forge_key == "ic.ic_layout")
+    physics_grid = ic_box.children[0].children[1]
+    layout_row = next(r for r in physics_grid.children if r.forge_key == "ic.ic_layout")
     assert layout_row.layout.display == _display(editor.ic_layout)
 
     editor.ic_layout.layout.display = "none"
