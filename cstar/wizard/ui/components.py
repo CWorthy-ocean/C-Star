@@ -713,8 +713,13 @@ EXPERIMENTAL_CHIP = chip(
 
 
 def banner(kind: str, html: str) -> str:
-    """A ``<div class='forge-banner {kind}'>`` HTML banner."""
-    return f"<div class='forge-banner {kind}'>{html}</div>"
+    """A ``<div class='forge-banner {kind}'>`` HTML banner.
+
+    ``.forge-banner`` is a flex box, so *html* goes in one inner ``<div>``:
+    otherwise each loose run of it (text, ``<b>…</b>``, ``<br>``) becomes its
+    own flex item, and they lay out side by side as columns.
+    """
+    return f"<div class='forge-banner {kind}'><div>{html}</div></div>"
 
 
 def banner_widget(W: Any, kind: str, html: str) -> Any:
