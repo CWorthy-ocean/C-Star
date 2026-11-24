@@ -126,6 +126,23 @@ class TestResolverOutputCadence:
             m.startswith("No output stream writes") for m in _resolver_warnings(caplog)
         )
 
+    @pytest.mark.parametrize(
+        "output", ["daily-restarts", "monthly-restarts", "standard", "weekly-restarts"]
+    )
+    def test_bgc_diagnostic_averages_can_be_turned_on_in_a_bundled_output_spec(
+        self, output
+    ):
+        """Verify a bundled OutputSpec resolves with ``wrt_avg_dia`` on: its
+        ``output_period_avg_dia`` was once 60 s, which the MARBL-step check refuses.
+        """
+        cfg = _build(
+            dt=7200,
+            output_settings=_CATALOG.output_data(output),
+            run_time_overrides={"bgc": {"wrt_avg_dia": True}},
+        )
+
+        assert cfg.model_settings["bgc"]["wrt_avg_dia"] is True
+
 
 class TestValidateRunTimeSectionsOutputCadence:
     def test_hourly_history_with_dt_960_is_reported(self):

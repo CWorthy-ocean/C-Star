@@ -44,7 +44,7 @@
     nrpf_bgc_his = 7
     nrpf_bgc_his_dia = 7
     output_period_bgc_avg = 86400.0
-    output_period_bgc_avg_dia = 60.0
+    output_period_bgc_avg_dia = 86400.0
     output_period_bgc_his = 86400.0
     output_period_bgc_his_dia = 86400.0
     wrt_bgc_avg = .false.
