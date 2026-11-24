@@ -453,6 +453,13 @@ FORGE_BLUEPRINT_VERSION = 11
 DEFAULT_APPLICATION = "forge"
 
 
+# The description a ForgeBlueprint file without one gets, and the one every
+# wizard-authored blueprint carried before the resolver derived a description
+# (``cstar.applications.forge.resolve.default_blueprint_description``). The wizard
+# reads a loaded file that carries it as having no description of its own.
+PLACEHOLDER_DESCRIPTION = "Generated blueprint"
+
+
 def emitted_blueprint_filename(name: str) -> str:
     """Return the file name of the ``ucla_roms`` blueprint a forge run named
     ``name`` emits.
@@ -1822,7 +1829,7 @@ class ForgeBlueprint(Blueprint):
     # ``composition.model.name``/``domain.grid_name`` (they are provenance/functional
     # inputs, not naming inputs, once ``name`` is stored directly).
     name: str
-    description: str = "Generated blueprint"
+    description: str = PLACEHOLDER_DESCRIPTION
     run: RunWindow
     domain: Domain
     forcing: Forcing

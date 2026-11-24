@@ -15,7 +15,7 @@ import copy
 import logging
 import typing as t
 import warnings
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +32,9 @@ from cstar.applications.forge.blueprint import (
     _COMPOSITION_SPEC_KINDS,
     BLEND_FALLBACK_INHERITED_FIELDS,
     FORGE_BLUEPRINT_VERSION,
+    PLACEHOLDER_DESCRIPTION,
     CarbonateSensitivitySpec,
+    CdrSpec,
     Code,
     Composition,
     ForgeBlueprint,
@@ -55,6 +57,7 @@ from cstar.applications.forge.namelist_model import (
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
+    default_blueprint_description,
 )
 from cstar.applications.forge.settings import render_roms_settings
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
@@ -209,6 +212,197 @@ def test_naming_is_derived_not_stored():
     assert cfg.casename == "cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102"
     # output_root_name is host-derived from the scratch path
     assert cfg.output_root_name("/scratch").startswith("/scratch/cson_roms-marbl")
+
+
+def test_description_defaults_to_a_summary_of_the_resolved_blueprint():
+    """Omitted or empty, the description is derived like the name; a caller's own
+    description is kept as given.
+    """
+    cfg = _build(description=None)
+    assert cfg.description == default_blueprint_description(cfg)
+    assert cfg.description == (
+        "test-tiny, 6x2x3 grid at ~83x500 km, 2012-01-01 to 2012-01-02, "
+        "cson_roms-marbl_v0.1, MARBL"
+    )
+    assert _build(description="").description == cfg.description
+    assert _build(description="Test tiny").description == "Test tiny"
+    assert (
+        _build(description=PLACEHOLDER_DESCRIPTION).description
+        == PLACEHOLDER_DESCRIPTION
+    )
+
+
+def _describe(cfg: ForgeBlueprint, **update: t.Any) -> str:
+    """The derived description of ``cfg`` with top-level fields replaced."""
+    return default_blueprint_description(cfg.model_copy(update=update))
+
+
+@pytest.mark.parametrize(
+    ("grid_kwargs", "phrase"),
+    [
+        (
+            {"nx": 20, "ny": 20, "N": 10, "size_x": 8000, "size_y": 8000},
+            "20x20x10 grid at ~400 km",
+        ),
+        (
+            {"nx": 100, "ny": 100, "N": 50, "size_x": 250, "size_y": 260},
+            "100x100x50 grid at ~2.5 km",
+        ),
+        (
+            {"nx": 400, "ny": 400, "size_x": 200, "size_y": 200},
+            "400x400 grid at ~500 m",
+        ),
+        ({"nx": 6, "ny": 2, "N": 3}, "6x2x3 grid"),
+        # A user-provided grid file: no generation geometry to describe.
+        ({"N": 3}, None),
+    ],
+)
+def test_description_names_the_grid_size_and_spacing(grid_kwargs, phrase):
+    cfg = _build(description=None)
+    text = _describe(
+        cfg, domain=cfg.domain.model_copy(update={"grid_kwargs": grid_kwargs})
+    )
+    parts = text.split(", ")
+    assert parts[0] == "test-tiny"
+    if phrase is None:
+        assert parts[1] == "2012-01-01 to 2012-01-02"
+    else:
+        assert parts[1] == phrase
+
+
+@pytest.mark.parametrize(
+    ("cdr", "phrase"),
+    [
+        (CdrSpec(), None),
+        (
+            CdrSpec(
+                mode="simple",
+                cdr_forcing={"releases": [{"tracer_fluxes": {"ALK": [1.0]}}]},
+            ),
+            "one alkalinity release",
+        ),
+        (
+            CdrSpec(
+                mode="yaml",
+                cdr_forcing={
+                    "releases": [{"tracer_concentrations": {"ALK": 1.0, "DIC": 1.0}}]
+                    * 2
+                },
+            ),
+            "two alkalinity releases",
+        ),
+        (
+            CdrSpec(
+                mode="simple",
+                cdr_forcing={
+                    "releases": [
+                        {"tracer_set": "cdr_lite", "tracer_fluxes": {"DIC": [-1.0]}}
+                    ]
+                },
+            ),
+            "one DIC release",
+        ),
+        (
+            CdrSpec(
+                mode="simple",
+                cdr_forcing={
+                    "releases": [
+                        {
+                            "tracer_set": "passive",
+                            "tracer_concentrations": {"tracer": 1.0},
+                        }
+                    ]
+                },
+            ),
+            "one dye release",
+        ),
+        (
+            CdrSpec(
+                mode="simple",
+                cdr_forcing={
+                    "releases": [
+                        {"tracer_fluxes": {"ALK": [1.0]}},
+                        {"tracer_fluxes": {"DIC": [-1.0]}},
+                    ]
+                },
+            ),
+            "two CDR releases",
+        ),
+        (
+            CdrSpec(
+                mode="simple",
+                cdr_forcing={"releases": [{"tracer_fluxes": {"ALK": [1.0]}}] * 12},
+            ),
+            "12 alkalinity releases",
+        ),
+        (
+            CdrSpec(
+                mode="simple", cdr_forcing={"releases": [{"lon": 1.0, "lat": 2.0}]}
+            ),
+            "one CDR release",
+        ),
+        (CdrSpec(mode="simple", cdr_forcing={"releases": []}), "CDR forcing"),
+        (CdrSpec.model_construct(mode="netcdf"), "CDR forcing from a file"),
+        (CdrSpec(mode="upscaled"), "upscaled CDR"),
+    ],
+)
+def test_description_names_the_cdr_releases(cdr, phrase):
+    cfg = _build(description=None)
+    text = _describe(cfg, cdr=cdr)
+    if phrase is None:
+        assert text == cfg.description
+    else:
+        assert text == f"{cfg.description}, {phrase}"
+
+
+@pytest.mark.parametrize(
+    ("cppdefs", "phrase"),
+    [
+        ({"marbl": True}, "MARBL"),
+        # MARBL with the online CDR-lite sensitivities is still a MARBL build.
+        ({"marbl": True, "cdr_lite": True}, "MARBL"),
+        ({"marbl": False, "cdr_lite": True}, "CDR-lite"),
+        ({"marbl": False}, "no BGC"),
+    ],
+)
+def test_description_names_the_bgc_mode(cppdefs, phrase):
+    cfg = _build(description=None)
+    settings = {**cfg.model_settings, "cppdefs": cppdefs}
+    assert _describe(cfg, model_settings=settings).split(", ")[-1] == phrase
+
+
+def test_description_names_the_presets_and_drops_them_past_the_length():
+    """A preset's ``-default`` suffix says nothing; past about 120 characters the
+    forcing preset goes first, then the model preset, and no word is cut in two.
+    """
+    cfg = _build(description=None)
+    alk = CdrSpec(
+        mode="simple", cdr_forcing={"releases": [{"tracer_fluxes": {"ALK": [1.0]}}]}
+    )
+
+    def described(grid_name: str, cdr: CdrSpec) -> str:
+        return _describe(
+            cfg,
+            domain=cfg.domain.model_copy(update={"grid_name": grid_name}),
+            composition=Composition(
+                model=SpecRef(name="roms-marbl-0.16-default", origin="catalog"),
+                forcing=SpecRef(name="glorys-era5-esper", origin="catalog"),
+            ),
+            cdr=cdr,
+        )
+
+    window = "6x2x3 grid at ~83x500 km, 2012-01-01 to 2012-01-02"
+    assert described("wio", CdrSpec()) == (
+        f"wio, {window}, roms-marbl-0.16, MARBL, glorys-era5-esper"
+    )
+    # 122 characters with the forcing preset.
+    assert described("wio", alk) == (
+        f"wio, {window}, roms-marbl-0.16, MARBL, one alkalinity release"
+    )
+    long_name = "gulf-of-guinea-12th-degree"
+    assert described(long_name, alk) == (
+        f"{long_name}, {window}, MARBL, one alkalinity release"
+    )
 
 
 def test_partitioning_auto_tiling_with_n_cores_is_valid():
@@ -7625,6 +7819,84 @@ class TestForgeBlueprintWizard:
         assert wiz.config.name == "my-custom-run"  # but the override sticks
         assert wiz.config.name != default_name
 
+    def test_blank_description_tracks_derived_default(self):
+        wiz = self._wizard()
+        derived = wiz.config.description
+        assert derived == default_blueprint_description(wiz.config)
+        assert wiz.description.value == derived  # auto-backfilled
+        assert wiz._description_touched is False
+        wiz.end.value = wiz.end.value + timedelta(days=3)
+        assert wiz.config.description != derived
+        assert wiz.description.value == wiz.config.description  # still tracking
+
+    def test_typed_description_overrides_default_and_stops_tracking(self):
+        """A real edit (not under ``_suspend()``) sets the flag before the rebuild
+        it triggers, so the backfill never writes over the user's first keystroke.
+        """
+        wiz = self._wizard()
+        wiz.description.value = "Gulf of Guinea spin-up"
+        assert wiz.description.value == "Gulf of Guinea spin-up"
+        assert wiz.config.description == "Gulf of Guinea spin-up"
+        wiz.end.value = wiz.end.value + timedelta(days=3)
+        wiz.npx.value = wiz.npx.value + 1
+        assert wiz.description.value == "Gulf of Guinea spin-up"
+        assert wiz.config.description == "Gulf of Guinea spin-up"
+
+    def test_cleared_description_resolves_to_the_derived_default(self):
+        wiz = self._wizard()
+        wiz.description.value = "temporary"
+        wiz.description.value = ""
+        assert wiz.description.value == ""  # not refilled under the user's cursor
+        assert wiz.config.description == default_blueprint_description(wiz.config)
+
+    def _load_with_description(self, tmp_path, description):
+        """Save the default blueprint, set its description (``None`` drops the
+        key), and load the file into a fresh wizard.
+        """
+        w1 = self._wizard()
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        if description != "as saved":
+            data = yaml.safe_load(p.read_text())
+            if description is None:
+                del data["description"]
+            else:
+                data["description"] = description
+            p.write_text(yaml.safe_dump(data, sort_keys=False))
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.config is not None, w2.derived.value
+        return w2
+
+    def test_loaded_description_is_kept(self, tmp_path):
+        wiz = self._load_with_description(tmp_path, "Toy run for the CDR tutorial")
+        assert wiz.description.value == "Toy run for the CDR tutorial"
+        assert wiz.config.description == "Toy run for the CDR tutorial"
+        wiz.end.value = wiz.end.value + timedelta(days=3)
+        assert wiz.config.description == "Toy run for the CDR tutorial"
+
+    @pytest.mark.parametrize(
+        "description",
+        [
+            pytest.param(PLACEHOLDER_DESCRIPTION, id="old-placeholder"),
+            pytest.param(None, id="no-description"),
+            # Saved while it still tracked the inputs: a derived text, not a choice.
+            pytest.param("as saved", id="derived-text"),
+        ],
+    )
+    def test_loaded_default_description_tracks_the_inputs(self, tmp_path, description):
+        wiz = self._load_with_description(tmp_path, description)
+        assert wiz._description_touched is False
+        assert wiz.config.description == default_blueprint_description(wiz.config)
+        assert wiz.description.value == wiz.config.description
+        before = wiz.config.description
+        wiz.end.value = wiz.end.value + timedelta(days=3)
+        assert wiz.config.description != before
+        assert wiz.description.value == wiz.config.description
+
     def test_save_writes_valid_yaml(self, tmp_path):
         wiz = self._wizard()
         wiz.save_path.value = str(tmp_path / "forge_blueprint.yaml")
@@ -9333,6 +9605,56 @@ class TestSaveModifiedSpecsToCatalog:
 
         return ForgeBlueprintWizard(catalog=catalog)
 
+    def _save_every_spec(self, wiz):
+        """Save each of the five specs under a ``my-<kind>`` name."""
+        wiz._boundaries_touched = True  # not exercising boundary derivation here
+        wiz.cdr_mode_dd.value = "yaml"
+        wiz._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+        wiz._rebuild()
+        for kind in ("model", "domain", "forcing", "output", "cdr"):
+            getattr(wiz, f"save_{kind}_name").value = f"my-{kind}"
+            getattr(wiz, f"_on_save_{kind}")(None)
+            status = getattr(wiz, f"save_{kind}_status").value
+            assert "✓" in status, (kind, status)
+
+    def _spec_descriptions(self, catalog):
+        return {
+            kind: catalog._spec_data(f"{kind.capitalize()}Spec", f"my-{kind}")[
+                "description"
+            ]
+            for kind in ("model", "domain", "forcing", "output", "cdr")
+        }
+
+    def test_saved_specs_never_take_the_derived_description(self, isolated_catalog):
+        """The derived description sums up the whole run, so it describes no one
+        spec: a spec saved while the field holds it gets an empty description, and
+        a ModelSpec keeps the description of the spec it was saved from.
+        """
+        wiz = self._wizard(isolated_catalog)
+        base_model = wiz.model_dd.value
+        base_description = isolated_catalog.model_data(base_model)["description"]
+        assert wiz.description.value == wiz.config.description  # derived
+
+        self._save_every_spec(wiz)
+
+        assert self._spec_descriptions(isolated_catalog) == {
+            "model": base_description,
+            "domain": "",
+            "forcing": "",
+            "output": "",
+            "cdr": "",
+        }
+
+    def test_saved_specs_take_a_typed_description(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        wiz.description.value = "Toy run for the CDR tutorial"
+
+        self._save_every_spec(wiz)
+
+        assert set(self._spec_descriptions(isolated_catalog).values()) == {
+            "Toy run for the CDR tutorial"
+        }
+
     def test_save_output_spec_marks_unmodified_and_clears_overrides(
         self, isolated_catalog
     ):
@@ -9690,7 +10012,7 @@ class TestSaveModifiedSpecsToCatalog:
 
         assert "my-cdr-spec" in isolated_catalog.cdr_names
         assert isolated_catalog.cdr_data("my-cdr-spec") == {
-            "description": wiz.description.value,
+            "description": "",  # not the blueprint's derived description
             "mode": "yaml",
             "cdr_forcing": fake_cdr,
             "cdr_forcing_file": None,

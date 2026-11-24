@@ -41,6 +41,7 @@ from pydantic import BaseModel
 
 from cstar.applications.forge.blueprint import (
     DEFAULT_APPLICATION,
+    PLACEHOLDER_DESCRIPTION,
     REGIONAL_PHYSICS_SURFACE_SOURCES,
     BgcBoundarySource,
     BgcInitialConditionsSource,
@@ -96,6 +97,7 @@ from cstar.applications.forge.resolve import (
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
     cfl_dt,
+    default_blueprint_description,
     extract_output_settings,
     find_carbonate_sensitivity_files,
     force_switches_without_input_off,
@@ -155,10 +157,12 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "dt",
     ): "Baroclinic time step in seconds. Derived from the grid (CFL criterion) until "
     "you type a value; 'Use CFL value' goes back to the derived value.",
-    ("run", "description"): "Human-readable description of this blueprint.",
     ("export", "name"): "Canonical blueprint name. Drives the save filename, the "
     "default working directory, casename, and generated file stems. Defaults to a "
     "derived name (model_grid_NprocsProcs); edit to override.",
+    ("export", "description"): "One line describing this blueprint. Derived from "
+    "the grid, run window, model, BGC mode, forcing and CDR release until you type "
+    "your own.",
     # ---- grid ------------------------------------------------------------------
     ("grid", "nx"): "Number of horizontal grid points in the x-direction (longitude).",
     ("grid", "ny"): "Number of horizontal grid points in the y-direction (latitude).",
@@ -5869,13 +5873,6 @@ class ForgeBlueprintWizard:
             style={"description_width": "130px"},
             tooltip=_tip("run", "model_ref_date"),
         )
-        self.description = W.Text(
-            value="Generated blueprint",
-            description="Description:",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="420px"),
-            tooltip=_tip("run", "description"),
-        )
         # --- grid extended options ---
         self.hmin = W.FloatText(
             value=_GRID_KWARGS_LEFT_OUT["hmin"],
@@ -6439,6 +6436,18 @@ class ForgeBlueprintWizard:
             tooltip=_tip("export", "name"),
         )
         self.name.observe(self._on_name_change, names="value")
+        # The blueprint description follows the resolver's derived one-line summary
+        # the same way, until the user types in it (_description_touched).
+        self._description_touched = False
+        self.description = W.Text(
+            value="",
+            description="Description:",
+            placeholder="(derived from the grid, run window, model and forcing)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="100%", max_width="760px"),
+            tooltip=_tip("export", "description"),
+        )
+        self.description.observe(self._on_description_change, names="value")
         self._save_path_touched = False
         self.save_path.observe(self._on_save_path_change, names="value")
 
@@ -6633,7 +6642,6 @@ class ForgeBlueprintWizard:
             self.start,
             self.end,
             self.model_ref_date,
-            self.description,
             self.topo_source,
             self.topo_path,
             self.nest_enable,
@@ -6673,6 +6681,15 @@ class ForgeBlueprintWizard:
         if getattr(self, "_suspended", False):
             return
         self._name_touched = True
+        self._rebuild()
+
+    def _on_description_change(self, _change):
+        # Mirrors _on_name_change: the backfill in _rebuild runs under _suspend().
+        # Not in _rebuild's watched list, so the flag is set before the rebuild
+        # that would otherwise backfill over the user's first keystroke.
+        if getattr(self, "_suspended", False):
+            return
+        self._description_touched = True
         self._rebuild()
 
     def _on_save_path_change(self, _change):
@@ -7919,6 +7936,16 @@ class ForgeBlueprintWizard:
         src = getattr(src, "value", src)
         src_w.value = str(src) if src in _TOPO_SOURCES else _NESTED_TOPO_INHERIT
 
+    def _spec_description(self) -> str:
+        """The description a catalog spec saved from this session gets.
+
+        The text the user typed for the blueprint, or empty while the field holds
+        the derived one: that summarizes the whole run (grid, dates, forcing, CDR),
+        so it would describe no single spec. Empty leaves a ModelSpec with the
+        description of the spec it was saved from (``register_model_from_settings``).
+        """
+        return self.description.value.strip() if self._description_touched else ""
+
     def _domain_spec_data(self) -> dict[str, Any]:
         """Build a DomainSpec-shaped dict from the current widget state (the
         domain-spec extractor for "save modified specs to catalog"). Includes
@@ -7928,7 +7955,7 @@ class ForgeBlueprintWizard:
         """
         kw = self._gather()
         data: dict[str, Any] = {
-            "description": self.description.value,
+            "description": self._spec_description(),
             "model_name": self.model_dd.value,
             "grid_name": self.grid_name.value,
             "start_time": _run_time_iso(self._run_datetime("start", self.start.value)),
@@ -8879,7 +8906,17 @@ class ForgeBlueprintWizard:
             elif cfg.composition.model.name:
                 self._load_unknown_specs.append(f"model '{cfg.composition.model.name}'")
             self.grid_name.value = cfg.domain.grid_name
-            self.description.value = cfg.description
+            # A file's own description is kept, unless it is no more than a default:
+            # none, the old placeholder, or the text the resolver derives for it
+            # (saved untouched). Those follow the inputs again, like a new blueprint.
+            self._description_touched = cfg.description.strip() not in {
+                "",
+                PLACEHOLDER_DESCRIPTION,
+                default_blueprint_description(cfg),
+            }
+            self.description.value = (
+                cfg.description if self._description_touched else ""
+            )
             self.name.value = cfg.name
             self._name_touched = (
                 True  # a loaded name is a deliberate choice, not a default
@@ -9212,7 +9249,13 @@ class ForgeBlueprintWizard:
             ),
             start_date=self._run_datetime("start", self.start.value),
             end_date=self._run_datetime("end", self.end.value),
-            description=self.description.value,
+            # Untouched (or cleared): None, so the resolver derives a fresh one-line
+            # description from the inputs, as it does the name below.
+            description=(
+                (self.description.value.strip() or None)
+                if self._description_touched
+                else None
+            ),
             # Untouched: always pass None so the resolver recomputes a fresh default
             # (self.name.value may still hold the *previous* rebuild's backfilled
             # default -- reusing it here would freeze it instead of tracking inputs).
@@ -9595,14 +9638,21 @@ class ForgeBlueprintWizard:
         if self._load_status_is_error:
             self.load_status.value = ""
             self._load_status_is_error = False
-        # Backfill the Export name/save-path fields with the current derived default
-        # until the user edits either -- their edit "locks in" that field (see
-        # _on_name_change/_on_save_path_change). Under _suspend() so these
-        # programmatic writes don't themselves flip the touched flags or recurse.
-        if not self._name_touched or not self._save_path_touched:
+        # Backfill the Export name/description/save-path fields with the current
+        # derived defaults until the user edits one -- their edit "locks in" that
+        # field (see _on_name_change/_on_description_change/_on_save_path_change).
+        # Under _suspend() so these programmatic writes don't themselves flip the
+        # touched flags or recurse.
+        if (
+            not self._name_touched
+            or not self._description_touched
+            or not self._save_path_touched
+        ):
             with self._suspend():
                 if not self._name_touched:
                     self.name.value = cfg.name
+                if not self._description_touched:
+                    self.description.value = cfg.description
                 if not self._save_path_touched:
                     self.save_path.value = self._default_blueprint_path(cfg.name)
         # Independent of the backfill above (and of _name_touched): the derived
@@ -10257,7 +10307,7 @@ class ForgeBlueprintWizard:
             self.catalog.register_output(
                 name,
                 extract_output_settings(self.config.model_settings),
-                description=self.description.value,
+                description=self._spec_description(),
             )
         except FileExistsError as exc:
             # str(exc) names the owning layer (e.g. "...already exists in the
@@ -10337,7 +10387,7 @@ class ForgeBlueprintWizard:
                 name,
                 owned,
                 base_path,
-                description=self.description.value,
+                description=self._spec_description(),
                 # Live widget values, using _gather()'s exact conventions (use_pio/
                 # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
                 # the round-trip verifier below compares against _gather()'s kw, so
@@ -10457,7 +10507,7 @@ class ForgeBlueprintWizard:
             self.catalog.register_forcing(
                 name,
                 self._forcing_editor.gather(),
-                description=self.description.value,
+                description=self._spec_description(),
             )
         except FileExistsError as exc:
             self.save_forcing_status.value = f"<span style='color:#b00'>{exc}</span>"
@@ -10507,7 +10557,7 @@ class ForgeBlueprintWizard:
         try:
             self.catalog.register_cdr(
                 name,
-                description=self.description.value,
+                description=self._spec_description(),
                 mode=mode,
                 cdr_forcing=current["cdr_forcing"],
                 cdr_forcing_file=current["cdr_forcing_file"],
@@ -10919,7 +10969,6 @@ class ForgeBlueprintWizard:
                         components.field_row(W, "start", self.start),
                         components.field_row(W, "end", self.end),
                         components.field_row(W, "model_ref_date", self.model_ref_date),
-                        components.field_row(W, "description", self.description),
                     ],
                 ),
             ),
@@ -11043,6 +11092,7 @@ class ForgeBlueprintWizard:
             self.derived,
             self.preview,
             components.field_row(W, "name", self.name),
+            components.field_row(W, "description", self.description),
             self.download_link_review,
             components.field_row(
                 W, "save_path", self.save_path, extra=(self.save_btn,)
