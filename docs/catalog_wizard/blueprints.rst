@@ -73,6 +73,11 @@ Boundaries and forcing
    that you must download yourself (TPXO tides, for example) are noted here;
    see :doc:`../getting_started/data_access`.
 
+   The **Initial conditions** and **Boundary forcing** panels each have a
+   *Physics* part and, with MARBL, a *Biogeochemistry* part for the BGC
+   sources. **Regridding & roms-tools options** at the bottom of each holds
+   the settings that apply to both parts.
+
    With MARBL, the **Surface forcing** panel starts with **Atmospheric CO2**.
    *Static* holds the air CO2 at **Constant atmospheric xCO2** for the whole
    run; the default, 284.7 ppm, is the pre-industrial average, so set the
