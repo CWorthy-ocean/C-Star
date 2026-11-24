@@ -2843,7 +2843,7 @@ def _row_field_label(name: str) -> str | None:
 
 def _use_vars_rule() -> str:
     """What Forge asks of two or more BGC sources, in the wizard's words."""
-    label = _row_desc("use_vars", "use_vars", colon=False)
+    label = _row_desc("use_vars", "use_vars")
     return (
         f"With two or more sources, give each one its {label}, so each tracer "
         "comes from one source."
@@ -2857,7 +2857,7 @@ def _wizard_words(text: str) -> str:
     refusal of BGC sources that do not partition the tracers is reworded whole.
     """
     if m := _MISSING_USE_VARS_RE.match(text):
-        label = _row_desc("use_vars", "use_vars", colon=False)
+        label = _row_desc("use_vars", "use_vars")
         return f"{_wizard_words(m[1])} ({m[2]}) has no {label}. {_use_vars_rule()}"
     if m := _SHARED_USE_VARS_RE.match(text):
         return (
@@ -5554,7 +5554,7 @@ class _ForcingEditor:
             "ic_bgc": self.ic_name.value != _IC_NONE,
             "boundary_bgc": self.boundary_name.value != _BOUNDARY_NONE,
         }
-        label = _row_desc("use_vars", "use_vars", colon=False)
+        label = _row_desc("use_vars", "use_vars")
         for cat, note in self._bgc_notes.items():
             rows = self._rows[cat]
             lines: list[str] = []
