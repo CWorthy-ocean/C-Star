@@ -1393,6 +1393,46 @@ class TestGridKwargsForgeKeys:
         assert len(calls) == (2 if has_child else 1)
         assert not [c.kwargs for c in calls if "metadata" in c.kwargs]
 
+    def test_child_spec_metadata_block_sets_the_nesting_period(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """A child DomainSpec's ``metadata`` block reaches the executor as one
+        period, the namelist's ``extract_period`` and the one given to
+        ``make_nesting_info``.
+        """
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_path=_MODEL_PATH,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            grid_kwargs_child={
+                **self._CHILD,
+                "metadata": {"prefix": "child", "period": 1800.0, "include_bgc": True},
+            },
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        with patch(
+            "cstar.applications.forge.executor.rt.align_grids",
+            return_value=_create_grid_mock(),
+        ):
+            builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+        assert builder.nesting_period == 1800.0
+        assert (
+            builder.nesting_period
+            == cfg.model_settings["extract_data"]["extract_period"]
+        )
+
 
 class TestForgeExecutorGetDs:
     """Tests for the get_ds method."""
@@ -3657,7 +3697,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             # The resolved compile-time/run-time settings dicts are handed to input
             # generation BY REFERENCE (executor-owned, mutated in place by the
             # generation steps) -- steps read e.g. cppdefs.marbl (has_bgc) to
-            # default include_bgc on make_nesting_info.
+            # set include_bgc on make_nesting_info.
             assert (
                 call_kwargs["settings_compile_time"] is builder._settings_compile_time
             )

@@ -1208,6 +1208,9 @@ class DomainCatalog:
             domain_data["grid_kwargs_parent"] = builder.grid_kwargs_parent
         if builder.grid_kwargs_child:
             domain_data["grid_kwargs_child"] = builder.grid_kwargs_child
+            domain_data["metadata_child"] = {"period": builder.nesting_period}
+            if builder.nesting_include_pressure_fluxes:
+                domain_data["nesting_include_pressure_fluxes"] = True
         # v_sponge: best-effort -- this executor-driven path predates the
         # wizard's touched/derived distinction (see forge_blueprint_wizard's
         # _domain_spec_data, the authoritative save path), so it always

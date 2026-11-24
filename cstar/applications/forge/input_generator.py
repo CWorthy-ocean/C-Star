@@ -30,6 +30,7 @@ import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import (
     BLEND_FALLBACK_INHERITED_FIELDS,
+    NESTING_PERIOD_DEFAULT,
     CarbonateSensitivitySpec,
     OpenBoundaries,
     UserProvidedFile,
@@ -527,7 +528,11 @@ class RomsInputGenerator(InputGenerator):
     If None, roms-tools defaults to 2000-01-01."""
     grid_parent: rt.Grid | None = None
     grid_child: rt.Grid | None = None
-    metadata_child: dict[str, Any] | None = None
+    nesting_period: float = NESTING_PERIOD_DEFAULT
+    """Extraction period (seconds) of ``nesting.nc``; also written to the namelist's
+    ``extract_data.extract_period``."""
+    nesting_include_pressure_fluxes: bool = False
+    """Whether ``nesting.nc`` includes baroclinic pressure fluxes."""
     settings_compile_time: dict[str, Any] | None = None
     """Executor-owned live compile-time settings dict (``ForgeExecutor._settings_compile_time``),
     bound by reference -- not copied. Generation steps read and mutate it directly;
@@ -1876,21 +1881,17 @@ class RomsInputGenerator(InputGenerator):
             if self._should_reuse_existing_output(out_path_nesting):
                 print(f"   ↪ Reusing existing file: {out_path_nesting}")
             else:
-                # This section of code is needed when doing nesting with BGC.  ROMS_Tools has a flag called "include_bgc" which
-                # defaults to false when we are making child boundary conditions, but it needs to be set to true in order to
-                # save the BGC variables.
-                nesting_kwargs = dict(self.metadata_child or {})
-                if self.has_bgc:
-                    # ROMS-Tools: include_bgc=True sets output_vars to include "bgc" on nesting.nc.
-                    nesting_kwargs.setdefault("include_bgc", True)
-                nesting_kwargs.setdefault("verbose", self.verbose)
                 out_path_nesting_mangled = self._pio_mangle(out_path_nesting)
                 with mem_log("make_nesting_info", enabled=self.verbose):
                     rt.make_nesting_info(
                         self.grid,
                         self.grid_child,
                         str(out_path_nesting_mangled),
-                        **nesting_kwargs,
+                        period=self.nesting_period,
+                        # include_bgc follows the parent's BGC (roms-tools defaults it off)
+                        include_bgc=self.has_bgc,
+                        include_pressure_fluxes=self.nesting_include_pressure_fluxes,
+                        verbose=self.verbose,
                     )
                     self._pio_finalize(out_path_nesting_mangled)
             self.ucla_roms_blueprint_elements.nesting_info = cstar_models.Dataset(
@@ -1936,6 +1937,9 @@ class RomsInputGenerator(InputGenerator):
                 self._settings_run_time["extract_data"] = {}
             self._settings_run_time["extract_data"]["do_extract"] = True
             self._settings_run_time["extract_data"]["extract_file"] = "nesting.nc"
+            self._settings_run_time["extract_data"]["extract_period"] = (
+                self.nesting_period
+            )
             self._settings_run_time["extract_data"]["n_chd"] = self.grid_child.N
             self._settings_run_time["extract_data"]["theta_s_chd"] = (
                 self.grid_child.theta_s

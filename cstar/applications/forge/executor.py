@@ -32,6 +32,7 @@ import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import input_generator, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    NESTING_PERIOD_DEFAULT,
     RUNTIME_GRID_KWARGS,
     CarbonateSensitivitySpec,
     Forcing,
@@ -460,9 +461,12 @@ class ForgeExecutor(BaseModel):
     grid_child: rt.Grid | None = Field(
         default=None, init=False, validate_default=False, exclude=True
     )
-    metadata_child: dict[str, Any] | None = Field(
-        default=None, init=False, validate_default=False, exclude=True
-    )
+    nesting_period: float = Field(default=NESTING_PERIOD_DEFAULT, gt=0)
+    """Extraction period (seconds) of the nesting data a parent writes for its child:
+    both the ``period`` of ``nesting.nc`` and the namelist's
+    ``extract_data.extract_period``. Unused without a child."""
+    nesting_include_pressure_fluxes: bool = False
+    """Whether the nesting data includes baroclinic pressure fluxes."""
     _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
         default=None
     )
@@ -772,9 +776,6 @@ class ForgeExecutor(BaseModel):
                         self.grid, self.grid_child, verbose=self.verbose
                     )
 
-                if "metadata" in self.grid_kwargs_child:
-                    self.metadata_child = self.grid_kwargs_child["metadata"]
-
             # I am a parent and a child
             elif (
                 self.grid_kwargs_child is not None
@@ -793,9 +794,6 @@ class ForgeExecutor(BaseModel):
                     self.grid_child = rt.align_grids(
                         self.grid, self.grid_child, verbose=self.verbose
                     )
-
-                if "metadata" in self.grid_kwargs_child:
-                    self.metadata_child = self.grid_kwargs_child["metadata"]
 
             # I am a child but not a parent
             elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
@@ -2014,7 +2012,8 @@ class ForgeExecutor(BaseModel):
             grid=self.grid,
             grid_parent=self.grid_parent,
             grid_child=self.grid_child,
-            metadata_child=self.metadata_child,
+            nesting_period=self.nesting_period,
+            nesting_include_pressure_fluxes=self.nesting_include_pressure_fluxes,
             settings_compile_time=self._settings_compile_time,
             settings_run_time=self._settings_run_time,
             has_bgc=self._has_bgc,
