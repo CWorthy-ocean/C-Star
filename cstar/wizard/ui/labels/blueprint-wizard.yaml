@@ -334,8 +334,6 @@ fields:
     label: Model reference date
     symbol: model_reference_date
     hint: ROMS model t=0 reference date.
-  description:
-    label: Description
   hmin:
     label: Minimum depth
     symbol: hmin
@@ -423,6 +421,9 @@ fields:
   name:
     label: Blueprint name
     hint: Drives the save filename, the default working directory and case name; edit to override the derived default.
+  description:
+    label: Description
+    hint: A brief description of your model choices, saved inside the blueprint for future context.
 
   # ===========================================================================
   # grid.<k> -- the 11 grid kwargs, shared by main/child/parent grids

@@ -31,12 +31,14 @@ import copy
 import logging
 import math
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
 import yaml
 
 from cstar.applications.forge.blueprint import (
+    PLACEHOLDER_DESCRIPTION,
     BgcSourceItem,
     BoundaryForcing,
     CarbonateSensitivitySpec,
@@ -76,6 +78,7 @@ from cstar.applications.forge.engine import (
 from cstar.applications.forge.namelist_model import (
     BgcMode,
     NamelistConsistencyError,
+    bgc_mode_from_cppdefs,
     canonical_output_sections_for_precheck,
     cdr_nz_chd_from_file,
     cdr_releases_time_interpolation,
@@ -642,6 +645,128 @@ def with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
     return cdr_spec.model_copy(update={"cdr_forcing": forcing})
 
 
+# A blueprint's description is read in a list of blueprints: one line, and past
+# about this many characters ``default_blueprint_description`` leaves parts out.
+_DESCRIPTION_LENGTH = 120
+_BGC_MODE_PHRASES: dict[BgcMode, str] = {
+    "marbl": "MARBL",
+    "none": "no BGC",
+    "cdr_lite": "CDR-lite",
+}
+_COUNT_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+
+
+def default_blueprint_description(bp: ForgeBlueprint) -> str:
+    """One line describing ``bp`` for an ocean modeler skimming a list of blueprints.
+
+    ``build_forge_blueprint`` gives a blueprint this description when its caller
+    passes none, and the wizard shows it until its user types their own. It names
+    the grid, the grid size with its approximate spacing, the run window, the model
+    preset, the BGC mode, the forcing preset and any CDR release, for example
+    ``wio-toy, 20x20x10 grid at ~400 km, 2012-01-02 to 2012-01-06, roms-marbl-0.13,
+    MARBL, simple-bgc-demo, one alkalinity release``. Past about 120 characters it
+    leaves out the forcing preset, then the model preset.
+
+    It reads only the blueprint's own fields, never a grid or a file, so it is cheap
+    enough for every resolve, and it leaves out a part it cannot describe (a grid
+    file's size, a spec authored from scratch) rather than fail.
+    """
+    cppdefs = bp.model_settings.get("cppdefs") or {}
+    # (text, drop rank): rank 0 always stays; higher ranks go first, rank 1 last.
+    parts: list[tuple[str | None, int]] = [
+        (bp.domain.grid_name, 0),
+        (_grid_phrase(bp.domain.grid_kwargs), 0),
+        (f"{bp.run.start_date:%Y-%m-%d} to {bp.run.end_date:%Y-%m-%d}", 0),
+        (bp.composition.model.name.removesuffix("-default") or None, 1),
+        (_BGC_MODE_PHRASES[bgc_mode_from_cppdefs(cppdefs)], 0),
+        (bp.composition.forcing.name or None, 2),
+        (_cdr_phrase(bp.cdr), 0),
+    ]
+    kept = [(text, rank) for text, rank in parts if text]
+    for rank in (2, 1):
+        if len(", ".join(text for text, _ in kept)) <= _DESCRIPTION_LENGTH:
+            break
+        kept = [(text, r) for text, r in kept if r != rank]
+    return ", ".join(text for text, _ in kept)
+
+
+def _positive(value: Any) -> float | None:
+    """``value`` as a positive finite number, or ``None`` if it is not one."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 and math.isfinite(number) else None
+
+
+def _grid_phrase(grid_kwargs: Mapping[str, Any]) -> str | None:
+    """``"20x20x10 grid at ~400 km"`` from roms-tools grid kwargs (sizes in km), or
+    ``None`` without ``nx``/``ny`` (a user-provided grid file).
+    """
+    nx, ny, n = (_positive(grid_kwargs.get(k)) for k in ("nx", "ny", "N"))
+    if nx is None or ny is None:
+        return None
+    phrase = "x".join(f"{d:.0f}" for d in (nx, ny, n) if d is not None) + " grid"
+    size_x, size_y = (_positive(grid_kwargs.get(k)) for k in ("size_x", "size_y"))
+    if size_x is None or size_y is None:
+        return phrase
+    return f"{phrase} at ~{_spacing_phrase(size_x / nx, size_y / ny)}"
+
+
+def _spacing_phrase(dx_km: float, dy_km: float) -> str:
+    """``"400 km"`` for near-square cells, ``"83x500 km"`` (x by y) otherwise; in
+    metres when the cells are under a kilometre.
+    """
+    lo, hi = sorted((dx_km, dy_km))
+    scale, unit = (1, "km") if hi >= 1 else (1000, "m")
+
+    def number(km: float) -> str:
+        value = km * scale
+        return f"{value:.0f}" if value >= 10 else f"{value:.2g}"
+
+    if hi <= 1.1 * lo:
+        return f"{number((dx_km + dy_km) / 2)} {unit}"
+    return f"{number(dx_km)}x{number(dy_km)} {unit}"
+
+
+def _cdr_phrase(cdr: CdrSpec) -> str | None:
+    """``"one alkalinity release"`` and the like, or ``None`` without CDR forcing."""
+    if cdr.mode == "none":
+        return None
+    if cdr.mode == "netcdf":
+        return "CDR forcing from a file"
+    if cdr.mode == "upscaled":
+        return "upscaled CDR"
+    releases = (cdr.cdr_forcing or {}).get("releases")
+    if not isinstance(releases, list | tuple) or not releases:
+        return "CDR forcing"
+    kinds = {_release_kind(release) for release in releases}
+    noun = f"{kinds.pop()} release" if len(kinds) == 1 else "CDR release"
+    n = len(releases)
+    count = _COUNT_WORDS[n - 1] if n <= len(_COUNT_WORDS) else str(n)
+    return f"{count} {noun}" + ("" if n == 1 else "s")
+
+
+def _release_kind(release: Any) -> str:
+    """What a roms-tools CDR release adds, by the tracers it names: ``alkalinity``
+    (any ``ALK``), ``DIC`` (``DIC`` without ``ALK``), ``dye`` (a passive release),
+    else ``CDR``.
+    """
+    if not isinstance(release, Mapping):
+        return "CDR"
+    if release.get("tracer_set") == "passive":
+        return "dye"
+    tracers = {
+        tracer
+        for field in ("tracer_fluxes", "tracer_concentrations")
+        if isinstance(values := release.get(field), Mapping)
+        for tracer in values
+    }
+    if "ALK" in tracers:
+        return "alkalinity"
+    return "DIC" if "DIC" in tracers else "CDR"
+
+
 def _align_cdr_output_to_marbl_step(
     settings: dict[str, Any], *, roms_ref: str | None
 ) -> None:
@@ -709,7 +834,7 @@ def build_forge_blueprint(
     end_date: datetime,
     model_reference_date: datetime | None = None,
     name: str | None = None,
-    description: str = "Generated blueprint",
+    description: str | None = None,
     cdr: dict[str, Any] | CdrSpec | None = None,
     cdr_forcing: dict[str, Any] | None = None,
     cdr_forcing_yaml: str | Path | None = None,
@@ -818,7 +943,9 @@ def build_forge_blueprint(
 
     ``name`` is the blueprint's canonical name (``ForgeBlueprint.name``, a top-level
     field); if omitted, this computes and sanitizes the default
-    (``{model_name}_{grid_name}_{n_procs}procs``).
+    (``{model_name}_{grid_name}_{n_procs}procs``). ``description`` works the same
+    way: if omitted or empty, the blueprint gets
+    :func:`default_blueprint_description`, a one-line summary of what it resolved to.
 
     ``model_reference_date`` is the ROMS model reference date (t=0), passed to every
     rt object that accepts it. If ``None`` (the default), ``RunWindow`` falls back to
@@ -1654,7 +1781,8 @@ def build_forge_blueprint(
     default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
     bp = ForgeBlueprint(
         name=name or default_name,
-        description=description,
+        # Replaced below when omitted: the default describes the resolved blueprint.
+        description=description or PLACEHOLDER_DESCRIPTION,
         run=RunWindow(
             start_date=start_date,
             end_date=end_date,
@@ -1726,6 +1854,8 @@ def build_forge_blueprint(
         ),
         provenance=provenance if provenance is not None else ForgeProvenance(),
     )
+    if not description:
+        bp.description = default_blueprint_description(bp)
     check_derived_overrides(explicit_overrides, known_derived_values(bp))
     _warn_user_files_need_pio_conversion(bp, use_pio)
     for message in resolver_warnings(bp, roms_ref=effective_roms_ref):
