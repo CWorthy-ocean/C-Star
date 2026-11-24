@@ -70,12 +70,34 @@ def test_root_has_forge_app_class():
 
 def test_root_contains_style_header_nav_and_stack():
     shell = AppShell([("Only", _DummyPage("hello"))])
-    assert len(shell.root.children) == 4
-    style, header, nav, stack = shell.root.children
+    assert len(shell.root.children) == 5
+    style, header, nav, stack, scroll_top = shell.root.children
     assert nav is shell.nav
     assert stack is shell.stack
     assert "<style " in style.value  # the tag carries an onload attribute
     assert "<style>" in header.value  # header carries header_css
+    # last, so the pages keep their place in the tree; never shown
+    assert scroll_top.layout.display == "none"
+    assert scroll_top.value == ""
+
+
+def test_show_scrolls_the_shell_to_its_top_each_time():
+    """``show`` switches the page and sets a new scroll-to-top image each call:
+    the page left behind may be much longer, and an unchanged value would not
+    sync to the browser, so the script would not run again.
+    """
+    shell = AppShell([("One", _DummyPage("1")), ("Two", _DummyPage("2"))])
+    scroll_top = shell.root.children[-1]
+    shell.show("Two")
+    first = scroll_top.value
+    assert shell.stack.selected_index == 1
+    assert first.startswith("<img ")
+    assert f'onload="{shell_module._SCROLL_TOP_JS}"' in first
+    assert "scrollIntoView" in shell_module._SCROLL_TOP_JS
+    assert "closest('.forge-shell')" in shell_module._SCROLL_TOP_JS
+    shell.show("One")
+    assert shell.stack.selected_index == 0
+    assert scroll_top.value not in ("", first)
 
 
 def test_appshell_lazy_imports_ipywidgets_when_w_omitted():
@@ -104,7 +126,7 @@ def test_shell_skips_its_own_stylesheet_when_a_page_carries_one():
     shell = AppShell([("Only", page)], W=W)
     styles = [c for c in shell.root.children if "forge-style" in c._dom_classes]
     assert styles == []
-    assert len(shell.root.children) == 3  # header, nav, stack
+    assert len(shell.root.children) == 4  # header, nav, stack, scroll-to-top
 
     bare = AppShell([("Only", W.HTML("body"))], W=W)
     assert sum("forge-style" in c._dom_classes for c in bare.root.children) == 1
@@ -187,6 +209,7 @@ def test_open_in_the_workplan_builder_adds_the_steps_and_switches_page(tmp_path)
     wiz._on_open_workplan(None)
     assert shell.nav.index == 1
     assert shell.stack.selected_index == 1
+    assert "scrollIntoView" in shell.root.children[-1].value
     page = shell.pages[1][1]
     assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
     assert page.name.value == slugify(wiz.config.name)

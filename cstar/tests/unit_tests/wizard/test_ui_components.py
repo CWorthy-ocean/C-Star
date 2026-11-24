@@ -346,3 +346,82 @@ def test_open_accordion_panes_are_independent_and_retitleable():
 def test_open_accordion_rejects_mismatched_panes_and_titles():
     with pytest.raises(ValueError, match="2 panes but 1 titles"):
         C.open_accordion(W, [W.HTML("a"), W.HTML("b")], ["A"])
+
+
+def _at_rule_block(prelude: str) -> str:
+    """The bodies of every ``WIZARD_CSS`` at-rule that starts with ``prelude``."""
+    css = C.WIZARD_CSS
+    bodies = []
+    for match in re.finditer(re.escape(prelude + " {"), css):
+        depth, start = 1, match.end()
+        for i in range(start, len(css)):
+            depth += {"{": 1, "}": -1}.get(css[i], 0)
+            if depth == 0:
+                bodies.append(css[start:i])
+                break
+    assert bodies, f"no {prelude} block"
+    return "\n".join(bodies)
+
+
+def test_wizard_is_light_in_any_host_theme():
+    """In a dark JupyterLab, ipywidgets' own controls read the theme's colours
+    (dark boxes, white checkbox labels on the white cards). ``.forge-app`` pins
+    them to the light theme's, re-declaring the ``--jp-widgets-*`` colours that
+    ipywidgets resolves on ``:root``.
+    """
+    decls = _declarations(".forge-app")
+    assert "color-scheme: light;" in decls
+    for name, value in C._LIGHT_HOST_COLORS.items():
+        assert f"{name}: {value};" in decls
+    for name in (
+        "--jp-widgets-label-color",
+        "--jp-widgets-input-color",
+        "--jp-widgets-input-background-color",
+        "--jp-content-font-color1",
+        "--jp-content-link-color",
+        "--jp-layout-color1",
+    ):
+        assert name in C._LIGHT_HOST_COLORS
+
+
+def test_dark_jupyterlab_gets_a_light_page_behind_the_wizard():
+    """Text on the page (header, intro, catalog bar) needs a light background in a
+    dark JupyterLab; only the outermost wizard root gets it.
+    """
+    selector = (
+        'body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app)'
+    )
+    assert f"background: {C.branding.GREY};" in _declarations(selector)
+    header = C.branding.header_css()
+    assert (
+        'body[data-jp-theme-light="false"] .cworthy-forge-header'
+        ":not(.forge-app .cworthy-forge-header)"
+    ) in header
+
+
+def test_sticky_step_links_wrap_instead_of_hiding():
+    """In a narrow window the step links wrap onto another line (they used to be
+    cut off past "6 Advanced"); the run summary takes what room is left and
+    ellipsises, and goes when there is too little room to read it.
+    """
+    assert "flex-wrap: wrap;" in _declarations(
+        ".forge-app .forge-sticky .widget-html-content"
+    )
+    summary = _declarations(".forge-app .forge-sticky .summary")
+    assert "flex: 1 1 0;" in summary
+    assert "text-overflow: ellipsis;" in summary
+    assert "container: forge-sticky / inline-size;" in _declarations(
+        ".forge-app .forge-sticky > .widget-html:first-child"
+    )
+    assert ".forge-app.forge-wizard .forge-sticky .summary { display: none; }" in (
+        _at_rule_block("@container forge-sticky (max-width: 900px)")
+    )
+
+
+def test_pinned_top_preview_docks_below_a_wrapped_sticky_bar():
+    """Below ~820px the Workplan page's bar may take two lines, so a pinned top
+    preview docks below that height instead of sliding under the bar.
+    """
+    block = _at_rule_block("@media (max-width: 820px)")
+    assert f"top: {C.STICKY_BAR_HEIGHT_WRAPPED};" in block
+    assert "body[data-voila] .forge-app .forge-side-top.forge-pinned" in block

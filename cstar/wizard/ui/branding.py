@@ -77,6 +77,14 @@ def header_css() -> str:
     font-size: 13px;
     color: #666;
 }}
+/* shown on its own above a wizard (branding_display) in a dark JupyterLab: on a
+   light panel, as the wizard below it is (inside the shell it already is) */
+body[data-jp-theme-light="false"] .{HEADER_CLASS}:not(.forge-app .{HEADER_CLASS}) {{
+    color-scheme: light;
+    background: {GREY};
+    border-radius: 6px 6px 0 0;
+    padding: 10px 12px;
+}}
 """
 
 

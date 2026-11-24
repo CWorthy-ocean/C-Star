@@ -102,6 +102,21 @@ def test_glossary_loads():
     assert "fields" in g
 
 
+def test_no_hint_stops_mid_sentence():
+    """A YAML plain scalar ends at an unquoted quote mark on its next line, so a
+    hint like "... e.g. 'GLORYS'. ..." once loaded as "... e.g." (153f042f).
+    """
+    hints = {
+        key: entry.hint
+        for key, entry in labels.glossary()["fields"].items()
+        if entry.hint
+    }
+    assert hints
+    assert [k for k, h in hints.items() if h.rstrip().endswith(("e.g.", "i.e."))] == []
+    assert "'GLORYS'" in hints["ic.ic_name"]
+    assert "'GLORYS'" in hints["boundary.boundary_name"]
+
+
 def test_known_keys_non_empty():
     assert len(labels.known_keys()) > 0
     assert len(labels.known_sections()) > 0

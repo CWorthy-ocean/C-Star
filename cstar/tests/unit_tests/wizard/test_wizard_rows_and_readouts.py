@@ -456,3 +456,81 @@ def test_stylesheet_rules_for_rows_tables_and_grids_avoid_important():
 def test_stylesheet_has_no_has_child_gridbox_selector():
     """The stylesheet no longer uses the :has(> .widget-gridbox > .forge-field) selector."""
     assert ":has(> .widget-gridbox > .forge-field)" not in components.WIZARD_CSS
+
+
+# ---- 7. narrow cards ---------------------------------------------------------------
+
+
+def _at_rule_block(prelude: str) -> str:
+    """The bodies of every ``WIZARD_CSS`` at-rule that starts with ``prelude``."""
+    css = components.WIZARD_CSS
+    bodies = []
+    for match in re.finditer(re.escape(prelude + " {"), css):
+        depth, start = 1, match.end()
+        for i in range(start, len(css)):
+            depth += {"{": 1, "}": -1}.get(css[i], 0)
+            if depth == 0:
+                bodies.append(css[start:i])
+                break
+    assert bodies, f"no {prelude} block"
+    return "\n".join(bodies)
+
+
+def _with_class(root: Any, css_class: str) -> list[Any]:
+    return [x for x in _walk(root) if css_class in getattr(x, "_dom_classes", ())]
+
+
+def test_output_tables_take_their_columns_from_the_stylesheet(shared_wizard):
+    """An inline column template would beat the narrow-card rule, so the tables
+    carry none; each row's last cell (the file readout and extras) is the one a
+    narrow card moves to a line of its own.
+    """
+    tables = _with_class(shared_wizard.widget, "forge-out-table")
+    assert tables
+    for table in tables:
+        assert table.layout.grid_template_columns is None
+        cells = list(table.children)
+        assert len(cells) % 5 == 0
+        assert all("forge-out-x" in c._dom_classes for c in cells[4::5])
+        assert not any("forge-out-x" in c._dom_classes for i, c in enumerate(cells) if i % 5 != 4)
+    assert "grid-template-columns:" in _declarations_of(".forge-app .forge-out-table")
+    narrow = _at_rule_block("@container (max-width: 720px)")
+    assert ".forge-app .forge-out-table > .forge-out-x { grid-column: 2 / -1; }" in narrow
+    assert ".forge-out-th.forge-out-x { display: none; }" in narrow
+
+
+def test_variable_grids_drop_columns_in_narrower_cards(shared_wizard):
+    """Four columns ellipsised labels ("Sea surface hei…") in a narrow card: the
+    stylesheet sets four, three and two by card width, so no grid sets its own.
+    """
+    grids = _with_class(shared_wizard.widget, "forge-var-grid")
+    assert grids
+    assert all(g.layout.grid_template_columns is None for g in grids)
+    assert "repeat(4, minmax(0, 1fr))" in _declarations_of(".forge-app .forge-var-grid")
+    assert "repeat(3, minmax(0, 1fr))" in _at_rule_block("@container (max-width: 1150px)")
+    assert ".forge-var-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in (
+        _at_rule_block("@container (max-width: 760px)")
+    )
+
+
+def test_cdr_plot_moves_below_the_release_panels_in_a_narrow_card(shared_wizard):
+    """Like the Grid card's preview, the CDR plot column wraps below the panels."""
+    rows = _with_class(shared_wizard.widget, "forge-cdr-row")
+    assert len(rows) == 1
+    assert rows[0].children[1] is shared_wizard.cdr_plot_box
+    assert ".forge-app .forge-cdr-row { flex-wrap: wrap" in _at_rule_block(
+        "@container (max-width: 1000px)"
+    ).replace(".forge-app .forge-geo-row, ", "")
+
+
+def test_nesting_checkboxes_size_to_their_labels(shared_wizard):
+    """The default 300px cut "This grid is a parent (enter child grid info below)." off."""
+    assert shared_wizard.nest_enable.layout.width == "auto"
+    assert shared_wizard.parent_enable.layout.width == "auto"
+
+
+def _declarations_of(selector: str) -> str:
+    match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", components.WIZARD_CSS)
+    assert match, f"no rule for {selector}"
+    return match.group(1)
+

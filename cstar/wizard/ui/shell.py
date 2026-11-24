@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+#: A 1x1 transparent GIF: an image that loads at once, for :data:`_SCROLL_TOP_JS`.
+_BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+
+#: Scrolls the shell's top into view once the image has loaded, by which time the
+#: page just brought to the front has replaced the old one. ``scrollIntoView``
+#: moves whichever box scrolls: Voila's ``#rendered_cells``, JupyterLab's notebook
+#: panel. A timeout rather than ``requestAnimationFrame``, which a background tab
+#: never runs. Neither host runs ``<script>``, so this rides an ``<img onload=...>``
+#: like the favicon script (see :func:`cstar.wizard.ui.branding._favicon_js`).
+_SCROLL_TOP_JS = (
+    "var s=this.closest('.forge-shell');"
+    "if(s)setTimeout(function(){s.scrollIntoView({block:'start'});},0);"
+)
+
+
 def _carries_style(widgets: list[Any]) -> bool:
     """True if any widget (or a descendant) is a ``forge-style`` stylesheet widget."""
     stack = list(widgets)
@@ -72,19 +87,33 @@ class AppShell:
         self.stack.add_class("forge-stack")
         self._link = W.jslink((self.nav, "index"), (self.stack, "selected_index"))
 
-        self.root = W.VBox([*style_children, header, self.nav, self.stack])
+        # Holds the scroll-to-top image `show` sets; never displayed.
+        self._scroll_top = W.HTML("", layout=W.Layout(display="none"))
+        self._scroll_count = 0
+
+        self.root = W.VBox(
+            [*style_children, header, self.nav, self.stack, self._scroll_top]
+        )
         self.root.add_class("forge-app")
         self.root.add_class("forge-shell")
 
     def show(self, title: str) -> None:
-        """Bring the page called ``title`` to the front.
+        """Bring the page called ``title`` to the front, scrolled to its top.
 
         Sets the nav and the stack both: ``jslink`` only syncs them in a
-        browser, and a kernel with no frontend attached must switch too.
+        browser, and a kernel with no frontend attached must switch too. The
+        page left behind may be much longer, so the browser would otherwise keep
+        its scroll position, below the end of the new page.
         """
         index = [t for t, _ in self.pages].index(title)
         self.nav.index = index
         self.stack.selected_index = index
+        # A new value each time, or the widget would not sync and re-run it.
+        self._scroll_count += 1
+        self._scroll_top.value = (
+            f"<img src='{_BLANK_GIF}' alt='' data-n='{self._scroll_count}' "
+            f'onload="{_SCROLL_TOP_JS}"/>'
+        )
 
     def display(self) -> None:
         """Display the shell's root widget."""
