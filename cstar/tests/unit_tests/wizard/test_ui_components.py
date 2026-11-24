@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 
 import pytest
 
@@ -102,6 +103,39 @@ def test_banner_contains_kind_class_and_html():
     html = C.banner("warn", "watch out")
     assert "forge-banner warn" in html
     assert "watch out" in html
+
+
+class _RootChildren(HTMLParser):
+    """Collects what sits directly inside the first element: child tags and text."""
+
+    _VOID = frozenset({"br", "hr", "img", "input", "wbr"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.depth = 0
+        self.children: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if self.depth == 1:
+            self.children.append(f"<{tag}>")
+        if tag not in self._VOID:
+            self.depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag not in self._VOID:  # ``<br/>`` reports an end tag too
+            self.depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.depth == 1 and data.strip():
+            self.children.append(data)
+
+
+def test_banner_content_is_one_flex_item():
+    # .forge-banner is a flex box: text, <b> and <br> left loose inside it would
+    # each be a flex item, laid out side by side as columns
+    parser = _RootChildren()
+    parser.feed(C.banner("info", "Defaults come from <b>x</b>. Expand<br>a section."))
+    assert parser.children == ["<div>"]
 
 
 def test_banner_widget_has_marker_class():
