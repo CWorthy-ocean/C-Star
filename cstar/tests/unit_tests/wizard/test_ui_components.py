@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 
 import pytest
 
@@ -348,9 +349,8 @@ def test_open_accordion_rejects_mismatched_panes_and_titles():
         C.open_accordion(W, [W.HTML("a"), W.HTML("b")], ["A"])
 
 
-def _at_rule_block(prelude: str) -> str:
-    """The bodies of every ``WIZARD_CSS`` at-rule that starts with ``prelude``."""
-    css = C.WIZARD_CSS
+def _at_rule_block(prelude: str, css: str = C.WIZARD_CSS) -> str:
+    """The bodies of every at-rule in ``css`` that starts with ``prelude``."""
     bodies = []
     for match in re.finditer(re.escape(prelude + " {"), css):
         depth, start = 1, match.end()
@@ -363,16 +363,36 @@ def _at_rule_block(prelude: str) -> str:
     return "\n".join(bodies)
 
 
-def test_wizard_is_light_in_any_host_theme():
-    """In a dark JupyterLab, ipywidgets' own controls read the theme's colours
-    (dark boxes, white checkbox labels on the white cards). ``.forge-app`` pins
-    them to the light theme's, re-declaring the ``--jp-widgets-*`` colours that
-    ipywidgets resolves on ``:root``.
+def _rule(selector: str, css: str) -> str:
+    """The declaration block of the rule for ``selector`` in ``css``."""
+    match = re.search(r"(?:^|\n)\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", css)
+    assert match, f"no rule for {selector}"
+    return match.group(1)
+
+
+def test_wizard_follows_the_host_theme():
+    """``.forge-app`` declares the palette and the host colours ipywidgets' own
+    controls read (re-declaring the ``--jp-widgets-*`` colours ipywidgets resolves
+    on ``:root``): the light values by default, the dark ones in a dark
+    JupyterLab and in Voila when the browser prefers dark.
     """
-    decls = _declarations(".forge-app")
-    assert "color-scheme: light;" in decls
-    for name, value in C._LIGHT_HOST_COLORS.items():
-        assert f"{name}: {value};" in decls
+    table = {**C.branding.PALETTE, **C._HOST_COLORS}
+    light = _rule(".forge-app", C.WIZARD_CSS)
+    dark_lab = _rule('body[data-jp-theme-light="false"] :is(.forge-app)', C.WIZARD_CSS)
+    dark_voila = _rule(
+        "body[data-voila] :is(.forge-app)",
+        _at_rule_block("@media (prefers-color-scheme: dark)"),
+    )
+    assert "color-scheme: light;" in light
+    for block in (dark_lab, dark_voila):
+        assert "color-scheme: dark;" in block
+    for name, (light_value, dark_value) in table.items():
+        assert f"{name}: {light_value};" in light
+        for dark in (dark_lab, dark_voila):
+            # a value the same in both themes comes from the light block alone
+            assert (f"{name}:" in dark) == (dark_value != light_value)
+            if dark_value != light_value:
+                assert f"{name}: {dark_value};" in dark
     for name in (
         "--jp-widgets-label-color",
         "--jp-widgets-input-color",
@@ -381,20 +401,119 @@ def test_wizard_is_light_in_any_host_theme():
         "--jp-content-link-color",
         "--jp-layout-color1",
     ):
-        assert name in C._LIGHT_HOST_COLORS
+        assert name in C._HOST_COLORS
 
 
-def test_dark_jupyterlab_gets_a_light_page_behind_the_wizard():
-    """Text on the page (header, intro, catalog bar) needs a light background in a
-    dark JupyterLab; only the outermost wizard root gets it.
+def test_light_values_are_the_brand_palette():
+    """Light looks as it did before the dark theme: the tokens' light values are the
+    brand constants, and the ``--jp-*`` light values JupyterLab 4's light theme's.
     """
-    selector = 'body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app)'
-    assert f"background: {C.branding.GREY};" in _declarations(selector)
+    B = C.branding
+    for name, constant in {
+        "--forge-text": B.SOFT_BLACK,
+        "--forge-red": B.BRAND_RED,
+        "--forge-blue": B.BLUE,
+        "--forge-navy": B.NAVY,
+        "--forge-page": B.GREY,
+        "--forge-line": B.LINE,
+        "--forge-tint-blue": B.TINT_BLUE,
+    }.items():
+        assert B.PALETTE[name][0] == constant
+    assert C._HOST_COLORS["--jp-layout-color1"] == ("#fff", "#212121")
+
+
+def test_only_voila_follows_the_browsers_dark_preference():
+    """JupyterLab marks its own theme on ``body``: its light theme stays light on a
+    dark OS, so every rule under the dark media query is scoped to Voila.
+    """
+    for css in (C.WIZARD_CSS, C.branding.header_css()):
+        block = _at_rule_block("@media (prefers-color-scheme: dark)", css)
+        selectors = re.findall(r"([^{}]+)\{", block)
+        assert selectors
+        for selector in selectors:
+            assert selector.strip().startswith("body[data-voila]"), selector
+
+
+def test_voila_page_background_follows_the_theme():
+    page_light, page_dark = C.branding.PALETTE["--forge-page"]
+    assert f"background: {page_light};" in _rule("body[data-voila]", C.WIZARD_CSS)
+    media = _at_rule_block("@media (prefers-color-scheme: dark)")
+    assert f"background: {page_dark};" in _rule("body[data-voila]", media)
+    assert f"background: {page_dark};" in _rule(
+        'body[data-voila][data-jp-theme-light="false"]', C.WIZARD_CSS
+    )
+
+
+def test_header_declares_its_own_palette():
+    """``branding_display()`` can show the header without the wizard's stylesheet,
+    so its CSS declares the palette tokens it reads, in both themes.
+    """
     header = C.branding.header_css()
-    assert (
-        'body[data-jp-theme-light="false"] .cworthy-forge-header'
-        ":not(.forge-app .cworthy-forge-header)"
-    ) in header
+    assert C.branding.themed_rule(".cworthy-forge-header", C.branding.PALETTE) in header
+    assert "var(--forge-red)" in header
+
+
+def _has_colour_literal(value: str) -> bool:
+    """Whether a CSS value names a colour itself (a ``var(--forge-…)`` does not)."""
+    return bool(_COLOUR_LITERAL.search(re.sub(r"var\([^)]*\)", "", value)))
+
+
+_COLOUR_LITERAL = re.compile(
+    r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\b(?:white|black|red|green|blue|gr[ae]y|orange"
+    r"|yellow|purple|navy|silver|maroon|teal|crimson|darkred|lightgr[ae]y)\b",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("name", ["WIZARD_CSS", "header_css"])
+def test_stylesheet_colours_come_from_tokens(name):
+    """Every colour in the stylesheets is a ``var(--forge-…)`` token, so it follows
+    the theme; literal colours appear only in the custom-property declarations
+    (and in Voila's page background, outside the wizard's root).
+    """
+    css = C.WIZARD_CSS if name == "WIZARD_CSS" else C.branding.header_css()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    for selector, block in re.findall(r"([^{};]+)\{([^{}]*)\}", css):
+        for declaration in block.split(";"):
+            prop, _, value = declaration.partition(":")
+            if prop.strip().startswith("--") or not _has_colour_literal(value):
+                continue
+            assert selector.strip().startswith("body[data-voila]"), (
+                f"{selector.strip()} {{ {declaration.strip()} }}"
+            )
+            assert value.strip() in C.branding.PALETTE["--forge-page"]
+
+
+def test_status_span_colours_follow_the_theme():
+    assert C.status_span("err", "bad") == "<span class='forge-st-err'>bad</span>"
+    for kind in ("err", "ok", "warn", "note"):
+        assert f".forge-app .{C.status_class(kind)} {{" in C.WIZARD_CSS
+
+
+#: CSS properties and ipywidgets style traits that carry a colour.
+_COLOUR_SETTING = re.compile(
+    r"\b(?:color|background(?:-color)?|border(?:-[a-z]+)?|fill|stroke|outline(?:-color)?"
+    r"|button_color|text_color|bar_color|handle_color)\s*[:=]\s*['\"]?([^'\";}>)]*)",
+)
+
+
+def test_wizard_modules_write_no_colours_of_their_own():
+    """A colour written into Python-built HTML, SVG or a ``W.Layout`` stays light
+    on a dark page; it belongs in the stylesheet (a class plus a palette token).
+    """
+    root = Path(C.__file__).resolve().parents[1]
+    stylesheets = {root / "ui" / "components.py", root / "ui" / "branding.py"}
+    found = []
+    for path in sorted(root.rglob("*.py")):
+        if path in stylesheets:
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for value in _COLOUR_SETTING.findall(line):
+                if _has_colour_literal(value):
+                    found.append(f"{path.relative_to(root)}:{number}: {line.strip()}")
+    assert not found, "\n".join(found)
 
 
 def test_sticky_step_links_wrap_instead_of_hiding():

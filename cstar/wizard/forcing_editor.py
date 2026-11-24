@@ -1812,10 +1812,8 @@ class _ForcingEditor:
                         raise FileNotFoundError(f"river custom file not found: {path}")
                     content_hash = hash_netcdf_contents(path)
                 except Exception as exc:
-                    ws[
-                        "custom_file_status"
-                    ].value = (
-                        f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+                    ws["custom_file_status"].value = components.status_span(
+                        "err", f"{type(exc).__name__}: {exc}"
                     )
                     return
                 ws["_custom_file"] = {
@@ -1846,9 +1844,9 @@ class _ForcingEditor:
             def _on_river_custom_file_attach_click(_btn, ws=w) -> None:
                 path_str = ws["custom_file_path"].value.strip()
                 if not path_str:
-                    ws[
-                        "custom_file_status"
-                    ].value = "<span style='color:#b00'>Enter a path first.</span>"
+                    ws["custom_file_status"].value = components.status_span(
+                        "err", "Enter a path first."
+                    )
                     return
                 # Explicit click always re-hashes (the file may have changed on
                 # disk since the last attach) -- no `_maybe_` dedupe here.

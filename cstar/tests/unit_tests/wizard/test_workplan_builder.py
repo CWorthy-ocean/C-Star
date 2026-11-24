@@ -2336,7 +2336,7 @@ def _nodes(svg: str) -> dict[str, dict[str, str]]:
     found = {}
     for match in re.finditer(
         r"<g class='node' data-node='([^']*)' data-layer='(\d+)' data-kind='([^']*)'>"
-        r".*?<rect x='([\d.]+)' y='([\d.]+)'",
+        r".*?<rect(?: class='[^']*')? x='([\d.]+)' y='([\d.]+)'",
         svg,
     ):
         name, layer, kind, x, y = match.groups()
@@ -2401,6 +2401,46 @@ def test_dag_svg_layers_labels_and_escaping(roms_bp):
     assert labels == ["blueprint, boundary", "restart"]
     # every name is escaped, so no markup of ours can be injected
     assert "make<ic>" not in svg and "make&lt;ic&gt;" in svg
+
+
+def test_dag_svg_names_classes_and_writes_no_colour(roms_bp):
+    from cstar.orchestration.models import RunRef, Step
+
+    steps = [
+        Step(
+            name="make",
+            application="nest_ic",
+            blueprint="inline",
+            depends_on=["spin@old"],
+        ),
+        Step(name="forge", application="forge", blueprint=str(roms_bp)),
+        Step(
+            name="run",
+            application="ucla_roms",
+            blueprint=str(roms_bp),
+            depends_on=["forge", "make"],
+            directives={"continue-from": {"step": "make"}},
+        ),
+        Step(name="odd", application="something_else", blueprint=str(roms_bp)),
+    ]
+    svg = wb.dag_svg(steps, {"old": RunRef(run_id="the-old-run")})
+
+    assert not re.search(r"#[0-9a-fA-F]{3,6}\b|fill='#|stroke='#|stroke:#", svg)
+    rects = {
+        name: re.search(
+            rf"data-node='{name}'[^>]*>.*?<rect( class='[^']*')?", svg
+        ).group(1)
+        for name in ("spin@old", "make", "forge", "run", "odd")
+    }
+    assert rects == {
+        "spin@old": " class='dag-external'",
+        "make": " class='dag-nest-ic'",
+        "forge": " class='dag-forge'",
+        "run": " class='dag-ucla-roms'",
+        "odd": None,
+    }
+    assert "class='dag-title'" in svg and "class='dag-subtitle'" in svg
+    assert "class='dag-arrow'" in svg
 
 
 def test_dag_svg_labels_carbonate_sensitivity_edges(roms_bp):

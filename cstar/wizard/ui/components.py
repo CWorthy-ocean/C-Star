@@ -32,48 +32,9 @@ STICKY_BAR_HEIGHT = "56px"
 #: The same once the bar's step links wrap onto a second line (one more 26px row).
 STICKY_BAR_HEIGHT_WRAPPED = "82px"
 
-#: The host colours ipywidgets' own controls read (input boxes, checkbox and radio
-#: labels, the run log's output areas), at JupyterLab 4's light-theme values. The
-#: wizard's palette assumes a light page, so ``.forge-app`` sets these and stays
-#: light inside a dark JupyterLab theme too. ipywidgets declares the
-#: ``--jp-widgets-*`` colours on ``:root`` from the theme colours, so they resolve
-#: there; they are declared again here to resolve against the values above them.
-_LIGHT_HOST_COLORS = {
-    "--jp-layout-color0": "#fff",
-    "--jp-layout-color1": "#fff",
-    "--jp-layout-color2": "#eee",
-    "--jp-layout-color3": "#bdbdbd",
-    "--jp-layout-color4": "#757575",
-    "--jp-ui-font-color0": "#000",
-    "--jp-ui-font-color1": "rgba(0, 0, 0, 0.87)",
-    "--jp-ui-font-color2": "rgba(0, 0, 0, 0.54)",
-    "--jp-ui-font-color3": "rgba(0, 0, 0, 0.38)",
-    "--jp-ui-inverse-font-color0": "#fff",
-    "--jp-ui-inverse-font-color1": "#fff",
-    "--jp-content-font-color0": "#000",
-    "--jp-content-font-color1": "rgba(0, 0, 0, 0.87)",
-    "--jp-content-font-color2": "rgba(0, 0, 0, 0.54)",
-    "--jp-content-font-color3": "rgba(0, 0, 0, 0.38)",
-    "--jp-content-link-color": "#0d47a1",
-    "--jp-content-link-visited-color": "#7b1fa2",
-    # the light theme leaves this unset, so links fall back to the link colour
-    "--jp-content-link-hover-color": "var(--jp-content-link-color)",
-    "--jp-border-color0": "#bdbdbd",
-    "--jp-border-color1": "#bdbdbd",
-    "--jp-border-color2": "#e0e0e0",
-    "--jp-border-color3": "#eee",
-    "--jp-brand-color0": "#0d47a1",
-    "--jp-brand-color1": "#1976d2",
-    "--jp-brand-color2": "#64b5f6",
-    "--jp-error-color0": "#b71c1c",
-    "--jp-error-color1": "#d32f2f",
-    "--jp-warn-color0": "#e65100",
-    "--jp-warn-color1": "#f57c00",
-    "--jp-success-color0": "#1b5e20",
-    "--jp-success-color1": "#388e3c",
-    "--jp-info-color0": "#006064",
-    "--jp-info-color1": "#0097a7",
-    "--jp-rendermime-error-background": "#fdd",
+#: ipywidgets' own colour variables, derived from the host colours below: the
+#: same in both themes.
+_WIDGET_COLORS = {
     "--jp-widgets-color": "var(--jp-content-font-color1)",
     "--jp-widgets-label-color": "var(--jp-widgets-color)",
     "--jp-widgets-readout-color": "var(--jp-widgets-color)",
@@ -85,47 +46,87 @@ _LIGHT_HOST_COLORS = {
     "--jp-widgets-slider-handle-background-color": "var(--jp-layout-color1)",
     "--jp-widgets-slider-active-handle-color": "var(--jp-brand-color1)",
 }
-_LIGHT_HOST_DECLARATIONS = "\n".join(
-    f"    {name}: {value};" for name, value in _LIGHT_HOST_COLORS.items()
-)
+
+#: The host colours ipywidgets' own controls read (input boxes, checkbox and radio
+#: labels, the run log's output areas), as ``(light, dark)`` pairs at JupyterLab
+#: 4.6's theme-light and theme-dark values. ``.forge-app`` declares the column that
+#: fits the host's theme (:func:`cstar.wizard.ui.branding.themed_rule`), so a
+#: control matches the wizard's own colours in any host, Voila (always light
+#: itself) included. ipywidgets declares the ``--jp-widgets-*`` colours on
+#: ``:root`` from the theme colours, so they resolve there; they are declared
+#: again here to resolve against the values above them.
+_HOST_COLORS: dict[str, tuple[str, str]] = {
+    "--jp-layout-color0": ("#fff", "#111"),
+    "--jp-layout-color1": ("#fff", "#212121"),
+    "--jp-layout-color2": ("#eee", "#424242"),
+    "--jp-layout-color3": ("#bdbdbd", "#616161"),
+    "--jp-layout-color4": ("#757575", "#757575"),
+    "--jp-ui-font-color0": ("#000", "#fff"),
+    "--jp-ui-font-color1": ("rgba(0, 0, 0, 0.87)", "rgba(255, 255, 255, 0.87)"),
+    "--jp-ui-font-color2": ("rgba(0, 0, 0, 0.54)", "rgba(255, 255, 255, 0.54)"),
+    "--jp-ui-font-color3": ("rgba(0, 0, 0, 0.38)", "rgba(255, 255, 255, 0.38)"),
+    "--jp-ui-inverse-font-color0": ("#fff", "#000"),
+    "--jp-ui-inverse-font-color1": ("#fff", "rgba(0, 0, 0, 0.8)"),
+    "--jp-content-font-color0": ("#000", "#fff"),
+    "--jp-content-font-color1": ("rgba(0, 0, 0, 0.87)", "#fff"),
+    "--jp-content-font-color2": ("rgba(0, 0, 0, 0.54)", "rgba(255, 255, 255, 0.7)"),
+    "--jp-content-font-color3": ("rgba(0, 0, 0, 0.38)", "rgba(255, 255, 255, 0.5)"),
+    "--jp-content-link-color": ("#0d47a1", "#64b5f6"),
+    "--jp-content-link-visited-color": ("#7b1fa2", "#ba68c8"),
+    # the light theme leaves this unset, so links fall back to the link colour
+    "--jp-content-link-hover-color": ("var(--jp-content-link-color)", "#42a5f5"),
+    "--jp-border-color0": ("#bdbdbd", "#616161"),
+    "--jp-border-color1": ("#bdbdbd", "#616161"),
+    "--jp-border-color2": ("#e0e0e0", "#424242"),
+    "--jp-border-color3": ("#eee", "#212121"),
+    "--jp-brand-color0": ("#0d47a1", "#1976d2"),
+    "--jp-brand-color1": ("#1976d2", "#2196f3"),
+    "--jp-brand-color2": ("#64b5f6", "#64b5f6"),
+    "--jp-error-color0": ("#b71c1c", "#d32f2f"),
+    "--jp-error-color1": ("#d32f2f", "#f44336"),
+    "--jp-warn-color0": ("#e65100", "#f57c00"),
+    "--jp-warn-color1": ("#f57c00", "#ff9800"),
+    "--jp-success-color0": ("#1b5e20", "#388e3c"),
+    "--jp-success-color1": ("#388e3c", "#4caf50"),
+    "--jp-info-color0": ("#006064", "#0097a7"),
+    "--jp-info-color1": ("#0097a7", "#00bcd4"),
+    "--jp-rendermime-error-background": ("#fdd", "rgba(244, 67, 54, 0.28)"),
+    **{name: (value, value) for name, value in _WIDGET_COLORS.items()},
+}
 
 #: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap it with
 #: :func:`style_widget`, which also installs the number-box mouse-wheel guard that
 #: a bare ``f"<style>{WIZARD_CSS}</style>"`` would lack).
 WIZARD_CSS = f"""
-/* page background only in Voila (body[data-voila]); JupyterLab keeps its theme */
-body[data-voila] {{ background: {branding.GREY}; }}
+/* page background only in Voila (body[data-voila]); JupyterLab keeps its theme.
+   Voila's own panels (#main, #rendered_cells) cover it with its light theme's
+   colours, so in dark they take the page colour too */
+{branding.VOILA_BODY} {{ background: {branding.PALETTE["--forge-page"][0]}; }}
+{branding.DARK_VOILA_MEDIA} {{
+    {branding.VOILA_BODY} {{ background: {branding.PALETTE["--forge-page"][1]}; color-scheme: dark; }}
+    {branding.VOILA_BODY} :is(#main, #rendered_cells) {{ background: {branding.PALETTE["--forge-page"][1]}; }}
+}}
+{branding.VOILA_BODY}[data-jp-theme-light="false"] {{ background: {branding.PALETTE["--forge-page"][1]}; }}
 /* the page column: shell root only -- the wizard root also carries .forge-app
    (so the notebook path is styled) and must not get its own max-width/padding */
 body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; padding: 0 24px; }}
 
-/* the wizard is light in any host theme: native controls and scrollbars too
-   (color-scheme), and ipywidgets' controls through the host colours. The header
-   too, for when branding_display() shows it above a wizard, outside .forge-app */
-.{branding.HEADER_CLASS},
-.forge-app {{
-    color-scheme: light;
-{_LIGHT_HOST_DECLARATIONS}
-}}
-/* in a dark JupyterLab, the outermost wizard root brings Voila's light page with
-   it, so the text that sits on the page (header, intro, catalog bar) reads */
-body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
-    background: {branding.GREY};
-    border-radius: 6px;
-    padding: 0 12px 12px;
-}}
+/* the wizard's colours (branding.PALETTE) and the host colours ipywidgets' own
+   controls read, light or dark with the host's theme; native controls and
+   scrollbars follow through color-scheme */
+{branding.themed_rule(".forge-app", {**branding.PALETTE, **_HOST_COLORS})}
 
 .forge-app, .forge-app .widget-label, .forge-app .widget-html-content,
 .forge-app .jupyter-button, .forge-app input, .forge-app select,
 .forge-app textarea {{
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    color: {branding.SOFT_BLACK};
+    color: var(--forge-text);
 }}
 
 /* section card */
 .forge-app .forge-card {{
-    background: #fff;
-    border: 1px solid {branding.LINE};
+    background: var(--forge-surface);
+    border: 1px solid var(--forge-line);
     border-radius: 6px;
     margin: 10px 0;
     overflow: visible;
@@ -140,7 +141,7 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     align-items: center;
     gap: 10px;
     padding: 12px 18px;
-    border-bottom: 1px solid {branding.LINE_2};
+    border-bottom: 1px solid var(--forge-line-2);
 }}
 .forge-app .forge-card-h .widget-html-content {{
     display: flex;
@@ -153,8 +154,8 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    background: {branding.SOFT_BLACK};
-    color: #fff;
+    background: var(--forge-text);
+    color: var(--forge-surface);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -162,7 +163,7 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     font-weight: 700;
 }}
 .forge-app .forge-card .ttl {{ font-size: 15.5px; font-weight: 600; }}
-.forge-app .forge-card .desc {{ font-size: 12.5px; color: {branding.INK_2}; }}
+.forge-app .forge-card .desc {{ font-size: 12.5px; color: var(--forge-ink-2); }}
 /* generic flex-spacer marker, reused inside the card header, sticky bar, etc. */
 .forge-app .sp {{ flex: 1 1 auto; }}
 
@@ -178,18 +179,18 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     font-weight: 600;
     white-space: nowrap;
 }}
-.forge-app .forge-chip.req {{ background: {branding.TINT_RED}; color: {branding.BRAND_RED}; }}
-.forge-app .forge-chip.opt {{ background: {branding.LINE_2}; color: {branding.INK_2}; }}
-.forge-app .forge-chip.ok {{ background: {branding.TINT_GREEN}; color: {branding.GREEN}; }}
-.forge-app .forge-chip.warn {{ background: {branding.TINT_AMBER}; color: {branding.AMBER}; }}
-.forge-app .forge-chip.info {{ background: {branding.TINT_BLUE}; color: {branding.BLUE}; }}
-.forge-app .forge-chip.def {{ background: {branding.LINE_2}; color: {branding.SOFT_BLACK}; }}
+.forge-app .forge-chip.req {{ background: var(--forge-tint-red); color: var(--forge-red); }}
+.forge-app .forge-chip.opt {{ background: var(--forge-line-2); color: var(--forge-ink-2); }}
+.forge-app .forge-chip.ok {{ background: var(--forge-tint-green); color: var(--forge-green); }}
+.forge-app .forge-chip.warn {{ background: var(--forge-tint-amber); color: var(--forge-amber); }}
+.forge-app .forge-chip.info {{ background: var(--forge-tint-blue); color: var(--forge-blue); }}
+.forge-app .forge-chip.def {{ background: var(--forge-line-2); color: var(--forge-text); }}
 /* in a card header, Required/Optional are quiet text, not a red pill that reads
    like an error: the live status chip beside them is the header's one colour */
 .forge-app .forge-card-h .forge-chip.req,
 .forge-app .forge-card-h .forge-chip.opt {{
     background: transparent;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
     font-weight: 500;
     padding: 0 2px;
 }}
@@ -200,25 +201,25 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     gap: 10px;
     padding: 9px 12px;
     border-radius: 4px;
-    border: 1px solid {branding.LIGHT_BLUE};
-    background: {branding.TINT_BLUE};
+    border: 1px solid var(--forge-light-blue);
+    background: var(--forge-tint-blue);
     font-size: 13px;
 }}
-.forge-app .forge-banner.info {{ border-color: {branding.LIGHT_BLUE}; background: {branding.TINT_BLUE}; }}
-.forge-app .forge-banner.warn {{ border-color: {branding.AMBER}; background: {branding.TINT_AMBER}; }}
-.forge-app .forge-banner.err {{ border-color: {branding.BRAND_RED}; background: {branding.TINT_RED}; }}
-.forge-app .forge-banner.ok {{ border-color: {branding.GREEN}; background: {branding.TINT_GREEN}; }}
+.forge-app .forge-banner.info {{ border-color: var(--forge-light-blue); background: var(--forge-tint-blue); }}
+.forge-app .forge-banner.warn {{ border-color: var(--forge-amber); background: var(--forge-tint-amber); }}
+.forge-app .forge-banner.err {{ border-color: var(--forge-red); background: var(--forge-tint-red); }}
+.forge-app .forge-banner.ok {{ border-color: var(--forge-green); background: var(--forge-tint-green); }}
 .forge-app .forge-banner-w .widget-html-content {{ display: block; }}
 
 /* field rows: label column is an HTML widget, the input itself has description='' */
 .forge-app .forge-field .flab .widget-html-content {{ padding-top: 5px; line-height: 1.25; }}
 .forge-app .forge-field .w {{ font-size: 13px; font-weight: 500; }}
-.forge-app .forge-field .w .req {{ color: {branding.BRAND_RED}; font-weight: 700; margin-left: 4px; }}
+.forge-app .forge-field .w .req {{ color: var(--forge-red); font-weight: 700; margin-left: 4px; }}
 .forge-app .forge-field .exp {{ margin-top: 3px; }}
 .forge-app .forge-field .sym {{
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
 }}
 /* fixed input widths (110-420px) and 300px-wide checkboxes inside a two-column
    field_grid gave the card body a ~1470px min-content width: let the row's
@@ -256,16 +257,31 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 }}
 .forge-app .forge-hint {{
     font-size: 12px;
-    color: {branding.INK_2};
+    color: var(--forge-ink-2);
     line-height: 1.35;
     max-width: 520px;
 }}
-.forge-app .forge-unit {{ font-size: 12.5px; color: {branding.INK_2}; padding-top: 6px; }}
-.forge-app .forge-msg-err {{ font-size: 12.5px; color: {branding.BRAND_RED}; }}
-.forge-app .forge-msg-ok {{ font-size: 12.5px; color: {branding.GREEN}; }}
-.forge-app .forge-msg-warn {{ font-size: 12.5px; color: {branding.AMBER}; }}
+.forge-app .forge-unit {{ font-size: 12.5px; color: var(--forge-ink-2); padding-top: 6px; }}
+.forge-app .forge-msg-err {{ font-size: 12.5px; color: var(--forge-red); }}
+.forge-app .forge-msg-ok {{ font-size: 12.5px; color: var(--forge-green); }}
+.forge-app .forge-msg-warn {{ font-size: 12.5px; color: var(--forge-amber); }}
+/* status text in Python-built HTML (status_span): colour only, at the size of
+   the text around it. The catalog bar's status keeps the brand tones. */
+.forge-app .forge-st-err {{ color: var(--forge-err); }}
+.forge-app .forge-st-ok {{ color: var(--forge-ok); }}
+.forge-app .forge-st-warn {{ color: var(--forge-warn); }}
+.forge-app .forge-st-note {{ color: var(--forge-note); }}
+.forge-app .forge-catalog-bar .forge-st-err {{ color: var(--forge-red); }}
+.forge-app .forge-catalog-bar .forge-st-ok {{ color: var(--forge-green); }}
+.forge-app .forge-catalog-bar .forge-st-warn {{ color: var(--forge-amber); }}
+/* a quieter hint than forge-hint (the Workplan run's environment fallbacks), and
+   an aside under a setting (the nesting parent's) */
+.forge-app .forge-hint.quiet {{ color: var(--forge-quiet); }}
+.forge-app .forge-aside {{ font-style: italic; color: var(--forge-faint); margin: 0 0 6px; }}
+/* the run logs and the Workplan's run preview (W.Output) */
+.forge-app .forge-log {{ border: 1px solid var(--forge-log-border); }}
 .forge-app .widget-text input, .forge-app .widget-dropdown select {{
-    border: 1px solid {branding.LINE};
+    border: 1px solid var(--forge-line);
     border-radius: 4px;
 }}
 /* number boxes: no up/down arrows (the mouse wheel is handled in style_widget) */
@@ -273,8 +289,8 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 .forge-app input[type=number]::-webkit-inner-spin-button,
 .forge-app input[type=number]::-webkit-outer-spin-button {{ -webkit-appearance: none; margin: 0; }}
 .forge-app .widget-text input:focus, .forge-app .widget-dropdown select:focus {{
-    border-color: {branding.BLUE};
-    box-shadow: 0 0 0 2px {branding.LIGHT_BLUE};
+    border-color: var(--forge-blue);
+    box-shadow: 0 0 0 2px var(--forge-light-blue);
     outline: none;
 }}
 
@@ -285,11 +301,11 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     gap: 8px;
     margin: 8px 0 2px;
 }}
-.forge-app .forge-settings-sec .ttl {{ font-size: 15px; font-weight: 650; color: {branding.NAVY}; }}
+.forge-app .forge-settings-sec .ttl {{ font-size: 15px; font-weight: 650; color: var(--forge-navy); }}
 .forge-app .forge-settings-sec .sym {{
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
 }}
 
 /* subsection header: the space and hairline go ABOVE the title, so the title
@@ -300,7 +316,7 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     gap: 10px;
     margin: 22px 0 12px;
     padding-top: 16px;
-    border-top: 1px solid {branding.LINE_2};
+    border-top: 1px solid var(--forge-line-2);
 }}
 /* ...except for a subsection that opens its card body or pane. Hidden siblings
    (a card body starts with its error banner, display:none until there is a
@@ -311,11 +327,11 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     padding-top: 0;
 }}
 .forge-app .forge-sub .widget-html-content {{ display: flex; align-items: center; gap: 10px; }}
-.forge-app .forge-sub-ttl {{ font-size: 15px; font-weight: 650; color: {branding.NAVY}; }}
+.forge-app .forge-sub-ttl {{ font-size: 15px; font-weight: 650; color: var(--forge-navy); }}
 .forge-app .forge-sub-sym {{
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
 }}
 
 /* sticky bar (sticks in Voila's page scroll; harmless no-op inside a Lab cell).
@@ -325,8 +341,8 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     position: sticky;
     top: 0;
     z-index: 5;
-    background: #fff;
-    border-bottom: 1px solid {branding.LINE};
+    background: var(--forge-surface);
+    border-bottom: 1px solid var(--forge-line);
     margin: 0;
     padding: 8px 0;
     display: flex;
@@ -352,11 +368,11 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     border-radius: 13px;
     font-size: 12.5px;
     font-weight: 600;
-    color: {branding.INK_2};
+    color: var(--forge-ink-2);
     text-decoration: none;
     white-space: nowrap;
 }}
-.forge-app .forge-sticky a.step:hover {{ background: {branding.TINT_BLUE}; }}
+.forge-app .forge-sticky a.step:hover {{ background: var(--forge-tint-blue); }}
 /* in a narrow window the step links wrap onto a second line, so every card stays
    one click away; the run summary takes what room is left on its line (a zero
    basis: it never pushes anything onto another line) and ellipsises */
@@ -414,22 +430,22 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 .forge-app .jupyter-button {{
     border-radius: 4px;
     font-weight: 600;
-    border: 1px solid {branding.LINE};
-    background: #fff;
-    color: {branding.SOFT_BLACK};
+    border: 1px solid var(--forge-line);
+    background: var(--forge-surface);
+    color: var(--forge-text);
     width: auto;
     min-width: 0;
     padding: 0 12px;
 }}
 .forge-app .jupyter-button.mod-primary {{
-    background: {branding.BLUE};
-    border-color: {branding.BLUE};
-    color: #fff;
+    background: var(--forge-primary);
+    border-color: var(--forge-primary);
+    color: var(--forge-on-primary);
 }}
 .forge-app .jupyter-button.mod-danger {{
-    background: #fff;
-    border-color: {branding.BRAND_RED};
-    color: {branding.BRAND_RED};
+    background: var(--forge-surface);
+    border-color: var(--forge-red);
+    color: var(--forge-red);
 }}
 
 /* the sticky bar's download link, styled like a mod-primary button */
@@ -439,12 +455,12 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     height: 32px;
     padding: 0 12px;
     border-radius: 4px;
-    background: {branding.BLUE};
-    color: #fff;
+    background: var(--forge-primary);
+    color: var(--forge-on-primary);
     font-weight: 600;
     text-decoration: none;
 }}
-.forge-app .forge-dl-btn code {{ color: #fff; margin-left: 0.5em; }}
+.forge-app .forge-dl-btn code {{ color: var(--forge-on-primary); margin-left: 0.5em; }}
 
 /* the preview pane (a live view of the draft) sits beside the cards (right), or
    below or above them, and optionally sticks to the page scroll (forge-pinned).
@@ -460,8 +476,8 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 }}
 .forge-app .forge-side-top, .forge-app .forge-side-bottom {{
     box-sizing: border-box;
-    background: #fff;
-    border: 1px solid {branding.LINE};
+    background: var(--forge-surface);
+    border: 1px solid var(--forge-line);
     border-radius: 6px;
     padding: 6px 14px 10px;
     margin: 10px 0;
@@ -472,12 +488,12 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 .forge-app .forge-side-top.forge-pinned {{
     position: sticky;
     top: {STICKY_BAR_HEIGHT};
-    box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 6px 12px -8px var(--forge-shadow);
 }}
 .forge-app .forge-side-bottom.forge-pinned {{
     position: sticky;
     bottom: 0;
-    box-shadow: 0 -6px 12px -8px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 -6px 12px -8px var(--forge-shadow);
 }}
 /* in a narrow window the Workplan page's sticky bar can wrap onto a second line
    (its six step links, status chip and download button need ~780px of window), so
@@ -501,6 +517,22 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     padding-top: 0;
 }}
 .forge-app .forge-dag .widget-html-content {{ display: block; }}
+/* the workplan's dependency graph (workplan_builder.dag_svg): a node's fill
+   follows its application (its rect's class dag-<application>) */
+.forge-app .forge-dag .node > rect {{ fill: var(--forge-dag-other); stroke: var(--forge-dag-outline); }}
+.forge-app .forge-dag .node > rect.dag-ucla-roms {{ fill: var(--forge-dag-ucla-roms); }}
+.forge-app .forge-dag .node > rect.dag-forge {{ fill: var(--forge-dag-forge); }}
+.forge-app .forge-dag .node > rect.dag-nest-ic {{ fill: var(--forge-dag-nest-ic); }}
+.forge-app .forge-dag .node > rect.dag-upscaler {{ fill: var(--forge-dag-upscaler); }}
+.forge-app .forge-dag .node > rect.dag-hello-world {{ fill: var(--forge-dag-hello-world); }}
+.forge-app .forge-dag .node > rect.dag-external {{ fill: var(--forge-dag-external); }}
+.forge-app .forge-dag .dag-title {{ fill: var(--forge-dag-title); }}
+.forge-app .forge-dag .dag-subtitle {{ fill: var(--forge-dag-subtitle); }}
+.forge-app .forge-dag .edge {{ stroke: var(--forge-dag-edge); }}
+.forge-app .forge-dag .dag-arrow {{ fill: var(--forge-dag-edge); }}
+/* an edge label's halo is the pane's own background */
+.forge-app .forge-dag .edge-label {{ fill: var(--forge-dag-label); stroke: var(--forge-surface); }}
+.forge-app .forge-dag .dag-empty {{ fill: var(--forge-faint); }}
 @media (max-width: 1100px) {{
     .forge-app .forge-two-col {{ flex-direction: column !important; align-items: stretch; }}
     .forge-app .forge-two-col > .forge-left,
@@ -558,7 +590,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     cursor: pointer;
 }}
 .forge-app .forge-coll-h:has(> .forge-coll-hit:focus-visible) {{
-    outline: 2px solid {branding.LIGHT_BLUE};
+    outline: 2px solid var(--forge-light-blue);
     outline-offset: 1px;
 }}
 .forge-app .forge-coll-ht {{ flex: 1 1 auto; min-width: 0; margin: 0; }}
@@ -572,42 +604,42 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     flex: none;
     width: 12px;
     font-size: 12px;
-    color: {branding.INK_2};
+    color: var(--forge-ink-2);
     transition: transform .12s;
 }}
 .forge-app .forge-coll-open > .forge-coll-h .chev {{ transform: rotate(90deg); }}
-.forge-app .forge-coll-t {{ font-size: 13.5px; font-weight: 600; color: {branding.SOFT_BLACK}; white-space: nowrap; }}
+.forge-app .forge-coll-t {{ font-size: 13.5px; font-weight: 600; color: var(--forge-text); white-space: nowrap; }}
 .forge-app .forge-coll-pills {{ display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; }}
-.forge-app .forge-coll-req {{ font-size: 12px; font-weight: 500; color: {branding.INK_3}; white-space: nowrap; }}
+.forge-app .forge-coll-req {{ font-size: 12px; font-weight: 500; color: var(--forge-ink-3); white-space: nowrap; }}
 .forge-app .forge-pill {{
     display: inline-flex;
     align-items: center;
     height: 20px;
     padding: 0 7px;
     border-radius: 4px;
-    background: #EEF0F3;
-    color: #3D3F46;
+    background: var(--forge-pill);
+    color: var(--forge-pill-text);
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
 }}
-.forge-app .forge-pill.mod {{ background: {branding.TINT_BLUE}; color: {branding.BLUE}; }}
-.forge-app .forge-pill.warn {{ background: {branding.TINT_AMBER}; color: {branding.AMBER}; }}
-.forge-app .forge-pill.off {{ background: transparent; color: {branding.INK_3}; padding: 0 2px; }}
+.forge-app .forge-pill.mod {{ background: var(--forge-tint-blue); color: var(--forge-blue); }}
+.forge-app .forge-pill.warn {{ background: var(--forge-tint-amber); color: var(--forge-amber); }}
+.forge-app .forge-pill.off {{ background: transparent; color: var(--forge-ink-3); padding: 0 2px; }}
 /* a pane: white closed header; open, its tinted header joins the bordered body */
 .forge-app .forge-coll-pane > .forge-coll-h {{
-    background: #fff;
-    border: 1px solid {branding.LINE};
+    background: var(--forge-surface);
+    border: 1px solid var(--forge-line);
     border-radius: 6px;
     padding: 8px 14px;
 }}
 .forge-app .forge-coll-pane.forge-coll-open > .forge-coll-h {{
-    background: #FAFAFB;
+    background: var(--forge-surface-2);
     border-radius: 6px 6px 0 0;
-    border-bottom-color: {branding.LINE_2};
+    border-bottom-color: var(--forge-line-2);
 }}
 .forge-app .forge-coll-pane > .forge-coll-b {{
-    border: 1px solid {branding.LINE};
+    border: 1px solid var(--forge-line);
     border-top: 0;
     border-radius: 0 0 6px 6px;
     padding: 14px 18px 16px;
@@ -615,24 +647,24 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 /* inline: a one-line link (a forcing row's options), its body under a dashed rule */
 .forge-app .forge-coll-inline {{ flex: 1 1 100%; margin: 0; }}
 .forge-app .forge-coll-inline > .forge-coll-h {{ align-self: flex-start; }}
-.forge-app .forge-coll-inline .forge-coll-t {{ font-size: 12.5px; color: {branding.BLUE}; }}
+.forge-app .forge-coll-inline .forge-coll-t {{ font-size: 12.5px; color: var(--forge-blue); }}
 .forge-app .forge-coll-inline > .forge-coll-b {{
     margin-top: 10px;
     padding-top: 10px;
-    border-top: 1px dashed {branding.LINE};
+    border-top: 1px dashed var(--forge-line);
 }}
 /* a pane-level options link (initial conditions, boundary forcing) applies to
    the whole pane, so it is set off from the subsection above it like one */
 .forge-app .forge-coll-inline.forge-sec-opts {{
     margin-top: 18px;
     padding-top: 12px;
-    border-top: 1px solid {branding.LINE_2};
+    border-top: 1px solid var(--forge-line-2);
 }}
 
 /* tab bar: current-tab highlight */
 .forge-app .lm-TabBar-tab.lm-mod-current, .forge-app .p-TabBar-tab.p-mod-current {{
-    border-bottom: 2px solid {branding.BLUE};
-    color: {branding.BLUE};
+    border-bottom: 2px solid var(--forge-blue);
+    color: var(--forge-blue);
     font-weight: 600;
 }}
 
@@ -647,8 +679,8 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     font-size: 13px;
 }}
 .forge-app .forge-rail .widget-toggle-button.mod-active {{
-    background: {branding.TINT_BLUE};
-    color: {branding.BLUE};
+    background: var(--forge-tint-blue);
+    color: var(--forge-blue);
     font-weight: 600;
     box-shadow: none;
 }}
@@ -687,7 +719,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 .forge-app .forge-out-per .widget-html-content,
 .forge-app .forge-out-files .widget-html-content {{
     font-size: 12px;
-    color: {branding.INK_2};
+    color: var(--forge-ink-2);
     line-height: 1.3;
 }}
 .forge-app .forge-out-per .widget-html-content {{ white-space: nowrap; }}
@@ -696,7 +728,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: .05em;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
     height: 18px;
     line-height: 18px;
     box-sizing: border-box;
@@ -713,7 +745,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
    a subsection; the pane's first header has none (widget-level class set in
    _SettingsEditor) */
 .forge-app .forge-settings-sec-w {{
-    border-top: 1px solid {branding.LINE_2};
+    border-top: 1px solid var(--forge-line-2);
     margin-top: 18px;
     padding-top: 12px;
 }}
@@ -738,8 +770,8 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
    (_ForcingEditor._add_row_options) sit the same way under its disclosure. */
 .forge-app .forge-frow {{
     position: relative;
-    background: #FAFAFB;
-    border: 1px solid {branding.LINE_2};
+    background: var(--forge-surface-2);
+    border: 1px solid var(--forge-line-2);
     border-radius: 6px;
     padding: 10px 44px 12px 14px;
     margin: 0 0 10px;
@@ -753,7 +785,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 .forge-app .forge-frow-static-l {{
     font-size: 11.5px;
     font-weight: 600;
-    color: {branding.INK_2};
+    color: var(--forge-ink-2);
     line-height: 16px;
     margin: 0 0 3px;
 }}
@@ -772,7 +804,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     text-align: left;
     font-size: 11.5px;
     font-weight: 600;
-    color: {branding.INK_2};
+    color: var(--forge-ink-2);
     line-height: 16px;
     height: 16px;
     margin: 0 0 3px;
@@ -795,17 +827,17 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     padding: 0;
     border-color: transparent;
     background: transparent;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
 }}
 .forge-app .forge-frow > .widget-button:first-child:hover {{
-    color: {branding.BRAND_RED};
-    border-color: {branding.LINE_2};
-    background: #fff;
+    color: var(--forge-red);
+    border-color: var(--forge-line-2);
+    background: var(--forge-surface);
 }}
 /* a forcing-row box its pane's note asks the user to fill (refresh_bgc_notes) */
 .forge-app .forge-need input {{
-    border-color: {branding.AMBER};
-    background: {branding.TINT_AMBER};
+    border-color: var(--forge-amber);
+    background: var(--forge-tint-amber);
 }}
 /* the sticky bar's Invalid chip, a link to the card that owns the problem */
 .forge-app .forge-status-link {{ text-decoration: none; }}
@@ -814,7 +846,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     display: block;
     font-family: Menlo, Consolas, monospace;
     font-size: 11px;
-    color: {branding.INK_3};
+    color: var(--forge-ink-3);
 }}
 .forge-var-title {{ font-size: 12.5px; font-weight: 600; margin: 10px 0 4px; }}
 .forge-app .forge-var-grid .widget-checkbox {{ width: auto; }}
@@ -880,6 +912,25 @@ EXPERIMENTAL_CHIP = chip(
     "warn",
     title="This feature is experimental and may not work correctly.",
 )
+
+
+#: The kinds of inline status text :func:`status_span` colours.
+StatusKind = Literal["err", "ok", "warn", "note"]
+
+
+def status_class(kind: StatusKind) -> str:
+    """The class that colours status text of ``kind`` (see :func:`status_span`)."""
+    return f"forge-st-{kind}"
+
+
+def status_span(kind: StatusKind, html: str) -> str:
+    """Inline status text: ``html`` in a ``<span>`` coloured for ``kind``.
+
+    ``kind`` is an error, a success, a warning or a side note. The colour comes
+    from the stylesheet, so it follows the light or dark theme, and the text
+    keeps the size of the text around it (unlike ``.forge-msg-*``).
+    """
+    return f"<span class='{status_class(kind)}'>{html}</span>"
 
 
 def banner(kind: str, html: str) -> str:

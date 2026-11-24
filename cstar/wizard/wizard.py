@@ -1029,8 +1029,10 @@ def _plot_topography_source(name: str, path: str) -> tuple[dict[str, str] | None
         return None, ""
     why = f"file not found here: {path}" if path else "no local file"
     return None, (
-        f" <span style='color:#b58900'>(plotted with default ETOPO5 topography; "
-        f"{name}: {why})</span>"
+        " "
+        + components.status_span(
+            "warn", f"(plotted with default ETOPO5 topography; {name}: {why})"
+        )
     )
 
 
@@ -1285,7 +1287,7 @@ class ForgeBlueprintWizard:
             layout=W.Layout(width="auto"),
         )
         self.nest_help = W.HTML(
-            "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
+            "<div class='forge-aside'>"
             "This will enable the extract_data module and output boundary info "
             "for your child grid.</div>"
         )
@@ -1366,7 +1368,7 @@ class ForgeBlueprintWizard:
             layout=W.Layout(width="auto"),
         )
         self.parent_help = W.HTML(
-            "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
+            "<div class='forge-aside'>"
             "This will align the mask and topography with the parent grid. It "
             "will also disable boundary tides, switch sponge ub_tune to False, "
             "and skip boundary forcing generation.</div>"
@@ -1682,10 +1684,13 @@ class ForgeBlueprintWizard:
         # in that mode a CDR forcing is required and its releases must target the
         # CDR-lite tracers.
         self.cdr_lite_hint = W.HTML(
-            "<span style='color:#666'>BGC mode <code>cdr_lite</code>: releases "
-            "drive the CDR-lite tracers, and a CDR forcing is required. Simple "
-            "mode builds one ALK (OAE) release; a YAML or netCDF forcing must use "
-            "<code>tracer_set: cdr_lite</code>.</span>"
+            components.status_span(
+                "note",
+                "BGC mode <code>cdr_lite</code>: releases "
+                "drive the CDR-lite tracers, and a CDR forcing is required. Simple "
+                "mode builds one ALK (OAE) release; a YAML or netCDF forcing must use "
+                "<code>tracer_set: cdr_lite</code>.",
+            )
         )
         # The mode _apply_cdr_mode() last actually applied -- lets it detect a
         # real transition (for leaving-mode cleanup) whether invoked via the
@@ -1774,11 +1779,14 @@ class ForgeBlueprintWizard:
         self.cdr_clear_btn = W.Button(description="Clear CDR", icon="times")
         self.cdr_status = W.HTML("")
         _cdr_yaml_help = W.HTML(
-            "<span style='color:#666'>Follow the <a href="
-            "'https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html' "
-            "target='_blank'>roms-tools CDR forcing documentation</a> to build a "
-            "<code>CDRForcing</code> and export it with <code>to_yaml()</code>, "
-            "then upload that file here.</span>"
+            components.status_span(
+                "note",
+                "Follow the <a href="
+                "'https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html' "
+                "target='_blank'>roms-tools CDR forcing documentation</a> to build a "
+                "<code>CDRForcing</code> and export it with <code>to_yaml()</code>, "
+                "then upload that file here.",
+            )
         )
         self.cdr_yaml_box = W.VBox(
             [
@@ -1812,11 +1820,14 @@ class ForgeBlueprintWizard:
         )
         self.cdr_file_status = W.HTML("")
         _cdr_netcdf_help = W.HTML(
-            "<span style='color:#666'>Follow the <a href="
-            "'https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html' "
-            "target='_blank'>roms-tools CDR forcing documentation</a> to build and "
-            "<code>save()</code> the forcing as netCDF (or otherwise produce a "
-            "CDR-forcing netCDF), then attach or upload it here.</span>"
+            components.status_span(
+                "note",
+                "Follow the <a href="
+                "'https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html' "
+                "target='_blank'>roms-tools CDR forcing documentation</a> to build and "
+                "<code>save()</code> the forcing as netCDF (or otherwise produce a "
+                "CDR-forcing netCDF), then attach or upload it here.",
+            )
         )
         self.cdr_netcdf_box = W.VBox(
             [
@@ -1840,11 +1851,14 @@ class ForgeBlueprintWizard:
         self.cdr_upscaled_box = W.VBox(
             [
                 W.HTML(
-                    "<span style='color:#666'>ROMS will read CDR forcing supplied "
-                    "at runtime from a child domain's upscaled signal. The "
-                    "blueprint carries a placeholder path that C-Star's "
-                    "orchestrator replaces at run time -- nothing to configure "
-                    "here.</span>"
+                    components.status_span(
+                        "note",
+                        "ROMS will read CDR forcing supplied "
+                        "at runtime from a child domain's upscaled signal. The "
+                        "blueprint carries a placeholder path that C-Star's "
+                        "orchestrator replaces at run time -- nothing to configure "
+                        "here.",
+                    )
                 )
             ]
         )
@@ -1980,12 +1994,12 @@ class ForgeBlueprintWizard:
         self.validation = W.HTML("")
         self.preview = W.Output(
             layout=W.Layout(
-                border="1px solid #ccc",
                 padding="6px",
                 max_height="380px",
                 overflow="auto",
             )
         )
+        self.preview.add_class("forge-log")
         # Browser download (works in Voilà / JupyterLab without server file access)
         self.download_link = W.HTML("")
         # Save to the server/working-dir filesystem (handy for local or HPC use)
@@ -2061,17 +2075,19 @@ class ForgeBlueprintWizard:
         from cstar.system.manager import system_label
 
         self.run_warning = W.HTML(
-            "<b style='color:#b58900'>⚠ Processing a blueprint can use substantial "
+            f"<b class='{components.status_class('warn')}'>⚠ Processing a blueprint can use substantial "
             "memory and CPU depending on grid size.</b> Run this from a compute node "
             "(or another host) with resources appropriate for your domain — this is "
             f"not checked automatically. System: <code>{html.escape(system_label())}</code>."
         )
         self.run_later_note = W.HTML(
-            "<span style='color:#666'>ℹ To run this later, or on a different "
-            "machine, save the blueprint above and then (from the "
-            "<code>cstar-env</code> environment) call: "
-            "<code>cstar blueprint run &lt;path/to/forge_blueprint.yaml&gt;</code>. "
-            "</span>"
+            components.status_span(
+                "note",
+                "ℹ To run this later, or on a different "
+                "machine, save the blueprint above and then (from the "
+                "<code>cstar-env</code> environment) call: "
+                "<code>cstar blueprint run &lt;path/to/forge_blueprint.yaml&gt;</code>. ",
+            )
         )
         self.run_btn = W.Button(description="Run", icon="play")
         self.run_status = W.HTML("")
@@ -2109,7 +2125,6 @@ class ForgeBlueprintWizard:
         # output type (stderr, display_data) would render above it, reversed.
         self.run_output = W.Output(
             layout=W.Layout(
-                border="1px solid #ccc",
                 padding="6px",
                 max_height="380px",
                 overflow="auto",
@@ -2118,6 +2133,7 @@ class ForgeBlueprintWizard:
             )
         )
         self.run_output.add_class("forge-run-log")
+        self.run_output.add_class("forge-log")
         self._run_log_style = W.HTML(
             "<style>.forge-run-log > .jp-OutputArea "
             "{ flex: 0 0 auto; height: auto; max-height: none; }</style>"
@@ -2507,8 +2523,8 @@ class ForgeBlueprintWizard:
             grid = rt.Grid(filename=str(path))
             content_hash = hash_netcdf_contents(path)
         except Exception as exc:
-            self.grid_file_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.grid_file_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         self._finish_grid_file_attach(
@@ -2519,8 +2535,8 @@ class ForgeBlueprintWizard:
     def _on_grid_file_attach(self, _btn):
         path_str = self.grid_file_path.value.strip()
         if not path_str:
-            self.grid_file_status.value = (
-                "<span style='color:#b00'>Enter a path first.</span>"
+            self.grid_file_status.value = components.status_span(
+                "err", "Enter a path first."
             )
             return
         # Explicit click always re-loads/re-hashes (the file may have changed on
@@ -2622,9 +2638,8 @@ class ForgeBlueprintWizard:
             self._grid_file_grid = None
             self._boundaries_derived = False
             self.derive_status.value = ""
-            self.grid_file_status.value = (
-                f"<span style='color:#b00'>⚠ could not re-attach grid_file: "
-                f"{type(exc).__name__}: {exc}</span>"
+            self.grid_file_status.value = components.status_span(
+                "err", f"⚠ could not re-attach grid_file: {type(exc).__name__}: {exc}"
             )
             return
         self._finish_grid_file_attach(file_dict, grid, snapshot=False)
@@ -2684,15 +2699,14 @@ class ForgeBlueprintWizard:
         try:
             derived = float(cfl_dt(self._base_grid_kwargs(), self._attached_grid()))
         except Exception as exc:
-            self.dt_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc} "
-                "Type a time step.</span>"
+            self.dt_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc} Type a time step."
             )
             return
         with self._suspend():
             self.dt.value = derived
-        self.dt_status.value = (
-            "<span style='color:#080'>derived from the grid (CFL)</span>"
+        self.dt_status.value = components.status_span(
+            "ok", "derived from the grid (CFL)"
         )
 
     def _sync_marbl_ref_visibility(self, _change=None):
@@ -3083,9 +3097,10 @@ class ForgeBlueprintWizard:
             self.cdr_mode_dd.value = "yaml"
             self._apply_cdr_mode()
             self._cdr_forcing = legacy_cdr
-            self.cdr_status.value = (
-                f"<span style='color:#080'>✓ CDR loaded from legacy ForcingSpec "
-                f"embed: {len(legacy_cdr.get('releases', []))} release(s)</span>"
+            self.cdr_status.value = components.status_span(
+                "ok",
+                f"✓ CDR loaded from legacy ForcingSpec "
+                f"embed: {len(legacy_cdr.get('releases', []))} release(s)",
             )
         self._forcing_seed = self._forcing_editor.gather()
         self._rebuild()
@@ -3661,15 +3676,15 @@ class ForgeBlueprintWizard:
     def _on_load_path(self, _):
         path = self.load_path.value.strip()
         if not path:
-            self.load_status.value = (
-                "<span style='color:#b00'>Enter a path first.</span>"
+            self.load_status.value = components.status_span(
+                "err", "Enter a path first."
             )
             return
         try:
             cfg = ForgeBlueprint.from_yaml(path)
         except Exception as exc:
-            self.load_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.load_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             self._load_status_is_error = True
             return
@@ -3678,16 +3693,16 @@ class ForgeBlueprintWizard:
     def _on_load_from_catalog(self, _):
         name = self.load_catalog_dd.value
         if not name:
-            self.load_status.value = (
-                "<span style='color:#b00'>No catalog blueprint selected.</span>"
+            self.load_status.value = components.status_span(
+                "err", "No catalog blueprint selected."
             )
             self._load_status_is_error = True
             return
         try:
             path = self.catalog.forge_blueprint_path(name)
         except Exception as exc:
-            self.load_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.load_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             self._load_status_is_error = True
             return
@@ -3710,28 +3725,27 @@ class ForgeBlueprintWizard:
         try:
             cfg = ForgeBlueprint.from_yaml_data(yaml.safe_load(content))
         except Exception as exc:
-            self.load_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.load_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             self._load_status_is_error = True
             return
         self._set_load_status(cfg, self._populate_from(cfg))
 
     def _set_load_status(self, cfg: ForgeBlueprint, loaded_problems):
-        msg = f"<span style='color:#080'>Loaded {cfg.casename}</span>"
+        msg = components.status_span("ok", f"Loaded {cfg.casename}")
         if loaded_problems:
-            msg += (
-                f" &nbsp;<span style='color:#b00'>⚠ {len(loaded_problems)} invalid "
-                "settings value(s) in the file</span>"
+            msg += " &nbsp;" + components.status_span(
+                "err", f"⚠ {len(loaded_problems)} invalid settings value(s) in the file"
             )
         if self._load_unknown_specs:
             # The settings still come from the file; only the recorded name
             # changes to the spec the dropdown shows.
-            msg += (
-                " &nbsp;<span style='color:#b58900'>⚠ not in this catalog, saved "
+            msg += " &nbsp;" + components.status_span(
+                "warn",
+                "⚠ not in this catalog, saved "
                 "under the spec selected instead: "
-                + html.escape(", ".join(self._load_unknown_specs))
-                + "</span>"
+                + html.escape(", ".join(self._load_unknown_specs)),
             )
         self.load_status.value = msg
         self._load_status_is_error = False
@@ -3760,8 +3774,11 @@ class ForgeBlueprintWizard:
             cdr = data.get("cdr_forcing")
             self._cdr_forcing = cdr
             self.cdr_status.value = (
-                f"<span style='color:#080'>✓ CDR loaded from spec '{name}': "
-                f"{len(cdr.get('releases', []))} release(s)</span>"
+                components.status_span(
+                    "ok",
+                    f"✓ CDR loaded from spec '{name}': "
+                    f"{len(cdr.get('releases', []))} release(s)",
+                )
                 if cdr
                 else ""
             )
@@ -4107,9 +4124,8 @@ class ForgeBlueprintWizard:
             cdr = rt.CDRForcing(**parsed)
         except Exception as exc:
             self._cdr_forcing = None
-            self.cdr_status.value = (
-                f"<span style='color:#b00'>CDR invalid: {type(exc).__name__}: "
-                f"{exc}</span>"
+            self.cdr_status.value = components.status_span(
+                "err", f"CDR invalid: {type(exc).__name__}: {exc}"
             )
             self._rebuild()
             return
@@ -4123,10 +4139,12 @@ class ForgeBlueprintWizard:
             self.cdr_file_path.value = ""
             self.cdr_file_upload.value = ()
             self.cdr_file_status.value = ""
-            cleared_note = "<br><span style='color:#666'>(cleared the attached CDR file -- mutually exclusive)</span>"
+            cleared_note = "<br>" + components.status_span(
+                "note", "(cleared the attached CDR file -- mutually exclusive)"
+            )
         self.cdr_status.value = (
-            f"<span style='color:#080'>✓ CDR: {len(cdr.releases)} release(s)</span>"
-            f"{cleared_note}"
+            components.status_span("ok", f"✓ CDR: {len(cdr.releases)} release(s)")
+            + f"{cleared_note}"
         )
         self._rebuild()
 
@@ -4159,8 +4177,8 @@ class ForgeBlueprintWizard:
                 raise FileNotFoundError(f"CDR-forcing file not found: {path}")
             content_hash = hash_netcdf_contents(path)
         except Exception as exc:
-            self.cdr_file_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.cdr_file_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         # Light validation only (never blocks the attach -- the executor is the
@@ -4171,9 +4189,10 @@ class ForgeBlueprintWizard:
 
             with xr.open_dataset(path) as ds:
                 if "ncdr" not in ds.dims:
-                    warning = (
-                        "<br><span style='color:#b58900'>⚠ no 'ncdr' dimension "
-                        "found -- is this really a CDR-forcing file?</span>"
+                    warning = "<br>" + components.status_span(
+                        "warn",
+                        "⚠ no 'ncdr' dimension "
+                        "found -- is this really a CDR-forcing file?",
                     )
                 if (
                     self.bgc_dd.value == "cdr_lite"
@@ -4185,10 +4204,11 @@ class ForgeBlueprintWizard:
                         )
                     )
                 ):
-                    warning += (
-                        "<br><span style='color:#b58900'>⚠ BGC mode is cdr_lite "
+                    warning += "<br>" + components.status_span(
+                        "warn",
+                        "⚠ BGC mode is cdr_lite "
                         "but this file's tracer_name axis has no CDR_* tracers -- "
-                        "its releases need tracer_set cdr_lite.</span>"
+                        "its releases need tracer_set cdr_lite.",
                     )
         except Exception:
             pass
@@ -4200,9 +4220,8 @@ class ForgeBlueprintWizard:
             self._cdr_forcing = None
             self._clear_cdr_upload_value()
             self.cdr_status.value = ""
-            cleared_note = (
-                "<br><span style='color:#666'>(cleared the uploaded CDR "
-                "YAML -- mutually exclusive)</span>"
+            cleared_note = "<br>" + components.status_span(
+                "note", "(cleared the uploaded CDR YAML -- mutually exclusive)"
             )
         self.cdr_file_status.value = (
             _user_file_status_html(self._cdr_forcing_file) + warning + cleared_note
@@ -4212,8 +4231,8 @@ class ForgeBlueprintWizard:
     def _on_cdr_file_attach(self, _btn):
         path_str = self.cdr_file_path.value.strip()
         if not path_str:
-            self.cdr_file_status.value = (
-                "<span style='color:#b00'>Enter a path first.</span>"
+            self.cdr_file_status.value = components.status_span(
+                "err", "Enter a path first."
             )
             return
         # Explicit click always re-hashes -- no dedupe here.
@@ -4283,8 +4302,8 @@ class ForgeBlueprintWizard:
         except Exception as exc:
             self._carbonate_sensitivity = None
             message = html.escape(" ".join(str(exc).split()))
-            self.cs_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {message}</span>"
+            self.cs_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {message}"
             )
             self._rebuild()
             return
@@ -4297,10 +4316,11 @@ class ForgeBlueprintWizard:
         if self.use_pio_chk.value and not all(
             fmt.is_classic for fmt in formats.values()
         ):
-            status += (
-                "<br><span style='color:#666'>ParallelIO reads classic netCDF "
+            status += "<br>" + components.status_span(
+                "note",
+                "ParallelIO reads classic netCDF "
                 "only: Forge converts the staged copies to CDF-5 (the originals "
-                "are untouched).</span>"
+                "are untouched).",
             )
         self.cs_status.value = status
         self._rebuild()
@@ -4333,8 +4353,10 @@ class ForgeBlueprintWizard:
         self.cs_path.value = directory
         missing = [f for f in spec.files if not Path(f.location).expanduser().exists()]
         self.cs_status.value = _carbonate_status_html(len(spec.files)) + (
-            f"<br><span style='color:#b00'>⚠ {len(missing)} file(s) not found at "
-            "these paths</span>"
+            "<br>"
+            + components.status_span(
+                "err", f"⚠ {len(missing)} file(s) not found at these paths"
+            )
             if missing
             else ""
         )
@@ -4342,7 +4364,7 @@ class ForgeBlueprintWizard:
     def _on_cs_attach(self, _btn):
         path_str = self.cs_path.value.strip()
         if not path_str:
-            self.cs_status.value = "<span style='color:#b00'>Enter a path first.</span>"
+            self.cs_status.value = components.status_span("err", "Enter a path first.")
             return
         # Explicit click always re-scans and re-hashes -- no dedupe here.
         self._attach_carbonate_sensitivity_dir(path_str)
@@ -4429,9 +4451,10 @@ class ForgeBlueprintWizard:
                 old_type if old_type in dict(options).values() else options[0][1]
             )
         if is_volume:
-            self.cdr_plot_status.value = (
-                "<span style='color:#b58900'>⚠ volume-type CDR forcing -- "
-                "tracer flux plotting (ALK-only) isn't available.</span>"
+            self.cdr_plot_status.value = components.status_span(
+                "warn",
+                "⚠ volume-type CDR forcing -- "
+                "tracer flux plotting (ALK-only) isn't available.",
             )
 
     def _render_cdr_plot(self) -> None:
@@ -4504,12 +4527,12 @@ class ForgeBlueprintWizard:
             self._sync_cdr_plot_release_options()
             self._render_cdr_plot()
             if not self.cdr_plot_status.value:
-                self.cdr_plot_status.value = "<span style='color:#080'>✓</span>"
+                self.cdr_plot_status.value = components.status_span("ok", "✓")
         except Exception as exc:
             self._cdr_plot_object = None
             self._cdr_plot_grid = None
-            self.cdr_plot_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.cdr_plot_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
 
     def _on_cdr_plot_option_change(self, _change):
@@ -4673,8 +4696,11 @@ class ForgeBlueprintWizard:
                 self._cdr_forcing = cfg.cdr.cdr_forcing or None
                 self._clear_cdr_upload_value()
                 self.cdr_status.value = (
-                    f"<span style='color:#080'>✓ CDR loaded: "
-                    f"{len(self._cdr_forcing.get('releases', []))} release(s)</span>"
+                    components.status_span(
+                        "ok",
+                        f"✓ CDR loaded: "
+                        f"{len(self._cdr_forcing.get('releases', []))} release(s)",
+                    )
                     if self._cdr_forcing
                     else ""
                 )
@@ -4692,8 +4718,8 @@ class ForgeBlueprintWizard:
                     self.cdr_file_status.value = _user_file_status_html(
                         self._cdr_forcing_file
                     ) + (
-                        "<br><span style='color:#b00'>⚠ file not found at this "
-                        "path</span>"
+                        "<br>"
+                        + components.status_span("err", "⚠ file not found at this path")
                         if missing
                         else ""
                     )
@@ -5338,8 +5364,8 @@ class ForgeBlueprintWizard:
             and not self._boundaries_derived
             and not self.derive_status.value
         ):
-            self.derive_status.value = (
-                "<span style='color:#b58900'>⚠ not derived yet</span>"
+            self.derive_status.value = components.status_span(
+                "warn", "⚠ not derived yet"
             )
         # Suppressed for the same reason as _wizard_settings_cls_for_ref above --
         # _rebuild runs on every keystroke, including typing into the roms_ref
@@ -5633,13 +5659,13 @@ class ForgeBlueprintWizard:
         """
         if not self._boundaries_touched and not self._boundaries_derived:
             self.download_link.value = (
-                "<span class='forge-dl-off' style='color:#b58900' "
+                f"<span class='forge-dl-off {components.status_class('warn')}' "
                 f'title="{html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}">'
                 "⬇ Derive boundaries to download</span>"
             )
-            self.download_link_review.value = (
-                f"<span style='color:#b58900'>⚠ "
-                f"{html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}</span>"
+            self.download_link_review.value = components.status_span(
+                "warn",
+                f"⚠ {html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}",
             )
             return
         download_cfg = cfg.stamp_provenance(WIZARD_TOOL)
@@ -5759,12 +5785,12 @@ class ForgeBlueprintWizard:
         try:
             grid = self._build_grid_from_widgets()
             self._apply_grid_derived_properties(grid)
-            self.derive_status.value = (
-                "<span style='color:#080'>✓ derived from grid</span>"
+            self.derive_status.value = components.status_span(
+                "ok", "✓ derived from grid"
             )
         except Exception as exc:
-            self.derive_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.derive_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
         self._rebuild()
 
@@ -5812,12 +5838,12 @@ class ForgeBlueprintWizard:
             buf.seek(0)
             self.plot_img.value = buf.read()
             self.plot_img.layout.display = ""
-            self.plot_status.value = "<span style='color:#080'>✓</span>" + getattr(
+            self.plot_status.value = components.status_span("ok", "✓") + getattr(
                 self, "_grid_build_topo_note", ""
             )
         except Exception as exc:
-            self.plot_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.plot_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
 
     def _on_nest_plot(self, _):
@@ -5876,11 +5902,11 @@ class ForgeBlueprintWizard:
             self.nest_plot_img.value = buf.read()
             self.nest_plot_img.layout.display = ""
             self.nest_plot_status.value = (
-                "<span style='color:#080'>✓</span>" + note_self + note_child
+                components.status_span("ok", "✓") + note_self + note_child
             )
         except Exception as exc:
-            self.nest_plot_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.nest_plot_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
 
     def _on_parent_plot(self, _):
@@ -5939,11 +5965,11 @@ class ForgeBlueprintWizard:
             self.parent_plot_img.value = buf.read()
             self.parent_plot_img.layout.display = ""
             self.parent_plot_status.value = (
-                "<span style='color:#080'>✓</span>" + note_parent + note_self
+                components.status_span("ok", "✓") + note_parent + note_self
             )
         except Exception as exc:
-            self.parent_plot_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.parent_plot_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
 
     def _save_config(self, path: Path) -> Path:
@@ -6113,26 +6139,27 @@ class ForgeBlueprintWizard:
 
     def _on_save(self, _):
         if not self._ensure_boundaries_derived():
-            self.save_status.value = (
-                "<span style='color:#b00'>Save aborted — open boundaries could "
+            self.save_status.value = components.status_span(
+                "err",
+                "Save aborted — open boundaries could "
                 "not be derived from the grid (see the Domain-derived properties "
                 "status above). A save must never ship provisional defaults; fix "
-                "the grid or set boundaries manually, then retry.</span>"
+                "the grid or set boundaries manually, then retry.",
             )
             return
         if self.config is None:
-            self.save_status.value = (
-                "<span style='color:#b00'>Nothing to save — config is invalid.</span>"
+            self.save_status.value = components.status_span(
+                "err", "Nothing to save — config is invalid."
             )
             return
         try:
             save_path = Path(self.save_path.value)
             save_path.parent.mkdir(parents=True, exist_ok=True)
             p = self._save_config(save_path)
-            self.save_status.value = f"<span style='color:#080'>Saved {p}</span>"
+            self.save_status.value = components.status_span("ok", f"Saved {p}")
         except Exception as exc:
-            self.save_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.save_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
 
     # ---- save modified specs to catalog --------------------------------------
@@ -6145,13 +6172,13 @@ class ForgeBlueprintWizard:
     def _on_save_output(self, _):
         name = self.save_output_name.value.strip()
         if not _valid_spec_name(name):
-            self.save_output_status.value = (
-                "<span style='color:#b00'>Invalid name.</span>"
+            self.save_output_status.value = components.status_span(
+                "err", "Invalid name."
             )
             return
         if self.config is None:
-            self.save_output_status.value = (
-                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            self.save_output_status.value = components.status_span(
+                "err", "Config invalid — nothing to save."
             )
             return
         try:
@@ -6164,11 +6191,11 @@ class ForgeBlueprintWizard:
             # str(exc) names the owning layer (e.g. "...already exists in the
             # 'bundled' catalog layer") -- a plain single-line message, no
             # traceback, so it's rendered verbatim rather than genericized.
-            self.save_output_status.value = f"<span style='color:#b00'>{exc}</span>"
+            self.save_output_status.value = components.status_span("err", f"{exc}")
             return
         except Exception as exc:
-            self.save_output_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.save_output_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         ok = self._verify_spec_roundtrip("output", name)
@@ -6192,25 +6219,25 @@ class ForgeBlueprintWizard:
                 }
         if ok:
             self._rebuild()
-            self.save_output_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            self.save_output_status.value = components.status_span(
+                "ok", f"Saved '{name}' ✓ (now unmodified)."
             )
         else:
-            self.save_output_status.value = (
-                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
-                "differs — spec kept as modified.</span>"
+            self.save_output_status.value = components.status_span(
+                "warn",
+                f"Saved '{name}', but round-trip differs — spec kept as modified.",
             )
 
     def _on_save_model(self, _):
         name = self.save_model_name.value.strip()
         if not _valid_spec_name(name):
-            self.save_model_status.value = (
-                "<span style='color:#b00'>Invalid name.</span>"
+            self.save_model_status.value = components.status_span(
+                "err", "Invalid name."
             )
             return
         if self.config is None:
-            self.save_model_status.value = (
-                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            self.save_model_status.value = components.status_span(
+                "err", "Config invalid — nothing to save."
             )
             return
         try:
@@ -6249,11 +6276,11 @@ class ForgeBlueprintWizard:
                 marbl_ref=self.marbl_ref.value.strip() or None,
             )
         except FileExistsError as exc:
-            self.save_model_status.value = f"<span style='color:#b00'>{exc}</span>"
+            self.save_model_status.value = components.status_span("err", f"{exc}")
             return
         except Exception as exc:
-            self.save_model_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.save_model_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         ok = self._verify_spec_roundtrip("model", name)
@@ -6275,34 +6302,33 @@ class ForgeBlueprintWizard:
             # A wizard-only setting held over the saved spec leaves it modified.
             modified = self.config is None or self.config.composition.model.modified
             note = "" if modified else " (now unmodified)"
-            self.save_model_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓{note}.</span>"
+            self.save_model_status.value = components.status_span(
+                "ok", f"Saved '{name}' ✓{note}."
             )
         else:
-            self.save_model_status.value = (
-                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
-                "differs — spec kept as modified.</span>"
+            self.save_model_status.value = components.status_span(
+                "warn",
+                f"Saved '{name}', but round-trip differs — spec kept as modified.",
             )
 
     def _on_save_domain(self, _):
         name = self.save_domain_name.value.strip()
         if not _valid_spec_name(name):
-            self.save_domain_status.value = (
-                "<span style='color:#b00'>Invalid name.</span>"
+            self.save_domain_status.value = components.status_span(
+                "err", "Invalid name."
             )
             return
         if self.config is None:
-            self.save_domain_status.value = (
-                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            self.save_domain_status.value = components.status_span(
+                "err", "Config invalid — nothing to save."
             )
             return
         if self._grid_file is not None:
             # DomainSpec (catalog/specs/DomainSpec/*.yaml) has no grid_file field --
             # saving now would silently produce a geometry-less entry (grid_kwargs
             # is {} while attached). Detach first.
-            self.save_domain_status.value = (
-                "<span style='color:#b00'>Detach the grid file first — DomainSpec "
-                "has no grid_file field.</span>"
+            self.save_domain_status.value = components.status_span(
+                "err", "Detach the grid file first — DomainSpec has no grid_file field."
             )
             return
         # Unlike _on_save/_on_run (which emit concrete boundaries into the
@@ -6315,11 +6341,11 @@ class ForgeBlueprintWizard:
         try:
             self.catalog.register_domain_from_dict(name, self._domain_spec_data())
         except FileExistsError as exc:
-            self.save_domain_status.value = f"<span style='color:#b00'>{exc}</span>"
+            self.save_domain_status.value = components.status_span("err", f"{exc}")
             return
         except Exception as exc:
-            self.save_domain_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.save_domain_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         ok = self._verify_spec_roundtrip("domain", name)
@@ -6333,25 +6359,25 @@ class ForgeBlueprintWizard:
                 self._domain_seed = self._domain_snapshot()
         if ok:
             self._rebuild()
-            self.save_domain_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            self.save_domain_status.value = components.status_span(
+                "ok", f"Saved '{name}' ✓ (now unmodified)."
             )
         else:
-            self.save_domain_status.value = (
-                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
-                "differs — spec kept as modified.</span>"
+            self.save_domain_status.value = components.status_span(
+                "warn",
+                f"Saved '{name}', but round-trip differs — spec kept as modified.",
             )
 
     def _on_save_forcing(self, _):
         name = self.save_forcing_name.value.strip()
         if not _valid_spec_name(name):
-            self.save_forcing_status.value = (
-                "<span style='color:#b00'>Invalid name.</span>"
+            self.save_forcing_status.value = components.status_span(
+                "err", "Invalid name."
             )
             return
         if self.config is None:
-            self.save_forcing_status.value = (
-                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            self.save_forcing_status.value = components.status_span(
+                "err", "Config invalid — nothing to save."
             )
             return
         try:
@@ -6361,11 +6387,11 @@ class ForgeBlueprintWizard:
                 description=self._spec_description(),
             )
         except FileExistsError as exc:
-            self.save_forcing_status.value = f"<span style='color:#b00'>{exc}</span>"
+            self.save_forcing_status.value = components.status_span("err", f"{exc}")
             return
         except Exception as exc:
-            self.save_forcing_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.save_forcing_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         ok = self._verify_spec_roundtrip("forcing", name)
@@ -6379,29 +6405,29 @@ class ForgeBlueprintWizard:
                 self._forcing_seed = self._forcing_editor.gather()
         if ok:
             self._rebuild()
-            self.save_forcing_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            self.save_forcing_status.value = components.status_span(
+                "ok", f"Saved '{name}' ✓ (now unmodified)."
             )
         else:
-            self.save_forcing_status.value = (
-                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
-                "differs — spec kept as modified.</span>"
+            self.save_forcing_status.value = components.status_span(
+                "warn",
+                f"Saved '{name}', but round-trip differs — spec kept as modified.",
             )
 
     def _on_save_cdr(self, _):
         name = self.save_cdr_name.value.strip()
         if not _valid_spec_name(name):
-            self.save_cdr_status.value = "<span style='color:#b00'>Invalid name.</span>"
+            self.save_cdr_status.value = components.status_span("err", "Invalid name.")
             return
         if self.config is None:
-            self.save_cdr_status.value = (
-                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            self.save_cdr_status.value = components.status_span(
+                "err", "Config invalid — nothing to save."
             )
             return
         mode = self.cdr_mode_dd.value
         if mode == "none":
-            self.save_cdr_status.value = (
-                "<span style='color:#b58900'>Mode is 'None' — nothing to save.</span>"
+            self.save_cdr_status.value = components.status_span(
+                "warn", "Mode is 'None' — nothing to save."
             )
             return
         current = self._current_cdr_dict()
@@ -6414,11 +6440,11 @@ class ForgeBlueprintWizard:
                 cdr_forcing_file=current["cdr_forcing_file"],
             )
         except FileExistsError as exc:
-            self.save_cdr_status.value = f"<span style='color:#b00'>{exc}</span>"
+            self.save_cdr_status.value = components.status_span("err", f"{exc}")
             return
         except Exception as exc:
-            self.save_cdr_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            self.save_cdr_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
             )
             return
         ok = self._verify_spec_roundtrip("cdr", name)
@@ -6432,13 +6458,13 @@ class ForgeBlueprintWizard:
                 self._cdr_seed = self._cdr_snapshot()
         if ok:
             self._rebuild()
-            self.save_cdr_status.value = (
-                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            self.save_cdr_status.value = components.status_span(
+                "ok", f"Saved '{name}' ✓ (now unmodified)."
             )
         else:
-            self.save_cdr_status.value = (
-                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
-                "differs — spec kept as modified.</span>"
+            self.save_cdr_status.value = components.status_span(
+                "warn",
+                f"Saved '{name}', but round-trip differs — spec kept as modified.",
             )
 
     def _build_run_command(self, blueprint_path: str) -> list[str]:
@@ -6467,16 +6493,17 @@ class ForgeBlueprintWizard:
 
     def _on_run(self, _):
         if not self._ensure_boundaries_derived():
-            self.run_status.value = (
-                "<span style='color:#b00'>Run aborted — open boundaries could "
+            self.run_status.value = components.status_span(
+                "err",
+                "Run aborted — open boundaries could "
                 "not be derived from the grid (see the Domain-derived properties "
                 "status above). Fix the grid or set boundaries manually, then "
-                "retry.</span>"
+                "retry.",
             )
             return
         if self.config is None:
-            self.run_status.value = (
-                "<span style='color:#b00'>Nothing to run — config is invalid.</span>"
+            self.run_status.value = components.status_span(
+                "err", "Nothing to run — config is invalid."
             )
             return
         _schedule_coroutine(self._run_async())
@@ -6527,18 +6554,19 @@ class ForgeBlueprintWizard:
             # runner logs where it published it). Point at it rather than restating
             # a path this widget would have to derive for itself.
             self.run_status.value = (
-                "<span style='color:#080'>✓ finished</span> — run the emitted "
-                "UCLA-ROMS blueprint named in the log with <code>cstar blueprint "
+                components.status_span("ok", "✓ finished")
+                + " — run the emitted "
+                + "UCLA-ROMS blueprint named in the log with <code>cstar blueprint "
                 "run &lt;path&gt;</code>"
                 if code == 0
-                else f"<span style='color:#b00'>exited with code {code}</span>"
+                else components.status_span("err", f"exited with code {code}")
             )
         except Exception as exc:
             # Name the command in the status so a failure isn't a context-free
             # error string (cmd is None only if saving the blueprint threw first).
             where = f" while running: {' '.join(cmd)}" if cmd else ""
-            self.run_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}{where}</span>"
+            self.run_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}{where}"
             )
         finally:
             self._run_in_progress = False

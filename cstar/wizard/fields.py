@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, get_args, get_origin
 
 from cstar.base.digest import short_digest
+from cstar.wizard.ui import components
 
 # ===========================================================================
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
@@ -791,27 +792,33 @@ def _user_file_status_html(file_dict: dict[str, Any] | None) -> str:
     name = Path(file_dict["location"]).name
     short = short_digest(file_dict["content_hash"])
     return (
-        f"<span style='color:#080'>✓ attached {name} (sha256 {short}…)</span><br>"
-        "<span style='color:#b58900'>⚠ This file must exist at this exact path "
-        "on the machine where the executor runs.</span>"
+        components.status_span("ok", f"✓ attached {name} (sha256 {short}…)")
+        + "<br>"
+        + components.status_span(
+            "warn",
+            "⚠ This file must exist at this exact path "
+            "on the machine where the executor runs.",
+        )
     )
 
 
 # Shown in a user-provided-file status slot until a file is attached, where the
 # blueprint is invalid without one (a CUSTOM_FILE river row; CDR mode "netcdf").
-_FILE_NOT_ATTACHED_HINT = (
-    "<span style='color:#b58900'>No file attached yet -- enter a path and press "
+_FILE_NOT_ATTACHED_HINT = components.status_span(
+    "warn",
+    "No file attached yet -- enter a path and press "
     "Enter (or click Attach / upload a file). The blueprint is invalid until "
-    "a file is attached.</span>"
+    "a file is attached.",
 )
 _RIVER_CUSTOM_FILE_HINT = _FILE_NOT_ATTACHED_HINT
 _CDR_FILE_HINT = _FILE_NOT_ATTACHED_HINT
 # The carbonate-sensitivity twin (a directory, so no upload): shown while the
 # source is "path" and nothing is attached, where the blueprint is invalid.
-_CARBONATE_DIR_HINT = (
-    "<span style='color:#b58900'>No directory attached yet -- enter a path and "
+_CARBONATE_DIR_HINT = components.status_span(
+    "warn",
+    "No directory attached yet -- enter a path and "
     "press Enter (or click Attach). The blueprint is invalid until a directory "
-    "is attached.</span>"
+    "is attached.",
 )
 
 
@@ -823,10 +830,16 @@ def _carbonate_status_html(n_files: int, detail: str = "") -> str:
     """
     suffix = f", {detail}" if detail else ""
     return (
-        f"<span style='color:#080'>✓ attached {n_files} carbonate sensitivity "
-        f"file(s){suffix}</span><br>"
-        "<span style='color:#b58900'>⚠ These files must exist at these exact "
-        "paths on the machine where the executor runs.</span>"
+        components.status_span(
+            "ok",
+            f"✓ attached {n_files} carbonate sensitivity file(s){suffix}",
+        )
+        + "<br>"
+        + components.status_span(
+            "warn",
+            "⚠ These files must exist at these exact "
+            "paths on the machine where the executor runs.",
+        )
     )
 
 

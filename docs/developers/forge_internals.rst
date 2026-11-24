@@ -317,7 +317,13 @@ The call chain end to end
    the sticky status bar, per-card chips and accordion titles
    (``_update_status``). The CSS travels inside the widget tree so the
    plain-notebook path is styled too; only the Voila page column
-   (``body[data-voila] .forge-shell``) is shell-specific.
+   (``body[data-voila] .forge-shell``) is shell-specific. Every colour is a
+   ``--forge-*`` token from ``branding.PALETTE``, which holds a light and a
+   dark value; ``branding.themed_rule`` applies the dark one in a dark
+   JupyterLab theme and in Voila when the browser prefers dark. HTML built in
+   Python names a class (``components.status_span`` for status text) and never
+   writes a colour itself, or it would stay light in the dark theme; a unit
+   test enforces this.
 2. User picks a domain -> ``_on_domain()`` prefills
    grid/boundaries/partitioning/dates from ``catalog.domain_data(name)``.
 3. Every edit -> ``_rebuild()`` -> ``build_forge_blueprint(**self._gather())``

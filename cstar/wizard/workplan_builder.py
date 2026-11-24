@@ -497,15 +497,16 @@ def unsupported_machines() -> list[str]:
 # ---------------------------------------------------------------------------
 # dependency graph
 # ---------------------------------------------------------------------------
-_DAG_FILLS = {
-    UCLA_ROMS: "#cfe3f7",
-    FORGE: "#d5ecd0",
-    NEST_IC: "#f6e3c4",
-    UPSCALER: "#e6d4f2",
-    HELLO_WORLD: "#f4d6d6",
+# colours live in the stylesheet (branding.PALETTE's --forge-dag-* tokens); the
+# SVG only names a class, so the graph follows the light or dark theme
+_DAG_NODE_CLASSES = {
+    UCLA_ROMS: "dag-ucla-roms",
+    FORGE: "dag-forge",
+    NEST_IC: "dag-nest-ic",
+    UPSCALER: "dag-upscaler",
+    HELLO_WORLD: "dag-hello-world",
 }
-_DAG_OTHER_FILL = "#e4e7ea"
-_DAG_EXTERNAL_FILL = "#f1f1f1"
+_DAG_EXTERNAL_CLASS = "dag-external"
 _DAG_NODE_W, _DAG_NODE_H, _DAG_GAP_X, _DAG_GAP_Y, _DAG_PAD = 176, 46, 96, 18, 14
 _DAG_EDGE_LABELS = (
     (ContinuanceDirective, "restart"),
@@ -611,7 +612,7 @@ def dag_svg(steps: Sequence[Step], runs: Mapping[str, RunRef]) -> str:
     if not ordered:
         return (
             "<svg xmlns='http://www.w3.org/2000/svg' width='260' height='40' "
-            "viewBox='0 0 260 40'><text x='8' y='24' font-size='13' fill='#777'>"
+            "viewBox='0 0 260 40'><text x='8' y='24' font-size='13' class='dag-empty'>"
             "No steps yet.</text></svg>"
         )
     layer = _dag_layers(parents)
@@ -636,7 +637,7 @@ def dag_svg(steps: Sequence[Step], runs: Mapping[str, RunRef]) -> str:
         f"viewBox='0 0 {width} {height}' font-family='sans-serif'>",
         "<defs><marker id='forge-arrow' viewBox='0 0 10 10' refX='9' refY='5' "
         "markerWidth='7' markerHeight='7' orient='auto-start-reverse'>"
-        "<path d='M0,0 L10,5 L0,10 z' fill='#555'/></marker></defs>",
+        "<path d='M0,0 L10,5 L0,10 z' class='dag-arrow'/></marker></defs>",
     ]
     for (source, target), why in labels.items():
         x1 = where[source][0] + _DAG_NODE_W
@@ -646,14 +647,14 @@ def dag_svg(steps: Sequence[Step], runs: Mapping[str, RunRef]) -> str:
         parts.append(
             f"<path class='edge' data-from='{html.escape(source, quote=True)}' "
             f"data-to='{html.escape(target, quote=True)}' "
-            f"d='M{x1},{y1} H{xm} V{y2} H{x2}' fill='none' stroke='#555' "
+            f"d='M{x1},{y1} H{xm} V{y2} H{x2}' fill='none' "
             "stroke-width='1.4' marker-end='url(#forge-arrow)'/>"
         )
         if why:
             parts.append(
                 f"<text class='edge-label' x='{xm}' y='{(y1 + y2) / 2 - 4}' "
-                "text-anchor='middle' font-size='10' fill='#444' "
-                "style='paint-order:stroke;stroke:#fff;stroke-width:3px'>"
+                "text-anchor='middle' font-size='10' "
+                "style='paint-order:stroke;stroke-width:3px'>"
                 f"{html.escape(', '.join(why))}</text>"
             )
     applications = {step.name: step.application for step in steps}
@@ -663,23 +664,25 @@ def dag_svg(steps: Sequence[Step], runs: Mapping[str, RunRef]) -> str:
         if external:
             alias = StepRef.parse(node).run
             subtitle = f"run {runs[alias].run_id}" if alias in runs else "another run"
-            fill, dash = _DAG_EXTERNAL_FILL, " stroke-dasharray='5 3'"
+            rect_class, dash = _DAG_EXTERNAL_CLASS, " stroke-dasharray='5 3'"
             kind = "external"
         else:
             subtitle = applications[node]
-            fill = _DAG_FILLS.get(subtitle, _DAG_OTHER_FILL)
+            rect_class = _DAG_NODE_CLASSES.get(subtitle, "")
             dash, kind = "", subtitle
+        class_attr = f" class='{rect_class}'" if rect_class else ""
         title = html.escape(f"{node} ({subtitle})")
         parts.append(
             f"<g class='node' data-node='{html.escape(node, quote=True)}' "
             f"data-layer='{layer[node]}' data-kind='{html.escape(kind, quote=True)}'>"
             f"<title>{title}</title>"
-            f"<rect x='{x}' y='{y}' width='{_DAG_NODE_W}' height='{_DAG_NODE_H}' "
-            f"rx='8' fill='{fill}' stroke='#667'{dash}/>"
+            f"<rect{class_attr} x='{x}' y='{y}' width='{_DAG_NODE_W}' "
+            f"height='{_DAG_NODE_H}' rx='8'{dash}/>"
             f"<text x='{x + _DAG_NODE_W / 2}' y='{y + 20}' text-anchor='middle' "
-            f"font-size='12' font-weight='600' fill='#222'>{_dag_text(node)}</text>"
+            f"font-size='12' font-weight='600' class='dag-title'>"
+            f"{_dag_text(node)}</text>"
             f"<text x='{x + _DAG_NODE_W / 2}' y='{y + 36}' text-anchor='middle' "
-            f"font-size='10' fill='#555'>{_dag_text(subtitle, 30)}</text></g>"
+            f"font-size='10' class='dag-subtitle'>{_dag_text(subtitle, 30)}</text></g>"
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -2947,7 +2950,7 @@ class WorkplanBuilderPage:
                 value = ""
             fallbacks.append(f"{label} <code>{_esc(value) or 'unset'}</code>")
         self.env_note.value = (
-            "<span class='forge-hint' style='color:#888'>Blank fields fall back "
+            "<span class='forge-hint quiet'>Blank fields fall back "
             f"to the environment: {', '.join(fallbacks)}</span>"
         )
         notes = []
@@ -3755,7 +3758,6 @@ class WorkplanBuilderPage:
         # same log styling and bottom-pinned scrolling as the Blueprint page's Run
         self.run_output = W.Output(
             layout=W.Layout(
-                border="1px solid #ccc",
                 padding="6px",
                 max_height="380px",
                 overflow="auto",
@@ -3764,6 +3766,7 @@ class WorkplanBuilderPage:
             )
         )
         self.run_output.add_class("forge-run-log")
+        self.run_output.add_class("forge-log")
         self._run_log_style = W.HTML(
             "<style>.forge-run-log > .jp-OutputArea "
             "{ flex: 0 0 auto; height: auto; max-height: none; }</style>"

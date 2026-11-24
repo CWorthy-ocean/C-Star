@@ -3357,7 +3357,7 @@ def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
     wiz = ForgeBlueprintWizard()
     wiz._on_nest_plot(None)
 
-    assert not wiz.nest_plot_status.value.startswith("<span style='color:#b00'>"), (
+    assert not wiz.nest_plot_status.value.startswith("<span class='forge-st-err'>"), (
         wiz.nest_plot_status.value
     )
     # A blank new figure (created after a premature close) would have zero axes;
@@ -3855,7 +3855,7 @@ class TestComputeDt:
         wiz._on_compute_dt(None)
         assert wiz.dt.value == expected != 1.0
         assert "(CFL)" in wiz.dt_status.value
-        assert "#b00" not in wiz.dt_status.value
+        assert "forge-st-err" not in wiz.dt_status.value
 
     def test_does_not_run_the_resolver(self, monkeypatch):
         wiz = _new_wizard()
@@ -3865,7 +3865,7 @@ class TestComputeDt:
 
         monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _fail)
         wiz._on_compute_dt(None)
-        assert "#b00" not in wiz.dt_status.value
+        assert "forge-st-err" not in wiz.dt_status.value
 
     def test_works_while_the_blueprint_does_not_resolve(self):
         """cdr_lite demands a CDR forcing; without one the blueprint is invalid,
@@ -3904,7 +3904,7 @@ class TestComputeDt:
         wiz2._on_compute_dt(None)
         assert wiz2.dt.value == 1.0
         assert "failed to" in wiz2.dt_status.value
-        assert "#b00" in wiz2.dt_status.value
+        assert "forge-st-err" in wiz2.dt_status.value
 
 
 class TestGridFileAttach:
@@ -5438,7 +5438,7 @@ class TestCarbonateSensitivityGroup:
         wiz._attach_carbonate_sensitivity_dir(str(d))
         assert wiz._carbonate_sensitivity is None
         assert "1 per-rank tile" in wiz.cs_status.value
-        assert "b00" in wiz.cs_status.value  # the error colour
+        assert "forge-st-err" in wiz.cs_status.value  # the error colour
 
     def test_empty_directory_is_an_error(self, tmp_path):
         d = tmp_path / "empty"
