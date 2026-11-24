@@ -4428,6 +4428,9 @@ class _ForcingEditor:
                     # temp-source dropdown itself has no other gate -- it's simply
                     # unconditional on custom-mode, like domain_edge_buffer.
                     "surface_forcing_source_name",
+                    # A custom-file item takes no roms-tools options (see
+                    # _gather_item), so its passthrough box goes too.
+                    "options",
                 ):
                     ws[key].layout.display = "none" if is_custom else ""
                 for key in (
