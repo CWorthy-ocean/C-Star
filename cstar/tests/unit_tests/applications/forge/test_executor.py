@@ -1433,6 +1433,40 @@ class TestGridKwargsForgeKeys:
             == cfg.model_settings["extract_data"]["extract_period"]
         )
 
+    def test_child_metadata_block_in_executor_kwargs_is_refused(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """An executor built directly with the block in ``grid_kwargs_child``
+        refuses it rather than writing the nesting file at the default period.
+        """
+        from cstar.applications.forge.engine import forge_blueprint_to_builder_kwargs
+
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_path=_MODEL_PATH,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            grid_kwargs_child=self._CHILD,
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        kwargs = forge_blueprint_to_builder_kwargs(cfg)
+        kwargs["grid_kwargs_child"] = {
+            **kwargs["grid_kwargs_child"],
+            "metadata": {"period": 600.0},
+        }
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        with pytest.raises(ValidationError, match="nesting_period"):
+            ForgeExecutor(**kwargs, host=host)
+
 
 class TestForgeExecutorGetDs:
     """Tests for the get_ds method."""

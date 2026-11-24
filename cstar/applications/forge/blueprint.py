@@ -736,7 +736,7 @@ period of a child whose ``Domain.metadata_child`` states none."""
 # names them. A DomainSpec states them in its grid_kwargs["metadata"] block (the
 # domain's settings as somebody's child); a blueprint keeps only the period, in
 # Domain.metadata_child (see split_child_nesting_metadata).
-_CHILD_METADATA_KEY = "metadata"
+CHILD_METADATA_KEY = "metadata"
 _NESTING_METADATA_KEYS: frozenset[str] = frozenset(
     {"period", "prefix", "include_bgc", "include_pressure_fluxes"}
 )
@@ -759,17 +759,17 @@ def split_child_nesting_metadata(
     block and ``metadata_child`` are merged key by key, ``metadata_child`` winning
     (the wizard's period widget over a child preset's block).
 
-    ``include_pressure_fluxes: true`` in either source turns the switch on;
-    ``include_bgc`` is dropped, since the executor follows the parent's
+    A merged ``include_pressure_fluxes: true`` turns the switch on (it never turns
+    it off); ``include_bgc`` is dropped, since the executor follows the parent's
     ``bgc_mode``; ``prefix`` is dropped when it is roms-tools' default
-    ``"child"``. A different prefix, a period that is not a positive number, or
-    any other key raises ``ValueError``. Idempotent.
+    ``"child"``. A different prefix, a period that is not a finite positive
+    number, or any other key raises ``ValueError``. Idempotent.
     """
     child = grid_kwargs_child
     block: dict[str, Any] = {}
-    if isinstance(child, dict) and _CHILD_METADATA_KEY in child:
-        block = dict(child[_CHILD_METADATA_KEY] or {})
-        child = {k: v for k, v in child.items() if k != _CHILD_METADATA_KEY}
+    if isinstance(child, dict) and CHILD_METADATA_KEY in child:
+        block = dict(child[CHILD_METADATA_KEY] or {})
+        child = {k: v for k, v in child.items() if k != CHILD_METADATA_KEY}
     stated = dict(metadata_child or {})
     if "period" in block and "period" in stated and block["period"] != stated["period"]:
         logger.debug(
@@ -792,9 +792,14 @@ def split_child_nesting_metadata(
         )
     period = merged.get("period")
     if period is not None and (
-        isinstance(period, bool) or not isinstance(period, int | float) or period <= 0
+        isinstance(period, bool)
+        or not isinstance(period, int | float)
+        or not math.isfinite(period)
+        or period <= 0
     ):
-        problems.append(f"period {period!r} must be a positive number of seconds")
+        problems.append(
+            f"period {period!r} must be a finite positive number of seconds"
+        )
     if problems:
         raise ValueError("Nesting child settings: " + "; ".join(problems))
     if merged.get("include_pressure_fluxes"):

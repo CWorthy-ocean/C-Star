@@ -3566,6 +3566,8 @@ class TestSplitChildNestingMetadata:
             ({"colour": "red"}, "unknown key.*colour"),
             ({"period": 0}, "period 0"),
             ({"period": -5.0}, "period -5.0"),
+            ({"period": float("nan")}, "period nan"),
+            ({"period": float("inf")}, "period inf"),
             ({"period": "3600"}, "period '3600'"),
         ],
     )
