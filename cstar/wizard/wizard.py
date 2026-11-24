@@ -6377,9 +6377,13 @@ class ForgeBlueprintWizard:
             "automatically when a domain is selected from the catalog.",
         )
         self.plot_status = W.HTML("Click Refresh preview to draw the grid.")
+        # width 100% of its column (400-600px): a fixed-size image would hold its
+        # column at 600px and squeeze the fields beside it
         self.plot_img = W.Image(
             format="png",
-            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+            layout=W.Layout(
+                width="100%", min_width="400px", max_width="600px", display="none"
+            ),
         )
 
         # --- output / preview ---
@@ -6711,9 +6715,12 @@ class ForgeBlueprintWizard:
             options=[], description="Release:", style={"description_width": "110px"}
         )
         self.cdr_plot_release_dd.layout.display = "none"  # shown only if >1 release
+        # sized to its column like the grid preview (self.plot_img)
         self.cdr_plot_img = W.Image(
             format="png",
-            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+            layout=W.Layout(
+                width="100%", min_width="400px", max_width="600px", display="none"
+            ),
         )
         self.cdr_plot_box = W.VBox(
             [
@@ -11453,15 +11460,14 @@ class ForgeBlueprintWizard:
             )
             for k in (_GRID_INT + _GRID_FLOAT)
         ]
-        # Fixed-width preview column so the button caption and the empty-state
-        # hint never get squeezed by the two-column field grid beside them.
+        # The stylesheet sizes the fields and the preview column (`forge-geo-row`
+        # in WIZARD_CSS): the fields keep their room, and in a narrow card the
+        # preview moves below them.
         grid_plot_col = W.VBox(
             [self.plot_btn, self.plot_status, self.plot_img],
-            layout=W.Layout(padding="0 0 0 20px", flex="0 0 380px"),
+            layout=W.Layout(padding="0 0 0 20px"),
         )
         geometry_grid = components.field_grid(W, geometry_rows)
-        geometry_grid.layout.flex = "1 1 auto"
-        # In a narrow card the preview moves below the fields (see WIZARD_CSS).
         geometry_row = W.HBox([geometry_grid, grid_plot_col])
         geometry_row.add_class("forge-geo-row")
         geometry_sub = components.subsection(W, "grid.geometry", geometry_row)

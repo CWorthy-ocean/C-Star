@@ -533,7 +533,35 @@ def test_cdr_plot_moves_below_the_release_panels_in_a_narrow_card(shared_wizard)
     assert rows[0].children[1] is shared_wizard.cdr_plot_box
     assert ".forge-app .forge-cdr-row { flex-wrap: wrap" in _at_rule_block(
         "@container (max-width: 1000px)"
-    ).replace(".forge-app .forge-geo-row, ", "")
+    )
+
+
+def test_grid_preview_gives_way_to_the_geometry_fields(shared_wizard):
+    """A drawn 600px preview used to hold its column at the image's width and squeeze
+    the geometry fields (8000 shown as "80", units on their own line). The
+    stylesheet sizes the row: the fields keep their room and the preview, as wide
+    as its column (400-600px), shrinks first; a narrower card wraps it below.
+    """
+    rows = _with_class(shared_wizard.widget, "forge-geo-row")
+    assert len(rows) == 1
+    fields, preview = rows[0].children
+    assert fields.layout.flex is None
+    assert preview.layout.flex is None
+    assert _declarations_of(".forge-app .forge-geo-row > .forge-fgrid").split() == (
+        "flex: 1 1 680px; min-width: 680px;".split()
+    )
+    assert "flex: 0 1 620px;" in _declarations_of(
+        ".forge-app .forge-geo-row > :last-child"
+    )
+    wrapped = _at_rule_block("@container (max-width: 1100px)")
+    assert ".forge-app .forge-geo-row { flex-wrap: wrap; row-gap: 8px; }" in wrapped
+    assert ".forge-geo-row > .forge-fgrid { flex: 1 1 100%; min-width: 0; }" in wrapped
+    for image in (shared_wizard.plot_img, shared_wizard.cdr_plot_img):
+        assert (image.layout.width, image.layout.min_width, image.layout.max_width) == (
+            "100%",
+            "400px",
+            "600px",
+        )
 
 
 def test_nesting_checkboxes_size_to_their_labels(shared_wizard):

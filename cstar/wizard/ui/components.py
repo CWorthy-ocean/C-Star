@@ -239,11 +239,19 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 @container (max-width: 760px) {{
     .forge-app .forge-fgrid {{ grid-template-columns: minmax(0, 1fr); }}
 }}
-/* under 1000px the grid preview moves below the geometry fields, and the CDR
-   plot below the CDR release panels */
+/* the Grid geometry fields beside the grid preview: the fields keep the ~680px
+   their two columns need (label, box, unit and hint), the preview column gives
+   way first, down to its image's 400px floor; under 1100px the preview moves
+   below the fields */
+.forge-app .forge-geo-row > .forge-fgrid {{ flex: 1 1 680px; min-width: 680px; }}
+.forge-app .forge-geo-row > :last-child {{ flex: 0 1 620px; }}
+@container (max-width: 1100px) {{
+    .forge-app .forge-geo-row {{ flex-wrap: wrap; row-gap: 8px; }}
+    .forge-app .forge-geo-row > .forge-fgrid {{ flex: 1 1 100%; min-width: 0; }}
+}}
+/* under 1000px the CDR plot moves below the CDR release panels */
 @container (max-width: 1000px) {{
-    .forge-app .forge-geo-row, .forge-app .forge-cdr-row {{ flex-wrap: wrap; row-gap: 8px; }}
-    .forge-app .forge-geo-row > .forge-fgrid,
+    .forge-app .forge-cdr-row {{ flex-wrap: wrap; row-gap: 8px; }}
     .forge-app .forge-cdr-row > :first-child {{ flex: 1 1 100%; }}
 }}
 .forge-app .forge-hint {{
