@@ -350,7 +350,7 @@ def test_boundary_bgc_add_and_remove_buttons_always_present(editor):
     editor._render("boundary_bgc")
     assert any(
         getattr(c, "description", "") == "add bgc source"
-        for c in editor._containers["boundary_bgc"].children
+        for c in _iter_widget_tree(editor._containers["boundary_bgc"])
     )
 
     editor._add("boundary_bgc")
@@ -359,7 +359,7 @@ def test_boundary_bgc_add_and_remove_buttons_always_present(editor):
     assert remove_btn.layout.display == ""
     assert any(
         getattr(c, "description", "") == "add bgc source"
-        for c in editor._containers["boundary_bgc"].children
+        for c in _iter_widget_tree(editor._containers["boundary_bgc"])
     )
 
 
@@ -3847,8 +3847,10 @@ def test_settings_editor_tooltips_prefer_the_glossary_hint():
     assert _namelist_tooltip(RunTimeSettingsV0_9_0, "bottom_drag", "rdrg2") in (
         rdrg2_tip
     )
+    from cstar.wizard.ui.labels import label_for
+
     xco2air_tip = editor._widgets[("bgc", "xco2air_default")][0].tooltip
-    assert "co2_tvarying" in xco2air_tip
+    assert label_for("settings.bgc.xco2air_default").hint in xco2air_tip
     assert "PCO2AIR_FORCING" not in xco2air_tip
 
 

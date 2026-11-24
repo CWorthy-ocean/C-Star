@@ -813,6 +813,7 @@ def _make_field_widget(
     bool_dropdown: tuple[str, str] | None = None,
     choices: tuple[str, ...] | None = None,
     optional: bool = False,
+    multiline: bool = False,
 ):
     style = {"description_width": "260px"}
     wide = W.Layout(width="560px")
@@ -873,6 +874,16 @@ def _make_field_widget(
         )
     if base is list:
         joined = ", ".join(str(x) for x in (value or []))
+        if multiline:  # a long list wraps, so all of it shows
+            return W.Textarea(
+                value=joined,
+                description=name,
+                style=style,
+                layout=wide,
+                rows=4,
+                placeholder="comma-separated",
+                **kw,
+            )
         return W.Text(
             value=joined,
             description=name,
@@ -907,7 +918,8 @@ def _read_field_widget(
     if base is float:
         return float(v)
     if base is list:
-        parts = [p.strip() for p in str(v).split(",") if p.strip()]
+        # Commas or line breaks (a multiline list box, see _make_field_widget).
+        parts = [p.strip() for p in re.split(r"[,\n]", str(v)) if p.strip()]
         out: list[int | float | str] = []
         for p in parts:
             try:
@@ -1382,6 +1394,14 @@ _TS_DIAGNOSTICS_FLAGS = (("ts_output", "wrt_temp_dia"), ("ts_output", "wrt_salt_
 # also matters in split mode); named for ``_apply_field_rules``.
 _IMPLICIT_FS_SOLVER_FIELDS = ("fs_nsub", "fs_rho_inf", "fs_tol")
 
+# List settings long enough to need a wrapping text area, so the whole list shows.
+_MULTILINE_LIST_FIELDS = frozenset(
+    {
+        ("marbl_bgc", "marbl_tracers_to_write"),
+        ("marbl_bgc", "marbl_diagnostics_to_write"),
+    }
+)
+
 # Output-stream tables for the settings editor: each namelist section
 # that models one-or-more "write this stream / how often / how many records
 # per file" triples renders those fields as a small table (see
@@ -1656,6 +1676,13 @@ def _model_time_text(seconds: float) -> str:
             n = int(seconds // size)
             return f"{n} {unit}{'' if n == 1 else 's'}"
     return ""
+
+
+def _display_round(value: float) -> float:
+    """A derived number rounded for display: one decimal, or three significant
+    digits below 1 (where one decimal could round it to zero).
+    """
+    return round(value, 1) if abs(value) >= 1 else float(f"{value:.3g}")
 
 
 def _widget_number(widget: Any) -> float | None:
@@ -2178,14 +2205,22 @@ class _SettingsEditor:
                 _MODEL_CARD, tuple(_MODEL_CARD_FIELDS), model_settings, headers=False
             )
         )
-        # Likewise the Forcing card's: the constant atmospheric xCO2.
+        # The Forcing card's (the constant atmospheric xCO2) as field rows, labelled
+        # like the rest of its "Atmospheric CO2" block.
+        self._build_group(
+            _FORCING_CARD, tuple(_FORCING_CARD_FIELDS), model_settings, headers=False
+        )
         self.forcing_box = W.VBox(
-            self._build_group(
-                _FORCING_CARD,
-                tuple(_FORCING_CARD_FIELDS),
-                model_settings,
-                headers=False,
-            )
+            [
+                components.field_row(
+                    W,
+                    f"settings.{section}.{field}",
+                    self._widgets[(section, field)][0],
+                    width="120px",
+                )
+                for section, fields in self._group_fields.get(_FORCING_CARD, {}).items()
+                for field in fields
+            ]
         )
         # Before the on_edit observers attach, so locking one is never an edit.
         for key, why in self._forced_on.items():
@@ -2510,6 +2545,7 @@ class _SettingsEditor:
             bool_dropdown=bool_dropdown,
             choices=_literal_choices(ann),
             optional=_is_optional_numeric(ann),
+            multiline=(section, key) in _MULTILINE_LIST_FIELDS,
         )
         self._widgets[(section, key)] = (w, base)
         return w
@@ -3821,13 +3857,7 @@ class _ForcingEditor:
             layout=W.Layout(width="auto"),
         )
         self._co2_static_box = W.VBox(
-            [
-                co2_static if co2_static is not None else W.VBox([]),
-                W.HTML(
-                    "<div class='forge-hint'>284.7 ppm is the pre-industrial "
-                    "average. MARBL uses this value for the whole run.</div>"
-                ),
-            ]
+            [co2_static if co2_static is not None else W.VBox([])]
         )
         self._co2_varying_box = W.VBox(
             [
@@ -3842,7 +3872,7 @@ class _ForcingEditor:
         self.co2_block = components.subsection(
             W,
             "forcing.surface.co2",
-            self.co2_mode,
+            components.field_row(W, "forcing.co2.mode", self.co2_mode),
             self._co2_static_box,
             self._co2_varying_box,
         )
@@ -4598,8 +4628,9 @@ class _ForcingEditor:
     def _add_row_options(self, cat: str, w: dict[str, Any]) -> None:
         """Put *cat*'s option fields of row ``w`` (:data:`_ROW_OPTION_DEFAULTS`)
         under a disclosure kept in ``w["_options"]``, titled with how many it shows
-        and how many differ from their defaults; hidden while it shows none (a
-        custom-file river). Built once per row, so ``_render`` keeps it open.
+        and how many differ from their defaults (a preset may set some: "non-default",
+        not "changed"); hidden while it shows none (a custom-file river). Built once
+        per row, so ``_render`` keeps it open.
         """
         defaults = _ROW_OPTION_DEFAULTS.get(cat, {})
         keys = [k for k in w if k in defaults]
@@ -4621,7 +4652,7 @@ class _ForcingEditor:
             pane.set_title(
                 components.accordion_title(
                     title,
-                    components.Pill(f"{n} · {changed} changed", "mod")
+                    components.Pill(f"{n} · {changed} non-default", "mod")
                     if changed
                     else components.Pill(f"{n} · defaults", "off"),
                 )
@@ -4682,7 +4713,9 @@ class _ForcingEditor:
         elif cat == "boundary_bgc":
             extra = [self._sync_to_ic_btn]
         lead = [self.co2_block, self._surface_rows_header] if cat == "surface" else []
-        self._containers[cat].children = [*lead, *boxes, add, *extra]
+        buttons = W.HBox([add, *extra])
+        buttons.add_class("forge-row-btns")
+        self._containers[cat].children = [*lead, *boxes, buttons]
 
     def clear_category(self, cat: str):
         """Remove all rows for a row category (e.g. ``"boundary_bgc"`` for a
@@ -6047,49 +6080,19 @@ class ForgeBlueprintWizard:
         # which must call it explicitly since suspended observers are no-ops).
         self._cdr_mode_active: str | None = None
 
-        def _cdr_field(value, desc, unit, *, width="300px"):
-            """A FloatText plus an adjacent units label -- ipywidgets' own
-            ``description`` has no room for a units suffix on top of a label.
-
-            ``width`` is the WHOLE widget (label + input): the 170px
-            description_width is carved out of it, so it must comfortably
-            exceed 170px or the input box collapses to zero width.
-            """
-            w = W.FloatText(
-                value=value,
-                description=desc,
-                style={"description_width": "170px"},
-                layout=W.Layout(width=width),
-            )
-            return w, W.HBox([w, W.HTML(f"<span style='color:#666'>{unit}</span>")])
-
         # --- CDR mode "simple": a single hand-authored tracer-perturbation
         # release, compiled into a roms-tools CDRForcing kwargs dict at gather
-        # time (see _simple_cdr_forcing_dict). ---
-        self.cdr_simple_name = W.Text(
-            value="my_cdr",
-            description="Name:",
-            style={"description_width": "170px"},
-            layout=W.Layout(width="340px"),
-        )
-        self.cdr_simple_lat, _cdr_lat_row = _cdr_field(0.0, "Latitude:", "°N")
-        self.cdr_simple_lon, _cdr_lon_row = _cdr_field(0.0, "Longitude:", "°E")
-        self.cdr_simple_depth, _cdr_depth_row = _cdr_field(1.0, "Depth:", "m")
-        self.cdr_simple_hsc, _cdr_hsc_row = _cdr_field(
-            10.0, "Gaussian Scale (horizontal):", "m"
-        )
-        self.cdr_simple_vsc, _cdr_vsc_row = _cdr_field(
-            10.0, "Gaussian Scale (vertical):", "m"
-        )
-        self.cdr_simple_flux, _cdr_flux_row = _cdr_field(
-            2 * 10**6, "ALK tracer flux:", "meq/s", width="320px"
-        )
-        self.cdr_simple_start = W.DatePicker(
-            description="Start:", style={"description_width": "170px"}
-        )
-        self.cdr_simple_end = W.DatePicker(
-            description="End:", style={"description_width": "170px"}
-        )
+        # time (see _simple_cdr_forcing_dict). Laid out as field rows (labels and
+        # units from the glossary) in cdr_simple_box below. ---
+        self.cdr_simple_name = W.Text(value="my_cdr", layout=W.Layout(width="220px"))
+        self.cdr_simple_lat = W.FloatText(value=0.0)
+        self.cdr_simple_lon = W.FloatText(value=0.0)
+        self.cdr_simple_depth = W.FloatText(value=1.0)
+        self.cdr_simple_hsc = W.FloatText(value=10.0)
+        self.cdr_simple_vsc = W.FloatText(value=10.0)
+        self.cdr_simple_flux = W.FloatText(value=2 * 10**6)
+        self.cdr_simple_start = W.DatePicker()
+        self.cdr_simple_end = W.DatePicker()
         self._cdr_simple_fields = (
             self.cdr_simple_name,
             self.cdr_simple_lat,
@@ -6124,15 +6127,20 @@ class ForgeBlueprintWizard:
             [
                 self.cdr_simple_note,
                 self.cdr_simple_replace_btn,
-                self.cdr_simple_name,
-                _cdr_lat_row,
-                _cdr_lon_row,
-                _cdr_depth_row,
-                _cdr_hsc_row,
-                _cdr_vsc_row,
-                _cdr_flux_row,
-                self.cdr_simple_start,
-                self.cdr_simple_end,
+                components.field_row(W, "cdr_simple_name", self.cdr_simple_name),
+                *(
+                    components.field_row(W, key, widget, width="140px")
+                    for key, widget in (
+                        ("cdr_simple_lat", self.cdr_simple_lat),
+                        ("cdr_simple_lon", self.cdr_simple_lon),
+                        ("cdr_simple_depth", self.cdr_simple_depth),
+                        ("cdr_simple_hsc", self.cdr_simple_hsc),
+                        ("cdr_simple_vsc", self.cdr_simple_vsc),
+                        ("cdr_simple_flux", self.cdr_simple_flux),
+                    )
+                ),
+                components.field_row(W, "cdr_simple_start", self.cdr_simple_start),
+                components.field_row(W, "cdr_simple_end", self.cdr_simple_end),
             ]
         )
 
@@ -6330,6 +6338,9 @@ class ForgeBlueprintWizard:
         # _boundaries_derived tracks whether that's happened since the last
         # grid-affecting edit -- see _on_grid_kwarg_change/_on_derive_domain_properties.
         self._v_sponge_touched = False
+        # The full grid-derived v_sponge the widget shows rounded (see
+        # _show_derived_v_sponge), so a snapshot keeps its precision.
+        self._v_sponge_derived: float | None = None
         self._boundaries_touched = False
         self._boundaries_derived = False
         # What the widgets cannot hold of the last loaded blueprint or DomainSpec,
@@ -6964,6 +6975,28 @@ class ForgeBlueprintWizard:
         self._boundaries_touched = True
         self.derive_status.value = ""
         self._rebuild()
+
+    def _show_derived_v_sponge(self, value: float) -> None:
+        """Show the grid-derived sponge viscosity ``value`` rounded for display
+        (8333.333333333332 reads 8333.3), keeping the full value for
+        `_v_sponge_value`. The blueprint never takes it from the widget while it
+        is derived: the resolver derives it again from ``v_sponge=None``.
+        """
+        self._v_sponge_derived = value
+        self.v_sponge.value = _display_round(value)
+
+    def _v_sponge_value(self) -> float:
+        """The sponge viscosity the widget stands for: the full derived value while
+        it is untouched and shows that value rounded, else what it holds.
+        """
+        derived = self._v_sponge_derived
+        if (
+            not self._v_sponge_touched
+            and derived is not None
+            and self.v_sponge.value == _display_round(derived)
+        ):
+            return derived
+        return float(self.v_sponge.value)
 
     def _on_v_sponge_edit(self, _change):
         if getattr(self, "_suspended", False):
@@ -7806,7 +7839,7 @@ class ForgeBlueprintWizard:
             "grid_w": {k: w.value for k, w in self.grid_w.items()},
             "scoord_chk": self.scoord_chk.value,
             "bnd": {d: w.value for d, w in self.bnd.items()},
-            "v_sponge": self.v_sponge.value,
+            "v_sponge": self._v_sponge_value(),
             "dt": self.dt.value,
             "npx": self.npx.value,
             "npy": self.npy.value,
@@ -9418,7 +9451,7 @@ class ForgeBlueprintWizard:
         # write doesn't itself flip _v_sponge_touched (see _on_v_sponge_edit).
         if not self._v_sponge_touched:
             with self._suspend():
-                self.v_sponge.value = float(cfg.domain.v_sponge)
+                self._show_derived_v_sponge(float(cfg.domain.v_sponge))
 
         # Advanced/Output settings editor: every section is editable. The resolver
         # composes a baseline from the specs; the user's manual edits are a sparse
@@ -9919,7 +9952,9 @@ class ForgeBlueprintWizard:
                     if d in boundaries:
                         w.value = bool(boundaries[d])
             if not self._v_sponge_touched:
-                self.v_sponge.value = compute_v_sponge_from_grid(grid.size_x, grid.nx)
+                self._show_derived_v_sponge(
+                    compute_v_sponge_from_grid(grid.size_x, grid.nx)
+                )
         self._boundaries_derived = True
 
     def _on_derive_domain_properties(self, _):

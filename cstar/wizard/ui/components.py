@@ -591,7 +591,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 /* a wide setting (_make_field_widget's 560px) is capped at its column and its
    input shrinks, instead of running past the card in a narrow window */
 .forge-app .forge-settings-sec-w ~ .widget-vbox > .widget-inline-hbox {{ max-width: 100%; }}
-.forge-app .forge-settings-sec-w ~ .widget-vbox > .widget-inline-hbox > :is(input, select) {{ min-width: 0; }}
+.forge-app .forge-settings-sec-w ~ .widget-vbox > .widget-inline-hbox > :is(input, select, textarea) {{ min-width: 0; }}
 /* repeatable forcing rows: each row is a tile with its labels above the inputs
    (so a field lines up from row to row), checkboxes on the input baseline, and
    the remove button in the top-right corner. A row's option fields
@@ -607,6 +607,8 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     row-gap: 12px;
 }}
 .forge-app .forge-frow-opts {{ column-gap: 16px; row-gap: 12px; }}
+/* a row list's "add" button and its copy button, side by side */
+.forge-app .forge-row-btns {{ gap: 8px; flex-wrap: wrap; }}
 .forge-app .forge-frow > .widget-inline-hbox:not(.widget-checkbox),
 .forge-app .forge-frow-opts > .widget-inline-hbox:not(.widget-checkbox) {{
     flex-direction: column;

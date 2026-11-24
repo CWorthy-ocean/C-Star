@@ -83,12 +83,15 @@ def test_a_spec_without_mbl_co2_loads_static_at_the_pre_industrial_default():
     editor = _editor(wiz)
     assert editor.co2_mode.value == _CO2_STATIC
     assert _shown(editor._co2_static_box) and not _shown(editor._co2_varying_box)
-    assert "pre-industrial" in editor._co2_static_box.children[1].value
 
+    # The static value is a field row: glossary label, unit and the hint.
     widget = wiz.editor._widgets[_XCO2][0]
-    assert widget.description == "Constant atmospheric xCO2 (ppm)"
+    row = wiz.editor.forcing_box.children[0]
+    assert row.forge_key == "settings.bgc.xco2air_default"
+    assert row.forge_widget is widget
+    assert widget.description == ""
+    assert "pre-industrial" in row.children[1].children[1].value
     assert widget.value == 284.7
-    assert widget in wiz.editor.forcing_box.children[0].children
     assert wiz.editor.forcing_box in wiz.co2_static_box.children
     assert wiz.editor._group_fields[_FORCING_CARD] == {"bgc": ["xco2air_default"]}
     assert "xco2air_default" not in wiz.editor._group_fields[_BGC_PANE].get("bgc", [])

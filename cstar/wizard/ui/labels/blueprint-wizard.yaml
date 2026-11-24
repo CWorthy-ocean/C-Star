@@ -275,12 +275,10 @@ fields:
     label: Processors, east–west
     symbol: n_procs_x
     required: true
-    hint: Number of MPI tiles in the x-direction (east–west).
   npy:
     label: Processors, north–south
     symbol: n_procs_y
     required: true
-    hint: Number of MPI tiles in the y-direction (north–south).
   use_pio_chk:
     label: Write output with ParallelIO (PIO)
     hint: 'Builds ROMS against the ParallelIO library: inputs are written as classic-format (CDF-5) netCDF and ROMS reads/writes joined files.'
@@ -291,7 +289,6 @@ fields:
   n_cores:
     label: Total processors
     symbol: n_cores
-    hint: Total MPI ranks.
   roms_ref:
     label: ucla-roms version
     symbol: ucla_roms_ref
@@ -308,10 +305,8 @@ fields:
     hint: Optionally prefill the child grid kwargs from a cataloged domain.
   child_topo_source:
     label: Child topography source
-    hint: Topography dataset the child grid is built with when extracting nesting data.
   child_topo_path:
     label: Child topography file
-    hint: Explicit topography file for the child grid.
   nest_period:
     label: Nesting extract period
     unit: s
@@ -327,30 +322,24 @@ fields:
     hint: Optionally prefill the parent grid kwargs from a cataloged domain.
   parent_topo_source:
     label: Parent topography source
-    hint: Topography dataset the parent grid is rebuilt with.
   parent_topo_path:
     label: Parent topography file
-    hint: Explicit topography file for the parent grid.
   start:
     label: Start date
     required: true
-    hint: Start date of the simulation run window.
   end:
     label: End date
     required: true
-    hint: End date of the simulation run window.
   model_ref_date:
     label: Model reference date
     symbol: model_reference_date
     hint: ROMS model t=0 reference date.
   description:
     label: Description
-    hint: Human-readable description of this blueprint.
   hmin:
     label: Minimum depth
     symbol: hmin
     unit: m
-    hint: Minimum allowable ocean depth.
   close_narrow_chk:
     label: Close narrow channels
     symbol: close_narrow_channels
@@ -368,7 +357,6 @@ fields:
   topo_path:
     label: Topography file
     symbol: topo_path
-    hint: Path to a custom topography file.
   grid_file_path:
     label: Grid file
     symbol: grid_file
@@ -384,7 +372,7 @@ fields:
     label: Forcing preset
     required: true
     hint: Selects a named forcing spec from the catalog to seed all forcing fields.
-  co2_mode:
+  forcing.co2.mode:
     label: Air CO2
   cdr_dd:
     label: CDR preset
@@ -492,7 +480,6 @@ fields:
     symbol: hc
     unit: m
     required: false
-    hint: S-coordinate critical depth.
 
   # ===========================================================================
   # ic.* -- _ForcingEditor's initial-conditions scalar pane
@@ -507,7 +494,6 @@ fields:
     hint: 'GLORYS spatial layout override: regional (default) or global.'
   ic.ic_path:
     label: Initial conditions path
-    hint: Explicit path to a custom dataset file for this source.
   ic.ic_bgc_interp:
     label: Biogeochemistry interpolation
     symbol: bgc_interpolation_method
@@ -530,7 +516,6 @@ fields:
   ic.ic_regrid_method:
     label: Regrid method
     symbol: regrid_method
-    hint: Horizontal regrid engine.
   ic.ic_extrap_method:
     label: Extrapolation method
     symbol: extrap_method
@@ -556,7 +541,6 @@ fields:
     hint: 'GLORYS spatial layout: regional or global.'
   boundary.boundary_path:
     label: Boundary path
-    hint: Explicit path to a custom dataset file for this source.
   boundary.boundary_bgc_interp:
     label: Biogeochemistry interpolation
     symbol: bgc_interpolation_method
@@ -568,7 +552,6 @@ fields:
   boundary.boundary_regrid_method:
     label: Regrid method
     symbol: regrid_method
-    hint: Horizontal regrid engine.
   boundary.boundary_extrap_method:
     label: Extrapolation method
     symbol: extrap_method
@@ -934,7 +917,6 @@ fields:
   settings.cdr_lite_output.wrt_tracers:
     label: Write tracer concentrations
     symbol: wrt_tracers
-    hint: Write the CDR-lite tracer concentrations.
   settings.cdr_lite_output.wrt_vertical_integrals:
     label: Write vertical integrals
     symbol: wrt_vertical_integrals
