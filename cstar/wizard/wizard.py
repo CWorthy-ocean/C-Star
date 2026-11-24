@@ -2573,15 +2573,64 @@ _ESPER_METHOD_OPTS = ["", "lir", "nn", "mixed"]
 _ESPER_EQUATION_OPTS = ["", "8", "16"]
 
 
-def _row_desc(key: str, default: str, *, colon: bool = True) -> str:
+def _row_desc(key: str, default: str) -> str:
     """Per-row widget description text: the glossary label for
     ``forcing.row.<key>`` (falling back to ``default``, the historical
-    hardcoded caption), with a trailing colon for text/dropdown/number
-    widgets (``colon=True``, the default) or bare for checkboxes
-    (``colon=False``).
+    hardcoded caption). No trailing colon: a row tile sets each label above its
+    box.
     """
-    label = label_for(f"forcing.row.{key}", default=default).label
-    return f"{label}:" if colon else label
+    return label_for(f"forcing.row.{key}", default=default).label
+
+
+_ROW_REGRID_DEFAULTS = {"prefill": "", "regrid_method": "", "extrap_method": ""}
+# The fields of a repeatable forcing row that sit under its options disclosure
+# (_ROW_OPTIONS_TITLES) rather than on its first line, by row category, each with
+# the widget value that leaves it at its default: the disclosure counts the shown
+# ones and how many differ, _make_row seeds a missing field from it, and
+# _gather_item omits a field still at it. Every other field of a row is a primary
+# one. The BGC source rows (ic_bgc, boundary_bgc) have nothing to split.
+_ROW_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
+    "surface": {
+        "coarse_grid_mode": SurfaceForcingItem.model_fields[
+            "coarse_grid_mode"
+        ].default.value,
+        "blend_fallback": _BLEND_NONE,
+        "blend_fallback_correct_radiation": SurfaceBlendFallback.model_fields[
+            "correct_radiation"
+        ].default,
+        "blend_width_km": SurfaceBlend.model_fields["width_km"].default,
+        "blend_profile": SurfaceBlend.model_fields["profile"].default.value,
+        **_ROW_REGRID_DEFAULTS,
+        "options": "",
+    },
+    "tidal": {**_ROW_REGRID_DEFAULTS, "options": ""},
+    "river": {
+        "convert_to_climatology": RiverForcingItem.model_fields[
+            "convert_to_climatology"
+        ].default.value,
+        "coast_snap_buffer_km": 0.0,  # unset: the dataset's own buffer
+        "domain_edge_buffer": RiverForcingItem.model_fields[
+            "domain_edge_buffer"
+        ].default,
+        "surface_forcing_source_name": "",
+        "surface_forcing_source_path": "",
+        "river_temp_smoothing_window_days": RiverForcingItem.model_fields[
+            "river_temp_smoothing_window_days"
+        ].default,
+        "options": "",
+    },
+}
+_ROW_OPTIONS_TITLES = {"river": "River options"}
+_ROW_OPTIONS_TITLE = "Regridding & roms-tools options"
+
+
+def _row_option_changed(default: Any, value: Any) -> bool:
+    """Whether an options-disclosure field's ``value`` differs from its ``default``
+    (blank text counts as unset).
+    """
+    if isinstance(default, str):
+        return str(value).strip() != default
+    return value != default
 
 
 def _add_regrid_widgets(W, w: dict[str, Any], cat: str, item: dict[str, Any], small):
@@ -2683,7 +2732,7 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
         description=_row_desc("constants", "constants"),
         placeholder="key=value pairs, e.g. Fe=3.0e-3, ALK=2300",
         style=small,
-        layout=W.Layout(width="320px", height="48px"),
+        layout=W.Layout(width="320px"),
         tooltip=_tip(cat, "constants"),
     )
     _method_val = str(src.get("esper_method") or "")
@@ -2710,11 +2759,8 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
     )
     w["esper_salinity_conditioning"] = W.Checkbox(
         value=bool(src.get("esper_salinity_conditioning", False)),
-        description=_row_desc(
-            "esper_salinity_conditioning", "condition salinity", colon=False
-        ),
+        description=_row_desc("esper_salinity_conditioning", "condition salinity"),
         indent=False,
-        layout=W.Layout(width="200px"),
         tooltip=_tip(cat, "esper_salinity_conditioning"),
     )
 
@@ -3793,7 +3839,7 @@ class _ForcingEditor:
                 )
             ),
             description=_row_desc(
-                "blend_fallback_correct_radiation", "fallback corr_rad", colon=False
+                "blend_fallback_correct_radiation", "fallback corr_rad"
             ),
             indent=False,
             tooltip=_tip("surface", "blend_fallback_correct_radiation"),
@@ -3932,10 +3978,8 @@ class _ForcingEditor:
         if cat in ("surface", "boundary_bgc", "ic_bgc"):
             w["climatology"] = W.Checkbox(
                 value=bool(src.get("climatology", False)),
-                description=_row_desc("climatology", "climatology", colon=False),
+                description=_row_desc("climatology", "climatology"),
                 indent=False,
-                # Wider than the default so the longer label isn't clipped.
-                layout=W.Layout(width="130px"),
                 # "boundary_bgc" has no own tooltip entry -- reuse "boundary"'s.
                 tooltip=_tip(
                     "boundary" if cat == "boundary_bgc" else cat, "climatology"
@@ -4007,19 +4051,22 @@ class _ForcingEditor:
         if cat == "surface":
             w["correct_radiation"] = W.Checkbox(
                 value=bool(item.get("correct_radiation", False)),
-                description=_row_desc("correct_radiation", "corr_rad", colon=False),
+                description=_row_desc("correct_radiation", "corr_rad"),
                 indent=False,
                 tooltip=_tip("surface", "correct_radiation"),
             )
             w["wind_dropoff"] = W.Checkbox(
                 value=bool(item.get("wind_dropoff", False)),
-                description=_row_desc("wind_dropoff", "wind_dropoff", colon=False),
+                description=_row_desc("wind_dropoff", "wind_dropoff"),
                 indent=False,
                 tooltip=_tip("surface", "wind_dropoff"),
             )
             w["coarse_grid_mode"] = W.Dropdown(
                 options=_COARSE_MODES,
-                value=item.get("coarse_grid_mode", "auto"),
+                value=item.get(
+                    "coarse_grid_mode",
+                    _ROW_OPTION_DEFAULTS["surface"]["coarse_grid_mode"],
+                ),
                 description=_row_desc("coarse_grid_mode", "coarse"),
                 style=small,
                 layout=W.Layout(width="190px"),
@@ -4047,27 +4094,26 @@ class _ForcingEditor:
         if cat == "river":
             w["climatology"] = W.Checkbox(
                 value=bool(src.get("climatology", False)),
-                description=_row_desc("climatology", "climatology", colon=False),
+                description=_row_desc("climatology", "climatology"),
                 indent=False,
-                # Wider than the default so the longer label isn't clipped.
-                layout=W.Layout(width="130px"),
                 tooltip=_tip("river", "climatology"),
             )
             w["include_bgc"] = W.Checkbox(
                 value=bool(item.get("include_bgc", False)),
-                description=_row_desc("include_bgc", "bgc", colon=False),
+                description=_row_desc("include_bgc", "bgc"),
                 indent=False,
                 tooltip=_tip("river", "include_bgc"),
             )
             _ctc_opts = [e.value for e in ClimatologyMode]
+            river_defaults = _ROW_OPTION_DEFAULTS["river"]
             _ctc_val = item.get(
-                "convert_to_climatology", ClimatologyMode.IF_ANY_MISSING.value
+                "convert_to_climatology", river_defaults["convert_to_climatology"]
             )
             w["convert_to_climatology"] = W.Dropdown(
                 options=_ctc_opts,
                 value=_ctc_val
                 if _ctc_val in _ctc_opts
-                else ClimatologyMode.IF_ANY_MISSING.value,
+                else river_defaults["convert_to_climatology"],
                 description=_row_desc("convert_to_climatology", "clim mode"),
                 style=small,
                 layout=W.Layout(width="210px"),
@@ -4081,7 +4127,9 @@ class _ForcingEditor:
                 tooltip=_tip("river", "coast_snap_buffer_km"),
             )
             w["domain_edge_buffer"] = W.IntText(
-                value=int(item.get("domain_edge_buffer", 20)),
+                value=int(
+                    item.get("domain_edge_buffer", river_defaults["domain_edge_buffer"])
+                ),
                 description=_row_desc("domain_edge_buffer", "edge buffer"),
                 style=small,
                 layout=W.Layout(width="180px"),
@@ -4129,7 +4177,12 @@ class _ForcingEditor:
                 tooltip=_tip("river", "surface_forcing_source_path"),
             )
             w["river_temp_smoothing_window_days"] = W.FloatText(
-                value=float(item.get("river_temp_smoothing_window_days", 30.0)),
+                value=float(
+                    item.get(
+                        "river_temp_smoothing_window_days",
+                        river_defaults["river_temp_smoothing_window_days"],
+                    )
+                ),
                 description=_row_desc(
                     "river_temp_smoothing_window_days", "temp. smoothing (days)"
                 ),
@@ -4224,6 +4277,7 @@ class _ForcingEditor:
             w["options"] = _options_editor(
                 W, item.get("options"), description=_row_desc("options", "options")
             )
+            w["options"].layout.height = None  # the row tile sets its height
         remove = W.Button(
             description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item"
         )
@@ -4371,7 +4425,48 @@ class _ForcingEditor:
             w["_maybe_attach_custom_file"] = _maybe_attach_river_custom_file
             _sync_river_custom_visibility()
         self._apply_row_visibility(w)
+        self._add_row_options(cat, w)
         return w
+
+    def _add_row_options(self, cat: str, w: dict[str, Any]) -> None:
+        """Put *cat*'s option fields of row ``w`` (:data:`_ROW_OPTION_DEFAULTS`)
+        under a disclosure kept in ``w["_options"]``, titled with how many it shows
+        and how many differ from their defaults; hidden while it shows none (a
+        custom-file river). Built once per row, so ``_render`` keeps it open.
+        """
+        defaults = _ROW_OPTION_DEFAULTS.get(cat, {})
+        keys = [k for k in w if k in defaults]
+        if not keys:
+            return
+        W = self.W
+        title = _ROW_OPTIONS_TITLES.get(cat, _ROW_OPTIONS_TITLE)
+        body = W.HBox(
+            [w[k] for k in keys],
+            layout=W.Layout(flex_flow="row wrap", align_items="flex-end"),
+        )
+        body.add_class("forge-frow-opts")
+        pane = components.collapsible(W, body, title, variant="inline")
+
+        def _retitle(_change: Any = None) -> None:
+            shown = [k for k in keys if w[k].layout.display != "none"]
+            changed = sum(_row_option_changed(defaults[k], w[k].value) for k in shown)
+            n = f"{len(shown)} setting{'' if len(shown) == 1 else 's'}"
+            pane.set_title(
+                components.accordion_title(
+                    title,
+                    components.Pill(f"{n} · {changed} changed", "mod")
+                    if changed
+                    else components.Pill(f"{n} · defaults", "off"),
+                )
+            )
+            pane.layout.display = "" if shown else "none"
+
+        for k in keys:
+            w[k].observe(_retitle, names="value")
+            w[k].layout.observe(_retitle, names="display")
+        _retitle()
+        w["_options"] = pane
+        w["_option_keys"] = tuple(keys)
 
     def _row_box(self, w, *, removable: bool = True):
         # `type` (when present) drives the other options in the row, so show it first.
@@ -4385,19 +4480,23 @@ class _ForcingEditor:
         # data rather than widgets. Filter by prefix so a future carry cannot be
         # forgotten here and end up handed to HBox as a child. A row that is not
         # *removable* (the "Atmospheric CO2" block's) gets no remove button.
-        keys = [k for k in w if not k.startswith("_")]
+        option_keys = w.get("_option_keys", ())
+        keys = [k for k in w if not k.startswith("_") and k not in option_keys]
         if "type" in keys:
             keys = ["type", *[k for k in keys if k != "type"]]
         w["_remove_btn"].layout.display = ""
         lead = [w["_remove_btn"]] if removable else []
+        # The option fields (see _add_row_options) follow on their own line.
+        trail = [w["_options"]] if "_options" in w else []
         # Wrap onto further lines instead of overflowing horizontally: a fully
-        # populated row (source, path, climatology, constants, ESPER, options…)
-        # is wider than any sensible page.
+        # populated row (source, path, climatology, constants, ESPER…) is wider
+        # than any sensible page. Fields align on their input boxes, since each
+        # label sits above its box.
         row = self.W.HBox(
-            [*lead, *(w[k] for k in keys)],
-            layout=self.W.Layout(flex_flow="row wrap", align_items="flex-start"),
+            [*lead, *(w[k] for k in keys), *trail],
+            layout=self.W.Layout(flex_flow="row wrap", align_items="flex-end"),
         )
-        row.add_class("forge-frow")  # divider + spacing between wrapped rows
+        row.add_class("forge-frow")  # a tile per row
         return row
 
     def _render(self, cat: str):
@@ -4533,8 +4632,7 @@ class _ForcingEditor:
             constants = _parse_field(
                 _parse_constants,
                 w["constants"].value,
-                f"{self._row_label(cat, w)}, "
-                f"{_row_desc('constants', 'constants', colon=False)}",
+                f"{self._row_label(cat, w)}, {_row_desc('constants', 'constants')}",
             )
             if constants:
                 src["constants"] = constants
@@ -4649,7 +4747,10 @@ class _ForcingEditor:
                 w.get("surface_forcing_source_name")
                 and w["surface_forcing_source_name"].value
             )
-            if window != 30.0 and (visible or window > 0):
+            default_window = _ROW_OPTION_DEFAULTS["river"][
+                "river_temp_smoothing_window_days"
+            ]
+            if window != default_window and (visible or window > 0):
                 item["river_temp_smoothing_window_days"] = window
         if "convert_to_climatology" in w:
             item["convert_to_climatology"] = w["convert_to_climatology"].value
@@ -4657,15 +4758,17 @@ class _ForcingEditor:
             "coast_snap_buffer_km" in w and w["coast_snap_buffer_km"].value
         ):  # 0.0 = leave unset
             item["coast_snap_buffer_km"] = float(w["coast_snap_buffer_km"].value)
-        if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != 20:
+        default_edge = _ROW_OPTION_DEFAULTS["river"]["domain_edge_buffer"]
+        if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != (
+            default_edge
+        ):
             item["domain_edge_buffer"] = int(w["domain_edge_buffer"].value)
         item.update(copy.deepcopy(w.get("_carried") or {}))
         if "options" in w:  # advanced passthrough; omit when empty
             opts = _parse_field(
                 _parse_options,
                 w["options"].value,
-                f"{self._row_label(cat, w)}, "
-                f"{_row_desc('options', 'options', colon=False)}",
+                f"{self._row_label(cat, w)}, {_row_desc('options', 'options')}",
             )
             if opts:
                 item["options"] = opts

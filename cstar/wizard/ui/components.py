@@ -596,8 +596,8 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 .forge-app .forge-settings-sec-w ~ .widget-vbox > .widget-inline-hbox > :is(input, select) {{ min-width: 0; }}
 /* repeatable forcing rows: each row is a tile with its labels above the inputs
    (so a field lines up from row to row), checkboxes on the input baseline, and
-   the remove button in the top-right corner. !important beats
-   _ForcingEditor._row_box's inline align_items="flex-start" (PR 2 moves it). */
+   the remove button in the top-right corner. A row's option fields
+   (_ForcingEditor._add_row_options) sit the same way under its disclosure. */
 .forge-app .forge-frow {{
     position: relative;
     background: #FAFAFB;
@@ -607,13 +607,14 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     margin: 0 0 10px;
     column-gap: 16px;
     row-gap: 12px;
-    align-items: flex-end !important;
 }}
-.forge-app .forge-frow > .widget-inline-hbox:not(.widget-checkbox) {{
+.forge-app .forge-frow-opts {{ column-gap: 16px; row-gap: 12px; }}
+.forge-app .forge-frow > .widget-inline-hbox:not(.widget-checkbox),
+.forge-app .forge-frow-opts > .widget-inline-hbox:not(.widget-checkbox) {{
     flex-direction: column;
     align-items: stretch;
     margin: 0;
-    height: auto !important;  /* beats _options_editor's inline height="48px" (PR 2 moves it) */
+    height: auto;
 }}
 .forge-app .forge-frow .widget-inline-hbox:not(.widget-checkbox) > .widget-label {{
     max-width: none;
@@ -633,7 +634,7 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     height: 28px;
     margin: 0;
     align-items: center;
-    width: auto !important;  /* beats _make_row's inline width="130px" on Climatology (PR 2 moves it) */
+    width: auto;
 }}
 .forge-app .forge-frow > .widget-button:first-child {{
     position: absolute;
