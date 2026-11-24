@@ -1,7 +1,11 @@
-"""Tests for the field-widget helpers the wizard shares (cstar.wizard.fields)."""
+"""Tests for the helpers the wizard's modules share (cstar.wizard.fields)."""
 
-from cstar.wizard.fields import _base_type, _is_optional_numeric, _make_field_widget
-from cstar.wizard.wizard import _drain_stream_buffer
+from cstar.wizard.fields import (
+    _base_type,
+    _drain_stream_buffer,
+    _is_optional_numeric,
+    _make_field_widget,
+)
 
 
 def test_non_optional_int_field_keeps_number_box():

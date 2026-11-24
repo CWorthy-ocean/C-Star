@@ -22,7 +22,6 @@ plain CFL arithmetic until the user types one.
 
 from __future__ import annotations
 
-import base64
 import copy
 import html
 import re
@@ -30,14 +29,12 @@ import warnings
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, NamedTuple
+from typing import TYPE_CHECKING, Any, Final
 
 import yaml
 from pydantic import BaseModel, ValidationError
 
 from cstar.applications.forge.blueprint import (
-    DEFAULT_APPLICATION,
-    PLACEHOLDER_DESCRIPTION,
     BgcSourceItem,
     BoundaryForcing,
     Composition,
@@ -62,7 +59,6 @@ from cstar.applications.forge.resolve import (
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
     cfl_dt,
-    default_blueprint_description,
     extract_output_settings,
     force_switches_without_input_off,
     load_model_spec_data,
@@ -92,6 +88,8 @@ from cstar.wizard.forcing_editor import (
     _use_vars_rule,
 )
 from cstar.wizard.model_card import ModelCard, _pinned_roms_ref
+from cstar.wizard.review_card import WIZARD_TOOL, ReviewCard
+from cstar.wizard.review_card import WorkplanHooks as WorkplanHooks
 from cstar.wizard.run_card import RunCard, _run_time_label
 from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
@@ -110,20 +108,10 @@ from cstar.wizard.settings_editor import (
 )
 from cstar.wizard.settings_editor import LABEL_TEXT as LABEL_TEXT
 from cstar.wizard.ui import components
-from cstar.wizard.ui.catalog_bar import schedule_confirm_reset
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Sequence
-
-WIZARD_TOOL: Final[str] = "wizard"
-"""The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
-# What the Download links say while they wait (see _refresh_download_links).
-_DOWNLOAD_WAITS_FOR_BOUNDARIES: Final[str] = (
-    "The download is ready once the open boundaries are derived from the grid: "
-    "press Derive from grid in the Grid section, set the boundaries by hand, or "
-    "save the blueprint."
-)
+    from collections.abc import Collection, Sequence
 
 
 def _wizard_settings_cls_for_ref(roms_ref: str | None) -> type[BaseModel]:
@@ -642,63 +630,6 @@ def _get_catalog():
     return default_catalog
 
 
-def _schedule_coroutine(coro):
-    """Schedule a coroutine on the running loop (returns a Task), or run it to
-    completion directly if there is no running loop. Mirrors
-    ``cstar.applications.forge.executor._schedule_coroutine`` -- needed for seamless
-    execution of async code (like streaming a subprocess) from a synchronous
-    ipywidgets ``on_click`` handler, both inside and outside Jupyter.
-    """
-    import asyncio
-
-    try:
-        return asyncio.get_running_loop().create_task(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
-
-
-_STREAM_READ_SIZE = 2**16  # bytes per subprocess read; also bounds the flush below
-# A run whose child never emits a newline for a long stretch -- classically a
-# ``\r``-redrawn progress bar (git clone, tqdm, download progress) -- would grow an
-# unbounded "line". Flush an unterminated run once it reaches this so memory stays
-# bounded and the log still updates. (This is also what a line-oriented reader could
-# not survive: asyncio's StreamReader.readline() raises ValueError, "Separator is not
-# found, and chunk exceed the limit", at its 64 KiB default -- the bug this avoids.)
-_STREAM_MAX_LINE = 2**16
-
-
-def _drain_stream_buffer(
-    buf: bytes, *, at_eof: bool = False
-) -> tuple[list[str], bytes]:
-    r"""Split accumulated subprocess bytes into display lines, returning
-    ``(lines, remainder)``.
-
-    Segments are cut on ``\r\n``, ``\r`` or ``\n`` and each terminator is normalised
-    to a single trailing ``\n``, so ``\r``-only progress redraws surface as successive
-    log lines instead of one ever-growing line. A lone trailing ``\r`` is held back in
-    the remainder (unless at EOF) so a ``\r\n`` split across two reads is not mistaken
-    for a bare ``\r`` plus a spurious blank line. When not at EOF, an unterminated
-    remainder that reaches ``_STREAM_MAX_LINE`` is emitted as a partial line to keep
-    memory bounded; at EOF any remainder is flushed.
-    """
-    held = b""
-    if not at_eof and buf.endswith(b"\r"):
-        buf, held = buf[:-1], b"\r"
-    tokens = re.split(rb"(\r\n|\r|\n)", buf)
-    remainder = tokens.pop() + held
-    lines = [
-        tokens[i].decode(errors="replace") + "\n" for i in range(0, len(tokens), 2)
-    ]
-    if at_eof:
-        if remainder:
-            lines.append(remainder.decode(errors="replace"))
-        remainder = b""
-    elif len(remainder) >= _STREAM_MAX_LINE:
-        lines.append(remainder.decode(errors="replace"))
-        remainder = b""
-    return lines, remainder
-
-
 # Nested-grid topography: the parent/child grid kwargs may carry their own
 # ``topography_source``/``topography_path`` (Forge inputs, popped before rt.Grid --
 # see ForgeExecutor._nested_topography_pair for the inheritance rule). The
@@ -795,30 +726,6 @@ def _plot_topography_source(name: str, path: str) -> tuple[dict[str, str] | None
             "warn", f"(plotted with default ETOPO5 topography; {name}: {why})"
         )
     )
-
-
-_SAVE_FIRST = "Save the blueprint above first."
-"""Card 8's message while the blueprint is not saved as it stands."""
-
-
-class _SavedBlueprint(NamedTuple):
-    """The last blueprint file the wizard wrote, and what it wrote."""
-
-    requested: Path  #: the Save path the save was made with, as given
-    path: Path  #: the file written, resolved
-    text: str  #: ``to_yaml_str()`` of the config written
-
-
-class WorkplanHooks(NamedTuple):
-    """What the Blueprint page needs from a Workplan page, when it sits beside one."""
-
-    open_steps: Callable[[Path, str], None]
-    """Add the forge-then-run steps for (saved blueprint path, blueprint name) to the
-    Workplan page and show that page. May raise ``ValueError``."""
-
-    saved: Callable[[], None]
-    """A workplan file was written into the catalog: refresh the Workplan page's
-    Load list."""
 
 
 class ForgeBlueprintWizard:
@@ -1329,57 +1236,21 @@ class ForgeBlueprintWizard:
         # _on_editor_edit drops an edit that only restores one of its values.
         self._composed_settings: dict[str, Any] | None = None
 
-        self.derived = W.HTML("")
-        self.validation = W.HTML("")
-        self.preview = W.Output(
-            layout=W.Layout(
-                padding="6px",
-                max_height="380px",
-                overflow="auto",
-            )
+        # --- Save and Next steps cards (cards 7 and 8) ---
+        self.review_card = ReviewCard(
+            W,
+            self.catalog,
+            rebuild=self._rebuild,
+            suspend=self._suspend,
+            is_suspended=lambda: getattr(self, "_suspended", False),
+            config=lambda: self.config,
+            # Late-binding: tests replace these on the wizard instance.
+            save_config=lambda path: self._save_config(path),
+            ensure_boundaries_derived=lambda: self._ensure_boundaries_derived(),
+            boundaries_pending=lambda: (
+                not self._boundaries_touched and not self._boundaries_derived
+            ),
         )
-        self.preview.add_class("forge-log")
-        # Browser download (works in Voilà / JupyterLab without server file access)
-        self.download_link = W.HTML("")
-        # Save to the server/working-dir filesystem (handy for local or HPC use)
-        self.save_path = W.Text(
-            value="forge_blueprint.yaml",
-            description="Save to:",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="520px"),
-        )
-        self.save_btn = W.Button(description="Save to disk", icon="save")
-        self.save_status = W.HTML("")
-
-        # --- canonical blueprint name (also in the Export section) ---
-        # Defaults to the resolver's derived name and keeps tracking it until the user
-        # edits the field (self._name_touched flips True on their first real edit;
-        # programmatic backfills in _rebuild() happen under _suspend() so they don't
-        # themselves flip it). save_path tracks the derived name the same way.
-        self._name_touched = False
-        self.name = W.Text(
-            value="",
-            description="Name:",
-            placeholder="(derived from model/grid/procs)",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="320px"),
-            tooltip=_tip("export", "name"),
-        )
-        self.name.observe(self._on_name_change, names="value")
-        # The blueprint description follows the resolver's derived one-line summary
-        # the same way, until the user types in it (_description_touched).
-        self._description_touched = False
-        self.description = W.Text(
-            value="",
-            description="Description:",
-            placeholder="(derived from the grid, run window, model and forcing)",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="100%", max_width="760px"),
-            tooltip=_tip("export", "description"),
-        )
-        self.description.observe(self._on_description_change, names="value")
-        self._save_path_touched = False
-        self.save_path.observe(self._on_save_path_change, names="value")
 
         # --- save modified specs to catalog (name + button + status per spec) ---
         def _spec_save_row(placeholder):
@@ -1408,74 +1279,6 @@ class ForgeBlueprintWizard:
         )
         self.save_cdr_name, self.save_cdr_btn, self.save_cdr_status = _spec_save_row(
             "(new CdrSpec name)"
-        )
-
-        # --- run (invokes the C-Star CLI on the just-saved blueprint) ---
-        from cstar.system.manager import system_label
-
-        self.run_warning = W.HTML(
-            f"<b class='{components.status_class('warn')}'>⚠ Processing a blueprint can use substantial "
-            "memory and CPU depending on grid size.</b> Run this from a compute node "
-            "(or another host) with resources appropriate for your domain — this is "
-            f"not checked automatically. System: <code>{html.escape(system_label())}</code>."
-        )
-        self.run_later_note = W.HTML(
-            components.status_span(
-                "note",
-                "ℹ To run this later, or on a different "
-                "machine, save the blueprint above and then (from the "
-                "<code>cstar-env</code> environment) call: "
-                "<code>cstar blueprint run &lt;path/to/forge_blueprint.yaml&gt;</code>. ",
-            )
-        )
-        self.run_btn = W.Button(description="Run", icon="play")
-        self.run_status = W.HTML("")
-
-        # --- next steps: what to do with the saved blueprint ---
-        self.next_status = W.HTML("")
-        self.save_workplan_btn = W.Button(
-            description="Save workplan", icon="save", button_style="primary"
-        )
-        self.open_workplan_btn = W.Button(
-            description="Open in the Workplan builder",
-            icon="arrow-right",
-            layout=W.Layout(display="none"),
-        )
-        self.workplan_status = W.HTML("")
-        self.workplan_download = W.HTML("")
-        self._run_in_progress = False
-        self._workplan_hooks: WorkplanHooks | None = None
-        self._workplan_confirm: Path | None = None
-        self._workplan_confirm_timer: Any = None
-        self._saved_blueprint: _SavedBlueprint | None = None
-
-        # Keep the run log pinned to the LATEST lines instead of snapping to the
-        # top on every append. Two cooperating pieces (verified live in voila):
-        # 1. display=flex + column-reverse on this node anchors its scroll
-        #    position at the flex start, which column-reverse puts at the bottom.
-        # 2. The stylesheet below stops the inner .jp-OutputArea from being its
-        #    own scroll container: JupyterLab CSS bounds its height and gives it
-        #    overflow auto, so IT would do the scrolling (resetting to the top on
-        #    each append) while this node never overflows. flex: 0 0 auto lets it
-        #    grow to its content so the scrolling happens on this node instead.
-        #    (Layout can only style this node itself, hence a real stylesheet.)
-        # Safe because _run_async only ever calls append_stdout, and the frontend
-        # merges consecutive same-stream outputs into a single block -- a second
-        # output type (stderr, display_data) would render above it, reversed.
-        self.run_output = W.Output(
-            layout=W.Layout(
-                padding="6px",
-                max_height="380px",
-                overflow="auto",
-                display="flex",
-                flex_flow="column-reverse",
-            )
-        )
-        self.run_output.add_class("forge-run-log")
-        self.run_output.add_class("forge-log")
-        self._run_log_style = W.HTML(
-            "<style>.forge-run-log > .jp-OutputArea "
-            "{ flex: 0 0 auto; height: auto; max-height: none; }</style>"
         )
 
         # --- redesigned-UI status widgets (sticky bar, per-card chips, banners) ---
@@ -1511,9 +1314,6 @@ class ForgeBlueprintWizard:
         )
         self.grid_lock_banner.layout.display = "none"
         self.forcing_banner = components.banner_widget(W, "info", "")
-        # A second, plain HTML mirror of `download_link` for the Review card --
-        # `download_link` itself lives once, in the sticky bar (see `widget`).
-        self.download_link_review = W.HTML("")
 
         self.run_card.set_use_pio(self.model_card.default_use_pio())
         self._sync_cdr_lite_hint()
@@ -1532,15 +1332,13 @@ class ForgeBlueprintWizard:
         self.dt_btn.on_click(self._on_compute_dt)
         self.plot_btn.on_click(self._on_plot)
         self.nest_plot_btn.on_click(self._on_nest_plot)
-        self.save_btn.on_click(self._on_save)
+        # The Save and Next steps cards' observers and buttons.
+        self.review_card.wire()
         self.save_output_btn.on_click(self._on_save_output)
         self.save_model_btn.on_click(self._on_save_model)
         self.save_domain_btn.on_click(self._on_save_domain)
         self.save_forcing_btn.on_click(self._on_save_forcing)
         self.save_cdr_btn.on_click(self._on_save_cdr)
-        self.run_btn.on_click(self._on_run)
-        self.save_workplan_btn.on_click(self._on_save_workplan)
-        self.open_workplan_btn.on_click(self._on_open_workplan)
         self.load_btn.on_click(self._on_load_path)
         self.load_catalog_btn.on_click(self._on_load_from_catalog)
         self.upload.observe(self._on_upload, names="value")
@@ -1614,52 +1412,6 @@ class ForgeBlueprintWizard:
             w.observe(self._on_boundary_edit, names="value")
         self.v_sponge.observe(self._on_v_sponge_edit, names="value")
         self.dt.observe(self._on_dt_edit, names="value")
-
-    def _on_name_change(self, _change):
-        # A programmatic backfill (see _rebuild) happens under _suspend() -- only a
-        # real user edit should "lock in" the field against further auto-updates.
-        if getattr(self, "_suspended", False):
-            return
-        self._name_touched = True
-        self._rebuild()
-
-    def _on_description_change(self, _change):
-        # Mirrors _on_name_change: the backfill in _rebuild runs under _suspend().
-        # Not in _rebuild's watched list, so the flag is set before the rebuild
-        # that would otherwise backfill over the user's first keystroke.
-        if getattr(self, "_suspended", False):
-            return
-        self._description_touched = True
-        self._rebuild()
-
-    def _on_save_path_change(self, _change):
-        if getattr(self, "_suspended", False):
-            return
-        self._save_path_touched = True
-        self._sync_next_steps()
-
-    def _default_blueprint_path(self, name: str) -> str:
-        """Default "Save to:" path for a blueprint named *name*.
-
-        Prefers the active catalog's ``blueprints/forge/`` directory so a save lands
-        where the wizard's other catalog-aware specs look; falls back to a
-        bare filename (CWD-relative) when the catalog isn't a local filesystem
-        (e.g. loaded from a GitHub/http URL) and so isn't writable.
-        """
-        fname = f"{name}.yaml"
-        cat = getattr(self, "catalog", None)
-        try:
-            # A read-only catalog (e.g. the bundled one loaded as a single
-            # store) must not be offered as a save destination.
-            if (
-                cat is not None
-                and getattr(cat, "_is_local", False)
-                and not getattr(cat, "read_only", False)
-            ):
-                return str(cat.blueprint_dir(DEFAULT_APPLICATION) / fname)
-        except Exception:
-            pass
-        return fname
 
     def _on_grid_kwarg_change(self, _change):
         # A geometry/mask-affecting edit invalidates any prior mask-derived
@@ -2046,8 +1798,10 @@ class ForgeBlueprintWizard:
                 grid_kwargs_child, metadata_child, include_pressure_fluxes
             )
         except ValueError as exc:
-            self.derived.value = components.banner(
-                "err", f"<b>Invalid child domain.</b> {html.escape(str(exc))}"
+            self.review_card.show_summary(
+                components.banner(
+                    "err", f"<b>Invalid child domain.</b> {html.escape(str(exc))}"
+                )
             )
             return None
 
@@ -2703,16 +2457,6 @@ class ForgeBlueprintWizard:
         src = getattr(src, "value", src)
         src_w.value = str(src) if src in _TOPO_SOURCES else _NESTED_TOPO_INHERIT
 
-    def _spec_description(self) -> str:
-        """The description a catalog spec saved from this session gets.
-
-        The text the user typed for the blueprint, or empty while the field holds
-        the derived one: that summarizes the whole run (grid, dates, forcing, CDR),
-        so it would describe no single spec. Empty leaves a ModelSpec with the
-        description of the spec it was saved from (``register_model_from_settings``).
-        """
-        return self.description.value.strip() if self._description_touched else ""
-
     def _domain_spec_data(self) -> dict[str, Any]:
         """Build a DomainSpec-shaped dict from the current widget state (the
         domain-spec extractor for "save modified specs to catalog"). Includes
@@ -2722,7 +2466,7 @@ class ForgeBlueprintWizard:
         """
         kw = self._gather()
         data: dict[str, Any] = {
-            "description": self._spec_description(),
+            "description": self.review_card.spec_description(),
             "model_name": self.model_card.name,
             "grid_name": self.grid_name.value,
             **self.run_card.domain_dates(),
@@ -2883,23 +2627,7 @@ class ForgeBlueprintWizard:
             self.domain_dd.value = "<custom>"
             self.model_card.select_model(cfg, self._load_unknown_specs)
             self.grid_name.value = cfg.domain.grid_name
-            # A file's own description is kept, unless it is no more than a default:
-            # none, the old placeholder, or the text the resolver derives for it
-            # (saved untouched). Those follow the inputs again, like a new blueprint.
-            self._description_touched = cfg.description.strip() not in {
-                "",
-                PLACEHOLDER_DESCRIPTION,
-                default_blueprint_description(cfg),
-            }
-            self.description.value = (
-                cfg.description if self._description_touched else ""
-            )
-            self.name.value = cfg.name
-            self._name_touched = (
-                True  # a loaded name is a deliberate choice, not a default
-            )
-            self.save_path.value = self._default_blueprint_path(cfg.name)
-            self._save_path_touched = True
+            self.review_card.populate(cfg)
             self.run_card.populate_window(cfg)
             gk = cfg.domain.grid_kwargs
             self._set_loaded_grid_kwargs("grid", gk)
@@ -3103,17 +2831,7 @@ class ForgeBlueprintWizard:
             partitioning=self.run_card.partitioning(),
             start_date=self.run_card.start_datetime(),
             end_date=self.run_card.end_datetime(),
-            # Untouched (or cleared): None, so the resolver derives a fresh one-line
-            # description from the inputs, as it does the name below.
-            description=(
-                (self.description.value.strip() or None)
-                if self._description_touched
-                else None
-            ),
-            # Untouched: always pass None so the resolver recomputes a fresh default
-            # (self.name.value may still hold the *previous* rebuild's backfilled
-            # default -- reusing it here would freeze it instead of tracking inputs).
-            name=(self.name.value.strip() or None) if self._name_touched else None,
+            **self.review_card.gather(),
             # Untouched: None, so the resolver derives it from the grid (CFL).
             dt=float(self.dt.value) if self._dt_touched else None,
             # Untouched: pass None so the resolver derives a fresh default from
@@ -3334,19 +3052,12 @@ class ForgeBlueprintWizard:
         self._sync_derived_dt()
         # Captured before self.config is reassigned below -- used to detect a
         # real rename (vs. an unrelated edit re-running _rebuild) for the
-        # save_path filename re-sync further down.
+        # save_path filename re-sync (see ReviewCard.follow_derived).
         prev_name = self.config.name if self.config is not None else None
-        self.preview.clear_output(wait=True)
-        # self.validation reflects the *last successful* resolve; every early
-        # return below (missing dates, a build/validation exception) leaves a
-        # stale ✓/⚠ message sitting under self.derived's fresh error otherwise
-        # -- clear it once up front so only the success path below re-sets it.
-        self.validation.value = ""
+        self.review_card.clear_results()
         if not self.run_card.has_run_dates:
             self.config = None
-            self.derived.value = "<i>Set start and end dates…</i>"
-            self.download_link.value = ""
-            self.download_link_review.value = ""
+            self.review_card.show_unresolved("<i>Set start and end dates…</i>")
             self._show_unresolved_editor()
             self._update_status(
                 None,
@@ -3357,14 +3068,13 @@ class ForgeBlueprintWizard:
             cfg = build_forge_blueprint(**self._gather())
         except Exception as exc:  # validation or input error → show, don't crash
             self.config = None
-            self.download_link.value = ""
-            self.download_link_review.value = ""
-            with self.preview:
-                print(f"{type(exc).__name__}: {exc}")
             problems = _blueprint_problems(exc)
-            self.derived.value = components.banner(
-                "err",
-                f"<div><b>Invalid blueprint.</b> {_problem_summary(problems)}</div>",
+            self.review_card.show_unresolved(
+                components.banner(
+                    "err",
+                    f"<div><b>Invalid blueprint.</b> {_problem_summary(problems)}</div>",
+                ),
+                error=f"{type(exc).__name__}: {exc}",
             )
             self._show_unresolved_editor()
             self._update_status(None, problems=problems)
@@ -3464,44 +3174,8 @@ class ForgeBlueprintWizard:
         if self._load_status_is_error:
             self.load_status.value = ""
             self._load_status_is_error = False
-        # Backfill the Export name/description/save-path fields with the current
-        # derived defaults until the user edits one -- their edit "locks in" that
-        # field (see _on_name_change/_on_description_change/_on_save_path_change).
-        # Under _suspend() so these programmatic writes don't themselves flip the
-        # touched flags or recurse.
-        if (
-            not self._name_touched
-            or not self._description_touched
-            or not self._save_path_touched
-        ):
-            with self._suspend():
-                if not self._name_touched:
-                    self.name.value = cfg.name
-                if not self._description_touched:
-                    self.description.value = cfg.description
-                if not self._save_path_touched:
-                    self.save_path.value = self._default_blueprint_path(cfg.name)
-        # Independent of the backfill above (and of _name_touched): the derived
-        # name can also change from a grid/procs/model edit with Name left on
-        # auto-derive but Save-to customized to a specific directory -- that
-        # combination skips the backfill (save_path IS touched) entirely, so
-        # without this the filename would never re-sync. Re-sync only on a
-        # genuine rename, and only when the current filename still exactly
-        # tracks the *previous* derived name (i.e. the user hasn't customized
-        # the filename itself) -- preserves the user's directory and any
-        # deliberately-custom filename. Under _suspend() so this doesn't
-        # itself flip _save_path_touched or recurse.
-        if (
-            self._save_path_touched
-            and prev_name is not None
-            and cfg.name != prev_name
-            and Path(self.save_path.value).name == f"{prev_name}.yaml"
-        ):
-            with self._suspend():
-                self.save_path.value = str(
-                    Path(self.save_path.value).parent / f"{cfg.name}.yaml"
-                )
-        self._refresh_download_links(cfg)
+        self.review_card.follow_derived(cfg, prev_name)
+        self.review_card.refresh_download_links(cfg)
         # Surface (never silently ship) provisional open-boundary defaults: the
         # checkboxes currently reflect whatever's live, but that's only a real
         # mask-derived value once _boundaries_derived is True or the user has
@@ -3525,34 +3199,11 @@ class ForgeBlueprintWizard:
             problems = validate_run_time_sections(
                 cfg.model_settings, roms_ref=effective_roms_ref
             )
-        if problems:
-            self.validation.value = components.banner(
-                "err",
-                "<b>Settings validation:</b><br>"
-                + "<br>".join(f"&nbsp;&nbsp;{p}" for p in problems[:10]),
-            )
-        else:
-            self.validation.value = components.banner(
-                "ok", "<b>Blueprint is valid.</b> All settings pass validation."
-            )
         # What the run would use that nothing refuses but its author likely did not
         # mean (zero BGC inputs on an older ucla-roms). The resolver only logs these,
         # which a widget callback never shows, so show them here.
-        if notes := resolver_warnings(cfg, roms_ref=effective_roms_ref):
-            self.validation.value += components.banner(
-                "warn",
-                "<br>".join(f"<b>Warning:</b> {html.escape(note)}" for note in notes),
-            )
-        comp = cfg.composition
-        self.derived.value = (
-            f"<b>name</b>: <code>{cfg.name}</code> &nbsp; "
-            f"<b>casename</b>: <code>{cfg.casename}</code><br>"
-            f"<b>composition</b>: model=<code>{comp.model.name}</code> ({comp.model.origin}), "
-            f"domain=<code>{comp.domain.name or '—'}</code> ({comp.domain.origin}), "
-            f"forcing ({comp.forcing.origin})"
-        )
-        with self.preview:
-            print(cfg.to_yaml_str())
+        notes = resolver_warnings(cfg, roms_ref=effective_roms_ref)
+        self.review_card.show_resolved(cfg, problems, notes)
         self._update_status(cfg)
 
     def _forcing_summary(self, cat: str) -> tuple[components.Pill, ...]:
@@ -3721,11 +3372,7 @@ class ForgeBlueprintWizard:
         complete = components.chip("● Complete", "ok")
         chips["model"].value = problem_chips.get("model", self.model_card.status_chip())
         chips["run"].value = problem_chips.get("run", self.run_card.status_chip())
-        chips["review"].value = (
-            components.chip("● Ready", "ok")
-            if valid
-            else components.chip("● Invalid", "warn")
-        )
+        chips["review"].value = self.review_card.status_chip(valid)
         if not self._boundaries_derived and not self._boundaries_touched:
             n = 1 + (1 if not self._v_sponge_touched else 0)
             grid_chip = components.chip(f"● {n} fields to check", "warn")
@@ -3780,60 +3427,7 @@ class ForgeBlueprintWizard:
         self._retitle_settings_editor()
         if self.editor is not None:
             self.editor.set_run_window(self.run_card.window_seconds())
-        self._sync_next_steps()
-
-    def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
-        """Point both download links at ``cfg``, stamped once so they agree.
-
-        A download is a copy for the user, not a save: a stamp minted here is not
-        carried (that is `_save_config`'s job). A ``cfg`` that is already stamped,
-        as the config just saved is, comes back from ``stamp_provenance`` as it is,
-        so its links hand out exactly the file that was written.
-
-        While the open boundaries are the provisional checkbox defaults (neither
-        touched nor derived from the grid), the links are withheld: Save and Run
-        derive them first (`_ensure_boundaries_derived`), but a link has no click
-        hook to do that, and building a grid on every rebuild would stall typing.
-        """
-        if not self._boundaries_touched and not self._boundaries_derived:
-            self.download_link.value = (
-                f"<span class='forge-dl-off {components.status_class('warn')}' "
-                f'title="{html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}">'
-                "⬇ Derive boundaries to download</span>"
-            )
-            self.download_link_review.value = components.status_span(
-                "warn",
-                f"⚠ {html.escape(_DOWNLOAD_WAITS_FOR_BOUNDARIES)}",
-            )
-            return
-        download_cfg = cfg.stamp_provenance(WIZARD_TOOL)
-        self.download_link.value = self._download_html(
-            download_cfg, caption="Download blueprint"
-        )
-        self.download_link_review.value = self._download_html(download_cfg)
-
-    @staticmethod
-    def _download_html(cfg: ForgeBlueprint, caption: str | None = None) -> str:
-        """A data-URI download link for the resolved YAML — works in the browser
-        (Voilà / JupyterLab) with no server-side file access.
-
-        ``caption`` overrides the link text with a fixed, short caption (the
-        filename moves into ``title=`` instead) -- used by the sticky bar,
-        which has no room for a full filename. The default keeps the Review
-        card's "Download <code>fname</code>" copy.
-        """
-        payload = cfg.to_yaml_str().encode("utf-8")
-        b64 = base64.b64encode(payload).decode("ascii")
-        fname = f"{cfg.name}.forge_blueprint.yaml"
-        if caption is None:
-            text, title_attr = f"Download <code>{fname}</code>", ""
-        else:
-            text, title_attr = caption, f' title="{fname}"'
-        return (
-            f'⬇ <a class="forge-dl-btn" download="{fname}"{title_attr} '
-            f'href="data:text/yaml;base64,{b64}">'
-            f"{text}</a>"
-        )
+        self.review_card.sync_next_steps()
 
     # ---- actions -------------------------------------------------------------
     def _on_compute_dt(self, _):
@@ -3946,7 +3540,7 @@ class ForgeBlueprintWizard:
         The passive browser download link (a plain data-URI anchor, regenerated
         on every ``_rebuild``) has no click-time Python hook to apply this to --
         forcing a grid build on every edit would reintroduce the UI-stall this
-        design explicitly avoids. ``_refresh_download_links`` withholds it
+        design explicitly avoids. ``ReviewCard.refresh_download_links`` withholds it
         instead until the boundaries are touched or derived.
         """
         if self._boundaries_touched or self._boundaries_derived:
@@ -4116,8 +3710,9 @@ class ForgeBlueprintWizard:
 
         The stamp becomes the carried provenance, so a later save or rebuild keeps
         it while the content is unchanged (see ``ForgeBlueprint.stamp_provenance``),
-        and the download links are pointed at the file written. Every write of the
-        current config to disk goes through here.
+        and the Save and Next steps cards are told (`ReviewCard.record_save`): the
+        download links point at the file written. Every write of the current config
+        to disk goes through here.
         """
         if self.config is None:
             raise RuntimeError("no valid configuration to save")
@@ -4125,28 +3720,8 @@ class ForgeBlueprintWizard:
         written = stamped.to_yaml(path)
         self._carried_provenance = stamped.provenance
         self.config = stamped
-        self._refresh_download_links(stamped)
-        self._saved_blueprint = _SavedBlueprint(
-            Path(path), Path(written).expanduser().resolve(), stamped.to_yaml_str()
-        )
-        self._sync_next_steps()
+        self.review_card.record_save(Path(path), written, stamped)
         return written
-
-    def _saved_path(self) -> Path | None:
-        """The file the current config was last saved to, or ``None`` when there is
-        no such file: nothing saved yet, the config edited since, or the Save path
-        changed. Compared in memory (this runs on every rebuild), so a file deleted
-        or edited on disk is not noticed here.
-        """
-        saved = self._saved_blueprint
-        if (
-            self.config is None
-            or saved is None
-            or Path(self.save_path.value) != saved.requested
-            or self.config.to_yaml_str() != saved.text
-        ):
-            return None
-        return saved.path
 
     # ---- next steps ------------------------------------------------------------
     def set_workplan_hooks(self, hooks: WorkplanHooks | None) -> None:
@@ -4154,151 +3729,7 @@ class ForgeBlueprintWizard:
 
         Without hooks only "Save workplan" shows: there is no page to open.
         """
-        self._workplan_hooks = hooks
-        self.open_workplan_btn.layout.display = "" if hooks else "none"
-        self._sync_next_steps()
-
-    def _sync_next_steps(self) -> None:
-        """Make card 8 follow whether the blueprint above is saved and current."""
-        path = self._saved_path()
-        ready = path is not None
-        saved = self._saved_blueprint
-        if path is not None:
-            note = f"Saved to <code>{html.escape(str(path))}</code>."
-        elif saved is not None and self.config is not None:
-            note = (
-                f"{_SAVE_FIRST} It has changed since you saved it to "
-                f"<code>{html.escape(str(saved.path))}</code>."
-            )
-        else:
-            note = _SAVE_FIRST
-        self.next_status.value = f"<span class='forge-hint'>{note}</span>"
-        self.save_workplan_btn.disabled = self.open_workplan_btn.disabled = not ready
-        self.run_btn.disabled = self._run_in_progress or not ready
-        if not ready:
-            self.workplan_download.value = ""
-            self._reset_workplan_confirm()
-
-    def _workplan_msg(self, kind: str, message: str) -> None:
-        self.workplan_status.value = f"<span class='forge-msg-{kind}'>{message}</span>"
-
-    def _reset_workplan_confirm(self) -> None:
-        """Disarm the overwrite confirm: cancel its timer, restore the button."""
-        if self._workplan_confirm_timer is not None:
-            self._workplan_confirm_timer.cancel()
-        self._workplan_confirm = self._workplan_confirm_timer = None
-        self.save_workplan_btn.description = "Save workplan"
-        self.save_workplan_btn.button_style = "primary"
-
-    def _on_save_workplan(self, _btn: Any) -> None:
-        """Write the forge-then-run workplan for the saved blueprint to the catalog's
-        ``workplans/`` (beside the blueprint when there is no writable catalog), and
-        offer it for download. Replacing a different file takes a second click.
-        """
-        from cstar.wizard.workplan_builder import (
-            WorkplanBuilderPage,
-            default_workplan_path,
-            forge_then_run_workplan,
-            yaml_text,
-        )
-
-        path = self._saved_path()
-        if path is None or self.config is None:
-            self._workplan_msg("err", _SAVE_FIRST)
-            return
-        if not path.exists():
-            self._workplan_msg(
-                "err",
-                f"The saved blueprint <code>{html.escape(str(path))}</code> is "
-                "gone; save it again above.",
-            )
-            return
-        try:
-            workplan = forge_then_run_workplan(path, self.config.name)
-        except ValueError as exc:
-            self._workplan_msg("err", html.escape(str(exc)))
-            return
-        text = yaml_text(workplan)
-        target = default_workplan_path(self.catalog, workplan.name, path.parent)
-        shown = html.escape(str(target))
-        if target.exists() and self._workplan_confirm != target:
-            try:
-                differs = target.read_text() != text
-            except OSError:
-                differs = True
-            if differs:
-                self._reset_workplan_confirm()
-                self._workplan_confirm = target
-                self.save_workplan_btn.description = "Confirm overwrite"
-                self.save_workplan_btn.button_style = "danger"
-                self._workplan_confirm_timer = schedule_confirm_reset(
-                    self._reset_workplan_confirm
-                )
-                self._workplan_msg(
-                    "warn",
-                    f"A different workplan is already saved at <code>{shown}</code>. "
-                    "Click Confirm overwrite to replace it.",
-                )
-                return
-        self._reset_workplan_confirm()
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text)
-        except OSError as exc:
-            self._workplan_msg("err", html.escape(f"{type(exc).__name__}: {exc}"))
-            return
-        self._workplan_msg(
-            "ok",
-            f"Saved <code>{shown}</code>. Submit it with <code>cstar workplan submit "
-            f"{shown}</code>, or open it in the Workplan builder to add compute "
-            "settings.",
-        )
-        self.workplan_download.value = WorkplanBuilderPage._download_html(
-            workplan, text
-        )
-        if self._workplan_hooks is not None:
-            self._workplan_hooks.saved()
-
-    def _on_open_workplan(self, _btn: Any) -> None:
-        """Add the forge and run steps for the saved blueprint to the Workplan page."""
-        hooks = self._workplan_hooks
-        path = self._saved_path()
-        if hooks is None or path is None or self.config is None:
-            self._workplan_msg("err", _SAVE_FIRST)
-            return
-        try:
-            hooks.open_steps(path, self.config.name)
-        except ValueError as exc:
-            self._workplan_msg("err", html.escape(str(exc)))
-            return
-        self._workplan_msg(
-            "ok", "Opened the Workplan page with the forge and run steps."
-        )
-
-    def _on_save(self, _):
-        if not self._ensure_boundaries_derived():
-            self.save_status.value = components.status_span(
-                "err",
-                "Save aborted — open boundaries could "
-                "not be derived from the grid (see the Domain-derived properties "
-                "status above). A save must never ship provisional defaults; fix "
-                "the grid or set boundaries manually, then retry.",
-            )
-            return
-        if self.config is None:
-            self.save_status.value = components.status_span(
-                "err", "Nothing to save — config is invalid."
-            )
-            return
-        try:
-            save_path = Path(self.save_path.value)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            p = self._save_config(save_path)
-            self.save_status.value = components.status_span("ok", f"Saved {p}")
-        except Exception as exc:
-            self.save_status.value = components.status_span(
-                "err", f"{type(exc).__name__}: {exc}"
-            )
+        self.review_card.set_workplan_hooks(hooks)
 
     # ---- save modified specs to catalog --------------------------------------
     # Each handler: validate name -> extract that spec from current state ->
@@ -4323,7 +3754,7 @@ class ForgeBlueprintWizard:
             self.catalog.register_output(
                 name,
                 extract_output_settings(self.config.model_settings),
-                description=self._spec_description(),
+                description=self.review_card.spec_description(),
             )
         except FileExistsError as exc:
             # str(exc) names the owning layer (e.g. "...already exists in the
@@ -4403,7 +3834,7 @@ class ForgeBlueprintWizard:
                 name,
                 owned,
                 base_path,
-                description=self._spec_description(),
+                description=self.review_card.spec_description(),
                 # Live widget values, using _gather()'s exact conventions (use_pio/
                 # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
                 # the round-trip verifier below compares against _gather()'s kw, so
@@ -4523,7 +3954,7 @@ class ForgeBlueprintWizard:
             self.catalog.register_forcing(
                 name,
                 self._forcing_editor.gather(),
-                description=self._spec_description(),
+                description=self.review_card.spec_description(),
             )
         except FileExistsError as exc:
             self.save_forcing_status.value = components.status_span("err", f"{exc}")
@@ -4573,7 +4004,7 @@ class ForgeBlueprintWizard:
         try:
             self.catalog.register_cdr(
                 name,
-                description=self._spec_description(),
+                description=self.review_card.spec_description(),
                 mode=mode,
                 cdr_forcing=current["cdr_forcing"],
                 cdr_forcing_file=current["cdr_forcing_file"],
@@ -4600,111 +4031,6 @@ class ForgeBlueprintWizard:
                 f"Saved '{name}', but round-trip differs — spec kept as modified.",
             )
 
-    def _build_run_command(self, blueprint_path: str) -> list[str]:
-        """Command the Run button invokes: ``cstar blueprint run <path>``.
-
-        The same command the docs give for both pipeline steps, and the same one
-        the emitted ``ucla_roms`` blueprint is run with -- the button exposes no
-        per-run flags, so the full-option ``cstar forge run`` passthrough buys it
-        nothing. Resolving ``application: forge`` this way goes through C-Star's
-        registry, which finds the app as the in-tree
-        ``cstar.applications.forge`` module -- no separate install required.
-
-        Uses the ``cstar`` console script installed alongside the running
-        interpreter, so the subprocess stays in this environment rather than
-        taking whatever is first on PATH. Where that script is absent (the
-        ``cstar`` entry point not installed), falls back to
-        ``python -m cstar.cli.cli forge run``, the same unified CLI's ``forge``
-        subcommand invoked as a module.
-        """
-        import sys
-
-        cstar_exe = Path(sys.executable).with_name("cstar")
-        if cstar_exe.exists():
-            return [str(cstar_exe), "blueprint", "run", blueprint_path]
-        return [sys.executable, "-m", "cstar.cli.cli", "forge", "run", blueprint_path]
-
-    def _on_run(self, _):
-        if not self._ensure_boundaries_derived():
-            self.run_status.value = components.status_span(
-                "err",
-                "Run aborted — open boundaries could "
-                "not be derived from the grid (see the Domain-derived properties "
-                "status above). Fix the grid or set boundaries manually, then "
-                "retry.",
-            )
-            return
-        if self.config is None:
-            self.run_status.value = components.status_span(
-                "err", "Nothing to run — config is invalid."
-            )
-            return
-        _schedule_coroutine(self._run_async())
-
-    async def _run_async(self):
-        """Save the current blueprint, then launch the C-Star CLI as a subprocess
-        and stream its combined stdout/stderr into ``run_output`` line by line as
-        it arrives (not all at once at the end).
-        """
-        import asyncio
-
-        self._run_in_progress = True
-        self.run_btn.disabled = True
-        self.run_output.clear_output(wait=True)
-        self.run_status.value = "<i>saving blueprint…</i>"
-        cmd: list[str] | None = None
-        try:
-            save_path = Path(self.save_path.value)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            path = self._save_config(save_path)
-            cmd = self._build_run_command(str(path))
-            self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            # Read fixed-size chunks and reassemble lines ourselves rather than
-            # `async for line in proc.stdout` (StreamReader.readline), which raises
-            # ValueError, "Separator is not found, and chunk exceed the limit", when a
-            # child emits 64 KiB without a newline -- e.g. a \r-redrawn progress bar.
-            # append_stdout (not `with self.run_output: print(...)`) appends directly
-            # to the widget's output list, so lines land in the log whether or not a
-            # live Jupyter kernel is routing stdout via iopub messaging.
-            buf = b""
-            while True:
-                chunk = await proc.stdout.read(_STREAM_READ_SIZE)
-                if not chunk:
-                    break
-                lines, buf = _drain_stream_buffer(buf + chunk)
-                for line in lines:
-                    self.run_output.append_stdout(line)
-            lines, buf = _drain_stream_buffer(buf, at_eof=True)
-            for line in lines:
-                self.run_output.append_stdout(line)
-            code = await proc.wait()
-            # On success the log above names the emitted ucla_roms blueprint (the
-            # runner logs where it published it). Point at it rather than restating
-            # a path this widget would have to derive for itself.
-            self.run_status.value = (
-                components.status_span("ok", "✓ finished")
-                + " — run the emitted "
-                + "UCLA-ROMS blueprint named in the log with <code>cstar blueprint "
-                "run &lt;path&gt;</code>"
-                if code == 0
-                else components.status_span("err", f"exited with code {code}")
-            )
-        except Exception as exc:
-            # Name the command in the status so a failure isn't a context-free
-            # error string (cmd is None only if saving the blueprint threw first).
-            where = f" while running: {' '.join(cmd)}" if cmd else ""
-            self.run_status.value = components.status_span(
-                "err", f"{type(exc).__name__}: {exc}{where}"
-            )
-        finally:
-            self._run_in_progress = False
-            self._sync_next_steps()
-
     # ---- layout / display ----------------------------------------------------
     @property
     def widget(self):
@@ -4721,13 +4047,13 @@ class ForgeBlueprintWizard:
         # Danger-styled destructive actions.
         self.grid_file_detach_btn.button_style = "danger"
 
-        sticky = W.HBox([self.sticky_bar, self.download_link])
+        sticky = W.HBox([self.sticky_bar, self.review_card.download_link])
         sticky.add_class("forge-sticky")
         # sticky_bar fills the remaining width (its own content -- step links,
         # summary, spacer, status chip -- pushes the chip to its right edge,
         # see _update_status); download_link stays sized to its fixed caption.
         self.sticky_bar.layout.flex = "1 1 auto"
-        self.download_link.layout.flex = "0 0 auto"
+        self.review_card.download_link.layout.flex = "0 0 auto"
 
         intro = W.HTML(
             "<p>Pick a model and a domain, adjust the grid, boundaries, "
@@ -5040,60 +4366,16 @@ class ForgeBlueprintWizard:
         review_card = components.card(
             W,
             "review",
-            self.validation,
-            self.derived,
-            self.preview,
-            components.field_row(W, "name", self.name),
-            components.field_row(W, "description", self.description),
-            self.download_link_review,
-            components.field_row(
-                W, "save_path", self.save_path, extra=(self.save_btn,)
-            ),
-            self.save_status,
+            *self.review_card.rows(),
             num=7,
             chips_widget=self.card_chips["review"],
             required_chip=False,
         )
 
-        run_forge = section_for("next.run_forge")
-        self.run_forge_pane = components.collapsible(
-            W,
-            W.VBox(
-                [
-                    W.HTML(
-                        "<p class='forge-hint'>Runs Forge in this session to build "
-                        "the input files and the UCLA-ROMS blueprint. It does not "
-                        "run UCLA-ROMS; to do both, use a workplan above.</p>"
-                    ),
-                    self.run_warning,
-                    self.run_later_note,
-                    W.HBox([self.run_btn, self.run_status]),
-                    self._run_log_style,
-                    self.run_output,
-                ]
-            ),
-            components.accordion_title(
-                run_forge.title, components.Pill(run_forge.desc, "off")
-            ),
-        )
-        workplan_sub = components.subsection(
-            W,
-            "next.workplan",
-            W.HTML(
-                "<p class='forge-hint'>Most runs need both steps: Forge builds the "
-                "inputs and the UCLA-ROMS blueprint, then UCLA-ROMS runs it. Save a "
-                "workplan that does both.</p>"
-            ),
-            W.HBox([self.save_workplan_btn, self.open_workplan_btn]),
-            self.workplan_status,
-            self.workplan_download,
-        )
         next_card = components.card(
             W,
             "next",
-            self.next_status,
-            workplan_sub,
-            self.run_forge_pane,
+            *self.review_card.next_rows(),
             self.save_specs_accordion,
             num=8,
         )

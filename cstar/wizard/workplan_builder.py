@@ -89,15 +89,17 @@ from cstar.orchestration.transforms import PLACEHOLDER_RE, mustache
 from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
-from cstar.wizard.fields import _base_type, _make_field_widget, _read_field_widget
+from cstar.wizard.fields import (
+    _STREAM_READ_SIZE,
+    _base_type,
+    _drain_stream_buffer,
+    _make_field_widget,
+    _read_field_widget,
+    _schedule_coroutine,
+)
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import schedule_confirm_reset
 from cstar.wizard.ui.labels import label_for, section_for
-from cstar.wizard.wizard import (
-    _STREAM_READ_SIZE,
-    _drain_stream_buffer,
-    _schedule_coroutine,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -1134,7 +1136,7 @@ class _StepPane:
                 "warn", "The Blueprint page has no valid configuration to use."
             )
             return
-        target = Path(wizard.save_path.value)
+        target = wizard.review_card.save_target
         target.parent.mkdir(parents=True, exist_ok=True)
         self._current_path = str(wizard._save_config(target))
         self.current_note.value = (

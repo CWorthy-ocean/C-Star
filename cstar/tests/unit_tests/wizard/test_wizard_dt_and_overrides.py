@@ -24,16 +24,18 @@ def _wizard() -> ForgeBlueprintWizard:
     wiz = ForgeBlueprintWizard()
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     return wiz
 
 
 def _save(wiz: ForgeBlueprintWizard, path: Path) -> ForgeBlueprint:
     """Press Save and return the blueprint it wrote."""
-    wiz.save_path.value = str(path)
+    wiz.review_card.save_path.value = str(path)
     wiz._boundaries_touched = True  # not exercising boundary derivation here
-    wiz._on_save(None)
-    assert "Saved" in wiz.save_status.value, wiz.save_status.value
+    wiz.review_card._on_save(None)
+    assert "Saved" in wiz.review_card.save_status.value, (
+        wiz.review_card.save_status.value
+    )
     return ForgeBlueprint.from_yaml(path)
 
 
@@ -101,7 +103,7 @@ class TestDerivedDt:
         w2 = ForgeBlueprintWizard()
         w2.load_path.value = str(path)
         w2._on_load_path(None)
-        assert w2.config is not None, w2.derived.value
+        assert w2.config is not None, w2.review_card.derived.value
         assert w2._dt_touched
         assert w2.dt.value == 450.0
         w2.grid_w["nx"].value = w2.grid_w["nx"].value * 4
@@ -137,14 +139,14 @@ class TestOverridesCannotDefeatTheTideRules:
         assert _BRY_TIDES not in wiz._overrides
 
         wiz.parent_enable.value = True
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         bp = _save(wiz, tmp_path / "bp.yaml")
         assert bp.model_settings["tides"]["bry_tides"] is False
 
     def test_a_child_grid_cannot_turn_boundary_tides_on(self, tmp_path):
         wiz = _wizard()
         wiz.parent_enable.value = True
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         widget = wiz.editor._widgets[_BRY_TIDES][0]
         assert widget.value is False
         widget.value = True
@@ -156,7 +158,7 @@ class TestOverridesCannotDefeatTheTideRules:
     def test_no_tidal_forcing_keeps_the_tide_switches_off(self, tmp_path):
         wiz = _wizard()
         wiz._forcing_editor.clear_category("tidal")
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert not wiz.config.forcing.tidal
         widget = wiz.editor._widgets[("tides", "pot_tides")][0]
         widget.value = True

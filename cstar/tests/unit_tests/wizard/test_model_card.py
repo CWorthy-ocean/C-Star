@@ -148,7 +148,7 @@ def test_loading_a_blueprint_with_an_archived_model_selects_it(tmp_path):
     wiz.model_card.show_archived_models.value = True
     wiz.model_card.model_dd.value = "roms-marbl-0.7-default"
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
 
@@ -237,7 +237,7 @@ class TestCarbonateSensitivityGroup:
 
     def test_default_cdr_lite_blueprint_has_no_carbonate_sensitivity(self):
         wiz = _cdr_lite_wizard()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.carbonate_sensitivity is None
         assert wiz.config.model_settings["cppdefs"]["cdr_lite"] is True
         assert wiz.config.model_settings["cppdefs"]["marbl"] is False
@@ -270,7 +270,7 @@ class TestCarbonateSensitivityGroup:
         assert "attached 2 carbonate sensitivity file(s)" in status
         assert "2012-01-01 00:00 to 2012-01-02 00:00" in status
         assert "exact paths" in status
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert [f.location for f in wiz.config.carbonate_sensitivity.files] == [
             f["location"] for f in files
         ]
@@ -326,7 +326,7 @@ class TestCarbonateSensitivityGroup:
         assert wiz.model_card._carbonate_sensitivity is None
         assert "no joined carbonate sensitivity files" in wiz.model_card.cs_status.value
         assert wiz.config is None
-        assert "attach a directory" in wiz.derived.value
+        assert "attach a directory" in wiz.review_card.derived.value
 
     def test_missing_path_and_plain_file_are_errors(self, tmp_path):
         wiz = _cdr_lite_wizard()
@@ -428,7 +428,7 @@ class TestCarbonateSensitivityGroup:
         )
         assert wiz.model_card._carbonate_sensitivity is not None
         assert "carbonate_sensitivity" not in wiz._gather()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.carbonate_sensitivity is None
 
     def test_gather_omits_attached_files_outside_cdr_lite(self, tmp_path):
@@ -446,14 +446,14 @@ class TestCarbonateSensitivityGroup:
         with pytest.raises(ValueError, match="attach a directory"):
             wiz._gather()
         assert wiz.config is None
-        assert "attach a directory" in wiz.derived.value
+        assert "attach a directory" in wiz.review_card.derived.value
 
     def test_round_trips_through_populate_from(self, tmp_path):
         d = _write_cdrgas_dir(tmp_path / "cdrgas")
         wiz = _cdr_lite_wizard()
         wiz.model_card.cs_source_dd.value = "path"
         wiz.model_card._attach_carbonate_sensitivity_dir(str(d))
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
 
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(wiz.config)
@@ -472,7 +472,7 @@ class TestCarbonateSensitivityGroup:
             in wiz2.model_card.cs_status.value
         )
         assert _display(wiz2.model_card.cs_group) == ""
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
         assert wiz2.config.content_hash() == wiz.config.content_hash()
 
     def test_load_back_trusts_the_stored_hashes_and_warns_on_missing_files(
@@ -498,7 +498,7 @@ class TestCarbonateSensitivityGroup:
 
     def test_load_back_of_a_directive_blueprint_selects_the_directive(self):
         wiz = _cdr_lite_wizard()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.carbonate_sensitivity is None
 
         wiz2 = ForgeBlueprintWizard()
@@ -510,7 +510,7 @@ class TestCarbonateSensitivityGroup:
         assert wiz2.model_card.cs_path.value == ""
         assert _display(wiz2.model_card.cs_group) == ""
         assert _display(wiz2.model_card.cs_path_box) == "none"
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
         assert wiz2.config.content_hash() == wiz.config.content_hash()
 
     def test_load_back_of_a_directive_blueprint_resets_an_earlier_attach(
@@ -536,7 +536,7 @@ class TestCarbonateSensitivityGroup:
         if mode == "none":
             _strip_bgc_forcing(wiz)
             wiz.model_card.bgc_dd.value = "none"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
 
         wiz2 = ForgeBlueprintWizard()
         wiz2.model_card.bgc_dd.value = "cdr_lite"  # a stale selection must be replaced

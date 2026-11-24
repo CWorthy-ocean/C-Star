@@ -53,6 +53,7 @@ from cstar.tests.unit_tests.wizard.helpers import (
     _upload_change,
 )
 from cstar.wizard.fields import _dd_options, _dd_values
+from cstar.wizard.review_card import WIZARD_TOOL
 from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
     _OUTPUT_CARD,
@@ -63,7 +64,6 @@ from cstar.wizard.settings_editor import (
 )
 from cstar.wizard.wizard import (
     _STICKY_STEPS,
-    WIZARD_TOOL,
     ForgeBlueprintWizard,
     _is_output_key,
 )
@@ -94,15 +94,15 @@ def test_invalid_bottom_fill_blend_m_shows_an_invalid_blueprint_banner(section, 
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
 
     box = getattr(wiz._forcing_editor, f"{section}_bottom_fill_blend_m")
     box.value = typed
     assert wiz.config is None
-    assert "Invalid blueprint" in wiz.derived.value
+    assert "Invalid blueprint" in wiz.review_card.derived.value
 
     box.value = ""
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
 
 
 # ===========================================================================
@@ -118,10 +118,10 @@ def test_blend_with_auto_coarse_mode_surfaces_the_forcing_error():
     wiz._rebuild()
     row = wiz._forcing_editor._rows["surface"][0]
     row["blend_fallback"].value = "ERA5"
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     row["coarse_grid_mode"].value = "auto"
     assert wiz.config is None
-    assert "Invalid blueprint" in wiz.derived.value
+    assert "Invalid blueprint" in wiz.review_card.derived.value
     assert wiz.card_errors["forcing"].layout.display == ""
     assert "Surface forcing, row 1" in wiz.card_errors["forcing"].value
     assert "1 problem" in wiz.card_chips["forcing"].value
@@ -144,7 +144,7 @@ def test_river_temp_source_round_trips_through_yaml(tmp_path):
     w["surface_forcing_source_name"].value = "ERA5"
     w["surface_forcing_source_path"].value = "/data/era5/*.nc"
     w["river_temp_smoothing_window_days"].value = 10.0
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
 
     saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
@@ -381,7 +381,7 @@ def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
 
     wiz.model_card.bgc_dd.value = "none"
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
     assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is False
 
@@ -415,9 +415,9 @@ def test_bgc_dd_none_with_non_default_bgc_forcing_surfaces_error_legibly():
     wiz._rebuild()
     assert wiz.forcing_dd.value == "glorys-era5-esper"
     assert wiz.config is None
-    assert "Invalid" in wiz.derived.value
-    assert "full message in the preview below" in wiz.derived.value
-    assert "\n" not in wiz.derived.value
+    assert "Invalid" in wiz.review_card.derived.value
+    assert "full message in the preview below" in wiz.review_card.derived.value
+    assert "\n" not in wiz.review_card.derived.value
 
 
 @pytest.mark.parametrize(
@@ -441,7 +441,9 @@ def test_rebuild_error_status_points_at_the_preview_only_when_truncated(
     monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _raise)
     wiz._rebuild()
     assert wiz.config is None
-    assert ("full message in the preview below" in wiz.derived.value) is suffixed
+    assert (
+        "full message in the preview below" in wiz.review_card.derived.value
+    ) is suffixed
 
 
 class TestBgcModeForcingDefault:
@@ -508,7 +510,7 @@ class TestBgcModeForcingDefault:
         )
         wiz.model_card.bgc_dd.value = mode
         assert wiz.forcing_dd.value == self.PHYSICS
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.composition.forcing.name == self.PHYSICS
         assert wiz.config.composition.forcing.modified is False
 
@@ -518,7 +520,7 @@ class TestBgcModeForcingDefault:
         assert wiz.forcing_dd.value == self.PHYSICS
         wiz.model_card.bgc_dd.value = "marbl"
         assert wiz.forcing_dd.value == self.UNIFIED
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
 
     def test_between_modes_without_marbl_nothing_switches(self, monkeypatch):
         wiz = self._wizard()
@@ -576,8 +578,8 @@ class TestBgcModeForcingDefault:
         w1 = self._wizard()
         w1._boundaries_touched = True
         path = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(path)
-        w1._on_save(None)
+        w1.review_card.save_path.value = str(path)
+        w1.review_card._on_save(None)
         text = path.read_text()
         assert "marbl: true" in text
         path.write_text(text.replace("marbl: true", "marbl: false"))
@@ -616,7 +618,7 @@ class TestBgcModeSettings:
         assert wiz.editor._bgc_mode == "marbl"
         assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz._editor_key.bgc_mode == "cdr_lite"
         assert wiz.editor._bgc_mode == "cdr_lite"
         assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
@@ -639,7 +641,7 @@ class TestBgcModeSettings:
         # beside the wizard's carbonate-sensitivity default (a Model-card setting)
         assert len(wiz._overrides) == 4
         assert set(wiz._active_overrides) == {("cppdefs", "sponge_tune"), _INTERP_KEY}
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.composition.overrides == {
             "cppdefs": {"sponge_tune": True},
             **_INTERP_HOLD,
@@ -666,7 +668,7 @@ class TestBgcModeSettings:
         assert wiz.config.composition.overrides == _INTERP_HOLD
         wiz.model_card.bgc_dd.value = "marbl"
 
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.composition.overrides == marbl_overrides
         assert wiz.config.model_settings["bgc"]["wrt_his"] is (not before)
         assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
@@ -725,7 +727,7 @@ class TestBgcModeSettings:
         wiz.run_card.cdr_mode_dd.value = (
             "simple"  # a CDR forcing: the config resolves again
         )
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.editor is not marbl_editor
         assert wiz.editor._bgc_mode == "cdr_lite"
         assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
@@ -761,7 +763,7 @@ class TestBgcModeSettings:
         assert "once the blueprint is valid" in placeholder.value
 
         wiz.run_card.cdr_mode_dd.value = "none"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz._editor_key.is_parent
         assert "extract_data" in wiz.editor._group_fields[_OUTPUT_CARD]
 
@@ -782,7 +784,7 @@ class TestBgcModeSettings:
 
         wiz.run_card.end.value = date(2012, 1, 2)
         wiz.grid_w["nx"].value = 10
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.editor is editor
 
     def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
@@ -790,14 +792,14 @@ class TestBgcModeSettings:
         wiz.model_card.bgc_dd.value = "marbl"
         wiz.run_card.cdr_mode_dd.value = "none"
         self._toggle(wiz, ("bgc", "wrt_his"))
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
 
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(wiz.config)
 
         assert ("bgc", "wrt_his") in wiz._overrides
         assert wiz2._overrides == wiz._overrides
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
 
     def test_loaded_marbl_only_overrides_are_reported_and_not_applied(self):
         """A blueprint whose mode forbids a MARBL-only output (hand-edited or
@@ -806,7 +808,7 @@ class TestBgcModeSettings:
         """
         wiz = self._wizard()
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         settings = copy.deepcopy(wiz.config.model_settings)
         settings["cdr_output"]["do_cdr_output"] = True
         settings["upscale_output"]["do_upscale"] = True
@@ -820,7 +822,7 @@ class TestBgcModeSettings:
         assert any("upscale_output.do_upscale=True" in p for p in problems)
         # the time-interpolation hold is the file's own value, carried as authored
         assert set(wiz2._active_overrides) == {("cppdefs", "sponge_tune"), _INTERP_KEY}
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
         assert wiz2.config.model_settings["cdr_output"]["do_cdr_output"] is False
         assert wiz2.config.model_settings["upscale_output"]["do_upscale"] is False
         assert wiz2.config.composition.overrides == {
@@ -831,7 +833,7 @@ class TestBgcModeSettings:
     def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
         wiz = self._wizard()
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         master = wiz.editor._widgets[_LITE_STREAM][0]
         assert master.value is True
         assert master.disabled is True
@@ -848,7 +850,7 @@ class TestBgcModeSettings:
         wiz.model_card.bgc_dd.value = "cdr_lite"
         self._toggle(wiz, ("cppdefs", "sponge_tune"))
         self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
 
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(wiz.config)
@@ -856,7 +858,7 @@ class TestBgcModeSettings:
         assert wiz2.model_card.bgc_dd.value == "cdr_lite"
         assert wiz2._overrides == wiz._overrides
         assert wiz2._editor_key.bgc_mode == "cdr_lite"
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
         assert wiz2.config.content_hash() == wiz.config.content_hash()
 
 
@@ -920,7 +922,7 @@ def test_cdr_plot_cache_invalidated_by_input_edit_and_mode_switch(monkeypatch):
     # An unrelated watched-widget edit goes through _rebuild() (the one hook
     # _invalidate_cdr_plot_cache is attached to), but the fingerprint check
     # sees no plot-affecting change -- the rendered plot SURVIVES.
-    wiz.description.value = "something else"
+    wiz.review_card.description.value = "something else"
     assert wiz.run_card._cdr_plot_object is not None
     assert wiz.run_card.cdr_plot_img.value != b""
     assert len(build_calls) == 1
@@ -1137,7 +1139,7 @@ class TestCarbonateSensitivityTimeInterpolation:
             "simple"  # cdr_lite needs a CDR forcing to resolve
         )
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         return wiz
 
     @staticmethod
@@ -1167,7 +1169,7 @@ class TestCarbonateSensitivityTimeInterpolation:
     def test_marbl_keeps_the_model_spec_value_and_shows_no_switch(self):
         wiz = self._wizard()
         wiz.model_card.bgc_dd.value = "marbl"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
         assert wiz.config.composition.overrides == {}
         assert wiz.model_card.cs_interp_box.children == ()
@@ -1178,7 +1180,7 @@ class TestCarbonateSensitivityTimeInterpolation:
         assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
         wiz.model_card.bgc_dd.value = "marbl"
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert self._checkbox(wiz).value is True
         assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
         assert "1 modified" not in wiz.card_chips["advanced"].value
@@ -1189,23 +1191,23 @@ class TestCarbonateSensitivityTimeInterpolation:
         wiz.model_card.show_archived_models.value = True
         wiz.model_card.model_dd.value = "roms-marbl-0.11-default"
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert _INTERP_KEY not in wiz.editor._widgets  # no such switch before 0.12
         assert _INTERP_KEY not in wiz._overrides
         assert wiz.model_card.cs_interp_box.children == ()
 
         wiz.model_card.model_dd.value = "roms-marbl-0.12-default"
         wiz.model_card.bgc_dd.value = "cdr_lite"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert self._checkbox(wiz).value is False
 
     def test_an_older_roms_ref_drops_the_default_instead_of_failing(self):
         wiz = self._wizard()
         wiz.model_card.roms_ref.value = "0.11.0"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert _INTERP_KEY not in wiz._overrides
         wiz.model_card.roms_ref.value = ""
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert self._checkbox(wiz).value is False
 
     def test_the_switch_shows_before_the_blueprint_is_valid(self):
@@ -1238,7 +1240,7 @@ class TestCarbonateSensitivityTimeInterpolation:
         assert wiz._overrides[_INTERP_KEY] is True
 
         wiz.run_card.cdr_mode_dd.value = "simple"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz._editor_key.resolved
         assert wiz.editor_box.children == (wiz.editor.accordion,)
         assert self._checkbox(wiz).value is True
@@ -1273,7 +1275,7 @@ class TestCarbonateSensitivityTimeInterpolation:
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(wiz.config)
 
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
         assert self._checkbox(wiz2).value is True
         assert wiz2.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
         assert _INTERP_KEY not in wiz2._overrides
@@ -1705,12 +1707,12 @@ def test_implicit_choice_with_an_older_ucla_roms_version_is_reported():
     """
     wiz = _implicit_fs_wizard("roms-marbl-0.15-default")
     wiz.editor._widgets[("implicit_fs", "fs_mode")][0].value = "implicit"
-    assert "Blueprint is valid" in wiz.validation.value
+    assert "Blueprint is valid" in wiz.review_card.validation.value
 
     wiz.model_card.roms_ref.value = "0.14.0"
     wiz._rebuild()
-    assert "implicit_fs needs ucla-roms >= 0.15.0" in wiz.validation.value
-    assert "Blueprint is valid" not in wiz.validation.value
+    assert "implicit_fs needs ucla-roms >= 0.15.0" in wiz.review_card.validation.value
+    assert "Blueprint is valid" not in wiz.review_card.validation.value
 
 
 def test_off_list_fs_mode_neither_crashes_the_build_nor_the_sync():
@@ -2320,7 +2322,7 @@ class TestNestedTopographyWidgets:
         pk = wiz._gather()["grid_kwargs_parent"]
         assert pk["topography_source"] == "SRTM15"
         assert pk["topography_path"] == "/hpc/data/srtm15_west.nc"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.domain.grid_kwargs_parent["topography_source"] == "SRTM15"
         assert "SRTM15" in wiz.config.datasets
 
@@ -2356,7 +2358,7 @@ class TestNestedTopographyWidgets:
         wiz.child_topo_path.value = "/hpc/data/child_tile.nc"  # path-only override
         wiz._rebuild()
         cfg = wiz.config
-        assert cfg is not None, wiz.derived.value
+        assert cfg is not None, wiz.review_card.derived.value
         assert (
             cfg.domain.grid_kwargs_child["topography_path"] == "/hpc/data/child_tile.nc"
         )
@@ -2657,7 +2659,7 @@ class TestGridFileAttach:
         assert calls["n"] == 1
         assert wiz._grid_file is not None
 
-        wiz.description.value = "edited after attach"  # triggers _rebuild()
+        wiz.review_card.description.value = "edited after attach"  # triggers _rebuild()
         wiz._rebuild()
 
         assert calls["n"] == 1  # never rehashed
@@ -2807,7 +2809,7 @@ class TestCdrFileAttach:
         )
         assert "attached" in wiz.run_card.cdr_file_status.value.lower()
         assert "no file attached yet" not in wiz.run_card.cdr_file_status.value.lower()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
 
         wiz.run_card._on_cdr_file_clear(None)
         assert "no file attached yet" in wiz.run_card.cdr_file_status.value.lower()
@@ -3209,13 +3211,13 @@ class TestRiverCustomFileAttach:
         w["name"].value = "CUSTOM_FILE"
         wiz._rebuild()
         assert wiz.config is None  # nothing attached yet -> invalid, as before
-        assert "Invalid blueprint" in wiz.derived.value
+        assert "Invalid blueprint" in wiz.review_card.derived.value
         assert "CUSTOM_FILE" in wiz.card_errors["forcing"].value
 
         w["custom_file_path"].value = str(_write_tiny_netcdf(tmp_path / "river.nc"))
         wiz._rebuild()
 
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         (river,) = [it for it in wiz.config.forcing.river if it.custom_file]
         assert river.source.name == "CUSTOM_FILE"
 
@@ -3229,7 +3231,7 @@ class TestRiverCustomFileAttach:
         w["custom_file_path"].value = str(p)
         w["custom_file_attach_btn"].click()
         wiz._rebuild()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert any(it.source.name == "CUSTOM_FILE" for it in wiz.config.forcing.river)
 
         wiz2 = ForgeBlueprintWizard()
@@ -3311,35 +3313,9 @@ def test_sticky_bar_reflects_model_and_validity_after_rebuild():
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     assert wiz.model_card.model_dd.value in wiz.sticky_bar.value
     assert "● Valid" in wiz.sticky_bar.value
-
-
-def test_download_html_default_caption_is_the_full_filename():
-    """With no ``caption``, `_download_html` keeps the Review card's copy:
-    "Download <code>fname</code>", no ``title=``.
-    """
-    wiz = ForgeBlueprintWizard()
-    cfg = wiz.config
-    assert cfg is not None, wiz.derived.value
-    fname = f"{cfg.name}.forge_blueprint.yaml"
-    html = ForgeBlueprintWizard._download_html(cfg)
-    assert f"Download <code>{fname}</code>" in html
-    assert "title=" not in html
-
-
-def test_download_html_custom_caption_moves_filename_to_title():
-    """A ``caption`` becomes the link text verbatim; the filename moves to
-    ``title=`` instead (the sticky bar's compact "Download blueprint" copy).
-    """
-    wiz = ForgeBlueprintWizard()
-    cfg = wiz.config
-    assert cfg is not None, wiz.derived.value
-    fname = f"{cfg.name}.forge_blueprint.yaml"
-    html = ForgeBlueprintWizard._download_html(cfg, caption="x")
-    assert ">x<" in html
-    assert f'title="{fname}"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -3386,7 +3362,7 @@ def test_output_editor_follows_the_nesting_toggles():
 
     wiz.parent_enable.value = True
     child = wiz.editor
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     assert "upscale_output" in child._group_fields[_OUTPUT_CARD]
     assert _OUTPUT_MORE_TITLE in child._group_fields
     assert "upscale_output" not in child._group_fields[_OUTPUT_MORE_TITLE]
@@ -3407,7 +3383,7 @@ def test_attached_grid_file_drops_the_nesting_streams(fake_grid, tmp_path):
     wiz._on_grid_file_attach(None)
 
     assert wiz.nest_enable.value is True and wiz.nest_enable.disabled
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     assert wiz.config.domain.grid_kwargs_child is None
     assert "extract_data" not in _built_fields(wiz.editor)
 
@@ -3537,7 +3513,7 @@ def _nested_config_at_1800():
     wiz.nest_period.value = 1800.0
     wiz._rebuild()
     cfg = wiz.config
-    assert cfg is not None, wiz.derived.value
+    assert cfg is not None, wiz.review_card.derived.value
     assert cfg.domain.metadata_child["period"] == 1800.0
     return cfg
 
@@ -3620,7 +3596,7 @@ def test_the_specs_the_wizard_saves_have_only_known_keys():
     wiz.nest_pressure_fluxes.value = True
     wiz.parent_enable.value = True
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
 
     domain = wiz._domain_spec_data()
     assert {"grid_kwargs_parent", "grid_kwargs_child", "metadata_child"} <= set(domain)
@@ -3657,7 +3633,7 @@ def test_saving_a_loaded_blueprint_unchanged_keeps_its_stamp(tmp_path):
     wiz.load_path.value = str(tmp_path / "first.yaml")
     wiz._on_load_path(None)
     assert wiz._carried_provenance == first  # the load keeps what the file recorded
-    wiz.save_path.value = str(tmp_path / "second.yaml")
+    wiz.review_card.save_path.value = str(tmp_path / "second.yaml")
     wiz._boundaries_touched = True
     second = _save(wiz)
 
@@ -3716,8 +3692,8 @@ def test_rebuild_preview_and_download_do_not_advance_the_carried_provenance(caps
     assert "generated_by: null" in preview
     assert f"tool: {WIZARD_TOOL}" not in preview
     # ... while what a download link carries is a stamped copy, the same in both links
-    sticky = _downloaded_yaml(wiz.download_link.value)
-    review = _downloaded_yaml(wiz.download_link_review.value)
+    sticky = _downloaded_yaml(wiz.review_card.download_link.value)
+    review = _downloaded_yaml(wiz.review_card.download_link_review.value)
     assert sticky["provenance"]["generated_by"]["tool"] == WIZARD_TOOL
     assert sticky["provenance"]["content_hash"] == wiz.config.content_hash()
     assert review == sticky
@@ -3753,11 +3729,12 @@ def test_set_grid_widgets_locked_toggles_grid_lock_banner():
 
 def test_wizard_module_keeps_the_public_names_that_moved():
     """Notebooks import these from ``cstar.wizard.wizard``; they now live elsewhere."""
-    from cstar.wizard import app, fields, settings_editor, wizard
+    from cstar.wizard import app, fields, review_card, settings_editor, wizard
 
     assert wizard.ForgeBlueprintWizardApp is app.ForgeBlueprintWizardApp
     assert wizard.HELP_TEXT is fields.HELP_TEXT
     assert wizard.LABEL_TEXT is settings_editor.LABEL_TEXT
+    assert wizard.WorkplanHooks is review_card.WorkplanHooks
 
 
 # ---------------------------------------------------------------------------
@@ -3776,7 +3753,7 @@ class TestCdrLiteSavedModel:
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
         catalog = DomainCatalog(catalog_root=root)
         wiz = _cdr_lite_wizard(catalog)
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.model_settings["param"]["ntrc_bio"] == 0
 
         wiz.save_model_name.value = "my-cdr-lite-model"
@@ -3808,7 +3785,7 @@ class TestCdrLiteSavedModel:
         assert wiz2.model_card.bgc_dd.value == "cdr_lite"
         assert _display(wiz2.model_card.cs_group) == ""
         wiz2.model_card.bgc_dd.value = "marbl"
-        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config is not None, wiz2.review_card.derived.value
 
     def test_a_hold_the_user_set_stays_out_of_the_saved_spec(self, tmp_path):
         """A hold the user chose (here toggled off and on again, so the wizard no
@@ -3847,10 +3824,18 @@ def test_card_seven_ends_at_save_and_card_eight_holds_the_rest():
     root = wiz.widget
     review = {id(w) for w in _descendants(_find_card(root, "review"))}
     nxt = {id(w) for w in _descendants(_find_card(root, "next"))}
-    for w in (wiz.run_btn, wiz.save_specs_accordion, wiz.run_forge_pane):
+    for w in (
+        wiz.review_card.run_btn,
+        wiz.save_specs_accordion,
+        wiz.review_card.run_forge_pane,
+    ):
         assert id(w) not in review
         assert id(w) in nxt
-    for w in (wiz.next_status, wiz.save_workplan_btn, wiz.open_workplan_btn):
+    for w in (
+        wiz.review_card.next_status,
+        wiz.review_card.save_workplan_btn,
+        wiz.review_card.open_workplan_btn,
+    ):
         assert id(w) not in review
         assert id(w) in nxt
     texts = " ".join(
@@ -3865,9 +3850,12 @@ def test_card_seven_ends_at_save_and_card_eight_holds_the_rest():
 def test_card_eight_panes_start_closed_with_their_summaries():
     wiz = ForgeBlueprintWizard()
     _ = wiz.widget
-    for pane in (wiz.run_forge_pane, wiz.save_specs_accordion):
+    for pane in (wiz.review_card.run_forge_pane, wiz.save_specs_accordion):
         assert pane.selected_index is None
-    assert "inputs and UCLA-ROMS blueprint only" in wiz.run_forge_pane.get_title()
+    assert (
+        "inputs and UCLA-ROMS blueprint only"
+        in wiz.review_card.run_forge_pane.get_title()
+    )
     assert "reuse this model" in wiz.save_specs_accordion.get_title()
     sub = _find_section(wiz.widget, "Run it as a workplan")
     assert sub is not None
@@ -3908,7 +3896,7 @@ class TestChildNestingMetadata:
         wiz.nest_period.value = 1800.0
         wiz._rebuild()
         cfg = wiz.config
-        assert cfg is not None, wiz.derived.value
+        assert cfg is not None, wiz.review_card.derived.value
 
         assert "metadata" not in cfg.domain.grid_kwargs_child
         assert cfg.domain.metadata_child == {"period": 1800.0}
@@ -3935,7 +3923,7 @@ class TestChildNestingMetadata:
         assert wiz.nest_period.value == 1800.0
         assert wiz.nest_pressure_fluxes.value is True
         wiz._rebuild()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.model_settings["extract_data"]["extract_period"] == 1800.0
 
     def test_child_preset_without_a_period_leaves_nest_period(self, monkeypatch):
@@ -3949,7 +3937,7 @@ class TestChildNestingMetadata:
         wiz.nest_period.value = 900.0
         self._pick_child(wiz, monkeypatch, self._child_spec({"prefix": "a_b"}))
 
-        assert "Invalid child domain" in wiz.derived.value
+        assert "Invalid child domain" in wiz.review_card.derived.value
         assert wiz.nest_period.value == 900.0
         assert wiz.nest_enable.value is False
 
@@ -3978,6 +3966,6 @@ class TestChildNestingMetadata:
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
         wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
 
-        assert "Invalid child domain" in wiz.derived.value
+        assert "Invalid child domain" in wiz.review_card.derived.value
         assert wiz.nest_period.value == 900.0
         assert wiz.nest_enable.value is False

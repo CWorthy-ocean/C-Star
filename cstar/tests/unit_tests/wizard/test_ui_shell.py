@@ -203,10 +203,10 @@ def test_open_in_the_workplan_builder_adds_the_steps_and_switches_page(tmp_path)
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True
-    wiz._on_save(None)
-    wiz._on_open_workplan(None)
+    wiz.review_card._on_save(None)
+    wiz.review_card._on_open_workplan(None)
     assert shell.nav.index == 1
     assert shell.stack.selected_index == 1
     assert "scrollIntoView" in shell.root.children[-1].value

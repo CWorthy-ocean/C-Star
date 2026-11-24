@@ -631,7 +631,7 @@ class TestLayeredCatalog:
         from cstar.wizard.wizard import ForgeBlueprintWizard
 
         wiz = ForgeBlueprintWizard()
-        result = wiz._default_blueprint_path("some-name")
+        result = wiz.review_card._default_blueprint_path("some-name")
         expected_dir = Path(os.environ["CSTAR_CATALOG"]).expanduser().resolve()
         assert Path(result) == expected_dir / "blueprints" / "forge" / "some-name.yaml"
 

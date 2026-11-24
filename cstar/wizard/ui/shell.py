@@ -188,7 +188,7 @@ def app(catalog_root: str | None = None) -> AppShell:
     Imports are lazy (both pages, in turn, lazily import ipywidgets).
     """
     from cstar.wizard.app import ForgeBlueprintWizardApp
-    from cstar.wizard.wizard import WorkplanHooks
+    from cstar.wizard.review_card import WorkplanHooks
     from cstar.wizard.workplan_builder import WorkplanBuilderPage
 
     queue_iopub_instead_of_dropping()

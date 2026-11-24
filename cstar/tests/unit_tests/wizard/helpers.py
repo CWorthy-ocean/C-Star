@@ -202,14 +202,14 @@ def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_siz
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
     wiz._boundaries_touched = True  # not exercising boundary derivation here
 
     async def _fake(*args, **kwargs):
         return _FakeProcess(data, returncode=returncode, chunk_size=chunk_size)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake)
-    wiz._on_run(None)
+    wiz.review_card._on_run(None)
     return wiz
 
 
@@ -218,16 +218,18 @@ def _saving_wizard(path):
     wiz = _new_wizard()
     wiz._boundaries_touched = True  # not exercising boundary derivation here
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
-    wiz.save_path.value = str(path)
+    assert wiz.config is not None, wiz.review_card.derived.value
+    wiz.review_card.save_path.value = str(path)
     return wiz
 
 
 def _save(wiz):
     """Press Save and return the provenance of the file it wrote."""
-    wiz._on_save(None)
-    assert "Saved" in wiz.save_status.value, wiz.save_status.value
-    return ForgeBlueprint.from_yaml(wiz.save_path.value).provenance
+    wiz.review_card._on_save(None)
+    assert "Saved" in wiz.review_card.save_status.value, (
+        wiz.review_card.save_status.value
+    )
+    return ForgeBlueprint.from_yaml(wiz.review_card.save_path.value).provenance
 
 
 def _downloaded_yaml(link_html):
