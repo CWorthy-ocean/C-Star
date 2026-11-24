@@ -135,11 +135,12 @@ Advanced settings
    :width: 100%
 
 Review and export
-   The resolved blueprint as YAML, with validation messages. Give it a
-   name, then **Download** the file or **Save** it to your catalog.
+   The resolved blueprint as YAML, with validation messages. Check its
+   name and description, then **Download** the file or **Save** it to your
+   catalog.
 
 .. figure:: ../images/wizard-review.png
-   :alt: The Review and export section: validation result, resolved YAML, name, download and save
+   :alt: The Review and export section: validation result, resolved YAML, name, description, download and save
    :width: 100%
 
 Next steps
