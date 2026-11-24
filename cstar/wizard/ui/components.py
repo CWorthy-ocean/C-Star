@@ -302,8 +302,10 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
     padding-top: 16px;
     border-top: 1px solid {branding.LINE_2};
 }}
-/* ...except for a subsection that opens its card body or pane */
-.forge-app .widget-vbox:first-child > .forge-sub:first-child {{
+/* ...except for a subsection that opens its card body or pane. Hidden siblings
+   (a card body starts with its error banner, display:none until there is a
+   problem) don't count, or Run setup's first subsection got the rule */
+.forge-app .widget-vbox:nth-child(1 of :not([style*="display: none"])) > .forge-sub:first-child {{
     border-top: 0;
     margin-top: 2px;
     padding-top: 0;

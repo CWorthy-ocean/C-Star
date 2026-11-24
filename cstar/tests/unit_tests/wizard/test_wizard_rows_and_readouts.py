@@ -574,3 +574,22 @@ def _declarations_of(selector: str) -> str:
     match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", components.WIZARD_CSS)
     assert match, f"no rule for {selector}"
     return match.group(1)
+
+
+def test_first_subsection_after_a_hidden_banner_opens_the_card(shared_wizard):
+    """A card body starts with its error banner, hidden until there is a problem;
+    Run setup's first subsection follows it and must still open the card, with no
+    rule or gap above it.
+    """
+    run_body = next(
+        x
+        for x in _with_class(shared_wizard.widget, "forge-card-b")
+        if x.children and x.children[0] is shared_wizard.card_errors["run"]
+    )
+    banner, first = run_body.children[:2]
+    assert banner.layout.display == "none"
+    assert "forge-sub" in first.children[0]._dom_classes
+    assert (
+        '.forge-app .widget-vbox:nth-child(1 of :not([style*="display: none"]))'
+        " > .forge-sub:first-child"
+    ) in components.WIZARD_CSS
