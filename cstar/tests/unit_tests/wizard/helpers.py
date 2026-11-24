@@ -3,6 +3,9 @@
 from datetime import date
 from pathlib import Path
 
+import yaml
+
+from cstar.applications.forge.blueprint import ForgeBlueprint
 from cstar.wizard.wizard import ForgeBlueprintWizard
 
 
@@ -153,3 +156,84 @@ def _new_wizard():
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
     return wiz
+
+
+class _FakeStdout:
+    """Minimal async stand-in for asyncio.StreamReader's ``read(n)``.
+
+    Serves a flat byte buffer in small, deliberately line-*un*aligned chunks (7
+    bytes by default), so a test exercises the wizard's chunk-to-line reassembly
+    rather than getting one whole line per read (which would prove nothing). Returns
+    ``b""`` at EOF, like the real reader.
+
+    Deliberately implements only ``read(n)`` and no ``__aiter__``: the wizard must
+    not go back to ``async for line in proc.stdout`` (StreamReader.readline), whose
+    64 KiB line limit is the bug this change removed -- doing so would fail here.
+    """
+
+    def __init__(self, data, chunk_size=7):
+        self._data = data if isinstance(data, bytes) else b"".join(data)
+        self._pos = 0
+        self._chunk_size = chunk_size
+
+    async def read(self, n=-1):
+        if self._pos >= len(self._data):
+            return b""
+        take = len(self._data) - self._pos if n < 0 else min(n, self._chunk_size)
+        chunk = self._data[self._pos : self._pos + take]
+        self._pos += len(chunk)
+        return chunk
+
+
+class _FakeProcess:
+    def __init__(self, data, returncode=0, chunk_size=7):
+        self.stdout = _FakeStdout(data, chunk_size=chunk_size)
+        self._returncode = returncode
+
+    async def wait(self):
+        return self._returncode
+
+
+def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_size=7):
+    """Drive _on_run with a fake process emitting ``data`` (bytes); return the wizard."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+
+    async def _fake(*args, **kwargs):
+        return _FakeProcess(data, returncode=returncode, chunk_size=chunk_size)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake)
+    wiz._on_run(None)
+    return wiz
+
+
+def _saving_wizard(path):
+    """A wizard holding the default valid config, set to save to ``path``."""
+    wiz = _new_wizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    wiz.save_path.value = str(path)
+    return wiz
+
+
+def _save(wiz):
+    """Press Save and return the provenance of the file it wrote."""
+    wiz._on_save(None)
+    assert "Saved" in wiz.save_status.value, wiz.save_status.value
+    return ForgeBlueprint.from_yaml(wiz.save_path.value).provenance
+
+
+def _downloaded_yaml(link_html):
+    """The parsed YAML a download link carries in its data URI."""
+    import base64
+    import re
+
+    payload = re.search(r"base64,([A-Za-z0-9+/=]+)", link_html).group(1)
+    return yaml.safe_load(base64.b64decode(payload))
