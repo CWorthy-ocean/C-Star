@@ -144,6 +144,14 @@ def test_the_time_varying_fields_round_trip_in_place():
         assert not _shown(row[key])
     for key in ("path", "coarse_grid_mode", "regrid_method", "options"):
         assert _shown(row[key])
+    # The custom file sits under the tile's disclosure and counts as an option.
+    assert row["path"] in row["_options"].body.children
+    assert row["_options"].get_title().startswith("Custom file and roms-tools options")
+    # path, coarse grid, regrid method and options differ from their defaults
+    assert "6 settings · 4 non-default" in row["_options"].get_title()
+    tile = editor._co2_varying_box.children[0]
+    assert "forge-frow-static" in tile.children[0]._dom_classes
+    assert row["path"] not in tile.children
 
     surface = editor.gather()["forcing"]["surface"]
     assert [item["source"]["name"] for item in surface] == ["MBL_co2", "ERA5"]
@@ -174,6 +182,26 @@ def test_only_marbl_shows_the_block_and_writes_mbl_co2():
     wiz.bgc_dd.value = "marbl"
     assert _shown(editor.co2_block)
     assert "MBL_co2" in _surface(wiz)
+
+
+def test_a_custom_co2_file_survives_a_save_and_reload(tmp_path: Path):
+    """The time-varying CO2 custom file is saved and loads back into its box."""
+    wiz = _wizard()
+    wiz.load_path.value = str(
+        _BUNDLED / "blueprints" / "forge" / "wio-toy-example.yaml"
+    )
+    wiz._on_load_path(None)
+    _editor(wiz)._co2_row["path"].value = "/data/mbl.txt"
+    assert wiz.config is not None
+    saved = wiz._save_config(tmp_path / "bp.yaml")
+
+    again = _wizard()
+    again.load_path.value = str(saved)
+    again._on_load_path(None)
+    assert _editor(again)._co2_row["path"].value == "/data/mbl.txt"
+    assert again.config is not None
+    (mbl,) = (i for i in again.config.forcing.surface if i.source.name == "MBL_co2")
+    assert str(mbl.source.path) == "/data/mbl.txt"
 
 
 @pytest.mark.parametrize(

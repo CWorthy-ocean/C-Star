@@ -608,6 +608,17 @@ body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
     row-gap: 12px;
 }}
 .forge-app .forge-frow-opts {{ column-gap: 16px; row-gap: 12px; }}
+/* a fixed value shown as text in a row's field position (the time-varying CO2
+   source): label above, text on the input line */
+.forge-app .forge-frow .forge-frow-static .widget-html-content {{ display: block; }}
+.forge-app .forge-frow-static-l {{
+    font-size: 11.5px;
+    font-weight: 600;
+    color: {branding.INK_2};
+    line-height: 16px;
+    margin: 0 0 3px;
+}}
+.forge-app .forge-frow-static-v {{ font-size: 13px; line-height: 28px; }}
 /* a row list's "add" button and its copy button, side by side */
 .forge-app .forge-row-btns {{ gap: 8px; flex-wrap: wrap; }}
 .forge-app .forge-frow > .widget-inline-hbox:not(.widget-checkbox),

@@ -2826,6 +2826,8 @@ _ROW_OPTION_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 _ROW_OPTIONS_TITLES = {"river": "River options"}
 _ROW_OPTIONS_TITLE = "Regridding & roms-tools options"
+# A row whose custom-file box sits under its disclosure too (the time-varying CO2).
+_ROW_OPTIONS_WITH_FILE_TITLE = "Custom file and roms-tools options"
 
 
 def _row_option_changed(default: Any, value: Any) -> bool:
@@ -2974,6 +2976,14 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
 # small JSON editor per item — visible and round-tripped — rather than hidden. This is
 # the advanced/transitional hatch; promoting a knob to a typed field gives it a proper
 # widget above.
+# What an empty optional box shows, by what blank means there. Grey text reading
+# "(default)" looked like a value already filled in.
+_PATH_PLACEHOLDER = "Leave blank to use the default"
+_BLEND_M_PLACEHOLDER = "Leave blank for the default depth"
+# A nested grid's topography file: blank follows its topography source dropdown
+# (this grid's file when that reads "(same as this grid)").
+_NESTED_TOPO_PATH_PLACEHOLDER = "Leave blank to use the source above"
+
 _OPTIONS_PLACEHOLDER = (
     'advanced roms-tools kwargs (JSON object), e.g. {"chunks": {"time": 1}}'
 )
@@ -3414,6 +3424,10 @@ def _row_seed_items(
 
 _CO2_SOURCE = BgcSurfaceSource.MBL_CO2.value
 """The surface source that forces MARBL's atmospheric CO2 in time."""
+# What the time-varying CO2 tile shows in place of a Source box.
+_CO2_SOURCE_TEXT = (
+    "NOAA marine boundary layer CO2 record, 1979 to 2024 (Forge downloads it)"
+)
 _CO2_STATIC = "static"
 _CO2_TIME_VARYING = "time-varying"
 _CO2_MODE_OPTS = (
@@ -3488,7 +3502,7 @@ class _ForcingEditor:
         self.ic_path = W.Text(
             value=str((ic.get("source") or {}).get("path") or ""),
             description="IC path:",
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
             tooltip=_tip("ic", "path"),
@@ -3570,7 +3584,7 @@ class _ForcingEditor:
         self.ic_bottom_fill_blend_m = W.Text(
             value=_blend_m_text(ic.get("bottom_fill_blend_m")),
             description="bottom blend (m):",
-            placeholder="(default)",
+            placeholder=_BLEND_M_PLACEHOLDER,
             style={"description_width": "110px"},
             tooltip=_tip("ic", "bottom_fill_blend_m"),
         )
@@ -3659,7 +3673,7 @@ class _ForcingEditor:
         self.boundary_path = W.Text(
             value=str(_boundary_source.get("path") or ""),
             description="boundary path:",
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
             tooltip=_tip("boundary", "path"),
@@ -3712,7 +3726,7 @@ class _ForcingEditor:
         self.boundary_bottom_fill_blend_m = W.Text(
             value=_blend_m_text(boundary_block.get("bottom_fill_blend_m")),
             description="bottom blend (m):",
-            placeholder="(default)",
+            placeholder=_BLEND_M_PLACEHOLDER,
             style={"description_width": "110px"},
             tooltip=_tip("boundary", "bottom_fill_blend_m"),
         )
@@ -3853,7 +3867,9 @@ class _ForcingEditor:
         seed = copy.deepcopy(item) if item is not None else {}
         seed["type"] = SurfaceType.BGC.value
         seed.setdefault("source", {}).update(name=_CO2_SOURCE, climatology=False)
-        self._co2_row = self._make_row("surface", seed, fixed_source=_CO2_SOURCE)
+        self._co2_row = self._make_row(
+            "surface", seed, fixed_source=_CO2_SOURCE, path_in_options=True
+        )
         for key in ("type", "name", "climatology"):
             self._co2_row[key].layout.display = "none"
         self.co2_mode = W.RadioButtons(
@@ -3864,16 +3880,16 @@ class _ForcingEditor:
         self._co2_static_box = W.VBox(
             [co2_static if co2_static is not None else W.VBox([])]
         )
-        self._co2_varying_box = W.VBox(
-            [
-                self._row_box(self._co2_row, removable=False),
-                W.HTML(
-                    "<div class='forge-hint'>Forge downloads NOAA's marine "
-                    "boundary layer CO2 record (1979 to 2024) unless you give a "
-                    "path, and MARBL follows it through the run.</div>"
-                ),
-            ]
+        # The source as text where other rows have their Source box, so the tile
+        # does not read as a box to fill in; its custom file is an option.
+        co2_tile = self._row_box(self._co2_row, removable=False)
+        source = W.HTML(
+            f"<div class='forge-frow-static-l'>{html.escape(_row_desc('name', 'src'))}"
+            f"</div><div class='forge-frow-static-v'>{_CO2_SOURCE_TEXT}</div>"
         )
+        source.add_class("forge-frow-static")
+        co2_tile.children = (source, *co2_tile.children)
+        self._co2_varying_box = W.VBox([co2_tile])
         self.co2_block = components.subsection(
             W,
             "forcing.surface.co2",
@@ -4103,11 +4119,17 @@ class _ForcingEditor:
         w["blend_fallback"].observe(_on_fallback_change, names="value")
 
     def _make_row(
-        self, cat: str, item: dict[str, Any], *, fixed_source: str | None = None
+        self,
+        cat: str,
+        item: dict[str, Any],
+        *,
+        fixed_source: str | None = None,
+        path_in_options: bool = False,
     ):
         """One editable row for an item of *cat*. *fixed_source* pins the source
         name (the "Atmospheric CO2" block's ``MBL_co2`` row, a source the row
-        dropdowns do not offer).
+        dropdowns do not offer); *path_in_options* puts its custom-file box under
+        the row's options disclosure (see ``_add_row_options``).
         """
         W = self.W
         src = item.get("source") or {}
@@ -4144,7 +4166,7 @@ class _ForcingEditor:
         w["path"] = W.Text(
             value=str(src.get("path") or ""),
             description=_row_desc("path", "path"),
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             style=small,
             layout=W.Layout(width="260px"),
             tooltip=_tip(cat, "path"),
@@ -4352,7 +4374,7 @@ class _ForcingEditor:
             w["bgc_source_path"] = W.Text(
                 value=str(_bgc_src.get("path") or ""),
                 description=_row_desc("bgc_source_path", "bgc path"),
-                placeholder="(default)",
+                placeholder=_PATH_PLACEHOLDER,
                 style=small,
                 layout=W.Layout(width="220px"),
                 tooltip=_tip("river", "bgc_source_path"),
@@ -4373,7 +4395,7 @@ class _ForcingEditor:
             w["surface_forcing_source_path"] = W.Text(
                 value=str(_temp_src.get("path") or ""),
                 description=_row_desc("surface_forcing_source_path", "temp. path"),
-                placeholder="(default)",
+                placeholder=_PATH_PLACEHOLDER,
                 style=small,
                 layout=W.Layout(width="240px"),
                 tooltip=_tip("river", "surface_forcing_source_path"),
@@ -4632,22 +4654,32 @@ class _ForcingEditor:
             w["_maybe_attach_custom_file"] = _maybe_attach_river_custom_file
             _sync_river_custom_visibility()
         self._apply_row_visibility(w)
-        self._add_row_options(cat, w)
+        self._add_row_options(cat, w, with_path=path_in_options)
         return w
 
-    def _add_row_options(self, cat: str, w: dict[str, Any]) -> None:
-        """Put *cat*'s option fields of row ``w`` (:data:`_ROW_OPTION_DEFAULTS`)
+    def _add_row_options(
+        self, cat: str, w: dict[str, Any], *, with_path: bool = False
+    ) -> None:
+        """Put *cat*'s option fields of row ``w`` (:data:`_ROW_OPTION_DEFAULTS`),
+        and its custom-file box too when ``with_path`` (blank: the default dataset),
         under a disclosure kept in ``w["_options"]``, titled with how many it shows
         and how many differ from their defaults (a preset may set some: "non-default",
         not "changed"); hidden while it shows none (a custom-file river). Built once
         per row, so ``_render`` keeps it open.
         """
-        defaults = _ROW_OPTION_DEFAULTS.get(cat, {})
+        defaults = {
+            **({"path": ""} if with_path else {}),
+            **_ROW_OPTION_DEFAULTS.get(cat, {}),
+        }
         keys = [k for k in w if k in defaults]
         if not keys:
             return
         W = self.W
-        title = _ROW_OPTIONS_TITLES.get(cat, _ROW_OPTIONS_TITLE)
+        title = (
+            _ROW_OPTIONS_WITH_FILE_TITLE
+            if with_path
+            else _ROW_OPTIONS_TITLES.get(cat, _ROW_OPTIONS_TITLE)
+        )
         body = W.HBox(
             [w[k] for k in keys],
             layout=W.Layout(flex_flow="row wrap", align_items="flex-end"),
@@ -5722,7 +5754,7 @@ class ForgeBlueprintWizard:
             description="child topo path:",
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
-            placeholder="(default)",
+            placeholder=_NESTED_TOPO_PATH_PLACEHOLDER,
             tooltip=_tip("nesting", "child_topo_path"),
         )
         self.nest_period = W.FloatText(
@@ -5802,7 +5834,7 @@ class ForgeBlueprintWizard:
             description="parent topo path:",
             style={"description_width": "110px"},
             layout=W.Layout(width="360px"),
-            placeholder="(default)",
+            placeholder=_NESTED_TOPO_PATH_PLACEHOLDER,
             tooltip=_tip("nesting", "parent_topo_path"),
         )
         # --- parent plot (this grid's boundary within its parent) ---
@@ -5878,7 +5910,7 @@ class ForgeBlueprintWizard:
             description="topo path:",
             style={"description_width": "120px"},
             layout=W.Layout(width="380px"),
-            placeholder="(default)",
+            placeholder=_PATH_PLACEHOLDER,
             tooltip=_tip("grid", "topography_path"),
         )
 

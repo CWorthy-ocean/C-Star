@@ -493,7 +493,7 @@ fields:
     symbol: glorys_layout
     hint: 'GLORYS spatial layout override: regional (default) or global.'
   ic.ic_path:
-    label: Initial conditions path
+    label: Custom initial conditions file
   ic.ic_bgc_interp:
     label: Biogeochemistry interpolation
     symbol: bgc_interpolation_method
@@ -540,7 +540,7 @@ fields:
     symbol: glorys_layout
     hint: 'GLORYS spatial layout: regional or global.'
   boundary.boundary_path:
-    label: Boundary path
+    label: Custom boundary file
   boundary.boundary_bgc_interp:
     label: Biogeochemistry interpolation
     symbol: bgc_interpolation_method
@@ -610,8 +610,8 @@ fields:
   # forcing rows, buttons, Advanced settings fields (coordinator glossary pass)
   # ===========================================================================
   forcing.row.path:
-    label: Path
-    hint: Local directory or URL.
+    label: Custom file
+    hint: A local file, directory or URL to read instead of the default dataset.
   forcing.row.glorys_layout:
     label: GLORYS layout
   forcing.row.correct_radiation:
@@ -665,7 +665,7 @@ fields:
   forcing.row.bgc_source_name:
     label: BGC source
   forcing.row.bgc_source_path:
-    label: BGC path
+    label: Custom BGC file
   forcing.row.custom_file_path:
     label: File
   forcing.row.options:
@@ -673,7 +673,7 @@ fields:
   forcing.row.surface_forcing_source_name:
     label: Temperature source
   forcing.row.surface_forcing_source_path:
-    label: Temperature path
+    label: Custom temperature file
   forcing.row.river_temp_smoothing_window_days:
     label: Temperature smoothing window
     unit: days
