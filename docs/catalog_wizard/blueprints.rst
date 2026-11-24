@@ -22,8 +22,8 @@ can be left at their defaults.
    :width: 100%
 
 Start from an existing blueprint
-   Load a blueprint saved in your catalog, or paste YAML, to edit it. Skip
-   this section to build one from scratch.
+   Load a blueprint saved in your catalog, or one from a file (type its path
+   or upload it), to edit it. Skip this section to build one from scratch.
 
 Model
    The model preset (a **ModelSpec** from the catalog), which pins the ROMS,
@@ -62,7 +62,7 @@ Domain and grid
    parent or child domain.
 
 .. figure:: ../images/wizard-domain.png
-   :alt: The Domain and grid section: grid geometry, vertical coordinate, bathymetry, derived values and nesting
+   :alt: The Domain and grid section: grid geometry beside a drawn grid preview, vertical coordinate, bathymetry, derived values and nesting
    :width: 100%
 
 Boundaries and forcing
@@ -175,6 +175,10 @@ Next steps
 
    **Save specs to the catalog** saves any spec you modified as a new named
    catalog entry, to reuse in other blueprints.
+
+.. figure:: ../images/wizard-next-steps.png
+   :alt: The Next steps section after saving: the saved path, the Save workplan and Open in the Workplan builder buttons, and the collapsed Run Forge here and Save specs to the catalog panels
+   :width: 100%
 
 What happens next
 -----------------
