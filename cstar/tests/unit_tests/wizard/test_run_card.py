@@ -303,8 +303,8 @@ def test_cdr_yaml_and_netcdf_panels_link_to_docs():
 
 def test_cdr_simple_mode_seeds_defaults_on_activation():
     wiz = ForgeBlueprintWizard()
-    wiz.grid_w["center_lat"].value = 12.5
-    wiz.grid_w["center_lon"].value = -34.5
+    wiz.domain_card.grid_w["center_lat"].value = 12.5
+    wiz.domain_card.grid_w["center_lon"].value = -34.5
     wiz.run_card.start.value = date(2015, 3, 1)
     wiz.run_card.end.value = date(2015, 4, 1)
 
@@ -855,7 +855,7 @@ def test_cdr_plot_of_an_attached_cdr_lite_file_draws_each_releases_own_tracer(
     monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
     flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
     wiz = _cdr_lite_wizard()
-    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    monkeypatch.setattr(wiz.domain_card, "build_grid_from_widgets", lambda: grid)
     wiz.run_card.cdr_mode_dd.value = "netcdf"
     wiz.run_card._attach_cdr_file_from_path(str(path))
     assert "no CDR_* tracers" not in wiz.run_card.cdr_file_status.value
@@ -892,7 +892,7 @@ def test_cdr_plot_of_the_simple_release_follows_the_bgc_mode(
     flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
     grid = _small_cdr_grid()
     wiz = _cdr_lite_wizard()
-    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    monkeypatch.setattr(wiz.domain_card, "build_grid_from_widgets", lambda: grid)
     wiz.run_card.cdr_simple_name.value = "pulse"
     wiz.run_card.cdr_simple_lat.value = 55.0
     wiz.run_card.cdr_simple_lon.value = 0.5  # off the coarse grid's coastal cells
@@ -932,7 +932,7 @@ def test_cdr_plot_of_a_mixed_forcing_draws_only_the_selected_marbl_release(
     monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
     flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
     wiz = _cdr_lite_wizard()
-    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    monkeypatch.setattr(wiz.domain_card, "build_grid_from_widgets", lambda: grid)
     wiz.run_card.cdr_mode_dd.value = "netcdf"
     wiz.run_card._attach_cdr_file_from_path(str(path))
 
@@ -958,7 +958,7 @@ def test_cdr_plot_of_an_attached_file_survives_a_bgc_mode_change(
     _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
     monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
     wiz = _cdr_lite_wizard()
-    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    monkeypatch.setattr(wiz.domain_card, "build_grid_from_widgets", lambda: grid)
     wiz.run_card.cdr_mode_dd.value = "netcdf"
     wiz.run_card._attach_cdr_file_from_path(str(path))
     wiz.run_card._on_cdr_plot_generate(None)

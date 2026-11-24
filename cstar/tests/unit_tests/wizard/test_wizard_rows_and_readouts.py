@@ -17,11 +17,12 @@ from cstar.applications.forge.blueprint import (
     RiverForcingItem,
     RiverSource,
 )
+from cstar.wizard.domain_card import _display_round
 from cstar.wizard.fields import _make_field_widget, _read_field_widget
 from cstar.wizard.forcing_editor import _ROW_OPTION_DEFAULTS, _ForcingEditor
 from cstar.wizard.settings_editor import _model_time_text, _SettingsEditor
 from cstar.wizard.ui import components
-from cstar.wizard.wizard import ForgeBlueprintWizard, _display_round
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -377,9 +378,9 @@ def test_surface_flux_list_is_not_collapsible(shared_wizard):
 def test_derived_v_sponge_shows_rounded_and_saves_full():
     """The widget shows one decimal while the derived and saved values stay unrounded."""
     wiz = ForgeBlueprintWizard()
-    shown = wiz.v_sponge.value
+    shown = wiz.domain_card.v_sponge.value
     assert round(shown, 1) == shown
-    derived = wiz._v_sponge_value()
+    derived = wiz.domain_card._v_sponge_value()
     assert derived == wiz._domain_snapshot()["v_sponge"]
     assert wiz.config is not None
     assert wiz.config.domain.v_sponge == derived
@@ -389,8 +390,8 @@ def test_derived_v_sponge_shows_rounded_and_saves_full():
 def test_edited_v_sponge_is_read_back_as_typed():
     """After a user edit the widget's own value is used."""
     wiz = ForgeBlueprintWizard()
-    wiz.v_sponge.value = 1234.5
-    assert wiz._v_sponge_value() == 1234.5
+    wiz.domain_card.v_sponge.value = 1234.5
+    assert wiz.domain_card._v_sponge_value() == 1234.5
 
 
 def test_display_round_keeps_small_values():
@@ -550,7 +551,10 @@ def test_grid_preview_gives_way_to_the_geometry_fields(shared_wizard):
     wrapped = _at_rule_block("@container (max-width: 1100px)")
     assert ".forge-app .forge-geo-row { flex-wrap: wrap; row-gap: 8px; }" in wrapped
     assert ".forge-geo-row > .forge-fgrid { flex: 1 1 100%; min-width: 0; }" in wrapped
-    for image in (shared_wizard.plot_img, shared_wizard.run_card.cdr_plot_img):
+    for image in (
+        shared_wizard.domain_card.plot_img,
+        shared_wizard.run_card.cdr_plot_img,
+    ):
         assert (image.layout.width, image.layout.min_width, image.layout.max_width) == (
             "100%",
             "400px",
@@ -560,8 +564,8 @@ def test_grid_preview_gives_way_to_the_geometry_fields(shared_wizard):
 
 def test_nesting_checkboxes_size_to_their_labels(shared_wizard):
     """The default 300px cut "This grid is a parent (enter child grid info below)." off."""
-    assert shared_wizard.nest_enable.layout.width == "auto"
-    assert shared_wizard.parent_enable.layout.width == "auto"
+    assert shared_wizard.domain_card.nest_enable.layout.width == "auto"
+    assert shared_wizard.domain_card.parent_enable.layout.width == "auto"
 
 
 def _declarations_of(selector: str) -> str:

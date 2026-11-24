@@ -19,9 +19,10 @@ import xarray as xr
 import yaml
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.wizard.domain_card import _merge_loaded_kwargs
 from cstar.wizard.fields import _dd_values
 from cstar.wizard.forcing_editor import _parse_constants, _parse_options
-from cstar.wizard.wizard import ForgeBlueprintWizard, _merge_loaded_kwargs
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 _REPO = Path(__file__).resolve().parents[4]
 _WIO_RELEASE = _REPO / "docs/tutorials/forge_blueprint_wio_release.yaml"
@@ -160,14 +161,18 @@ class TestLoadSaveKeepsTheData:
 
     def test_a_parent_keeps_the_grid_kwargs_it_has_no_box_for(self, monkeypatch):
         wiz = _load(_CCS_CHILD)
-        monkeypatch.setattr(wiz, "_on_parent_plot", lambda _: None)  # no grid build
+        monkeypatch.setattr(
+            wiz.domain_card, "on_parent_plot", lambda _: None
+        )  # no grid build
 
         assert wiz.config.domain.grid_kwargs_parent["close_narrow_channels"] is True
         # ... but a parent picked from the catalog replaces the loaded one whole.
-        preset = next(v for v in _dd_values(wiz.parent_domain_dd) if v != "<custom>")
-        wiz.parent_domain_dd.value = preset
+        preset = next(
+            v for v in _dd_values(wiz.domain_card.parent_domain_dd) if v != "<custom>"
+        )
+        wiz.domain_card.parent_domain_dd.value = preset
         spec_gk = wiz.catalog.domain_data(preset).get("grid_kwargs") or {}
-        assert wiz._nested_grid_kwargs("parent").get(
+        assert wiz.domain_card._nested_grid_kwargs("parent").get(
             "close_narrow_channels"
         ) == spec_gk.get("close_narrow_channels")
 
@@ -175,11 +180,11 @@ class TestLoadSaveKeepsTheData:
         wiz = _load(_NEST_TINY_CHILD)
         assert wiz.config.domain.grid_kwargs["hmin"] == 5.0  # written explicitly
 
-        wiz.hmin.value = 7.5
+        wiz.domain_card.hmin.value = 7.5
         assert wiz.config.domain.grid_kwargs["hmin"] == 7.5
-        wiz.close_narrow_chk.value = True
+        wiz.domain_card.close_narrow_chk.value = True
         assert wiz.config.domain.grid_kwargs["close_narrow_channels"] is True
-        wiz.close_narrow_chk.value = False
+        wiz.domain_card.close_narrow_chk.value = False
         assert "close_narrow_channels" not in wiz.config.domain.grid_kwargs
 
     def test_prefill_and_extrap_kwargs_are_kept(self, tmp_path):
@@ -278,7 +283,7 @@ class TestSimpleCdrTheFieldsCannotShow:
         wiz = ForgeBlueprintWizard()
         wiz.run_card.start.value = date(2012, 1, 1)
         wiz.run_card.end.value = date(2012, 1, 2)
-        wiz._boundaries_touched = True  # not exercising boundary derivation
+        wiz.domain_card._boundaries_touched = True  # not exercising boundary derivation
         wiz.model_card.bgc_dd.value = "cdr_lite"
         wiz.run_card.cdr_mode_dd.value = "simple"
         saved = _save(wiz, tmp_path / "lite.yaml")
@@ -320,8 +325,8 @@ class TestSimpleCdrFollowsTheRun:
         wiz.run_card.cdr_simple_lon.value = 61.25  # the user's own choice
 
         wiz.run_card.end.value = date(2012, 1, 5)
-        wiz.grid_w["center_lat"].value = -3.0
-        wiz.grid_w["center_lon"].value = 62.0
+        wiz.domain_card.grid_w["center_lat"].value = -3.0
+        wiz.domain_card.grid_w["center_lon"].value = 62.0
 
         assert wiz.run_card.cdr_simple_end.value == date(2012, 1, 5)
         assert wiz.run_card.cdr_simple_lat.value == -3.0
@@ -362,7 +367,9 @@ class TestDownloadWaitsForDerivedBoundaries:
         wiz = ForgeBlueprintWizard()
         wiz.run_card.start.value = date(2012, 1, 1)
         wiz.run_card.end.value = date(2012, 1, 2)
-        monkeypatch.setattr(wiz, "_build_grid_from_widgets", _open_ocean_grid)
+        monkeypatch.setattr(
+            wiz.domain_card, "build_grid_from_widgets", _open_ocean_grid
+        )
 
         before = _downloaded(wiz.review_card.download_link.value)
         saved = _save(wiz, tmp_path / "saved.yaml")
@@ -379,10 +386,12 @@ class TestDownloadWaitsForDerivedBoundaries:
         wiz = ForgeBlueprintWizard()
         wiz.run_card.start.value = date(2012, 1, 1)
         wiz.run_card.end.value = date(2012, 1, 2)
-        provisional = {d: w.value for d, w in wiz.bnd.items()}
-        monkeypatch.setattr(wiz, "_build_grid_from_widgets", _open_ocean_grid)
+        provisional = {d: w.value for d, w in wiz.domain_card.bnd.items()}
+        monkeypatch.setattr(
+            wiz.domain_card, "build_grid_from_widgets", _open_ocean_grid
+        )
 
-        wiz.derive_btn.click()
+        wiz.domain_card.derive_btn.click()
         downloaded = _downloaded(wiz.review_card.download_link.value)
         saved = _save(wiz, tmp_path / "saved.yaml")
 

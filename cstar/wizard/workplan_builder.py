@@ -1122,7 +1122,7 @@ class _StepPane:
             return
         # the Blueprint page's own Save/Run guard: never persist the provisional
         # open-boundary defaults of a grid whose boundaries were never derived
-        if not wizard._ensure_boundaries_derived():
+        if not wizard.domain_card.ensure_boundaries_derived():
             self.current_note.value = components.banner(
                 "err",
                 "Open boundaries could not be derived from the Blueprint page's "

@@ -621,7 +621,9 @@ def test_forge_step_offers_no_override_form(page):
 def test_current_blueprint_page_config_saves_and_uses_that_file(
     page, bp_app, monkeypatch
 ):
-    monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: True)
+    monkeypatch.setattr(
+        bp_app.inner.domain_card, "ensure_boundaries_derived", lambda: True
+    )
     pane = page.panes[0]
     assert bp_app.inner.config is not None  # the default blueprint is valid
     pane.source.value = wb.SOURCE_CURRENT
@@ -637,7 +639,9 @@ def test_current_blueprint_page_config_is_stamped_by_the_wizard(
     """The page writes the Blueprint page's config through the wizard's own save,
     so the file carries its provenance stamp and the wizard carries it on.
     """
-    monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: True)
+    monkeypatch.setattr(
+        bp_app.inner.domain_card, "ensure_boundaries_derived", lambda: True
+    )
     pane = page.panes[0]
     pane.source.value = wb.SOURCE_CURRENT
 
@@ -1998,7 +2002,9 @@ def test_current_config_is_not_saved_when_boundaries_cannot_be_derived(
 ):
     saved = Path(bp_app.inner.review_card.save_path.value)
     saved.unlink(missing_ok=True)
-    monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: False)
+    monkeypatch.setattr(
+        bp_app.inner.domain_card, "ensure_boundaries_derived", lambda: False
+    )
     pane = page.panes[0]
     pane.source.value = wb.SOURCE_CURRENT
     assert pane._current_path == ""

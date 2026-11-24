@@ -13,7 +13,7 @@ from cstar.wizard.ui import labels
 from cstar.wizard.wizard import ForgeBlueprintWizard
 
 # The 11 grid kwargs shared by the main/child/parent grids (see
-# cstar.wizard.wizard._GRID_INT/_GRID_FLOAT/_SCOORD).
+# cstar.wizard.domain_card._GRID_INT/_GRID_FLOAT/_SCOORD).
 _GRID_KWARGS = (
     "nx",
     "ny",

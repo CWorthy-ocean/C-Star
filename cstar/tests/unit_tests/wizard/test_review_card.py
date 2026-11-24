@@ -64,7 +64,9 @@ def test_on_run_guards_on_invalid_config(monkeypatch):
     import asyncio
 
     wiz = ForgeBlueprintWizard()
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.domain_card._boundaries_touched = (
+        True  # not exercising boundary derivation here
+    )
     wiz.config = None
 
     def _boom(*a, **kw):
@@ -90,7 +92,9 @@ def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_p
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.domain_card._boundaries_touched = (
+        True  # not exercising boundary derivation here
+    )
 
     captured_cmd = {}
 
@@ -124,7 +128,9 @@ def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.domain_card._boundaries_touched = (
+        True  # not exercising boundary derivation here
+    )
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
         return _FakeProcess([b"uh oh\n"], returncode=1)
@@ -182,7 +188,7 @@ def test_on_run_error_status_names_the_command(monkeypatch, tmp_path):
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
-    wiz._boundaries_touched = True
+    wiz.domain_card._boundaries_touched = True
 
     async def _boom(*args, **kwargs):
         raise OSError("no such executable")
@@ -214,7 +220,7 @@ def test_saving_a_never_stamped_blueprint_unchanged_records_the_wizard(tmp_path)
     assert wiz.config.provenance.generated_by is None
     assert wiz.config.provenance.content_hash == wiz.config.content_hash()
     wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
-    wiz._boundaries_touched = True
+    wiz.domain_card._boundaries_touched = True
 
     saved = _save(wiz)
 
@@ -304,7 +310,7 @@ def _saved_wizard(tmp_path, *, hooks=None):
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
-    wiz._boundaries_touched = True
+    wiz.domain_card._boundaries_touched = True
     return wiz
 
 

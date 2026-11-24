@@ -663,7 +663,7 @@ class TestLayeredCatalog:
         assert label_by_value["top-only-domain"] == "top-only-domain"  # no badge
         assert label_by_value["gulf-guinea-toy"] == "gulf-guinea-toy (bundled)"
         # dd_values recovers the bare names regardless of the tuple-badging.
-        assert set(_dd_values(wiz.domain_dd)) >= {
+        assert set(_dd_values(wiz.domain_card.domain_dd)) >= {
             "top-only-domain",
             "gulf-guinea-toy",
         }
@@ -674,10 +674,10 @@ class TestLayeredCatalog:
         # would make ipywidgets silently store dd.value as a raw tuple -- so
         # confirm the sentinel is folded into the same homogeneous tuple list
         # and that setting dd.value to it still assigns the bare sentinel.
-        assert all(isinstance(o, tuple) for o in wiz.domain_dd.options)
-        assert ("<custom>", "<custom>") in wiz.domain_dd.options
-        wiz.domain_dd.value = "<custom>"
-        assert wiz.domain_dd.value == "<custom>"
+        assert all(isinstance(o, tuple) for o in wiz.domain_card.domain_dd.options)
+        assert ("<custom>", "<custom>") in wiz.domain_card.domain_dd.options
+        wiz.domain_card.domain_dd.value = "<custom>"
+        assert wiz.domain_card.domain_dd.value == "<custom>"
 
     def test_wizard_dd_options_no_badges_are_plain_strings(self, tmp_path):
         """A single (non-layered) DomainCatalog has no ``entry_source`` -- every
@@ -696,7 +696,7 @@ class TestLayeredCatalog:
         wiz = ForgeBlueprintWizard(catalog=cat)
         options = _dd_options(wiz.catalog, cat.domain_names, "domain")
         assert all(isinstance(o, str) for o in options)
-        assert all(isinstance(o, str) for o in wiz.domain_dd.options)
+        assert all(isinstance(o, str) for o in wiz.domain_card.domain_dd.options)
 
 
 class TestReviewFixes:

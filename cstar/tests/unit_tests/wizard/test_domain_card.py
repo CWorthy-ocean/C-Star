@@ -20,7 +20,7 @@ from cstar.wizard.wizard import ForgeBlueprintWizard
 def test_topo_source_dropdown_includes_emod():
     """The topography-source dropdown must offer EMOD alongside ETOPO5/SRTM15."""
     wiz = ForgeBlueprintWizard()
-    assert "EMOD" in wiz.topo_source.options
+    assert "EMOD" in wiz.domain_card.topo_source.options
 
 
 _BUNDLED_DOMAINS = sorted(
@@ -55,14 +55,18 @@ def test_grid_previews_build_every_bundled_domain(monkeypatch, name):
     monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
 
     wiz = ForgeBlueprintWizard()
-    wiz.domain_dd.value = name
-    wiz.nest_domain_dd.value = name
-    wiz.parent_domain_dd.value = name
-    wiz._on_plot(None)
-    wiz._on_nest_plot(None)
-    wiz._on_parent_plot(None)
+    wiz.domain_card.domain_dd.value = name
+    wiz.domain_card.nest_domain_dd.value = name
+    wiz.domain_card.parent_domain_dd.value = name
+    wiz.domain_card.on_plot(None)
+    wiz.domain_card._on_nest_plot(None)
+    wiz.domain_card.on_parent_plot(None)
 
-    for status in (wiz.plot_status, wiz.nest_plot_status, wiz.parent_plot_status):
+    for status in (
+        wiz.domain_card.plot_status,
+        wiz.domain_card.nest_plot_status,
+        wiz.domain_card.parent_plot_status,
+    ):
         assert "✓" in status.value, status.value
     assert len(built) >= 5  # this grid x3, the child and the parent
 
@@ -87,9 +91,9 @@ def test_parent_plot_is_always_grid_plot_only(monkeypatch):
     wiz = ForgeBlueprintWizard()
     for nest_enabled in (False, True):
         calls.clear()
-        wiz.nest_enable.value = nest_enabled
-        wiz._on_plot(None)
-        assert calls == ["plot"], (nest_enabled, wiz.plot_status.value)
+        wiz.domain_card.nest_enable.value = nest_enabled
+        wiz.domain_card.on_plot(None)
+        assert calls == ["plot"], (nest_enabled, wiz.domain_card.plot_status.value)
 
 
 def test_nest_plot_button_renders_parent_and_child_via_plot_nesting(monkeypatch):
@@ -115,15 +119,19 @@ def test_nest_plot_button_renders_parent_and_child_via_plot_nesting(monkeypatch)
     monkeypatch.setattr(roms_tools, "plot_nesting", _fake_plot_nesting, raising=False)
 
     wiz = ForgeBlueprintWizard()
-    wiz._on_nest_plot(None)
+    wiz.domain_card._on_nest_plot(None)
 
-    assert any(c[0] == "plot_nesting" for c in calls), wiz.nest_plot_status.value
+    assert any(c[0] == "plot_nesting" for c in calls), (
+        wiz.domain_card.nest_plot_status.value
+    )
     assert not any(c[0] == "plot" for c in calls)  # doesn't touch the parent plot
-    assert len(wiz.nest_plot_img.value) > 0
+    assert len(wiz.domain_card.nest_plot_img.value) > 0
     # The parent plot/status are untouched by the nesting-section refresh
     # (plot_status still carries its initial empty-state hint).
-    assert wiz.plot_status.value == "Click Refresh preview to draw the grid."
-    assert wiz.plot_img.value == b""
+    assert (
+        wiz.domain_card.plot_status.value == "Click Refresh preview to draw the grid."
+    )
+    assert wiz.domain_card.plot_img.value == b""
 
 
 def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
@@ -164,11 +172,11 @@ def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
     monkeypatch.setattr(plt.Figure, "savefig", _spy_savefig)
 
     wiz = ForgeBlueprintWizard()
-    wiz._on_nest_plot(None)
+    wiz.domain_card._on_nest_plot(None)
 
-    assert not wiz.nest_plot_status.value.startswith("<span class='forge-st-err'>"), (
-        wiz.nest_plot_status.value
-    )
+    assert not wiz.domain_card.nest_plot_status.value.startswith(
+        "<span class='forge-st-err'>"
+    ), wiz.domain_card.nest_plot_status.value
     # A blank new figure (created after a premature close) would have zero axes;
     # the real drawn figure has one axis with the plotted line.
     assert captured.get("axes"), "expected the drawn figure's axes, got a blank figure"
@@ -189,18 +197,20 @@ class TestNestedTopographyWidgets:
 
     def _pick_parent(self, wiz, monkeypatch, spec):
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        monkeypatch.setattr(wiz, "_on_parent_plot", lambda _b: None)
-        wiz.parent_domain_dd.value = wiz.parent_domain_dd.options[1]
+        monkeypatch.setattr(wiz.domain_card, "on_parent_plot", lambda _b: None)
+        wiz.domain_card.parent_domain_dd.value = (
+            wiz.domain_card.parent_domain_dd.options[1]
+        )
 
     def test_parent_pick_copies_spec_topography_and_gather_emits_it(self, monkeypatch):
         wiz = _new_wizard()
-        assert wiz.parent_topo_source.value == "(same as this grid)"
+        assert wiz.domain_card.parent_topo_source.value == "(same as this grid)"
         self._pick_parent(wiz, monkeypatch, self._SPEC)
 
-        assert wiz.parent_enable.value is True
-        assert wiz.parent_w["nx"].value == 30
-        assert wiz.parent_topo_source.value == "SRTM15"
-        assert wiz.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
+        assert wiz.domain_card.parent_enable.value is True
+        assert wiz.domain_card.parent_w["nx"].value == 30
+        assert wiz.domain_card.parent_topo_source.value == "SRTM15"
+        assert wiz.domain_card.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
 
         pk = wiz._gather()["grid_kwargs_parent"]
         assert pk["topography_source"] == "SRTM15"
@@ -214,21 +224,21 @@ class TestNestedTopographyWidgets:
         parent must NOT silently inherit this grid's (e.g. EMOD) topography.
         """
         wiz = _new_wizard()
-        wiz.topo_source.value = "EMOD"
-        wiz.topo_path.value = "/hpc/data/EMODnet_C2.nc"
+        wiz.domain_card.topo_source.value = "EMOD"
+        wiz.domain_card.topo_path.value = "/hpc/data/EMODnet_C2.nc"
         spec = {"grid_kwargs": self._SPEC["grid_kwargs"]}  # no topography keys
         self._pick_parent(wiz, monkeypatch, spec)
 
-        assert wiz.parent_topo_source.value == "ETOPO5"
-        assert wiz.parent_topo_path.value == ""
+        assert wiz.domain_card.parent_topo_source.value == "ETOPO5"
+        assert wiz.domain_card.parent_topo_path.value == ""
         pk = wiz._gather()["grid_kwargs_parent"]
         assert pk["topography_source"] == "ETOPO5"
         assert "topography_path" not in pk
 
     def test_inherit_sentinel_emits_no_keys(self):
         wiz = _new_wizard()
-        wiz.parent_enable.value = True
-        wiz.nest_enable.value = True
+        wiz.domain_card.parent_enable.value = True
+        wiz.domain_card.nest_enable.value = True
         kw = wiz._gather()
         for key in ("grid_kwargs_parent", "grid_kwargs_child"):
             assert "topography_source" not in kw[key]
@@ -237,8 +247,10 @@ class TestNestedTopographyWidgets:
     def test_round_trips_through_populate_from(self, monkeypatch):
         wiz = _new_wizard()
         self._pick_parent(wiz, monkeypatch, self._SPEC)
-        wiz.nest_enable.value = True
-        wiz.child_topo_path.value = "/hpc/data/child_tile.nc"  # path-only override
+        wiz.domain_card.nest_enable.value = True
+        wiz.domain_card.child_topo_path.value = (
+            "/hpc/data/child_tile.nc"  # path-only override
+        )
         wiz._rebuild()
         cfg = wiz.config
         assert cfg is not None, wiz.review_card.derived.value
@@ -250,16 +262,16 @@ class TestNestedTopographyWidgets:
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
 
-        assert wiz2.parent_topo_source.value == "SRTM15"
-        assert wiz2.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
-        assert wiz2.child_topo_source.value == "(same as this grid)"
-        assert wiz2.child_topo_path.value == "/hpc/data/child_tile.nc"
+        assert wiz2.domain_card.parent_topo_source.value == "SRTM15"
+        assert wiz2.domain_card.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
+        assert wiz2.domain_card.child_topo_source.value == "(same as this grid)"
+        assert wiz2.domain_card.child_topo_path.value == "/hpc/data/child_tile.nc"
         assert (
             wiz2._gather()["grid_kwargs_parent"] == wiz._gather()["grid_kwargs_parent"]
         )
 
     def test_plot_topography_falls_back_when_file_not_local(self, tmp_path):
-        from cstar.wizard.wizard import (
+        from cstar.wizard.domain_card import (
             _effective_nested_topo,
             _plot_topography_source,
         )
@@ -306,18 +318,22 @@ class TestNestedTopographyWidgets:
         monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
         wiz = _new_wizard()
         local = _write_tiny_netcdf(tmp_path / "parent_topo.nc")
-        wiz.parent_enable.value = True
-        wiz.parent_topo_source.value = "EMOD"
-        wiz.parent_topo_path.value = str(local)
-        wiz.topo_source.value = "SRTM15"  # this grid: no local file -> fallback
+        wiz.domain_card.parent_enable.value = True
+        wiz.domain_card.parent_topo_source.value = "EMOD"
+        wiz.domain_card.parent_topo_path.value = str(local)
+        wiz.domain_card.topo_source.value = (
+            "SRTM15"  # this grid: no local file -> fallback
+        )
 
-        wiz._on_parent_plot(None)
+        wiz.domain_card.on_parent_plot(None)
 
         parent_kw, this_kw = calls[0], calls[1]
         assert parent_kw["topography_source"] == {"name": "EMOD", "path": str(local)}
         assert "topography_source" not in this_kw
-        assert "SRTM15" in wiz.parent_plot_status.value  # fallback note for this grid
-        assert "EMOD" not in wiz.parent_plot_status.value
+        assert (
+            "SRTM15" in wiz.domain_card.parent_plot_status.value
+        )  # fallback note for this grid
+        assert "EMOD" not in wiz.domain_card.parent_plot_status.value
 
 
 def test_nest_period_loads_from_metadata_child_over_a_stale_snapshot():
@@ -331,15 +347,15 @@ def test_nest_period_loads_from_metadata_child_over_a_stale_snapshot():
     wiz2 = _new_wizard()
     wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
 
-    assert wiz2.nest_period.value == 1800.0
+    assert wiz2.domain_card.nest_period.value == 1800.0
     assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
     assert wiz2._gather()["metadata_child"] == {"period": 1800.0}
 
 
 def test_nest_period_falls_back_to_metadata_child_without_an_extract_period():
     wiz = _new_wizard()
-    wiz.nest_enable.value = True
-    wiz.nest_period.value = 1800.0
+    wiz.domain_card.nest_enable.value = True
+    wiz.domain_card.nest_period.value = 1800.0
     wiz._rebuild()
     cfg = wiz.config
     settings = copy.deepcopy(cfg.model_settings)
@@ -347,16 +363,16 @@ def test_nest_period_falls_back_to_metadata_child_without_an_extract_period():
 
     wiz2 = _new_wizard()
     wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
-    assert wiz2.nest_period.value == 1800.0
+    assert wiz2.domain_card.nest_period.value == 1800.0
     assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
 
 
 def test_set_grid_widgets_locked_toggles_grid_lock_banner():
     wiz = ForgeBlueprintWizard()
-    assert wiz.grid_lock_banner.layout.display == "none"
+    assert wiz.domain_card.grid_lock_banner.layout.display == "none"
 
-    wiz._set_grid_widgets_locked(True)
-    assert wiz.grid_lock_banner.layout.display == ""
+    wiz.domain_card._set_grid_widgets_locked(True)
+    assert wiz.domain_card.grid_lock_banner.layout.display == ""
 
-    wiz._set_grid_widgets_locked(False)
-    assert wiz.grid_lock_banner.layout.display == "none"
+    wiz.domain_card._set_grid_widgets_locked(False)
+    assert wiz.domain_card.grid_lock_banner.layout.display == "none"
