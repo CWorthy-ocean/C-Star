@@ -434,6 +434,13 @@ def test_field_grid_default_columns_come_from_the_stylesheet():
     assert grid.layout.grid_template_columns is None
 
 
+def test_field_grid_rows_keep_their_height_when_stretched():
+    """Beside a drawn grid preview the geometry row stretches its field grid to the
+    image's height; the grid's rows must stay packed at the top, not spread out.
+    """
+    assert "align-content: start;" in _declarations_of(".forge-app .forge-fgrid")
+
+
 def test_field_grid_other_column_counts_stay_inline():
     """A grid with another column count keeps its inline template."""
     grid = components.field_grid(W, [W.HTML("a")], cols=3)

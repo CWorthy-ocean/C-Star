@@ -229,8 +229,13 @@ body[data-jp-theme-light="false"] .forge-app:not(.forge-app .forge-app) {{
 .forge-app .forge-field .widget-hbox > .widget-text {{ flex: 0 1 auto; min-width: 0; }}
 .forge-app .forge-field .widget-hbox > .jupyter-button {{ flex: none; }}
 .forge-app .forge-field .widget-hbox > .widget-checkbox {{ width: auto; margin-right: 22px; }}
-/* field_grid: two columns, one in a narrow card body */
-.forge-app .forge-fgrid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+/* field_grid: two columns, one in a narrow card body. Rows keep their own height
+   at the top when the grid is stretched taller (beside a drawn grid preview, the
+   geometry row stretches it to the image's height and the rows spread apart) */
+.forge-app .forge-fgrid {{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+}}
 @container (max-width: 760px) {{
     .forge-app .forge-fgrid {{ grid-template-columns: minmax(0, 1fr); }}
 }}
