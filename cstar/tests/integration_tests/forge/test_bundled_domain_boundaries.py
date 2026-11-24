@@ -22,12 +22,14 @@ import roms_tools as rt
 import yaml
 from roms_tools.setup.utils import get_boundary_coords
 
-import cstar
-from cstar.applications.forge.blueprint import OpenBoundaries, TopographySource
-
-DOMAIN_SPEC_DIR = (
-    Path(cstar.__file__).parent / "catalog" / "bundled" / "specs" / "DomainSpec"
+from cstar.applications.forge.blueprint import (
+    OpenBoundaries,
+    TopographySource,
+    grid_build_kwargs,
 )
+from cstar.base.env import BUNDLED_CATALOG_ROOT
+
+DOMAIN_SPEC_DIR = BUNDLED_CATALOG_ROOT / "specs" / "DomainSpec"
 DOMAIN_SPECS = sorted(DOMAIN_SPEC_DIR.glob("*.yaml"))
 assert DOMAIN_SPECS, f"no DomainSpec files under {DOMAIN_SPEC_DIR}: the glob is stale"
 
@@ -41,10 +43,10 @@ def reduced_grid_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Return ``grid_kwargs`` with at most ``MAX_CELLS`` cells along the longer axis.
 
     The extent, centre, rotation and the ratio of ``nx`` to ``ny`` (so the cell
-    shape) are kept. ``metadata`` (nesting settings), which ``rt.Grid`` rejects,
-    and ``verbose``, which the caller passes itself, are dropped.
+    shape) are kept. Forge's own keys (``metadata``, ``verbose``) are dropped, as
+    Forge drops them (:func:`grid_build_kwargs`).
     """
-    kwargs = {k: v for k, v in grid_kwargs.items() if k not in ("metadata", "verbose")}
+    kwargs = grid_build_kwargs(grid_kwargs)
     factor = max(kwargs["nx"], kwargs["ny"]) / MAX_CELLS
     if factor > 1:
         kwargs["nx"] = max(2, round(kwargs["nx"] / factor))

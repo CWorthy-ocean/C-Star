@@ -57,7 +57,7 @@ from cstar.applications.forge.resolve import (
     build_forge_blueprint,
 )
 from cstar.applications.forge.settings import render_roms_settings
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import BUNDLED_CATALOG_ROOT, ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import slugify
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.orchestration.models import (
@@ -1112,6 +1112,39 @@ def test_domain_grid_file_allows_verbose():
         grid_file=UserProvidedFile(**_USER_FILE_KWARGS),
     )
     assert domain.grid_file is not None
+
+
+_BUNDLED_DOMAIN_SPECS = sorted(
+    (BUNDLED_CATALOG_ROOT / "specs" / "DomainSpec").glob("*.yaml")
+)
+assert _BUNDLED_DOMAIN_SPECS, "no bundled DomainSpec files: the glob is stale"
+
+
+def test_grid_build_kwargs_drops_forge_keys_only():
+    """``metadata`` and ``verbose`` are Forge's; every other key, a misspelt one
+    included, is passed on for ``rt.Grid`` to accept or refuse.
+    """
+    from cstar.applications.forge.blueprint import grid_build_kwargs
+
+    gk = {"nx": 2, "hmn": 1.0, "metadata": {"period": 3600.0}, "verbose": True}
+    assert grid_build_kwargs(gk) == {"nx": 2, "hmn": 1.0}
+    assert "metadata" in gk  # the caller's dict is left as it was
+
+
+@pytest.mark.parametrize("spec_path", _BUNDLED_DOMAIN_SPECS, ids=lambda p: p.stem)
+def test_bundled_domain_grid_build_kwargs_fit_rt_grid(spec_path):
+    """Every bundled DomainSpec's grid_kwargs, less Forge's own keys, are keywords
+    ``rt.Grid`` takes. GoA-10th_deg and NEP-4th_deg carry a ``metadata`` block,
+    which ``rt.Grid`` refuses.
+    """
+    import inspect
+
+    import roms_tools as rt
+
+    from cstar.applications.forge.blueprint import grid_build_kwargs
+
+    gk = yaml.safe_load(spec_path.read_text())["grid_kwargs"]
+    inspect.signature(rt.Grid).bind(**grid_build_kwargs(gk))
 
 
 def test_domain_grid_file_rejects_nesting():

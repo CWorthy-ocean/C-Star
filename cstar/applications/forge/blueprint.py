@@ -587,6 +587,22 @@ _GRID_FILE_VERT_KEYS = ("theta_s", "theta_b", "hc", "N")
 # --verbose``), not part of the grid.
 RUNTIME_GRID_KWARGS: frozenset[str] = frozenset({"verbose"})
 
+# grid_kwargs keys that are not rt.Grid keywords at all: a DomainSpec's
+# ``metadata`` block (``prefix``, ``period``, ``include_bgc``) holds the domain's
+# settings as a nesting child, read from ``grid_kwargs_child`` for roms-tools'
+# nesting step (``ForgeExecutor.metadata_child``).
+_NESTING_GRID_KWARGS: frozenset[str] = frozenset({"metadata"})
+
+
+def grid_build_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``grid_kwargs`` less the keys that are Forge's rather than ``rt.Grid``'s
+    (:data:`RUNTIME_GRID_KWARGS` and a nesting ``metadata`` block): the keywords
+    for ``rt.Grid(**...)``. Every other key is kept, so a misspelt one still fails
+    in ``rt.Grid``.
+    """
+    dropped = RUNTIME_GRID_KWARGS | _NESTING_GRID_KWARGS
+    return {k: v for k, v in grid_kwargs.items() if k not in dropped}
+
 
 def vert_kwargs_from_grid_kwargs(grid_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Extract the ``theta_s``/``theta_b``/``hc``/``N`` subset of ``grid_kwargs``

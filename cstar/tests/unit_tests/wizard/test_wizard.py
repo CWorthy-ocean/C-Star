@@ -40,6 +40,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_16_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
+from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
@@ -5286,6 +5287,50 @@ def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
     assert wiz2.config.composition.forcing.modified is False
     assert wiz2.config.composition.model.modified is False
     assert wiz2.config.composition.output.modified is False
+
+
+_BUNDLED_DOMAINS = sorted(
+    p.stem for p in (BUNDLED_CATALOG_ROOT / "specs" / "DomainSpec").glob("*.yaml")
+)
+assert _BUNDLED_DOMAINS, "no bundled DomainSpec files: the glob is stale"
+
+
+@pytest.mark.parametrize("name", _BUNDLED_DOMAINS)
+def test_grid_previews_build_every_bundled_domain(monkeypatch, name):
+    """Each bundled DomainSpec previews as this grid, as the nesting child and as
+    the parent: every Grid the three Refresh preview buttons build gets only
+    keywords ``roms_tools.Grid`` takes. GoA-10th_deg's and NEP-4th_deg's
+    ``metadata`` block, kept from the loaded spec, once reached ``Grid(...)``.
+    """
+    import inspect
+
+    import roms_tools
+
+    grid_signature = inspect.signature(roms_tools.Grid)
+    built: list[dict] = []
+
+    class _SignatureGrid:
+        def __init__(self, **kwargs):
+            grid_signature.bind(**kwargs)  # the real Grid's TypeError
+            built.append(kwargs)
+
+        def plot(self):
+            pass
+
+    monkeypatch.setattr(roms_tools, "Grid", _SignatureGrid)
+    monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
+
+    wiz = ForgeBlueprintWizard()
+    wiz.domain_dd.value = name
+    wiz.nest_domain_dd.value = name
+    wiz.parent_domain_dd.value = name
+    wiz._on_plot(None)
+    wiz._on_nest_plot(None)
+    wiz._on_parent_plot(None)
+
+    for status in (wiz.plot_status, wiz.nest_plot_status, wiz.parent_plot_status):
+        assert "✓" in status.value, status.value
+    assert len(built) >= 5  # this grid x3, the child and the parent
 
 
 def test_parent_plot_is_always_grid_plot_only(monkeypatch):
