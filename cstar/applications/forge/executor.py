@@ -35,6 +35,7 @@ from cstar.applications.forge.blueprint import (
     RUNTIME_GRID_KWARGS,
     CarbonateSensitivitySpec,
     Forcing,
+    NestedChild,
     OpenBoundaries,
     UserProvidedFile,
     emitted_blueprint_description,
@@ -193,7 +194,6 @@ _TOPO_NAN_MARKER = "NaN values found in regridded topography"
 _GRID_LABELS = {
     "parent": "parent grid (domain.grid_kwargs_parent)",
     "self": "grid (domain.grid_kwargs)",
-    "child": "child grid (domain.grid_kwargs_child)",
 }
 
 
@@ -272,9 +272,8 @@ class ForgeExecutor(BaseModel):
     grid_kwargs_parent: dict[str, Any] | None = Field(
         default=None, validate_default=False
     )
-    grid_kwargs_child: dict[str, Any] | None = Field(
-        default=None, validate_default=False
-    )
+    children: dict[str, NestedChild] = Field(default_factory=dict)
+    nest_period: float = Field(default=3600.0)
     grid_file: UserProvidedFile | None = Field(
         default=None,
         validate_default=False,
@@ -456,11 +455,8 @@ class ForgeExecutor(BaseModel):
     grid_parent: rt.Grid | None = Field(
         default=None, init=False, validate_default=False, exclude=True
     )
-    grid_child: rt.Grid | None = Field(
-        default=None, init=False, validate_default=False, exclude=True
-    )
-    metadata_child: dict[str, Any] | None = Field(
-        default=None, init=False, validate_default=False, exclude=True
+    grid_children: dict[str, rt.Grid] = Field(
+        default_factory=dict, init=False, exclude=True
     )
     _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
         default=None
@@ -558,7 +554,7 @@ class ForgeExecutor(BaseModel):
                     "longitude/latitude coverage (plus a few cells' margin) -- "
                     "check the footprint above against that file's lon/lat range. "
                     "A nested parent/child grid can name its own topography_source/"
-                    "topography_path inside grid_kwargs_parent/grid_kwargs_child."
+                    "topography_path inside grid_kwargs_parent/children[<name>].grid_kwargs."
                 ) from exc
 
     def _resolve_topography_source(
@@ -599,7 +595,7 @@ class ForgeExecutor(BaseModel):
         self, grid_kwargs: dict[str, Any]
     ) -> tuple[str, str | None]:
         """The ``(name, path)`` topography pair a nested grid's kwargs dict
-        (``grid_kwargs_parent`` / ``grid_kwargs_child``) resolves to.
+        (``grid_kwargs_parent`` / a child's ``grid_kwargs``) resolves to.
 
         Both keys are optional in the dict and are *inputs to Forge*, not
         ``rt.Grid`` kwargs (they're popped before the build):
@@ -647,8 +643,8 @@ class ForgeExecutor(BaseModel):
         pairs = {"self": (domain_name, self.topography_path)}
         if self.grid_kwargs_parent is not None:
             pairs["parent"] = self._nested_topography_pair(self.grid_kwargs_parent)
-        if self.grid_kwargs_child is not None:
-            pairs["child"] = self._nested_topography_pair(self.grid_kwargs_child)
+        for name, child in self.children.items():
+            pairs[f"child {name}"] = self._nested_topography_pair(child.grid_kwargs)
         return pairs
 
     def _explicit_path_topography_names(self) -> set[str]:
@@ -706,13 +702,10 @@ class ForgeExecutor(BaseModel):
         self._require_host()
 
         if self.grid_file is not None:
-            if (
-                self.grid_kwargs_parent is not None
-                or self.grid_kwargs_child is not None
-            ):
+            if self.grid_kwargs_parent is not None or self.children:
                 raise ValueError(
                     "grid_file is set (a user-supplied grid) but grid_kwargs_parent/"
-                    "grid_kwargs_child is also set; a custom grid file plus nesting "
+                    "children is also set; a custom grid file plus nesting "
                     "is unsupported (the ForgeBlueprint schema already forbids this "
                     "combination for a resolver-built blueprint)."
                 )
@@ -751,83 +744,44 @@ class ForgeExecutor(BaseModel):
                         self.grid_kwargs_parent, topo
                     )
                 else:
-                    # Likewise for "child" and grid_kwargs_child.
-                    assert self.grid_kwargs_child is not None
-                    self.grid_kwargs_child = self._with_topography(
-                        self.grid_kwargs_child, topo
+                    # Likewise for "child <name>" and that child's grid_kwargs.
+                    child_name = label.removeprefix("child ")
+                    child = self.children[child_name]
+                    self.children[child_name] = child.model_copy(
+                        update={
+                            "grid_kwargs": self._with_topography(
+                                child.grid_kwargs, topo
+                            )
+                        }
                     )
 
-            # Create grids, 4 cases:
-            # has child and no parent, has child and parent, has parent and no child, no parent no child
-
-            # I am a parent but not a child
-            if self.grid_kwargs_child is not None and self.grid_kwargs_parent is None:
-                # Make both parent and child, to make the nesting data.
-                grid_kwargs_child = {
-                    k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
-                }
-
-                self.grid_child = self._build_grid("child", grid_kwargs_child)
-                self.grid = self._build_grid("self", self.grid_kwargs)
-                with mem_log("align_grids(self, child)", enabled=self.verbose):
-                    self.grid_child = rt.align_grids(
-                        self.grid, self.grid_child, verbose=self.verbose
-                    )
-
-                if "metadata" in self.grid_kwargs_child:
-                    self.metadata_child = self.grid_kwargs_child["metadata"]
-
-            # I am a parent and a child
-            elif (
-                self.grid_kwargs_child is not None
-                and self.grid_kwargs_parent is not None
-            ):
-                grid_kwargs_child = {
-                    k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
-                }
+            # A child's grid is built to make its nesting data; this grid is adapted
+            # to its parent, then each child to this grid.
+            if self.grid_kwargs_parent is not None:
                 grid_kwargs_parent = {
                     k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
                 }
-                grid_kwargs = {
-                    k: v for k, v in self.grid_kwargs.items() if k != "metadata"
-                }
-
-                # Adapt this grid to its parent, but create nesting data for its child
                 self.grid_parent = self._build_grid("parent", grid_kwargs_parent)
-                self.grid_child = self._build_grid("child", grid_kwargs_child)
-                self.grid = self._build_grid("self", grid_kwargs)
+            for name, child in self.children.items():
+                grid_kwargs_child = {
+                    k: v for k, v in child.grid_kwargs.items() if k != "metadata"
+                }
+                self.grid_children[name] = self._build_grid(
+                    f"child {name}", grid_kwargs_child
+                )
+            grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
+            self.grid = self._build_grid("self", grid_kwargs)
 
+            if self.grid_parent is not None:
                 with mem_log("align_grids(parent, self)", enabled=self.verbose):
                     self.grid = rt.align_grids(
                         self.grid_parent, self.grid, verbose=self.verbose
                     )
-                with mem_log("align_grids(self, child)", enabled=self.verbose):
-                    self.grid_child = rt.align_grids(
-                        self.grid, self.grid_child, verbose=self.verbose
+            for name, grid_child in self.grid_children.items():
+                with mem_log(f"align_grids(self, child {name})", enabled=self.verbose):
+                    self.grid_children[name] = rt.align_grids(
+                        self.grid, grid_child, verbose=self.verbose
                     )
-
-                if "metadata" in self.grid_kwargs_child:
-                    self.metadata_child = self.grid_kwargs_child["metadata"]
-
-            # I am a child but not a parent
-            elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
-                grid_kwargs_parent = {
-                    k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
-                }
-                grid_kwargs = {
-                    k: v for k, v in self.grid_kwargs.items() if k != "metadata"
-                }
-
-                # Adapt this grid to its parent. no nesting data needed
-                self.grid_parent = self._build_grid("parent", grid_kwargs_parent)
-                self.grid = self._build_grid("self", grid_kwargs)
-
-                with mem_log("align_grids(parent, self)", enabled=self.verbose):
-                    self.grid = rt.align_grids(
-                        self.grid_parent, self.grid, verbose=self.verbose
-                    )
-            else:
-                self.grid = self._build_grid("self", self.grid_kwargs)
 
         # Initialize blueprint with basic structure
         log.debug("model_post_init: initializing blueprint structure for %r", self.name)
@@ -857,9 +811,9 @@ class ForgeExecutor(BaseModel):
 
         # The grid is always generated from the injected grid object.
         _add_nc("grid")
-        if self.grid_child is not None:
-            _add_nc("grid_child")
-            _add_nc("nesting")
+        for name in self.grid_children:
+            _add_nc(f"grid_child-{name}")
+            _add_nc(f"nesting_{name}")
 
         if inputs_cfg.get("initial_conditions"):
             _add_nc("initial_conditions")
@@ -2032,8 +1986,9 @@ class ForgeExecutor(BaseModel):
             input_data_dir=self.input_data_dir,
             grid=self.grid,
             grid_parent=self.grid_parent,
-            grid_child=self.grid_child,
-            metadata_child=self.metadata_child,
+            grid_children=self.grid_children,
+            children=self.children,
+            nest_period=self.nest_period,
             settings_compile_time=self._settings_compile_time,
             settings_run_time=self._settings_run_time,
             has_bgc=self._has_bgc,
@@ -2089,11 +2044,10 @@ class ForgeExecutor(BaseModel):
             if ucla_roms_blueprint_elements.cdr_forcing
             else None
         )
-        ucla_roms_blueprint_dict["nesting_info"] = (
-            ucla_roms_blueprint_elements.nesting_info.model_dump()
-            if ucla_roms_blueprint_elements.nesting_info
-            else None
-        )
+        ucla_roms_blueprint_dict["nesting_info"] = {
+            name: dataset.model_dump()
+            for name, dataset in ucla_roms_blueprint_elements.nesting_info.items()
+        }
 
         # Settings are stored in a sidecar YAML, not in the blueprint itself.
         ucla_roms_blueprint_dict["runtime_params"] = None

@@ -32,7 +32,7 @@ import xarray as xr
 import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import source_datasets
-from cstar.applications.forge.blueprint import CarbonateSensitivitySpec
+from cstar.applications.forge.blueprint import CarbonateSensitivitySpec, NestedChild
 from cstar.applications.forge.glorys_subchunk import (
     SubchunkUnsupportedError,
     build_ref_for_files,
@@ -410,7 +410,7 @@ class TestUclaRomsBlueprintInputData:
         assert data.initial_conditions is None
         assert data.forcing is None
         assert data.cdr_forcing is None
-        assert data.nesting_info is None
+        assert data.nesting_info == {}
 
     def test_ucla_roms_blueprint_input_data_creation_with_data(self):
         """Test creating UclaRomsBlueprintInputData with data."""
@@ -437,9 +437,8 @@ class TestUclaRomsBlueprintInputData:
     def test_ucla_roms_blueprint_input_data_creation_with_nesting_info(self):
         """Test creating UclaRomsBlueprintInputData with nesting_info set."""
         nesting_dataset = cstar_models.Dataset(data=[])
-        data = UclaRomsBlueprintInputData(nesting_info=nesting_dataset)
-        assert data.nesting_info is not None
-        assert data.nesting_info == nesting_dataset
+        data = UclaRomsBlueprintInputData(nesting_info={"child": nesting_dataset})
+        assert data.nesting_info == {"child": nesting_dataset}
 
 
 class TestInputStep:
@@ -1264,7 +1263,7 @@ class TestPlannedOutputReuseDetection:
         """Deleting the parent grid file must not be masked by a sibling child grid file."""
         data = sample_roms_input_generator
         grid_path = data._forcing_filename("grid")
-        child_path = data._forcing_filename("grid_child")
+        child_path = data._forcing_filename("grid_child-child")
         child_path.write_bytes(b"child")
         self._set_planned(data, grid_path, child_path)
 
@@ -2431,7 +2430,8 @@ class TestRomsInputGeneratorGeneration:
         mock_child.theta_s = 6.0
         mock_child.theta_b = 3.0
         mock_child.hc = 300.0
-        sample_roms_input_generator.grid_child = mock_child
+        sample_roms_input_generator.grid_children = {"child": mock_child}
+        sample_roms_input_generator.children = {"child": NestedChild(grid_kwargs={})}
 
         sample_roms_input_generator.input_data_dir = (
             tmp_path / f"{sample_roms_input_generator.domain_name}"
@@ -2443,11 +2443,11 @@ class TestRomsInputGeneratorGeneration:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.touch()
         out_path_child = sample_roms_input_generator._forcing_filename(
-            input_name="grid_child"
+            input_name="grid_child-child"
         )
         out_path_child.touch()
         out_path_nesting = sample_roms_input_generator._forcing_filename(
-            input_name="nesting"
+            input_name="nesting_child"
         )
         out_path_nesting.touch()
 
@@ -2456,13 +2456,11 @@ class TestRomsInputGeneratorGeneration:
             sample_roms_input_generator._generate_grid()
 
         # nesting_info should be set as a Dataset pointing to the nesting file
-        assert (
+        nesting_info = (
             sample_roms_input_generator.ucla_roms_blueprint_elements.nesting_info
-            is not None
         )
-        nesting_resources = (
-            sample_roms_input_generator.ucla_roms_blueprint_elements.nesting_info.data
-        )
+        assert list(nesting_info) == ["child"]
+        nesting_resources = nesting_info["child"].data
         assert len(nesting_resources) == 1
         assert str(out_path_nesting) in nesting_resources[0].location
 
@@ -2498,14 +2496,15 @@ class TestRomsInputGeneratorGeneration:
         mock_child.theta_s = 6.0
         mock_child.theta_b = 3.0
         mock_child.hc = 300.0
-        sample_roms_input_generator.grid_child = mock_child
+        sample_roms_input_generator.grid_children = {"child": mock_child}
+        sample_roms_input_generator.children = {"child": NestedChild(grid_kwargs={})}
 
         sample_roms_input_generator.input_data_dir = (
             tmp_path / f"{sample_roms_input_generator.domain_name}"
         )
         sample_roms_input_generator.input_data_dir.mkdir(parents=True, exist_ok=True)
 
-        for name in ("grid", "grid_child", "nesting"):
+        for name in ("grid", "grid_child-child", "nesting_child"):
             p = sample_roms_input_generator._forcing_filename(input_name=name)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.touch()
@@ -2518,17 +2517,66 @@ class TestRomsInputGeneratorGeneration:
             "extract_file"
         ]
         # Should be just the filename, not an absolute path
-        assert extract_file == "nesting.nc"
+        assert (
+            extract_file
+            == f"{sample_roms_input_generator.domain_name}_nesting_child.nc"
+        )
         assert "/" not in str(extract_file)
 
+    @patch("cstar.applications.forge.input_generator.rt.make_nesting_info")
+    def test_generate_grid_with_two_children(
+        self, mock_nesting_writer, sample_roms_input_generator, tmp_path
+    ):
+        data = sample_roms_input_generator
+        data.grid = MagicMock(nx=20, ny=20, N=3, theta_s=5.0, theta_b=2.0, hc=250.0)
+        data.grid_children = {
+            "monterey": MagicMock(N=5, theta_s=6.0, theta_b=3.0, hc=300.0),
+            "salish-sea": MagicMock(N=7, theta_s=4.0, theta_b=1.0, hc=200.0),
+        }
+        data.children = {
+            "monterey": NestedChild(grid_kwargs={}, include_pressure_fluxes=True),
+            "salish-sea": NestedChild(grid_kwargs={}),
+        }
+        data.nest_period = 1800.0
+        data.input_data_dir = tmp_path / data.domain_name
+        data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        for stem in (
+            "grid",
+            "grid_child-monterey",
+            "nesting_monterey",
+            "grid_child-salish-sea",
+            "nesting_salish-sea",
+        ):
+            data._forcing_filename(input_name=stem).touch()
+
+        mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+        with patch("xarray.open_dataset", return_value=mock_ds):
+            data._generate_grid()
+
+        calls = mock_nesting_writer.call_args_list
+        assert [c.kwargs["prefix"] for c in calls] == ["monterey", "salish-sea"]
+        assert [c.kwargs["include_pressure_fluxes"] for c in calls] == [True, False]
+        assert {c.kwargs["period"] for c in calls} == {1800.0}
+        assert list(data.ucla_roms_blueprint_elements.nesting_info) == [
+            "monterey",
+            "salish-sea",
+        ]
+        extract = data._settings_run_time["extract_data"]
+        assert extract["extract_file"] == [
+            f"{data.domain_name}_nesting_monterey.nc",
+            f"{data.domain_name}_nesting_salish-sea.nc",
+        ]
+        assert extract["n_chd"] == [5, 7]
+        assert extract["extract_root_name"] == ["monterey", "salish-sea"]
+        assert extract["extract_period"] == 1800.0
+
     @patch("cstar.applications.forge.input_generator.rt.Grid")
-    def test_generate_grid_without_child_nesting_info_is_none(
+    def test_generate_grid_without_child_nesting_info_is_empty(
         self, mock_grid_class, sample_roms_input_generator, tmp_path
     ):
-        """Test _generate_grid leaves nesting_info as None when no grid_child is set."""
+        """Test _generate_grid leaves nesting_info empty when there are no children."""
         mock_grid = MagicMock()
         sample_roms_input_generator.grid = mock_grid
-        sample_roms_input_generator.grid_child = None
 
         sample_roms_input_generator.input_data_dir = (
             tmp_path / f"{sample_roms_input_generator.domain_name}"
@@ -2544,8 +2592,7 @@ class TestRomsInputGeneratorGeneration:
             sample_roms_input_generator._generate_grid()
 
         assert (
-            sample_roms_input_generator.ucla_roms_blueprint_elements.nesting_info
-            is None
+            sample_roms_input_generator.ucla_roms_blueprint_elements.nesting_info == {}
         )
         assert not sample_roms_input_generator._settings_run_time.get(
             "extract_data", {}
@@ -6051,31 +6098,24 @@ class TestExecutorOwnedSettings:
         self, make_input_data, sample_grid_kwargs
     ):
         data = make_input_data(
-            grid_child=rt.Grid(**sample_grid_kwargs),
+            grid_children={"child": rt.Grid(**sample_grid_kwargs)},
+            children={"child": NestedChild(grid_kwargs={})},
             has_bgc=True,
         )
         mock_nesting = self._run_grid_step(data)
         mock_nesting.assert_called_once()
         assert mock_nesting.call_args.kwargs["include_bgc"] is True
+        assert mock_nesting.call_args.kwargs["prefix"] == "child"
 
-    def test_no_bgc_omits_include_bgc_on_nesting(
+    def test_no_bgc_sets_include_bgc_false_on_nesting(
         self, make_input_data, sample_grid_kwargs
     ):
-        data = make_input_data(grid_child=rt.Grid(**sample_grid_kwargs))
-        mock_nesting = self._run_grid_step(data)
-        mock_nesting.assert_called_once()
-        assert "include_bgc" not in mock_nesting.call_args.kwargs
-
-    def test_metadata_child_include_bgc_wins_over_has_bgc(
-        self, make_input_data, sample_grid_kwargs
-    ):
-        """An explicit include_bgc in metadata_child overrides the has_bgc default."""
         data = make_input_data(
-            grid_child=rt.Grid(**sample_grid_kwargs),
-            metadata_child={"include_bgc": False},
-            has_bgc=True,
+            grid_children={"child": rt.Grid(**sample_grid_kwargs)},
+            children={"child": NestedChild(grid_kwargs={})},
         )
         mock_nesting = self._run_grid_step(data)
+        mock_nesting.assert_called_once()
         assert mock_nesting.call_args.kwargs["include_bgc"] is False
 
     @patch("cstar.applications.forge.input_generator.rt.SurfaceForcing")

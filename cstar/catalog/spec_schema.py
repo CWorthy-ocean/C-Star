@@ -35,7 +35,7 @@ log = get_logger(__name__)
 
 SPEC_SCHEMA_VERSIONS: t.Final[Mapping[str, str]] = {
     "ModelSpec": "2.0.0",
-    "DomainSpec": "1.0.0",
+    "DomainSpec": "2.0.0",
     "ForcingSpec": "2.0.0",
     "OutputSpec": "2.0.0",
     "CdrSpec": "1.0.0",
@@ -52,9 +52,8 @@ DOMAIN_SPEC_KEYS: t.Final[frozenset[str]] = frozenset(
         "end_time",
         "grid_kwargs",
         "grid_kwargs_parent",
-        "grid_kwargs_child",
-        "metadata_child",
-        "nesting_include_pressure_fluxes",
+        "children",
+        "nest_period",
         "open_boundaries",
         "partitioning",
         "v_sponge",
@@ -157,7 +156,8 @@ def migrate_spec(
         key this build does not know.
     ValueError
         If the version is not dotted integers, the content is not a mapping, a
-        migration refuses it, or a ModelSpec holds a key a ModelSpec does not have.
+        migration refuses it, a ModelSpec holds a key a ModelSpec does not have, or
+        a DomainSpec names a child ROMS cannot.
     """
     if not isinstance(data, Mapping):
         raise ValueError(f"{kind} {where} is not a mapping of keys to values")
@@ -189,6 +189,15 @@ def migrate_spec(
             f"{label} sets {', '.join(unknown)}, which a {kind} does not have; "
             f"its keys are {', '.join(sorted(known_spec_keys(kind)))}."
         )
+    if kind == "DomainSpec":
+        from cstar.roms.outputs import child_name_problems
+
+        if problems := [
+            problem
+            for name in content.get("children") or ()
+            for problem in child_name_problems(name)
+        ]:
+            raise ValueError(f"{label}: {'; '.join(problems)}")
     return MigratedSpec(content, found, target, content != original)
 
 

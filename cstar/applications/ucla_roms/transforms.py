@@ -30,6 +30,7 @@ from cstar.roms.outputs import (
     CarbonateSensitivityFile,
     RestartFile,
     TimestampedOutputFile,
+    child_name_problems,
     warn_on_restart_start_date_mismatch,
 )
 from cstar.roms.source_coverage import check_source_coverage
@@ -821,6 +822,10 @@ class NestingDirective(OverrideDirective):
     `deprecated` at check and schedule time and again where the directive is
     applied, and stop working in 0.20.0.
 
+    A parent that wrote boundary files for several children needs `child_name`
+    to pick the child this run is nested in; it may be left out when the
+    sources hold one child's files.
+
     Before the run starts, `verify` refuses boundary files whose records leave
     a gap or do not span the step's `start_date` to `end_date`.
     """
@@ -838,6 +843,8 @@ class NestingDirective(OverrideDirective):
     """Deprecated alias for `KEY_PATH`."""
     KEY_RST_PATH: t.Final[str] = "rst_path"
     """Deprecated key that also applies a restart-file override."""
+    KEY_CHILD_NAME: t.Final[str] = "child_name"
+    """Key naming the child grid whose boundary files to use."""
     SOURCE_DELIMITER: t.Final[str] = SOURCE_DELIMITER
     """Delimiter separating multiple sources in a `path`/`bry_path`/`step` value."""
 
@@ -860,8 +867,11 @@ class NestingDirective(OverrideDirective):
         """
         found_keys = set(config.keys())
         boundary_keys = {cls.KEY_PATH, cls.KEY_STEP, cls.KEY_BRY_PATH}
-        supported_keys = boundary_keys | {cls.KEY_RST_PATH}
+        supported_keys = boundary_keys | {cls.KEY_RST_PATH, cls.KEY_CHILD_NAME}
         problems: list[str] = []
+
+        if cls.KEY_CHILD_NAME in config:
+            problems.extend(child_name_problems(str(config[cls.KEY_CHILD_NAME])))
 
         if cls.KEY_BRY_PATH in found_keys and found_keys.intersection(
             {cls.KEY_PATH, cls.KEY_STEP}
@@ -1030,10 +1040,12 @@ class NestingDirective(OverrideDirective):
             deprecated `bry_path` key conflicts with `path`/`step`, or the
             value is empty after splitting.
         ValueError
-            If `rst_path` is supplied and no restart file can be located.
+            If `rst_path` is supplied and no restart file can be located, or
+            the sources hold several children's files and `child_name` is
+            not given.
         FileNotFoundError
-            If a listed source contains no boundary files, or a listed step
-            has no `output` directory.
+            If a listed source contains no boundary files (or none for
+            `child_name`), or a listed step has no `output` directory.
         CstarError
             If a file a listed step's record lists is missing.
         """
@@ -1041,7 +1053,7 @@ class NestingDirective(OverrideDirective):
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
 
-        self._boundary_files = collect_output_files(
+        files = collect_output_files(
             BoundaryFile,
             ArtifactKind.boundary_forcing,
             self._config.get(self.KEY_PATH) or self._config.get(self.KEY_BRY_PATH),
@@ -1049,6 +1061,24 @@ class NestingDirective(OverrideDirective):
             self._workplan,
             role=EXTRACT_ROLE,
         )
+        children = sorted({f.path.name.partition("_")[0] for f in files})
+        if child_name := self._config.get(self.KEY_CHILD_NAME):
+            files = [
+                f
+                for f in files
+                if f.path.name.startswith(f"{child_name}{BoundaryFile.SUFFIX}.")
+            ]
+            if not files:
+                raise FileNotFoundError(
+                    f"No boundary files for child {child_name!r}; the sources hold "
+                    f"boundary files for: {', '.join(children)}"
+                )
+        elif len(children) > 1:
+            raise ValueError(
+                f"The boundary sources hold files for several children "
+                f"({', '.join(children)}); add `{self.KEY_CHILD_NAME}: <one of them>`"
+            )
+        self._boundary_files = files
 
         overrides = BoundaryFileTrxAdapter.adapt(self._boundary_files)
 

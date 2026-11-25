@@ -28,6 +28,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.namelist_model import normalize_legacy_sections
 from cstar.base.adapter import SchemaAdapter
+from cstar.roms.outputs import DEFAULT_CHILD_NAME, child_name_problems
 
 LEGACY_DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
     "~/cstar/_forge_bp_runs",
@@ -111,6 +112,10 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     rather than an unknown-key error.
     v11 needs no step: ``pio_settings.pio_stride`` may now be null, which every
     v10 file already satisfies.
+    **v11 -> v12**: ``domain.grid_kwargs_child``, ``metadata_child`` and
+    ``nesting_include_pressure_fluxes`` become ``domain.children`` (the one child,
+    named by its metadata ``prefix`` when that is a valid child name, else
+    ``child``) and ``domain.nest_period`` (see :func:`nest_children_from_legacy`).
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
@@ -208,6 +213,11 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
             if working_dir.rstrip("/") in legacy_defaults:
                 del data["working_dir"]
 
+    if (version is None or version < 12) and isinstance(
+        legacy_domain := data.get("domain"), dict
+    ):
+        nest_children_from_legacy(legacy_domain)
+
     # v9 -> v10, run on every load: ``SpecRef.name`` is a plain string, and a v10
     # build that predates this change still wrote ``name: null``. Raw data only:
     # direct construction passes an already-built Composition.
@@ -228,6 +238,53 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
 
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data
+
+
+def nest_children_from_legacy(domain: dict[str, Any]) -> None:
+    """Rewrite the pre-v12 single-child keys IN PLACE as ``children`` / ``nest_period``.
+
+    Shared by :func:`migrate_forge_blueprint_data` (``domain``) and
+    :class:`DomainSpecAdapterV1V2` (the spec's top level). The three old keys
+    are always dropped. The one child's ``metadata`` (``metadata_child``, else
+    a ``metadata`` key inside ``grid_kwargs_child``) supplies its name
+    (``prefix``) and ``nest_period`` (``period``); ``include_bgc`` follows the
+    BGC mode, and any other metadata key is refused, since it can no longer be
+    passed to roms-tools.
+    """
+    child = domain.pop("grid_kwargs_child", None)
+    metadata = domain.pop("metadata_child", None)
+    pressure_fluxes = domain.pop("nesting_include_pressure_fluxes", False)
+    if child is None:
+        return
+    grid_kwargs = dict(child)
+    in_grid_metadata = grid_kwargs.pop("metadata", None)
+    meta = metadata or in_grid_metadata or {}
+    if unknown := sorted(set(meta) - _LEGACY_NESTING_METADATA):
+        raise ValueError(
+            f"the child grid's nesting metadata sets {', '.join(unknown)}, which "
+            "Forge no longer passes to roms-tools; remove it from the blueprint"
+        )
+    prefix = meta.get("prefix")
+    name = (
+        prefix
+        if isinstance(prefix, str) and not child_name_problems(prefix)
+        else DEFAULT_CHILD_NAME
+    )
+    domain["children"] = {
+        name: {
+            "grid_kwargs": grid_kwargs,
+            "include_pressure_fluxes": bool(
+                pressure_fluxes or meta.get("include_pressure_fluxes")
+            ),
+        }
+    }
+    if meta.get("period") is not None:
+        domain["nest_period"] = meta["period"]
+
+
+_LEGACY_NESTING_METADATA = frozenset(
+    {"prefix", "period", "include_bgc", "include_pressure_fluxes"}
+)
 
 
 def migrate_forcing_inputs(
@@ -342,6 +399,30 @@ SPEC_SCHEMA_1_0_0: Final[str] = "1.0.0"
 SPEC_SCHEMA_2_0_0: Final[str] = "2.0.0"
 
 
+class DomainSpecAdapterV1V2(SchemaAdapter):
+    """DomainSpec ``1.0.0`` -> ``2.0.0``: ``grid_kwargs_child``/``metadata_child``/
+    ``nesting_include_pressure_fluxes`` become ``children``/``nest_period``
+    (:func:`nest_children_from_legacy`).
+    """
+
+    @classmethod
+    def application(cls) -> str:
+        return "DomainSpec"
+
+    @classmethod
+    def source(cls) -> str:
+        return SPEC_SCHEMA_1_0_0
+
+    @classmethod
+    def target(cls) -> str:
+        return SPEC_SCHEMA_2_0_0
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, Any]) -> dict[str, Any]:
+        nest_children_from_legacy(model)
+        return model
+
+
 class ForcingSpecAdapterV1V2(SchemaAdapter):
     """ForcingSpec ``1.0.0`` -> ``2.0.0``: the pre-v8 forcing-input shapes
     (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) are
@@ -415,6 +496,7 @@ class ModelSpecAdapterV1V2(SchemaAdapter):
 
 
 SPEC_MIGRATIONS: Final[tuple[type[SchemaAdapter], ...]] = (
+    DomainSpecAdapterV1V2,
     ForcingSpecAdapterV1V2,
     OutputSpecAdapterV1V2,
     ModelSpecAdapterV1V2,

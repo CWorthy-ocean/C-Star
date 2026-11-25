@@ -133,10 +133,27 @@ class TestOutputProducts:
         ]
         assert all(p.size_bytes == 0 for p in products)
 
+    def test_boundary_files_of_every_child_are_boundary_forcing(
+        self, tmp_path: Path
+    ) -> None:
+        names = [f"{c}_bry.{_STAMP}.nc" for c in ("child", "monterey", "salish-sea")]
+        _touch(
+            tmp_path, f"output/output_his.{_STAMP}.nc", *(f"output/{n}" for n in names)
+        )
+
+        products = output_products(tmp_path / "output", tmp_path, use_pio=True)
+
+        assert {
+            Path(p.path).name: (p.kind, p.metadata.get("role")) for p in products
+        } == {
+            **{n: ("boundary_forcing", "child") for n in names},
+            f"output_his.{_STAMP}.nc": ("history", None),
+        }
+
     def test_names_that_do_not_match_are_skipped(self, tmp_path: Path) -> None:
         _touch(
             tmp_path,
-            f"output/other_rst.{_STAMP}.nc",
+            f"output/1x_rst.{_STAMP}.nc",
             f"output/output_rst.{_STAMP}.000.nc",
             "output/output_rst.nc",
         )
@@ -159,8 +176,8 @@ _FORGE_NAME = "it v0.1 [x]"
 _DOMAIN = "it v0_1 [x]"
 _FORGE_STEMS = {
     "grid": ("grid", {}),
-    "grid_child": ("grid", {"role": "child"}),
-    "nesting": ("grid", {"role": "nesting"}),
+    "grid_child-child": ("grid", {"role": "child"}),
+    "nesting_child": ("grid", {"role": "nesting"}),
     "initial_conditions": ("initial_conditions", {}),
     "boundary-physics": ("boundary_forcing", {}),
     "boundary-bgc-x": ("boundary_forcing", {}),
@@ -225,7 +242,13 @@ class TestInputProducts:
     def test_classifies_planned_files_by_stem(self, tmp_path: Path) -> None:
         paths = [
             tmp_path / "input_data" / f"{_DOMAIN}_{stem}.nc"
-            for stem in ("grid", "grid_child", "boundary-bgc-x", "surprise", "river")
+            for stem in (
+                "grid",
+                "grid_child-child",
+                "boundary-bgc-x",
+                "surprise",
+                "river",
+            )
         ]
         missing = tmp_path / "input_data" / f"{_DOMAIN}_tidal.nc"
         unprefixed = tmp_path / "input_data" / "carbonate.nc"
@@ -242,7 +265,7 @@ class TestInputProducts:
                 f"input_data/{_DOMAIN}_grid.nc",
                 {"sidecar": "blueprints/_grid.yaml"},
             ),
-            ("grid", f"input_data/{_DOMAIN}_grid_child.nc", {"role": "child"}),
+            ("grid", f"input_data/{_DOMAIN}_grid_child-child.nc", {"role": "child"}),
             ("boundary_forcing", f"input_data/{_DOMAIN}_boundary-bgc-x.nc", {}),
             ("river_forcing", f"input_data/{_DOMAIN}_river.nc", {}),
         ]
@@ -250,9 +273,9 @@ class TestInputProducts:
 
     def test_a_sidecar_does_not_leak_into_the_stem_table(self, tmp_path: Path) -> None:
         """A product's metadata is a copy, so adding a sidecar leaves the table alone."""
-        path = tmp_path / "input_data" / f"{_DOMAIN}_grid_child.nc"
+        path = tmp_path / "input_data" / f"{_DOMAIN}_grid_child-child.nc"
         _touch(path.parent, path.name)
-        _touch(tmp_path, "blueprints/_grid_child.yaml")
+        _touch(tmp_path, "blueprints/_grid_child-child.yaml")
 
         input_products(t.cast("t.Any", _FakeExecutor(tmp_path, _FORGE_NAME, [path])))
 

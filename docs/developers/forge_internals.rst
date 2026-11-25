@@ -122,13 +122,14 @@ C-Star application (see `Forge as a real C-Star application`_ below), not
 just a Pydantic model that happens to carry an ``application`` string.
 
 Top-level shape: ``forge_blueprint_version`` (int, bump only on breaking
-change; currently 10) - ``application`` (=``"forge"``, C-Star app
+change; currently 12) - ``application`` (=``"forge"``, C-Star app
 discriminator, required by the ``Blueprint`` base) - ``name``/``description``
 (required top-level fields on the ``Blueprint`` base; ``name`` is the single
 user-editable canonical name -- ``casename``/``working_dir``/
 ``B_{name}.yaml``/netCDF stems all derive from it) - ``run`` (start/end date,
 model_reference_date) - ``domain`` (``grid_name``, grid_kwargs,
-topography_source, open_boundaries, partitioning, nesting) - ``forcing``
+topography_source, open_boundaries, partitioning, nesting: ``nest_period`` and
+``children``, up to 8 named child grids in namelist order) - ``forcing``
 (flat: initial_conditions, a single boundary section (``BoundaryForcing``,
 mirroring ``InitialConditions``), surface/tidal/river lists,
 resolved_datasets) - ``cdr`` (``CdrSpec``: a 5-mode CDR-forcing selection --

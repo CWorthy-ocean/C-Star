@@ -5,7 +5,7 @@ description: 'Western Indian Ocean toy domain, days two to five: one alkalinity 
 application: forge
 state: notset
 schema_version: 1.1.0
-forge_blueprint_version: 11
+forge_blueprint_version: 12
 run:
   start_date: '2012-01-02T00:00:00'
   end_date: '2012-01-06T00:00:00'
@@ -37,9 +37,8 @@ domain:
     auto_tiling: false
     n_cores: null
   grid_kwargs_parent: null
-  grid_kwargs_child: null
-  metadata_child: null
-  nesting_include_pressure_fluxes: false
+  nest_period: 3600.0
+  children: {}
   v_sponge: 40000.0
   dt: 3600.0
   grid_file: null

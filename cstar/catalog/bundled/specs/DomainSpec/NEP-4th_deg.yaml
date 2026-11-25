@@ -1,4 +1,4 @@
-schema_version: 1.0.0
+schema_version: 2.0.0
 description: "Northeast Pacific 1/4 deg (nested)"
 model_name: "roms-marbl-0.16-default"
 grid_name: "NEP-4th_deg"
@@ -16,10 +16,6 @@ grid_kwargs:
   theta_s: 6.0
   theta_b: 3.0
   hc: 250.0
-  metadata:
-    prefix: "child"
-    period: 3600.0
-    include_bgc: true
 open_boundaries:
   south: true
   east: true

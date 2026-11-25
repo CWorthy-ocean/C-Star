@@ -524,9 +524,10 @@ def test_forge_blueprint_import_stays_light():
         "cstar.catalog",
         "cstar.wizard",
     )
+    # cstar.roms.outputs holds ChildName, the one rule for a child's name
     hits = {
         mod
-        for mod in imported
+        for mod in imported - {"cstar.roms", "cstar.roms.outputs"}
         if any(
             mod == prefix or mod.startswith(prefix + ".")
             for prefix in forbidden_prefixes
@@ -3233,44 +3234,54 @@ def test_roms090_cdr_lite_cppdef_renders_when_the_knob_is_on(tmp_path):
 
 def test_resolver_nesting_enables_extract_data():
     cfg = _build(
-        grid_kwargs_child=dict(
-            nx=30,
-            ny=30,
-            size_x=300,
-            size_y=300,
-            center_lon=0,
-            center_lat=55,
-            rot=0,
-            N=20,
-            theta_s=6.0,
-            theta_b=3.0,
-            hc=250.0,
-        ),
-        metadata_child={"period": 1800.0},
+        children={
+            "child": {
+                "grid_kwargs": dict(
+                    nx=30,
+                    ny=30,
+                    size_x=300,
+                    size_y=300,
+                    center_lon=0,
+                    center_lat=55,
+                    rot=0,
+                    N=20,
+                    theta_s=6.0,
+                    theta_b=3.0,
+                    hc=250.0,
+                )
+            }
+        },
+        nest_period=1800.0,
     )
     ed = cfg.model_settings["extract_data"]
-    assert ed["do_extract"] is True and ed["extract_file"] == "nesting.nc"
+    assert ed["do_extract"] is True
+    assert ed["extract_file"] == netcdf_basename(cfg.name, "nesting_child")
+    assert ed["extract_root_name"] == "child"
     assert ed["n_chd"] == 20 and ed["theta_s_chd"] == 6.0 and ed["hc_chd"] == 250.0
     assert ed["extract_period"] == 1800.0
-    assert cfg.domain.grid_kwargs_child["nx"] == 30
-    assert cfg.domain.metadata_child == {"period": 1800.0}
+    assert cfg.domain.children["child"].grid_kwargs["nx"] == 30
+    assert cfg.domain.nest_period == 1800.0
 
 
 def test_resolver_nesting_default_period():
     cfg = _build(
-        grid_kwargs_child=dict(
-            nx=30,
-            ny=30,
-            size_x=300,
-            size_y=300,
-            center_lon=0,
-            center_lat=55,
-            rot=0,
-            N=15,
-            theta_s=5.0,
-            theta_b=2.0,
-            hc=300.0,
-        )
+        children={
+            "child": {
+                "grid_kwargs": dict(
+                    nx=30,
+                    ny=30,
+                    size_x=300,
+                    size_y=300,
+                    center_lon=0,
+                    center_lat=55,
+                    rot=0,
+                    N=15,
+                    theta_s=5.0,
+                    theta_b=2.0,
+                    hc=300.0,
+                )
+            }
+        }
     )
     assert cfg.model_settings["extract_data"]["extract_period"] == 3600.0
     assert cfg.model_settings["extract_data"]["n_chd"] == 15
@@ -3279,7 +3290,7 @@ def test_resolver_nesting_default_period():
 def test_resolver_no_nesting_keeps_defaults():
     cfg = _build()
     assert cfg.model_settings["extract_data"]["do_extract"] is False
-    assert cfg.domain.grid_kwargs_child is None
+    assert cfg.domain.children == {}
 
 
 _PARENT_GRID_KWARGS = dict(
@@ -3337,19 +3348,23 @@ def test_resolver_parent_grid_skips_boundary_only_dataset():
 
 def test_resolver_child_grid_is_parent_and_keeps_boundary_forcing():
     cfg = _build(
-        grid_kwargs_child=dict(
-            nx=3,
-            ny=3,
-            size_x=300,
-            size_y=300,
-            center_lon=0,
-            center_lat=55,
-            rot=0,
-            N=10,
-            theta_s=6.0,
-            theta_b=3.0,
-            hc=250.0,
-        )
+        children={
+            "child": {
+                "grid_kwargs": dict(
+                    nx=3,
+                    ny=3,
+                    size_x=300,
+                    size_y=300,
+                    center_lon=0,
+                    center_lat=55,
+                    rot=0,
+                    N=10,
+                    theta_s=6.0,
+                    theta_b=3.0,
+                    hc=250.0,
+                )
+            }
+        }
     )
     assert cfg.domain.is_parent is True
     assert cfg.domain.is_child is False
@@ -4452,16 +4467,16 @@ def test_resolver_rejects_extract_period_not_dividing_rst_for_roms050():
     with pytest.raises(ValueError, match="evenly divide"):
         _build(
             model_path=_MODEL_PATH_ROMS050,
-            grid_kwargs_child=_CHILD_GRID,
-            metadata_child={"period": 5000.0},
+            children={"child": {"grid_kwargs": _CHILD_GRID}},
+            nest_period=5000.0,
         )
 
 
 def test_resolver_accepts_conforming_extract_period_for_roms050():
     cfg = _build(
         model_path=_MODEL_PATH_ROMS050,
-        grid_kwargs_child=_CHILD_GRID,
-        metadata_child={"period": 1800.0},  # 24 * 1800 = 43200 | 86400
+        children={"child": {"grid_kwargs": _CHILD_GRID}},
+        nest_period=1800.0,  # 24 * 1800 = 43200 | 86400
     )
     assert cfg.model_settings["extract_data"]["do_extract"] is True
 
@@ -4471,8 +4486,8 @@ def test_resolver_extract_check_gated_off_for_legacy_roms():
     older ucla-roms has no such precheck, so authoring isn't blocked.
     """
     cfg = _build(  # default _MODEL_PATH pins roms 0.2.0 (legacy schema)
-        grid_kwargs_child=_CHILD_GRID,
-        metadata_child={"period": 5000.0},
+        children={"child": {"grid_kwargs": _CHILD_GRID}},
+        nest_period=5000.0,
     )
     assert cfg.model_settings["extract_data"]["extract_period"] == 5000.0
 
@@ -8382,27 +8397,32 @@ class TestForgeBlueprintWizard:
 
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in w._dd_values(w.nest_domain_dd):
+        w._add_child_row()
+        row = w._child_rows[0]
+        if "gulf-guinea-toy" not in w._dd_values(row.domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
-        w.nest_domain_dd.value = "gulf-guinea-toy"  # prefills child + enables nesting
+        row.domain_dd.value = "gulf-guinea-toy"  # prefills child + enables nesting
+        row.name.value = "gulf"
         assert w.nest_enable.value is True
-        assert w.child_w["nx"].value == 10 and w.child_w["N"].value == 5
+        assert row.w["nx"].value == 10 and row.w["N"].value == 5
         assert w.config.model_settings["extract_data"]["do_extract"] is True
         assert w.config.model_settings["extract_data"]["n_chd"] == 5
 
     def test_nesting_ui_enables_extract_data(self):
         w = self._wizard()
         w.nest_enable.value = True
-        w.child_w["N"].value = 25
+        w._child_rows[0].name.value = "inner"
+        w._child_rows[0].w["N"].value = 25
         assert w.config.model_settings["extract_data"]["do_extract"] is True
         assert w.config.model_settings["extract_data"]["n_chd"] == 25
-        assert w.config.domain.grid_kwargs_child is not None
+        assert list(w.config.domain.children) == ["inner"]
 
     def test_load_preserves_advanced_edits_and_nesting(self, tmp_path):
         w1 = self._wizard()
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 7.25
         w1.nest_enable.value = True
-        w1.child_w["N"].value = 18
+        w1._child_rows[0].name.value = "inner"
+        w1._child_rows[0].w["N"].value = 18
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
@@ -8415,24 +8435,23 @@ class TestForgeBlueprintWizard:
         assert w2.config.model_settings["extract_data"]["n_chd"] == 18
 
     def test_nesting_pressure_fluxes_persists_through_load(self, tmp_path):
-        """nesting_include_pressure_fluxes is a first-class Domain field, correctly
-        gathered from nest_pressure_fluxes.value, but _populate_nesting silently
-        left the widget at its default (False) on load until this test was added
-        (same bug class as allow_flex_time; see project memory).
+        """A child's include_pressure_fluxes is gathered from its row, and
+        _populate_nesting restores it on load.
         """
         w1 = self._wizard()
         w1.nest_enable.value = True
-        w1.nest_pressure_fluxes.value = True
+        w1._child_rows[0].name.value = "inner"
+        w1._child_rows[0].pressure_fluxes.value = True
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
-        assert w1.config.domain.nesting_include_pressure_fluxes is True
+        assert w1.config.domain.children["inner"].include_pressure_fluxes is True
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         assert w2.nest_enable.value is True
-        assert w2.nest_pressure_fluxes.value is True
+        assert w2._child_rows[0].pressure_fluxes.value is True
 
     def test_parent_from_domain_dropdown_prefills_parent(self):
         w = self._wizard()
@@ -10716,3 +10735,189 @@ def test_local_templates_are_accepted(tmp_path: Path) -> None:
     code["templates_run_time"]["location"] = str(tmp_path)
 
     assert Code.model_validate(code).templates_run_time.location == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Named child grids
+# ---------------------------------------------------------------------------
+def _with_children(tmp_path, children):
+    cfg = _build(children={"child": {"grid_kwargs": _CHILD_GRID}})
+    data = yaml.safe_load(cfg.to_yaml(tmp_path / "bp.yaml").read_text())
+    data["domain"]["children"] = children
+    return data
+
+
+@pytest.mark.parametrize("name", ["salish_sea", "x" * 21, "1st"])
+def test_loading_a_blueprint_with_a_bad_child_name_fails(tmp_path, name):
+    data = _with_children(tmp_path, {name: {"grid_kwargs": _CHILD_GRID}})
+    with pytest.raises(ValueError, match=r"child name .* use a letter, then"):
+        ForgeBlueprint.from_yaml_data(data)
+
+
+def test_loading_a_blueprint_with_nine_children_fails(tmp_path):
+    children = {f"c{i}": {"grid_kwargs": _CHILD_GRID} for i in range(9)}
+    with pytest.raises(ValueError, match="at most 8"):
+        ForgeBlueprint.from_yaml_data(_with_children(tmp_path, children))
+
+
+def test_children_keep_their_order_through_a_round_trip(tmp_path):
+    children = {
+        "zeta": {"grid_kwargs": _CHILD_GRID},
+        "alpha": {"grid_kwargs": _CHILD_GRID, "include_pressure_fluxes": True},
+    }
+    back = ForgeBlueprint.from_yaml_data(_with_children(tmp_path, children))
+    assert list(back.domain.children) == ["zeta", "alpha"]
+    assert back.domain.children["alpha"].include_pressure_fluxes is True
+
+
+def _v11_domain(**legacy):
+    cfg = _build()
+    data = cfg.model_dump(mode="json")
+    for key in ("children", "nest_period"):
+        del data["domain"][key]
+    data["domain"].update(
+        grid_kwargs_child=dict(_CHILD_GRID),
+        metadata_child=None,
+        nesting_include_pressure_fluxes=False,
+    )
+    data["domain"].update(legacy)
+    data["forge_blueprint_version"] = 11
+    return data
+
+
+def test_v11_child_keeps_a_valid_prefix_as_its_name():
+    data = _v11_domain(
+        metadata_child={"prefix": "monterey", "period": 1800.0, "include_bgc": True},
+        nesting_include_pressure_fluxes=True,
+    )
+    domain = ForgeBlueprint.from_yaml_data(data).domain
+    assert list(domain.children) == ["monterey"]
+    assert domain.children["monterey"].grid_kwargs == _CHILD_GRID
+    assert domain.children["monterey"].include_pressure_fluxes is True
+    assert domain.nest_period == 1800.0
+
+
+@pytest.mark.parametrize("prefix", ["bad_name", "y" * 21, None, 3])
+def test_v11_child_with_an_invalid_prefix_is_named_child(prefix):
+    domain = ForgeBlueprint.from_yaml_data(
+        _v11_domain(metadata_child={"prefix": prefix})
+    ).domain
+    assert list(domain.children) == ["child"]
+    assert domain.nest_period == 3600.0
+
+
+def test_v11_metadata_inside_the_child_grid_kwargs_is_read_and_dropped():
+    grid_kwargs = {**_CHILD_GRID, "metadata": {"prefix": "inner", "period": 900.0}}
+    domain = ForgeBlueprint.from_yaml_data(
+        _v11_domain(grid_kwargs_child=grid_kwargs)
+    ).domain
+    assert list(domain.children) == ["inner"]
+    assert domain.children["inner"].grid_kwargs == _CHILD_GRID
+    assert domain.nest_period == 900.0
+
+
+def test_v11_null_period_takes_the_default():
+    domain = ForgeBlueprint.from_yaml_data(
+        _v11_domain(metadata_child={"period": None})
+    ).domain
+    assert domain.nest_period == 3600.0
+
+
+def test_v11_metadata_forge_no_longer_passes_on_is_refused():
+    with pytest.raises(ValueError, match="sets boundaries"):
+        ForgeBlueprint.from_yaml_data(
+            _v11_domain(metadata_child={"boundaries": {"west": False}})
+        )
+
+
+def test_v11_domain_without_a_child_drops_the_old_keys():
+    data = _v11_domain(grid_kwargs_child=None)
+    domain = ForgeBlueprint.from_yaml_data(data).domain
+    assert domain.children == {}
+    assert not hasattr(domain, "grid_kwargs_child")
+
+
+def test_resolver_middle_grid_is_child_and_parent():
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0120,
+        grid_kwargs_parent=_PARENT_GRID_KWARGS,
+        children={"inner": {"grid_kwargs": _CHILD_GRID}},
+    )
+    assert cfg.domain.is_child is True
+    assert cfg.domain.is_parent is True
+    assert cfg.forcing.boundary is None
+    assert cfg.model_settings["extract_data"]["extract_root_name"] == "inner"
+
+
+def test_resolver_two_children_write_lists_in_order():
+    children = {
+        "monterey": {"grid_kwargs": {**_CHILD_GRID, "theta_s": 4.0}},
+        "salish-sea": {"grid_kwargs": _CHILD_GRID},
+    }
+    cfg = _build(model_path=_MODEL_PATH_ROMS0120, children=children)
+    extract = cfg.model_settings["extract_data"]
+    assert extract["extract_root_name"] == ["monterey", "salish-sea"]
+    assert extract["extract_file"] == [
+        netcdf_basename(cfg.name, "nesting_monterey"),
+        netcdf_basename(cfg.name, "nesting_salish-sea"),
+    ]
+    assert extract["theta_s_chd"] == [4.0, 6.0]
+    assert extract["n_chd"] == [20, 20]
+
+
+def test_resolver_two_children_refused_before_ucla_roms_0_12():
+    children = {
+        "a": {"grid_kwargs": _CHILD_GRID},
+        "b": {"grid_kwargs": _CHILD_GRID},
+    }
+    with pytest.raises(ValueError, match="before 0.12.0 reads one child"):
+        _build(children=children)
+
+
+def test_resolver_child_not_named_child_refused_before_ucla_roms_0_12():
+    with pytest.raises(ValueError, match="children monterey: ucla-roms before 0.12.0"):
+        _build(children={"monterey": {"grid_kwargs": _CHILD_GRID}})
+
+
+def test_resolver_children_with_different_n_refused_without_pio():
+    children = {
+        "a": {"grid_kwargs": _CHILD_GRID},
+        "b": {"grid_kwargs": {**_CHILD_GRID, "N": 30}},
+    }
+    with pytest.raises(ValueError, match="different N .*without PIO"):
+        _build(model_path=_MODEL_PATH_ROMS0120, children=children, use_pio=False)
+
+
+def test_resolver_rejects_a_bad_child_name_before_resolving():
+    with pytest.raises(ValueError, match="child name 'a_b'"):
+        _build(children={"a_b": {"grid_kwargs": _CHILD_GRID}})
+
+
+def test_domain_spec_with_a_bad_child_name_is_rejected():
+    from cstar.catalog.spec_schema import read_spec
+
+    spec = {"grid_name": "g", "children": {"salish_sea": {"grid_kwargs": {}}}}
+    with pytest.raises(ValueError, match="DomainSpec f.yaml: child name 'salish_sea'"):
+        read_spec("DomainSpec", spec, "f.yaml")
+
+
+def test_domain_spec_v1_child_migrates_to_children():
+    from cstar.catalog.spec_schema import read_spec
+
+    spec = {
+        "schema_version": "1.0.0",
+        "grid_name": "g",
+        "grid_kwargs_child": {"nx": 5},
+        "metadata_child": {"prefix": "monterey", "period": 600.0},
+        "nesting_include_pressure_fluxes": True,
+    }
+    assert read_spec("DomainSpec", spec, "f.yaml") == {
+        "grid_name": "g",
+        "children": {
+            "monterey": {
+                "grid_kwargs": {"nx": 5},
+                "include_pressure_fluxes": True,
+            }
+        },
+        "nest_period": 600.0,
+    }

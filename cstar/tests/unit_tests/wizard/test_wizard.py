@@ -41,6 +41,7 @@ from cstar.applications.forge.namelist_model import (
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.catalog.spec_schema import known_spec_keys
+from cstar.roms.outputs import EXTRACT_CHILDREN_MAX
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
@@ -2285,6 +2286,7 @@ class TestBgcModeSettings:
         (placeholder,) = wiz.output_editor_box.children
         assert "once the blueprint is valid" in placeholder.value
 
+        wiz._child_rows[0].name.value = "inner"
         wiz.cdr_mode_dd.value = "none"
         assert wiz.config is not None, wiz.derived.value
         assert wiz._editor_key.is_parent
@@ -5334,11 +5336,13 @@ def test_nest_plot_button_renders_parent_and_child_via_plot_nesting(monkeypatch)
     monkeypatch.setattr(roms_tools, "plot_nesting", _fake_plot_nesting, raising=False)
 
     wiz = ForgeBlueprintWizard()
-    wiz._on_nest_plot(None)
+    wiz.nest_enable.value = True
+    row = wiz._child_rows[0]
+    wiz._on_nest_plot(row)
 
-    assert any(c[0] == "plot_nesting" for c in calls), wiz.nest_plot_status.value
+    assert any(c[0] == "plot_nesting" for c in calls), row.plot_status.value
     assert not any(c[0] == "plot" for c in calls)  # doesn't touch the parent plot
-    assert len(wiz.nest_plot_img.value) > 0
+    assert len(row.plot_img.value) > 0
     # The parent plot/status are untouched by the nesting-section refresh
     # (plot_status still carries its initial empty-state hint).
     assert wiz.plot_status.value == "Click Refresh preview to draw the grid."
@@ -5383,10 +5387,12 @@ def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
     monkeypatch.setattr(plt.Figure, "savefig", _spy_savefig)
 
     wiz = ForgeBlueprintWizard()
-    wiz._on_nest_plot(None)
+    wiz.nest_enable.value = True
+    row = wiz._child_rows[0]
+    wiz._on_nest_plot(row)
 
-    assert not wiz.nest_plot_status.value.startswith("<span style='color:#b00'>"), (
-        wiz.nest_plot_status.value
+    assert not row.plot_status.value.startswith("<span style='color:#b00'>"), (
+        row.plot_status.value
     )
     # A blank new figure (created after a premature close) would have zero axes;
     # the real drawn figure has one axis with the plotted line.
@@ -5773,31 +5779,33 @@ class TestNestedTopographyWidgets:
         wiz = _new_wizard()
         wiz.parent_enable.value = True
         wiz.nest_enable.value = True
+        wiz._child_rows[0].name.value = "inner"
         kw = wiz._gather()
-        for key in ("grid_kwargs_parent", "grid_kwargs_child"):
-            assert "topography_source" not in kw[key]
-            assert "topography_path" not in kw[key]
+        for gk in (kw["grid_kwargs_parent"], kw["children"]["inner"]["grid_kwargs"]):
+            assert "topography_source" not in gk
+            assert "topography_path" not in gk
 
     def test_round_trips_through_populate_from(self, monkeypatch):
         wiz = _new_wizard()
         self._pick_parent(wiz, monkeypatch, self._SPEC)
         wiz.nest_enable.value = True
-        wiz.child_topo_path.value = "/hpc/data/child_tile.nc"  # path-only override
+        wiz._child_rows[0].name.value = "inner"
+        wiz._child_rows[0].topo_path.value = "/hpc/data/child_tile.nc"  # path-only
         wiz._rebuild()
         cfg = wiz.config
         assert cfg is not None, wiz.derived.value
-        assert (
-            cfg.domain.grid_kwargs_child["topography_path"] == "/hpc/data/child_tile.nc"
-        )
-        assert "topography_source" not in cfg.domain.grid_kwargs_child
+        child_gk = cfg.domain.children["inner"].grid_kwargs
+        assert child_gk["topography_path"] == "/hpc/data/child_tile.nc"
+        assert "topography_source" not in child_gk
 
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
 
         assert wiz2.parent_topo_source.value == "SRTM15"
         assert wiz2.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
-        assert wiz2.child_topo_source.value == "(same as this grid)"
-        assert wiz2.child_topo_path.value == "/hpc/data/child_tile.nc"
+        row2 = wiz2._child_rows[0]
+        assert row2.topo_source.value == "(same as this grid)"
+        assert row2.topo_path.value == "/hpc/data/child_tile.nc"
         assert (
             wiz2._gather()["grid_kwargs_parent"] == wiz._gather()["grid_kwargs_parent"]
         )
@@ -6055,7 +6063,7 @@ class TestGridFileAttach:
         assert kw["grid_file"] == wiz._grid_file
         assert kw["grid"] is wiz._grid_file_grid
         assert kw["grid_kwargs"] == {}
-        assert "grid_kwargs_child" not in kw
+        assert "children" not in kw
         assert "grid_kwargs_parent" not in kw
 
     def test_rebuild_does_not_rehash_after_attach(
@@ -6924,11 +6932,8 @@ def test_extract_data_is_built_only_for_a_parent_with_nesting_owned_fields_hidde
 
     parent = _output_editor(is_parent=True)
     built = {field for section, field in parent._widgets if section == "extract_data"}
-    assert built == {"nrpf", "extract_root_name"}
-    assert parent._group_fields[_OUTPUT_CARD]["extract_data"] == [
-        "nrpf",
-        "extract_root_name",
-    ]
+    assert built == {"nrpf"}
+    assert parent._group_fields[_OUTPUT_CARD]["extract_data"] == ["nrpf"]
     note = next(
         w.value
         for w in _descendants(parent.output_box)
@@ -7005,13 +7010,11 @@ def test_output_editor_follows_the_nesting_toggles():
     assert "upscale_output" in plain._group_fields[_OUTPUT_MORE_TITLE]
 
     wiz.nest_enable.value = True
+    wiz._child_rows[0].name.value = "inner"
     parent = wiz.editor
     assert parent is not plain
     assert wiz.output_editor_box.children == (parent.output_box,)
-    assert parent._group_fields[_OUTPUT_CARD]["extract_data"] == [
-        "nrpf",
-        "extract_root_name",
-    ]
+    assert parent._group_fields[_OUTPUT_CARD]["extract_data"] == ["nrpf"]
     wiz.nest_enable.value = False
     assert "extract_data" not in _built_fields(wiz.editor)
 
@@ -7022,7 +7025,7 @@ def test_output_editor_follows_the_nesting_toggles():
     assert _OUTPUT_MORE_TITLE in child._group_fields
     assert "upscale_output" not in child._group_fields[_OUTPUT_MORE_TITLE]
     # the nesting toggles that do not change the role keep the same editor
-    wiz.nest_pressure_fluxes.value = True
+    wiz._child_rows[0].pressure_fluxes.value = True
     assert wiz.editor is child
 
 
@@ -7032,6 +7035,7 @@ def test_attached_grid_file_drops_the_nesting_streams(fake_grid, tmp_path):
     """
     wiz = _new_wizard()
     wiz.nest_enable.value = True
+    wiz._child_rows[0].name.value = "inner"
     assert "extract_data" in _built_fields(wiz.editor)
 
     wiz.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
@@ -7039,7 +7043,7 @@ def test_attached_grid_file_drops_the_nesting_streams(fake_grid, tmp_path):
 
     assert wiz.nest_enable.value is True and wiz.nest_enable.disabled
     assert wiz.config is not None, wiz.derived.value
-    assert wiz.config.domain.grid_kwargs_child is None
+    assert wiz.config.domain.children == {}
     assert "extract_data" not in _built_fields(wiz.editor)
 
 
@@ -7317,42 +7321,20 @@ def test_hosted_field_overrides_keep_ownership_and_count_in_the_output_card(
         assert "modified" not in editor._headers[(_OUTPUT_CARD, "ocean_vars")].value
 
 
-def test_nest_period_loads_from_the_effective_extract_period():
-    """A blueprint whose extract_period was overridden (Advanced, before this
-    field moved to the nesting options) differs from ``metadata_child.period``;
-    loading it keeps the effective value, with nest_period its one editor.
-    """
+def test_nest_period_round_trips_through_populate_from():
     wiz = _new_wizard()
     wiz.nest_enable.value = True
+    wiz._child_rows[0].name.value = "inner"
     wiz.nest_period.value = 1800.0
-    wiz._rebuild()
     cfg = wiz.config
     assert cfg is not None, wiz.derived.value
-    assert cfg.domain.metadata_child["period"] == 1800.0
-
-    settings = copy.deepcopy(cfg.model_settings)
-    settings["extract_data"]["extract_period"] = 3600.0
-    wiz2 = _new_wizard()
-    wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
-
-    assert wiz2.nest_period.value == 3600.0
-    assert wiz2.config.model_settings["extract_data"]["extract_period"] == 3600.0
-    assert wiz2._gather()["metadata_child"] == {"period": 3600.0}
-    assert ("extract_data", "extract_period") not in wiz2._overrides
-
-
-def test_nest_period_falls_back_to_metadata_child_without_an_extract_period():
-    wiz = _new_wizard()
-    wiz.nest_enable.value = True
-    wiz.nest_period.value = 1800.0
-    wiz._rebuild()
-    cfg = wiz.config
-    settings = copy.deepcopy(cfg.model_settings)
-    del settings["extract_data"]["extract_period"]
+    assert cfg.domain.nest_period == 1800.0
 
     wiz2 = _new_wizard()
-    wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
+    wiz2._populate_from(cfg)
+
     assert wiz2.nest_period.value == 1800.0
+    assert wiz2._gather()["nest_period"] == 1800.0
     assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
 
 
@@ -7362,6 +7344,7 @@ def test_extract_data_nesting_fields_never_become_overrides():
     """
     wiz = _new_wizard()
     wiz.nest_enable.value = True
+    wiz._child_rows[0].name.value = "inner"
     cfg = wiz.config
     settings = copy.deepcopy(cfg.model_settings)
     settings["extract_data"].update(n_chd=77, nrpf=48)
@@ -7371,6 +7354,125 @@ def test_extract_data_nesting_fields_never_become_overrides():
     assert wiz2._overrides[("extract_data", "nrpf")] == 48
 
 
+class TestChildRows:
+    @staticmethod
+    def _two_children():
+        wiz = _new_wizard()
+        wiz.nest_enable.value = True
+        first = wiz._child_rows[0]
+        first.name.value = "monterey"
+        first.w["nx"].value = 14
+        wiz._add_child_row()
+        second = wiz._child_rows[1]
+        second.name.value = "sf-bay"
+        second.pressure_fluxes.value = True
+        wiz.nest_period.value = 1800.0
+        return wiz
+
+    def test_ticking_the_checkbox_adds_one_row_and_no_more(self):
+        wiz = _new_wizard()
+        assert wiz._child_rows == []
+
+        wiz.nest_enable.value = True
+        wiz.nest_enable.value = False
+        wiz.nest_enable.value = True
+
+        assert len(wiz._child_rows) == 1
+        assert wiz.child_rows_box.children == (wiz._child_rows[0].widget,)
+
+    def test_children_are_gathered_in_row_order(self):
+        wiz = self._two_children()
+
+        kw = wiz._gather()
+
+        assert list(kw["children"]) == ["monterey", "sf-bay"]
+        assert kw["children"]["monterey"]["grid_kwargs"]["nx"] == 14
+        assert kw["children"]["monterey"]["include_pressure_fluxes"] is False
+        assert kw["children"]["sf-bay"]["include_pressure_fluxes"] is True
+        assert kw["nest_period"] == 1800.0
+        assert list(wiz.config.domain.children) == ["monterey", "sf-bay"]
+
+    def test_removing_a_row_drops_its_child(self):
+        wiz = self._two_children()
+
+        wiz._remove_child_row(wiz._child_rows[0])
+
+        assert list(wiz._gather()["children"]) == ["sf-bay"]
+        assert len(wiz.child_rows_box.children) == 1
+
+        wiz._remove_child_row(wiz._child_rows[0])
+
+        assert wiz.nest_enable.value is False
+        assert "children" not in wiz._gather()
+
+    @pytest.mark.parametrize("name", ["salish_sea", "a" * 21, ""])
+    def test_a_bad_name_is_refused_with_the_message(self, name):
+        wiz = self._two_children()
+
+        wiz._child_rows[1].name.value = name
+
+        with pytest.raises(ValueError, match="child"):
+            wiz._gather()
+        assert wiz.config is None
+        if name:
+            assert name in wiz._child_rows[1].name_status.value
+        assert wiz._child_rows[0].name_status.value == ""
+
+    def test_unequal_n_warns_only_without_pio(self):
+        wiz = self._two_children()
+        first, second = wiz._child_rows
+        wiz.use_pio_chk.value = True
+        second.w["N"].value = first.w["N"].value + 5
+        assert wiz.child_n_status.value == ""
+
+        wiz.use_pio_chk.value = False
+        assert "same N" in wiz.child_n_status.value
+
+        second.w["N"].value = first.w["N"].value
+        assert wiz.child_n_status.value == ""
+
+    def test_a_duplicate_name_is_refused_on_both_rows(self):
+        wiz = self._two_children()
+
+        wiz._child_rows[1].name.value = "monterey"
+
+        with pytest.raises(ValueError, match="more than one"):
+            wiz._gather()
+        assert wiz.config is None
+        for row in wiz._child_rows:
+            assert "more than one" in row.name_status.value
+
+    def test_two_children_round_trip_through_populate_from(self):
+        wiz = self._two_children()
+        cfg = wiz.config
+        assert cfg is not None, wiz.derived.value
+
+        wiz2 = _new_wizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2.nest_enable.value is True
+        assert [r.name.value for r in wiz2._child_rows] == ["monterey", "sf-bay"]
+        assert wiz2._child_rows[0].w["nx"].value == 14
+        assert wiz2._child_rows[1].pressure_fluxes.value is True
+        assert wiz2.nest_period.value == 1800.0
+        assert wiz2._gather()["children"] == wiz._gather()["children"]
+
+    def test_the_add_button_disables_at_the_maximum(self):
+        wiz = _new_wizard()
+        wiz.nest_enable.value = True
+
+        for _ in range(EXTRACT_CHILDREN_MAX - 1):
+            assert wiz.add_child_btn.disabled is False
+            wiz._add_child_row()
+
+        assert len(wiz._child_rows) == EXTRACT_CHILDREN_MAX
+        assert wiz.add_child_btn.disabled is True
+
+        wiz._remove_child_row(wiz._child_rows[-1])
+
+        assert wiz.add_child_btn.disabled is False
+
+
 def test_the_specs_the_wizard_saves_have_only_known_keys():
     """A spec at a newer minor with a key this build does not know is refused, so
     every key a writer saves must be in ``known_spec_keys`` -- here for a nested
@@ -7378,14 +7480,15 @@ def test_the_specs_the_wizard_saves_have_only_known_keys():
     """
     wiz = _new_wizard()
     wiz.nest_enable.value = True
-    wiz.nest_pressure_fluxes.value = True
+    wiz._child_rows[0].name.value = "inner"
+    wiz._child_rows[0].pressure_fluxes.value = True
     wiz.parent_enable.value = True
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
 
     domain = wiz._domain_spec_data()
-    assert {"grid_kwargs_parent", "grid_kwargs_child", "metadata_child"} <= set(domain)
-    assert domain["nesting_include_pressure_fluxes"] is True
+    assert {"grid_kwargs_parent", "children", "nest_period"} <= set(domain)
+    assert domain["children"]["inner"]["include_pressure_fluxes"] is True
     assert set(domain) <= known_spec_keys("DomainSpec")
     forcing = {"description", *wiz._forcing_editor.gather()}
     assert forcing <= known_spec_keys("ForcingSpec")

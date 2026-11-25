@@ -301,24 +301,27 @@ fields:
     symbol: marbl_ref
     hint: MARBL checkout target (commit hash, tag, or branch).
   nest_enable:
-    label: Enable child domain
-    hint: 'Enables a child (nested) domain: generates nesting.nc to supply boundary conditions for the inner domain from this (outer) model.'
-  nest_domain_dd:
+    label: Enable child domains
+    hint: 'Enables child (nested) domains: generates one nesting file per child to supply boundary conditions for the inner domains from this (outer) model.'
+  nesting.child_name:
+    label: Child name
+    hint: The name ROMS gives the child's boundary files. A letter, then letters, digits and '-', at most 20 characters; unique among the children.
+  nesting.nest_domain_dd:
     label: Child domain preset
     hint: Optionally prefill the child grid kwargs from a cataloged domain.
-  child_topo_source:
+  nesting.child_topo_source:
     label: Child topography source
     hint: Topography dataset the child grid is built with when extracting nesting data.
-  child_topo_path:
+  nesting.child_topo_path:
     label: Child topography file
     hint: Explicit topography file for the child grid.
   nest_period:
     label: Nesting extract period
     unit: s
-    hint: How often boundary values are written to nesting.nc.
-  nest_pressure_fluxes:
+    hint: How often boundary values are written to the nesting files, for all children.
+  nesting.nest_pressure_fluxes:
     label: Include pressure fluxes
-    hint: Includes baroclinic pressure flux variables in nesting.nc.
+    hint: Includes baroclinic pressure flux variables in this child's nesting file.
   parent_enable:
     label: Enable parent domain
     hint: Declares that this grid is nested inside a coarser parent grid.

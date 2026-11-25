@@ -3184,3 +3184,82 @@ def test_check_marbl_bgc_inputs_gate(ref, refused):
             _check(_forcing(), roms_ref=ref)
     else:
         _check(_forcing(), roms_ref=ref)
+
+
+_EXTRACT_ONE_CHILD = {
+    "do_extract": True,
+    "extract_file": "a.nc",
+    "nrpf": 24,
+    "n_chd": 5,
+    "theta_s_chd": 5.0,
+    "theta_b_chd": 2.0,
+    "hc_chd": 250.0,
+    "extract_period": 3600.0,
+}
+
+
+class TestExtractDataChildren:
+    @pytest.mark.parametrize("roots", ["a_b", "x" * 21, ["ok", "a_b"]])
+    def test_root_names_are_checked_on_every_tier(self, roots):
+        from cstar.applications.forge.namelist_model import (
+            ExtractDataCfg,
+            ExtractDataCfgV0_12_0,
+        )
+
+        two = {
+            **_EXTRACT_ONE_CHILD,
+            "extract_file": ["a.nc", "b.nc"],
+            "n_chd": [5, 5],
+            "theta_s_chd": [5.0, 5.0],
+            "theta_b_chd": [2.0, 2.0],
+            "hc_chd": [250.0, 250.0],
+        }
+        with pytest.raises(ValueError, match=r"extract_root_name entry \d+ \("):
+            ExtractDataCfgV0_12_0.model_validate({**two, "extract_root_name": roots})
+        if isinstance(roots, str):
+            with pytest.raises(ValueError, match="extract_root_name entry 0"):
+                ExtractDataCfg.model_validate(
+                    {**_EXTRACT_ONE_CHILD, "extract_root_name": roots}
+                )
+
+    def test_root_name_is_not_checked_when_extraction_is_off(self):
+        from cstar.applications.forge.namelist_model import ExtractDataCfg
+
+        ExtractDataCfg.model_validate(
+            {**_EXTRACT_ONE_CHILD, "do_extract": False, "extract_root_name": "a_b"}
+        )
+
+    def test_list_lengths_must_agree_with_extract_file(self):
+        from cstar.applications.forge.namelist_model import ExtractDataCfgV0_12_0
+
+        with pytest.raises(ValueError, match="n_chd has 1 entries for 2 child domains"):
+            ExtractDataCfgV0_12_0.model_validate(
+                {
+                    **_EXTRACT_ONE_CHILD,
+                    "extract_file": ["a.nc", "b.nc"],
+                    "extract_root_name": ["a", "b"],
+                }
+            )
+
+    def test_at_most_eight_children(self):
+        from cstar.applications.forge.namelist_model import ExtractDataCfgV0_12_0
+
+        nine = {
+            **_EXTRACT_ONE_CHILD,
+            "extract_file": [f"{i}.nc" for i in range(9)],
+            "n_chd": [5] * 9,
+            "theta_s_chd": [5.0] * 9,
+            "theta_b_chd": [2.0] * 9,
+            "hc_chd": [250.0] * 9,
+            "extract_root_name": [f"c{i}" for i in range(9)],
+        }
+        with pytest.raises(ValueError, match="reads at most 8"):
+            ExtractDataCfgV0_12_0.model_validate(nine)
+
+    def test_old_tier_rejects_a_list(self):
+        from cstar.applications.forge.namelist_model import ExtractDataCfg
+
+        with pytest.raises(ValueError):
+            ExtractDataCfg.model_validate(
+                {**_EXTRACT_ONE_CHILD, "extract_file": ["a", "b"]}
+            )

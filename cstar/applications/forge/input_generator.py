@@ -31,9 +31,11 @@ from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import (
     BLEND_FALLBACK_INHERITED_FIELDS,
     CarbonateSensitivitySpec,
+    NestedChild,
     OpenBoundaries,
     UserProvidedFile,
 )
+from cstar.applications.forge.engine import CHILD_VERTICAL_KWARGS
 from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     cdr_tracer_counts,
@@ -56,9 +58,10 @@ from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_VARIABLES,
     missing_carbonate_sensitivity_variables,
 )
+from cstar.roms.namelist import per_child_value
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +198,27 @@ def netcdf_basename(domain_name: str, input_name: str) -> str:
     return f"{netcdf_filename_component(domain_name)}_{netcdf_filename_component(input_name)}.nc"
 
 
+def extract_data_settings(
+    domain_name: str, children: Mapping[str, Mapping[str, Any]], nest_period: float
+) -> dict[str, Any]:
+    """The ``extract_data`` settings for a parent's ordered ``children`` (name ->
+    ``N``/``theta_s``/``theta_b``/``hc``): one value per key for one child, else
+    one list entry per child, in the order ROMS reads them.
+    """
+    return {
+        "do_extract": True,
+        "extract_file": per_child_value(
+            [netcdf_basename(domain_name, f"nesting_{name}") for name in children]
+        ),
+        **{
+            leaf: per_child_value([child[kwarg] for child in children.values()])
+            for kwarg, leaf in CHILD_VERTICAL_KWARGS.items()
+        },
+        "extract_period": nest_period,
+        "extract_root_name": per_child_value(list(children)),
+    }
+
+
 def _has_planned_output_tail(planned: Path, candidate: Path) -> bool:
     """True if ``candidate`` is ``planned``'s stem plus an accepted multi-file tail.
 
@@ -264,10 +288,8 @@ class UclaRomsBlueprintInputData(BaseModel):
     )
     """CDR forcing dataset."""
 
-    nesting_info: cstar_models.Dataset | None = Field(
-        default=None, validate_default=False
-    )
-    """Nesting info dataset (only set when a child grid is present)."""
+    nesting_info: dict[str, cstar_models.Dataset] = Field(default_factory=dict)
+    """Nesting info dataset of each child grid, by child name."""
 
 
 @dataclass
@@ -526,8 +548,9 @@ class RomsInputGenerator(InputGenerator):
     """ROMS model reference date (t=0). Forwarded to every rt object that accepts it.
     If None, roms-tools defaults to 2000-01-01."""
     grid_parent: rt.Grid | None = None
-    grid_child: rt.Grid | None = None
-    metadata_child: dict[str, Any] | None = None
+    grid_children: dict[str, rt.Grid] = field(default_factory=dict)
+    children: dict[str, NestedChild] = field(default_factory=dict)
+    nest_period: float = 3600.0
     settings_compile_time: dict[str, Any] | None = None
     """Executor-owned live compile-time settings dict (``ForgeExecutor._settings_compile_time``),
     bound by reference -- not copied. Generation steps read and mutate it directly;
@@ -1280,9 +1303,9 @@ class RomsInputGenerator(InputGenerator):
         for step, kwargs in step_kwargs_list:
             if step.name == "grid":
                 planned.append(self._forcing_filename("grid"))
-                if self.grid_child is not None:
-                    planned.append(self._forcing_filename("grid_child"))
-                    planned.append(self._forcing_filename("nesting"))
+                for name in self.grid_children:
+                    planned.append(self._forcing_filename(f"grid_child-{name}"))
+                    planned.append(self._forcing_filename(f"nesting_{name}"))
                 continue
 
             if step.name == "initial_conditions":
@@ -1849,13 +1872,12 @@ class RomsInputGenerator(InputGenerator):
                 grid_saved = self.grid.save(self._pio_mangle(out_path))
                 self._pio_finalize(grid_saved)
 
-        out_path_nesting = None
-        if self.grid_child is not None:
-            out_path_child = self._forcing_filename(input_name="grid_child")
-            yaml_path_child = self._yaml_filename(key + "_child")
+        for name, grid_child in self.grid_children.items():
+            out_path_child = self._forcing_filename(input_name=f"grid_child-{name}")
+            yaml_path_child = self._yaml_filename(f"{key}_child-{name}")
 
             try:
-                self.grid_child.to_yaml(yaml_path_child)
+                grid_child.to_yaml(yaml_path_child)
             except Exception as e:
                 warnings.warn(
                     f"Failed to save child grid YAML to {yaml_path_child}: {e}",
@@ -1866,34 +1888,33 @@ class RomsInputGenerator(InputGenerator):
             if self._should_reuse_existing_output(out_path_child):
                 print(f"   ↪ Reusing existing file: {out_path_child}")
             else:
-                with mem_log("grid_child.save", enabled=self.verbose):
-                    grid_child_saved = self.grid_child.save(
-                        self._pio_mangle(out_path_child)
-                    )
+                with mem_log(f"grid_child-{name}.save", enabled=self.verbose):
+                    grid_child_saved = grid_child.save(self._pio_mangle(out_path_child))
                     self._pio_finalize(grid_child_saved)
 
-            out_path_nesting = self._forcing_filename(input_name="nesting")
+            out_path_nesting = self._forcing_filename(input_name=f"nesting_{name}")
             if self._should_reuse_existing_output(out_path_nesting):
                 print(f"   ↪ Reusing existing file: {out_path_nesting}")
             else:
                 # This section of code is needed when doing nesting with BGC.  ROMS_Tools has a flag called "include_bgc" which
                 # defaults to false when we are making child boundary conditions, but it needs to be set to true in order to
                 # save the BGC variables.
-                nesting_kwargs = dict(self.metadata_child or {})
-                if self.has_bgc:
-                    # ROMS-Tools: include_bgc=True sets output_vars to include "bgc" on nesting.nc.
-                    nesting_kwargs.setdefault("include_bgc", True)
-                nesting_kwargs.setdefault("verbose", self.verbose)
                 out_path_nesting_mangled = self._pio_mangle(out_path_nesting)
-                with mem_log("make_nesting_info", enabled=self.verbose):
+                with mem_log(f"make_nesting_info-{name}", enabled=self.verbose):
                     rt.make_nesting_info(
                         self.grid,
-                        self.grid_child,
+                        grid_child,
                         str(out_path_nesting_mangled),
-                        **nesting_kwargs,
+                        prefix=name,
+                        period=self.nest_period,
+                        include_bgc=self.has_bgc,
+                        include_pressure_fluxes=self.children[
+                            name
+                        ].include_pressure_fluxes,
+                        verbose=self.verbose,
                     )
                     self._pio_finalize(out_path_nesting_mangled)
-            self.ucla_roms_blueprint_elements.nesting_info = cstar_models.Dataset(
+            self.ucla_roms_blueprint_elements.nesting_info[name] = cstar_models.Dataset(
                 data=[Resource(location=str(out_path_nesting), partitioned=False)]
             )
 
@@ -1927,23 +1948,22 @@ class RomsInputGenerator(InputGenerator):
             if self.partitioning.n_procs_y is not None:
                 self._settings_run_time["param"]["np_eta"] = self.partitioning.n_procs_y
 
-        if out_path_nesting is not None:
-            # out_path_nesting is only ever set inside `if self.grid_child is not
-            # None:` above, so the two are always both-or-neither; restated here
-            # so the grid_child.* accesses below narrow cleanly.
-            assert self.grid_child is not None
-            if "extract_data" not in self._settings_run_time:
-                self._settings_run_time["extract_data"] = {}
-            self._settings_run_time["extract_data"]["do_extract"] = True
-            self._settings_run_time["extract_data"]["extract_file"] = "nesting.nc"
-            self._settings_run_time["extract_data"]["n_chd"] = self.grid_child.N
-            self._settings_run_time["extract_data"]["theta_s_chd"] = (
-                self.grid_child.theta_s
+        if self.grid_children:
+            self._settings_run_time.setdefault("extract_data", {}).update(
+                extract_data_settings(
+                    self.domain_name,
+                    {
+                        name: {
+                            "N": grid.N,
+                            "theta_s": grid.theta_s,
+                            "theta_b": grid.theta_b,
+                            "hc": grid.hc,
+                        }
+                        for name, grid in self.grid_children.items()
+                    },
+                    self.nest_period,
+                )
             )
-            self._settings_run_time["extract_data"]["theta_b_chd"] = (
-                self.grid_child.theta_b
-            )
-            self._settings_run_time["extract_data"]["hc_chd"] = self.grid_child.hc
 
         self._settings_run_time.setdefault("s_coord", {}).update(
             tcline=self.grid.hc,

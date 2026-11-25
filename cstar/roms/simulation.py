@@ -104,11 +104,18 @@ from cstar.roms.input_dataset import (
     netcdf_dimension_size,
 )
 from cstar.roms.namelist import (
+    ExtractDataSettingsV0_12_0,
     RomsNamelistBase,
     namelist_schema_for_ref,
     namelist_schema_named,
+    per_child_value,
 )
-from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME, restart_timestamp
+from cstar.roms.outputs import (
+    DEFAULT_CHILD_NAME,
+    OUTPUT_ROOT_NAME,
+    BoundaryFile,
+    restart_timestamp,
+)
 from cstar.roms.precheck import (
     NamelistConsistencyError,
     applies_to,
@@ -132,6 +139,8 @@ from cstar.system.manager import (
 from cstar.system.scheduler import SUBMITTABLE_FAMILIES, ranks_per_node
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from cstar.base.external_codebase import ExternalCodeBase
     from cstar.execution.file_system import JobFileSystemManager
     from cstar.execution.handler import ExecutionHandler
@@ -191,7 +200,11 @@ def _ncjoin_wildcard(
 
 
 def _extract_data_join_wildcard(
-    wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
+    wildcard_pattern: str,
+    input_dir: Path,
+    output_dir: Path,
+    logger: logging.Logger,
+    children: "Sequence[str]",
 ) -> None:
     """Spatially join netcdfs matching the wildcard pattern using extract_data_join,
     move the joined output to output_dir, and remove the unjoined outputs.
@@ -206,6 +219,8 @@ def _extract_data_join_wildcard(
         Location to move the joined output to.
     logger : logging.Logger
         Logger object to post log messages to.
+    children : Sequence[str]
+        The names of the child grids; each one's joined boundary file is moved.
     """
     logger.info(f"Spatial extract/join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
@@ -217,9 +232,18 @@ def _extract_data_join_wildcard(
     out_file_name = wildcard_pattern.replace(".*.nc", ".nc")
     _, out_file_timestamp_dot_nc = out_file_name.split(".", maxsplit=1)
 
-    out_file_name = f"{EXTRACT_ROOT_NAME}_bry.{out_file_timestamp_dot_nc}"
-    joined_file = input_dir / out_file_name
-    out_file = joined_file.rename(output_dir / out_file_name)
+    joined_files = [
+        input_dir / f"{name}{BoundaryFile.SUFFIX}.{out_file_timestamp_dot_nc}"
+        for name in children
+    ]
+    for name, joined_file in zip(children, joined_files, strict=True):
+        if not joined_file.exists():
+            raise FileNotFoundError(
+                f"extract_data_join left no file for child {name!r} "
+                f"({joined_file.name}); found "
+                f"{sorted(p.name for p in input_dir.glob('*.nc'))}"
+            )
+    out_files = [f.rename(output_dir / f.name) for f in joined_files]
 
     ocean_file_name = f"ocean.{out_file_timestamp_dot_nc}"
     ocean_file = input_dir / ocean_file_name
@@ -227,7 +251,7 @@ def _extract_data_join_wildcard(
 
     remove_files(input_dir, wildcard_pattern)
 
-    logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
+    logger.info(f"Spatial extract/join of {[str(f) for f in out_files]} is complete")
 
 
 class IOLayout(StrEnum):
@@ -373,7 +397,7 @@ class ROMSSimulation(Simulation):
         tidal_forcing: "ROMSTidalForcing | None" = None,
         river_forcing: "ROMSRiverForcing | None" = None,
         cdr_forcing: "ROMSCdrForcing | None" = None,
-        nesting_info: "ROMSNestingInfo | None" = None,
+        nesting_info: "dict[str, ROMSNestingInfo] | None" = None,
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
@@ -504,8 +528,10 @@ class ROMSSimulation(Simulation):
         self._validate_input(cdr_forcing)
         self.cdr_forcing = cdr_forcing
 
-        self._validate_input(nesting_info)
-        self.nesting_info = nesting_info
+        self.nesting_info: dict[str, ROMSNestingInfo] = (
+            {} if nesting_info is None else nesting_info
+        )
+        self._validate_input(list(self.nesting_info.values()))
 
         self._validate_input(surface_forcing, ROMSSurfaceForcing)
         self.surface_forcing: list[ROMSSurfaceForcing] = (
@@ -1299,10 +1325,21 @@ class ROMSSimulation(Simulation):
                 self.cdr_forcing.working_copy.path  # type: ignore[union-attr]
             )
 
-        if self.nesting_info and self.nesting_info.working_copy:
-            nml.extract_data_settings.extract_file = self._namelist_path(
-                self.nesting_info.working_copy.path  # type: ignore[union-attr]
+        children = list(self.nesting_info)
+        if len(children) > 1 and not isinstance(
+            nml.extract_data_settings, ExtractDataSettingsV0_12_0
+        ):
+            raise ValueError(
+                f"{len(children)} child grids ({', '.join(children)}) need a ucla-roms "
+                f">= 0.12.0 namelist, but the namelist ({chosen_by}) takes one child"
             )
+
+        if children and all(ds.working_copy for ds in self.nesting_info.values()):
+            files = [
+                self._namelist_path(ds.working_copy.path)  # type: ignore[union-attr]
+                for ds in self.nesting_info.values()
+            ]
+            nml.extract_data_settings.extract_file = per_child_value(files)
 
         # a joined layout writes directly to output_dir without join/partition
         # steps, otherwise the step should put intermediate work in the
@@ -1320,7 +1357,8 @@ class ROMSSimulation(Simulation):
         # Note: only PARALLEL_IO builds honor extract_root_name;
         # non-PIO builds name extraction files from output_root_name (already
         # pointing at the same directory).
-        nml.extract_data_settings.extract_root_name = f"{root}/{EXTRACT_ROOT_NAME}"
+        roots = [f"{root}/{name}" for name in children or [DEFAULT_CHILD_NAME]]
+        nml.extract_data_settings.extract_root_name = per_child_value(roots)
 
         # User overrides are layered on last, so they take precedence over
         # any of the derived settings above.
@@ -1530,7 +1568,7 @@ class ROMSSimulation(Simulation):
                 self.tidal_forcing,
                 self.river_forcing,
                 self.cdr_forcing,
-                self.nesting_info,
+                *self.nesting_info.values(),
                 *self.boundary_forcing,
                 *self.surface_forcing,
                 *self.forcing_corrections,
@@ -1668,9 +1706,14 @@ class ROMSSimulation(Simulation):
             simulation_kwargs["cdr_forcing"] = ROMSCdrForcing(**cdr_forcing_kwargs)
 
         # Construct any ROMSNestingInfo instance:
-        nesting_info_kwargs = simulation_dict.get("nesting_info")
-        if nesting_info_kwargs is not None:
-            simulation_kwargs["nesting_info"] = ROMSNestingInfo(**nesting_info_kwargs)
+        nesting_info_entries = simulation_dict.get("nesting_info")
+        if nesting_info_entries is not None:
+            if not all(isinstance(v, dict) for v in nesting_info_entries.values()):
+                nesting_info_entries = {DEFAULT_CHILD_NAME: nesting_info_entries}
+            simulation_kwargs["nesting_info"] = {
+                name: ROMSNestingInfo(**kwargs)
+                for name, kwargs in nesting_info_entries.items()
+            }
 
         # Construct any ROMSBoundaryForcing instances:
         boundary_forcing_entries = simulation_dict.get("boundary_forcing", [])
@@ -1780,8 +1823,10 @@ class ROMSSimulation(Simulation):
             simulation_dict["river_forcing"] = self.river_forcing.to_dict()
         if self.cdr_forcing is not None:
             simulation_dict["cdr_forcing"] = self.cdr_forcing.to_dict()
-        if self.nesting_info is not None:
-            simulation_dict["nesting_info"] = self.nesting_info.to_dict()
+        if self.nesting_info:
+            simulation_dict["nesting_info"] = {
+                name: ds.to_dict() for name, ds in self.nesting_info.items()
+            }
         if len(self.surface_forcing) > 0:
             simulation_dict["surface_forcing"] = [
                 sf.to_dict() for sf in self.surface_forcing
@@ -3546,17 +3591,21 @@ class ROMSSimulation(Simulation):
 
         def _spatial_join(wildcard_pattern: str) -> None:
             """Choose and execute correct joining function for the file type."""
-            joiner = (
-                _extract_data_join_wildcard
-                if "ext" in wildcard_pattern
-                else _ncjoin_wildcard
-            )
-            joiner(
-                wildcard_pattern,
-                input_dir=temp_output_dir,
-                output_dir=output_dir,
-                logger=self.log,
-            )
+            if "ext" in wildcard_pattern:
+                _extract_data_join_wildcard(
+                    wildcard_pattern,
+                    input_dir=temp_output_dir,
+                    output_dir=output_dir,
+                    logger=self.log,
+                    children=list(self.nesting_info) or [DEFAULT_CHILD_NAME],
+                )
+            else:
+                _ncjoin_wildcard(
+                    wildcard_pattern,
+                    input_dir=temp_output_dir,
+                    output_dir=output_dir,
+                    logger=self.log,
+                )
 
         unique_wildcards = {
             str(Path(fname.stem).with_suffix(".*.nc")) for fname in files

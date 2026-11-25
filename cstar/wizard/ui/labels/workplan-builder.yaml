@@ -202,6 +202,10 @@ fields:
     label: Boundaries from
     symbol: nest-from
     hint: Several sources are joined with ";".
+  step.nest_child_name:
+    label: Child name
+    symbol: child_name
+    hint: Blank uses the boundary files of every child.
   step.cs_kind:
     label: Carbonate sensitivities from
     symbol: carbonate-sensitivity-from

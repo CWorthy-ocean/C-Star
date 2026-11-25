@@ -2,6 +2,7 @@ import asyncio
 import sys
 import typing as t
 from abc import abstractmethod
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
@@ -16,6 +17,7 @@ from cstar.applications.core import (
 from cstar.applications.ucla_roms.migration import (
     UclaRomsSchemaAdapter2025v1,
     UclaRomsSchemaAdapterV2V21,
+    UclaRomsSchemaAdapterV3V4,
     UclaRomsSchemaAdapterV21V3,
 )
 from cstar.applications.ucla_roms.models import APP_NAME, UclaRomsBlueprint
@@ -117,7 +119,7 @@ def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Prod
         if not path.is_relative_to(root):
             log.debug(f"Skipping {path}: it is not under the step root {root}")
             continue
-        row = next((r for r in OUTPUT_STREAMS if r[0] == match["stem"]), None)
+        row = next((r for r in OUTPUT_STREAMS if fnmatch(match["stem"], r[0])), None)
         kind, base = (row[1], row[2]) if row else (ArtifactKind.output, {})
         products.append(
             Product(
@@ -402,6 +404,7 @@ class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunne
         UclaRomsSchemaAdapter2025v1,
         UclaRomsSchemaAdapterV2V21,
         UclaRomsSchemaAdapterV21V3,
+        UclaRomsSchemaAdapterV3V4,
     )
 
     @override

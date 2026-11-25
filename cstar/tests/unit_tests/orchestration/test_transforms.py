@@ -1110,6 +1110,71 @@ def test_nesting_directive_path_only_sets_boundary_only(
     assert bp_after.runtime_params.start_date == bp_before.runtime_params.start_date
 
 
+BRY_TIMESTAMP_SUFFIX = "_bry.20230201003000.nc"
+
+
+def _nest_from_children(
+    workplan: Workplan, tmp_path: Path, children: list[str], **config: str
+) -> list[str]:
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    for child in children:
+        (bry_dir / f"{child}{BRY_TIMESTAMP_SUFFIX}").write_text("mock boundary data")
+    step = workplan.steps[0]
+    step.blueprint_overrides.clear()
+    steps = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir), **config})(step)
+    bp = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
+    return [Path(d.location).name for d in bp.forcing.boundary.data]
+
+
+@pytest.mark.parametrize(
+    ("children", "config", "expected"),
+    [
+        (["monterey", "salish-sea"], {"child_name": "salish-sea"}, "salish-sea"),
+        (["monterey"], {}, "monterey"),
+        (["child"], {}, "child"),
+        (["child"], {"child_name": "child"}, "child"),
+    ],
+)
+def test_nesting_directive_child_name_selects_boundary_files(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+    children: list[str],
+    config: dict[str, str],
+    expected: str,
+) -> None:
+    names = _nest_from_children(single_step_workplan, tmp_path, children, **config)
+    assert names == [f"{expected}{BRY_TIMESTAMP_SUFFIX}"]
+
+
+def test_nesting_directive_several_children_need_child_name(
+    single_step_workplan: Workplan, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match=r"monterey, salish-sea.*child_name"):
+        _nest_from_children(single_step_workplan, tmp_path, ["monterey", "salish-sea"])
+
+
+def test_nesting_directive_unknown_child_name_lists_the_children(
+    single_step_workplan: Workplan, tmp_path: Path
+) -> None:
+    with pytest.raises(FileNotFoundError, match="monterey, salish-sea"):
+        _nest_from_children(
+            single_step_workplan,
+            tmp_path,
+            ["monterey", "salish-sea"],
+            child_name="nowhere",
+        )
+
+
+@pytest.mark.parametrize("child_name", ["salish_sea", "a" * 21])
+def test_nesting_directive_config_rejects_a_bad_child_name(child_name: str) -> None:
+    config = {
+        NestingDirective.KEY_PATH: "bry",
+        NestingDirective.KEY_CHILD_NAME: child_name,
+    }
+    assert any("child name" in p for p in NestingDirective._config_problems(config))
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_nesting_directive_step_resolution(
@@ -2482,7 +2547,7 @@ def test_nesting_directive_multiple_paths(
 
     dir_b = tmp_path / "b"
     dir_b.mkdir()
-    (dir_b / "sibling_bry.20230301003000.nc").write_text("mock boundary data")
+    (dir_b / "parent_bry.20230301003000.nc").write_text("mock boundary data")
 
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
@@ -2493,7 +2558,7 @@ def test_nesting_directive_multiple_paths(
     bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
         "parent_bry.20230201003000.nc",
-        "sibling_bry.20230301003000.nc",
+        "parent_bry.20230301003000.nc",
     ]
     assert all(getattr(d, "hash", None) is None for d in bp_after.forcing.boundary.data)
 
@@ -2548,7 +2613,7 @@ def test_nesting_directive_path_mixes_directory_and_file(
     dir_a.mkdir()
     (dir_a / "parent_bry.20230201003000.nc").write_text("mock boundary data")
 
-    file_b = tmp_path / "b" / "sibling_bry.20230301003000.nc"
+    file_b = tmp_path / "b" / "parent_bry.20230301003000.nc"
     file_b.parent.mkdir()
     file_b.write_text("mock boundary data")
 
@@ -2560,7 +2625,7 @@ def test_nesting_directive_path_mixes_directory_and_file(
 
     bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
-        "sibling_bry.20230301003000.nc",
+        "parent_bry.20230301003000.nc",
         "parent_bry.20230201003000.nc",
     ]
 
@@ -2623,7 +2688,7 @@ def test_nesting_directive_multiple_steps(
     )
     second_fsm = RomsFileSystemManager(second_step.fsm.root_dir)
     second_fsm.prepare()
-    (second_fsm.output_dir / "second_bry.20230301003000.nc").write_text(
+    (second_fsm.output_dir / "first_bry.20230301003000.nc").write_text(
         "mock boundary data"
     )
 
@@ -2738,9 +2803,9 @@ def _plan_with_parent_outputs(
             id="only the recorded child extraction",
         ),
         pytest.param(
-            [("other_bry.20230201003000.nc", {})],
+            [("child_bry.20230201003000.nc", {})],
             ["child_bry.20230301003000.nc"],
-            ["child_bry.20230301003000.nc", "other_bry.20230201003000.nc"],
+            ["child_bry.20230201003000.nc", "child_bry.20230301003000.nc"],
             id="boundary products without the child role fall back to output",
         ),
     ],
@@ -2945,7 +3010,7 @@ def test_nesting_directive_bry_path_multiple_paths(
 
     dir_b = tmp_path / "b"
     dir_b.mkdir()
-    (dir_b / "sibling_bry.20230301003000.nc").write_text("mock boundary data")
+    (dir_b / "parent_bry.20230301003000.nc").write_text("mock boundary data")
 
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
@@ -8598,7 +8663,7 @@ def test_nesting_directive_step_from_external_run(
     fab = fabricate_external_run()
     external_out = RomsFileSystemManager(fab.step.fsm.root_dir).output_dir
     external_out.mkdir(parents=True, exist_ok=True)
-    (external_out / "outer_bry.20230301003000.nc").write_text("mock boundary data")
+    (external_out / "local_bry.20230301003000.nc").write_text("mock boundary data")
 
     local = LiveStep(
         name="local",

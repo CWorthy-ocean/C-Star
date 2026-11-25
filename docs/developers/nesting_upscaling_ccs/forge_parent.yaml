@@ -5,7 +5,7 @@ description: 'CCS parent (168x336x20, ~16 km): writes the nesting extraction for
 application: forge
 state: notset
 schema_version: 1.1.0
-forge_blueprint_version: 11
+forge_blueprint_version: 12
 run:
   start_date: '2010-01-15T00:00:00'
   end_date: '2010-01-19T00:00:00'
@@ -38,21 +38,21 @@ domain:
     auto_tiling: false
     n_cores: null
   grid_kwargs_parent: null
-  grid_kwargs_child:
-    nx: 70
-    ny: 140
-    N: 20
-    size_x: 280.0
-    size_y: 550.0
-    center_lon: -122.506
-    center_lat: 36.629
-    rot: 33.3
-    theta_s: 6.0
-    theta_b: 6.0
-    hc: 250.0
-  metadata_child:
-    period: 3600.0
-  nesting_include_pressure_fluxes: false
+  nest_period: 3600.0
+  children:
+    child:
+      grid_kwargs:
+        nx: 70
+        ny: 140
+        N: 20
+        size_x: 280.0
+        size_y: 550.0
+        center_lon: -122.506
+        center_lat: 36.629
+        rot: 33.3
+        theta_s: 6.0
+        theta_b: 6.0
+        hc: 250.0
   v_sponge: 1600.0
   dt: 900.0
   grid_file: null
@@ -555,7 +555,7 @@ model_settings:
     nz_chd: 50
   extract_data:
     do_extract: true
-    extract_file: nesting.nc
+    extract_file: ccs-parent_nesting_child.nc
     nrpf: 24
     n_chd: 20
     theta_s_chd: 6.0
@@ -750,5 +750,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:df9e4c56d30eb1732c9fd980017235326efdd79c52575402f6e9e0eb043fabcf
+  content_hash: bp-v2:a17ed220a0d3125ebf125809ea37d763cefb2075e8fd3484cc3b526ac705e2eb
   notes: null

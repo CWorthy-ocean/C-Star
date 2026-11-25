@@ -66,7 +66,7 @@ from collections import Counter
 from datetime import UTC, datetime, time
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -91,6 +91,7 @@ from cstar.orchestration.models import (
     SpecSelection,
 )
 from cstar.orchestration.serialization import read_blueprint_raw
+from cstar.roms.outputs import EXTRACT_CHILDREN_MAX, ChildName
 from cstar.system.migration import for_writing
 
 logger = logging.getLogger(__name__)
@@ -444,7 +445,10 @@ _HASH_EXCLUDE = frozenset({"forge_blueprint_version", "composition"})
 # an explicit exception to the "additive fields don't bump" rule above: a v10 build
 # rejects null, so the bump makes it say "upgrade cstar-ocean" instead of failing
 # validation.
-FORGE_BLUEPRINT_VERSION = 11
+# v12 (2026-11): ``domain.grid_kwargs_child``/``metadata_child``/
+# ``nesting_include_pressure_fluxes`` become ``domain.children`` (named, ordered) and
+# ``domain.nest_period``; the migration names the one old child.
+FORGE_BLUEPRINT_VERSION = 12
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -705,6 +709,21 @@ class Partitioning(_Section):
         return self
 
 
+class NestedChild(_Section):
+    grid_kwargs: dict[str, Any]
+    """roms-tools ``Grid`` kwargs of the child grid. Accepts the same optional
+    ``topography_source`` / ``topography_path`` overrides as
+    ``Domain.grid_kwargs_parent``."""
+    include_pressure_fluxes: bool = Field(default=False)
+    """Whether to include baroclinic pressure fluxes in this child's nesting file
+    (passed to make_nesting_info as include_pressure_fluxes)."""
+
+
+NestedChildren = Annotated[
+    dict[ChildName, NestedChild], Field(max_length=EXTRACT_CHILDREN_MAX)
+]
+
+
 class Domain(_Section):
     """Grid construction inputs (kwargs only — the ``rt.Grid`` is built at processing time).
 
@@ -738,14 +757,12 @@ class Domain(_Section):
     domain-level *path* is then deliberately not inherited); give only
     ``topography_path`` to read the domain-level dataset from another file.
     See ``ForgeExecutor._nested_topography_pair``."""
-    grid_kwargs_child: dict[str, Any] | None = None
-    """roms-tools ``Grid`` kwargs of the finer child grid this domain extracts
-    nesting data for. Accepts the same optional ``topography_source`` /
-    ``topography_path`` overrides as ``grid_kwargs_parent``."""
-    metadata_child: dict[str, Any] | None = None
-    nesting_include_pressure_fluxes: bool = False
-    """Whether to include baroclinic pressure fluxes in the nesting extraction file
-    (passed to make_nesting_info / make_edata as include_pressure_fluxes)."""
+    nest_period: float = Field(default=3600.0)
+    """Seconds between the boundary records written for the children (ROMS
+    ``output_period_extract``), shared by all of them."""
+    children: NestedChildren = Field(default_factory=dict)
+    """The finer grids this domain extracts nesting data for, in the order ROMS
+    reads them, by child name (the name ROMS gives the child's boundary files)."""
     v_sponge: float | None = None
     """Sponge-layer viscosity. A first-class, domain-owned property (mirrors
     ``open_boundaries``): the resolver derives it from grid spacing
@@ -764,7 +781,7 @@ class Domain(_Section):
     keys roms-tools still accepts alongside a ``filename`` (``theta_s``/
     ``theta_b``/``hc``/``N``) -- not the generation-geometry keys (see
     ``_grid_file_excludes_generation_geometry``) -- and nesting
-    (``grid_kwargs_parent``/``grid_kwargs_child``) is unsupported (v1)."""
+    (``grid_kwargs_parent``/``children``) is unsupported (v1)."""
 
     @property
     def is_child(self) -> bool:
@@ -773,8 +790,8 @@ class Domain(_Section):
 
     @property
     def is_parent(self) -> bool:
-        """Whether this domain is a parent that extracts nesting data for a child."""
-        return self.grid_kwargs_child is not None
+        """Whether this domain is a parent that extracts nesting data for children."""
+        return bool(self.children)
 
     @model_validator(mode="after")
     def _grid_file_excludes_generation_geometry(self) -> Domain:
@@ -794,10 +811,10 @@ class Domain(_Section):
                 "grid file is supplied directly. Only theta_s/theta_b/hc/N are "
                 "allowed alongside grid_file."
             )
-        if self.grid_kwargs_parent is not None or self.grid_kwargs_child is not None:
+        if self.grid_kwargs_parent is not None or self.children:
             raise ValueError(
                 "domain.grid_file (a user-supplied grid) cannot be combined with "
-                "nesting (grid_kwargs_parent/grid_kwargs_child); custom grid + "
+                "nesting (grid_kwargs_parent/children); custom grid + "
                 "nesting is unsupported."
             )
         return self

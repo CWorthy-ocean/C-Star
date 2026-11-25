@@ -2,7 +2,7 @@
 name: ucla_roms_example_new_bp
 description: this is to test the new blueprint schema, here's "a few" weird characters.
 application: roms_marbl
-schema_version: 3.0.0
+schema_version: 4.0.0
 working_dir: <working_dir>
 state: draft
 valid_start_date: 2012-01-01 12:00:00

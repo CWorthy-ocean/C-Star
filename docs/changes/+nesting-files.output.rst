@@ -1,0 +1,1 @@
+Forge names each child's grid and nesting files after the child, ``<domain>_grid_child-<name>.nc`` and ``<domain>_nesting_<name>.nc``; an existing parent's one child is named ``child``, so its boundary files stay ``child_bry.*.nc``.

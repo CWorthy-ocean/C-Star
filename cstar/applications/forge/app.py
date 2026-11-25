@@ -61,8 +61,8 @@ _APP_NAME_LONG: t.Final[str] = "C-Star Forge domain generator"
 
 INPUT_ARTIFACTS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = (
     ("grid", ArtifactKind.grid, {}),
-    ("grid_child", ArtifactKind.grid, {"role": "child"}),
-    ("nesting", ArtifactKind.grid, {"role": "nesting"}),
+    ("grid_child-*", ArtifactKind.grid, {"role": "child"}),
+    ("nesting_*", ArtifactKind.grid, {"role": "nesting"}),
     ("initial_conditions", ArtifactKind.initial_conditions, {}),
     ("boundary-*", ArtifactKind.boundary_forcing, {}),
     ("surface-*", ArtifactKind.surface_forcing, {}),

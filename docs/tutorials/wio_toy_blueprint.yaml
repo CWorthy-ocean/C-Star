@@ -2,7 +2,7 @@
 name: wio_toy
 description: wio toy domain for laptop
 application: ucla_roms
-schema_version: 3.0.0
+schema_version: 4.0.0
 working_dir: "~/cstar/wio_toy_blueprint"
 state: draft
 valid_start_date: 2012-01-01

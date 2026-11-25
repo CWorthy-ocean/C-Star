@@ -1206,8 +1206,11 @@ class DomainCatalog:
         }
         if builder.grid_kwargs_parent:
             domain_data["grid_kwargs_parent"] = builder.grid_kwargs_parent
-        if builder.grid_kwargs_child:
-            domain_data["grid_kwargs_child"] = builder.grid_kwargs_child
+        if builder.children:
+            domain_data["children"] = {
+                name: child.model_dump() for name, child in builder.children.items()
+            }
+            domain_data["nest_period"] = builder.nest_period
         # v_sponge: best-effort -- this executor-driven path predates the
         # wizard's touched/derived distinction (see forge_blueprint_wizard's
         # _domain_spec_data, the authoritative save path), so it always

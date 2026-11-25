@@ -87,8 +87,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from cstar.base.gitutils import _describe_nearest_tag, _describe_remote_nearest_tag
 from cstar.base.log import get_logger
+from cstar.roms.outputs import EXTRACT_CHILDREN_MAX, child_name_problems
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 log = get_logger(__name__)
@@ -98,9 +100,6 @@ log = get_logger(__name__)
 # overflow the declared array at run time.
 MARBL_TRACERS_TO_WRITE_MAX = 40
 MARBL_DIAGNOSTICS_TO_WRITE_MAX = 64
-# ucla-roms >= 0.12.0: `max_extract_chd` in src/param.F90, the length of the
-# &EXTRACT_DATA_SETTINGS per-child arrays.
-EXTRACT_CHILDREN_MAX = 8
 
 
 def _namelist_str_list(
@@ -460,6 +459,18 @@ class FrcOutputSettings(_NmlGroup):
     """Number of time records in forcing files"""
 
 
+def per_child_value(values: list[Any]) -> Any:
+    return values[0] if len(values) == 1 else values
+
+
+def extract_root_name_problems(roots: Any) -> list[str]:
+    return [
+        f"extract_root_name entry {i} ({root!r}): {problem}"
+        for i, root in enumerate(_as_list(roots))
+        for problem in child_name_problems(str(root).rsplit("/", 1)[-1])
+    ]
+
+
 class _ExtractDataSettingsCommon(_NmlGroup):
     """The ``&EXTRACT_DATA_SETTINGS`` keys every release reads as one value;
     the per-child keys are on :class:`ExtractDataSettings` (one child) and
@@ -489,6 +500,14 @@ class ExtractDataSettings(_ExtractDataSettingsCommon):
     """`hc` of nested domain"""
     extract_root_name: str = "child"
     """Root name (filename prefix) for extracted child boundary files"""
+
+    @model_validator(mode="after")
+    def _check_root_name(self) -> Self:
+        if self.do_extract and (
+            problems := extract_root_name_problems(self.extract_root_name)
+        ):
+            raise ValueError("; ".join(problems))
+        return self
 
 
 _EXTRACT_PER_CHILD_KEYS: Final = (
@@ -536,35 +555,42 @@ class ExtractDataSettingsV0_12_0(_ExtractDataSettingsCommon):
         """Reject a per-child layout ROMS stops on at startup (see the class
         docstring), reporting every problem at once.
         """
-        entries = {key: _as_list(getattr(self, key)) for key in _EXTRACT_PER_CHILD_KEYS}
-        problems = [
-            f"{key} has {len(values)} entries; ucla-roms reads at most "
-            f"{EXTRACT_CHILDREN_MAX} (max_extract_chd)"
-            for key, values in entries.items()
-            if len(values) > EXTRACT_CHILDREN_MAX
-        ]
-        n_children = len(entries["extract_file"])
-        if self.do_extract and n_children > 1:
-            if any(not str(f).strip() for f in entries["extract_file"]):
-                problems.append(
-                    "extract_file has a blank entry; each child domain needs its "
-                    "nesting file"
-                )
-            problems.extend(
-                f"{key} has {len(entries[key])} entries for {n_children} child "
-                "domains (extract_file); give one per child"
-                for key in ("n_chd", "theta_s_chd", "theta_b_chd", "hc_chd")
-                if len(entries[key]) != n_children
-            )
-            roots = entries["extract_root_name"]
-            if isinstance(self.extract_root_name, list) and len(roots) != n_children:
-                problems.append(
-                    f"extract_root_name has {len(roots)} entries for {n_children} "
-                    "child domains (extract_file); give one per child"
-                )
-        if problems:
+        values = {key: getattr(self, key) for key in _EXTRACT_PER_CHILD_KEYS}
+        if problems := extract_children_problems(values, self.do_extract):
             raise ValueError("; ".join(problems))
         return self
+
+
+def extract_children_problems(values: Mapping[str, Any], do_extract: bool) -> list[str]:
+    entries = {key: _as_list(values[key]) for key in _EXTRACT_PER_CHILD_KEYS}
+    problems = [
+        f"{key} has {len(entry)} entries; ucla-roms reads at most "
+        f"{EXTRACT_CHILDREN_MAX} (max_extract_chd)"
+        for key, entry in entries.items()
+        if len(entry) > EXTRACT_CHILDREN_MAX
+    ]
+    if do_extract:
+        problems.extend(extract_root_name_problems(values["extract_root_name"]))
+    n_children = len(entries["extract_file"])
+    if do_extract and n_children > 1:
+        if any(not str(f).strip() for f in entries["extract_file"]):
+            problems.append(
+                "extract_file has a blank entry; each child domain needs its "
+                "nesting file"
+            )
+        problems.extend(
+            f"{key} has {len(entries[key])} entries for {n_children} child "
+            "domains (extract_file); give one per child"
+            for key in ("n_chd", "theta_s_chd", "theta_b_chd", "hc_chd")
+            if len(entries[key]) != n_children
+        )
+        roots = entries["extract_root_name"]
+        if isinstance(values["extract_root_name"], list) and len(roots) != n_children:
+            problems.append(
+                f"extract_root_name has {len(roots)} entries for {n_children} "
+                "child domains (extract_file); give one per child"
+            )
+    return problems
 
 
 class SpongeTuneSettings(_NmlGroup):

@@ -123,8 +123,7 @@ class TestResolverRefusesConflicts:
     def test_child_level_count_override(self) -> None:
         with pytest.raises(ValueError, match="extract_data.n_chd"):
             _build(
-                grid_kwargs_child=_CHILD_GRID_KWARGS,
-                metadata_child={"period": 3600.0},
+                children={"child": {"grid_kwargs": _CHILD_GRID_KWARGS}},
                 run_time_overrides={"extract_data": {"n_chd": 90}},
             )
 
@@ -154,13 +153,11 @@ class TestChildVerticalCoordinates:
     @pytest.mark.parametrize("missing", ["N", "theta_s", "theta_b", "hc"])
     def test_resolver_requires_them(self, missing: str) -> None:
         child = {k: v for k, v in _CHILD_GRID_KWARGS.items() if k != missing}
-        with pytest.raises(ValueError, match=f"grid_kwargs_child is missing {missing}"):
-            _build(grid_kwargs_child=child, metadata_child={"period": 3600.0})
+        with pytest.raises(ValueError, match=f"grid_kwargs is missing {missing}"):
+            _build(children={"child": {"grid_kwargs": child}})
 
     def test_resolver_copies_them_into_extract_data(self) -> None:
-        cfg = _build(
-            grid_kwargs_child=_CHILD_GRID_KWARGS, metadata_child={"period": 3600.0}
-        )
+        cfg = _build(children={"child": {"grid_kwargs": _CHILD_GRID_KWARGS}})
         extract = cfg.model_settings["extract_data"]
         assert (
             extract["n_chd"],
@@ -283,9 +280,7 @@ class TestConfigureBuildUsesGeneratedValues:
         derived leaf: the resolver's old child fallbacks, a coarse-grid flag from
         the ModelSpec, a hand-edited tile count and boundary switch.
         """
-        cfg = _build(
-            grid_kwargs_child=_CHILD_GRID_KWARGS, metadata_child={"period": 3600.0}
-        )
+        cfg = _build(children={"child": {"grid_kwargs": _CHILD_GRID_KWARGS}})
         settings = cfg.model_settings
         settings["extract_data"].update(n_chd=90, hc_chd=250.0)
         settings["blk_frc"]["interp_frc"] = False

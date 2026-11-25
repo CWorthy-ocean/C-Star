@@ -24,7 +24,11 @@ from cstar.orchestration.models import (
     DocLocMixin,
     PathFilter,
 )
-from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
+from cstar.roms.namelist import (
+    _parse_semver,
+    namelist_schema_for_ref,
+)
+from cstar.roms.outputs import EXTRACT_CHILDREN_MAX, ChildName
 from cstar.system.migration import version_key
 
 if t.TYPE_CHECKING:
@@ -386,7 +390,7 @@ class PartitioningParameterSet(ParameterSet):
 class UclaRomsBlueprint(Blueprint):
     """Blueprint schema for running a UCLA-ROMS simulation."""
 
-    schema_version: str = "3.3.1"
+    schema_version: str = "4.0.0"
     """The blueprint schema version."""
 
     @property
@@ -437,8 +441,10 @@ class UclaRomsBlueprint(Blueprint):
     cdr_forcing: Dataset | None = Field(default=None)
     """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
 
-    nesting_info: Dataset | None = Field(default=None)
-    """Location of nesting info input file for this run. Optional."""
+    nesting_info: dict[ChildName, Dataset] = Field(
+        default_factory=dict, max_length=EXTRACT_CHILDREN_MAX
+    )
+    """Nesting info file for each child grid, keyed by child name, in namelist order."""
 
     namelist_overrides: dict[str, dict[str, t.Any]] = Field(default_factory=dict)
     """Mapping of ROMS namelist group to key/value overrides.

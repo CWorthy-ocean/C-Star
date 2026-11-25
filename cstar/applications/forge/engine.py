@@ -55,7 +55,7 @@ from cstar.applications.forge.namelist_model import (
 )
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import InvalidForgeBlueprintError
-from cstar.roms.namelist import release_ref_for_remote
+from cstar.roms.namelist import per_child_value, release_ref_for_remote
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -157,7 +157,7 @@ PROCESSING_FILLED_SECTIONS = (
 # keeps its stored value: the executor starts from the same snapshot
 # (``resolved_settings``), so leaving the leaf out of the overlay changes nothing.
 _COARSE_GRID_MODE = "forcing.surface[].coarse_grid_mode"
-# A parent's grid_kwargs_child key -> the extract_data leaf it fills. The resolver
+# A parent's child grid_kwargs key -> the extract_data leaf it fills. The resolver
 # requires all four: roms-tools fills a missing one from defaults it keeps private.
 CHILD_VERTICAL_KWARGS: dict[str, str] = {
     "N": "n_chd",
@@ -205,8 +205,12 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, dict[str, str | None]] = {
     "blk_frc": {"interp_frc": _COARSE_GRID_MODE},
     "bgc": {"interp_frc": _COARSE_GRID_MODE},
     "extract_data": {
-        leaf: f"domain.grid_kwargs_child.{kwarg}"
-        for kwarg, leaf in CHILD_VERTICAL_KWARGS.items()
+        **{
+            leaf: f"domain.children.<name>.grid_kwargs.{kwarg}"
+            for kwarg, leaf in CHILD_VERTICAL_KWARGS.items()
+        },
+        "extract_file": "domain.children",
+        "extract_root_name": "domain.children",
     },
     "cppdefs": {
         f"obc_{side}": f"domain.open_boundaries.{side}"
@@ -241,10 +245,13 @@ def known_derived_values(cfg: ForgeBlueprint) -> dict[str, dict[str, Any]]:
         for leaf, value in (("np_xi", part.n_procs_x), ("np_eta", part.n_procs_y)):
             if value is not None:
                 known["param"][leaf] = value
-    child = domain.grid_kwargs_child or {}
+    children = list(domain.children.values())
+    if names := list(domain.children):
+        known["extract_data"]["extract_root_name"] = per_child_value(names)
     for kwarg, leaf in CHILD_VERTICAL_KWARGS.items():
-        if kwarg in child:
-            known["extract_data"][leaf] = child[kwarg]
+        if children and all(kwarg in child.grid_kwargs for child in children):
+            values = [child.grid_kwargs[kwarg] for child in children]
+            known["extract_data"][leaf] = per_child_value(values)
     # Every surface step must agree on interp_frc (the generator refuses a mix), so
     # one item with an explicit mode fixes the value for all of them: "always"
     # writes the file on the coarse grid, "never" on the model grid. A BGC item
@@ -444,17 +451,9 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         resolved_settings=copy.deepcopy(cfg.model_settings),
         code_spec=cfg.code,
         grid_file=cfg.domain.grid_file,
+        children=dict(cfg.domain.children),
+        nest_period=cfg.domain.nest_period,
     )
-    # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
-    # block (which the ForgeBlueprint stores separately) — re-embed it.
-    if cfg.domain.grid_kwargs_child is not None:
-        child = dict(cfg.domain.grid_kwargs_child)
-        meta = dict(cfg.domain.metadata_child or {})
-        if cfg.domain.nesting_include_pressure_fluxes:
-            meta["include_pressure_fluxes"] = True
-        if meta:
-            child["metadata"] = meta
-        kwargs["grid_kwargs_child"] = child
     if cfg.domain.grid_kwargs_parent is not None:
         kwargs["grid_kwargs_parent"] = dict(cfg.domain.grid_kwargs_parent)
     return kwargs

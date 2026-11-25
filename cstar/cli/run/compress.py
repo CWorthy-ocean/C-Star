@@ -14,6 +14,7 @@ import subprocess
 import sys
 import typing as t
 from datetime import datetime
+from fnmatch import fnmatch
 from pathlib import Path
 
 import typer
@@ -151,7 +152,7 @@ def _input_like(file_type: FileType) -> bool:
         return any(kind in _INPUT_LIKE_KINDS for kind in file_type.kinds)
     name = Path(file_type.match.filename).name
     return any(
-        name.startswith(f"{stem}.")
+        fnmatch(name, f"{stem}.*")
         for stem, kind, _ in OUTPUT_STREAMS
         if kind in _INPUT_LIKE_KINDS
     )

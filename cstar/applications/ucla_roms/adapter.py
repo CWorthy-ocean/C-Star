@@ -26,6 +26,15 @@ from cstar.roms.input_dataset import (
 )
 
 
+class NestingInfoBlueprint(t.Protocol):
+    """The part of a ROMS-family blueprint the nesting info adapter reads."""
+
+    @property
+    def nesting_info(self) -> dict[str, models.Dataset]:
+        """Location of the nesting info input file of each child grid."""
+        ...
+
+
 class RomsInputsBlueprint(t.Protocol):
     """The parts of a ROMS-family blueprint (ucla_roms, ucla_roms_gpu) the input
     adapters read.
@@ -54,11 +63,6 @@ class RomsInputsBlueprint(t.Protocol):
     @property
     def cdr_forcing(self) -> models.Dataset | None:
         """Location of the CDR input file, if any."""
-        ...
-
-    @property
-    def nesting_info(self) -> models.Dataset | None:
-        """Location of the nesting info input file, if any."""
         ...
 
     @property
@@ -304,24 +308,26 @@ class CdrForcingAdapter(ModelAdapter[RomsInputsBlueprint, ROMSCdrForcing]):
         )
 
 
-class NestingInfoAdapter(ModelAdapter[RomsInputsBlueprint, ROMSNestingInfo]):
-    """Create a ROMSNestingInfo from a blueprint model."""
+class NestingInfoAdapter(
+    ModelAdapter[NestingInfoBlueprint, dict[str, ROMSNestingInfo]]
+):
+    """Create a ROMSNestingInfo for each child grid from a blueprint model."""
 
     @t.override
-    def adapt(self) -> ROMSNestingInfo | None:
-        if self.model.nesting_info is None:
-            return None
-
-        return ROMSNestingInfo(
-            location=str(self.model.nesting_info.data[0].location),
-            file_hash=(
-                self.model.nesting_info.data[0].hash
-                if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-        )
+    def adapt(self) -> dict[str, ROMSNestingInfo]:
+        return {
+            name: ROMSNestingInfo(
+                location=str(dataset.data[0].location),
+                file_hash=(
+                    dataset.data[0].hash
+                    if isinstance(dataset.data[0], models.VersionedResource)
+                    else None
+                ),
+                start_date=None,
+                end_date=None,
+            )
+            for name, dataset in self.model.nesting_info.items()
+        }
 
 
 class ForcingCorrectionAdapter(

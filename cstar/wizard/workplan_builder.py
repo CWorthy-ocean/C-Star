@@ -88,6 +88,7 @@ from cstar.orchestration.serialization import (
 )
 from cstar.orchestration.transforms import PLACEHOLDER_RE, mustache
 from cstar.roms.namelist import namelist_schema_for_ref
+from cstar.roms.outputs import child_name_problems
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
 from cstar.wizard.ui import components
@@ -864,6 +865,11 @@ class _StepPane:
         self.add_nest_btn = W.Button(
             description=_caption("add_source", "Add boundary source"), icon="plus"
         )
+        self.nest_child_name = W.Text(
+            placeholder="child name; blank when the parent has one child",
+            layout=W.Layout(width="420px"),
+        )
+        self.nest_child_status = W.HTML("")
         self.cs_kind = W.Dropdown(
             options=[(k, k) for k in (_KIND_NONE, _KIND_STEP, _KIND_PATH)],
             value=_KIND_NONE,
@@ -910,6 +916,7 @@ class _StepPane:
             self.cont_path,
             self.cont_timestamp,
             self.nest_kind,
+            self.nest_child_name,
             self.cs_kind,
             self.max_walltime,
             self.queue_name,
@@ -993,6 +1000,8 @@ class _StepPane:
                     row("cont_timestamp", self.cont_timestamp),
                     row("nest_kind", self.nest_kind),
                     W.VBox([self.nest_box, self.add_nest_btn]),
+                    row("nest_child_name", self.nest_child_name),
+                    self.nest_child_status,
                     row("cs_kind", self.cs_kind),
                     W.VBox([self.cs_box, self.add_cs_btn]),
                     self.directive_note,
@@ -1269,8 +1278,18 @@ class _StepPane:
         _show(self.cont_timestamp, has_cont and cont != _KIND_NONE)
         self._sync_restarts(has_cont)
         _show(self.nest_kind, has_nest)
-        _show(self.nest_box, has_nest and self.nest_kind.value != _KIND_NONE)
-        _show(self.add_nest_btn, has_nest and self.nest_kind.value != _KIND_NONE)
+        shown = has_nest and self.nest_kind.value != _KIND_NONE
+        _show(self.nest_box, shown)
+        _show(self.add_nest_btn, shown)
+        _show(self.nest_child_name, shown)
+        _show(self.nest_child_status, shown)
+        child = self.nest_child_name.value.strip()
+        problems = child_name_problems(child) if child else []
+        self.nest_child_status.value = (
+            f"<span class='forge-msg-err'>{_esc('; '.join(problems))}</span>"
+            if problems
+            else ""
+        )
         _show(self.cs_kind, has_cs)
         _show(self.cs_box, has_cs and self.cs_kind.value != _KIND_NONE)
         _show(self.add_cs_btn, has_cs and self.cs_kind.value != _KIND_NONE)
@@ -1653,13 +1672,18 @@ class _StepPane:
             values = [v for v in values if v]
             if not values:
                 raise ValueError("add at least one boundary source for nest-from")
-            directives[NestingDirective.key()] = {
+            nest = {
                 (
                     NestingDirective.KEY_STEP
                     if self.nest_kind.value == _KIND_STEP
                     else NestingDirective.KEY_PATH
                 ): NestingDirective.SOURCE_DELIMITER.join(values)
             }
+            if child := self.nest_child_name.value.strip():
+                if problems := child_name_problems(child):
+                    raise ValueError("; ".join(problems))
+                nest[NestingDirective.KEY_CHILD_NAME] = child
+            directives[NestingDirective.key()] = nest
         if self.cs_kind.value != _KIND_NONE:
             values = [str(r.widget.value).strip() for r in self.cs_rows]
             values = [v for v in values if v]
@@ -1826,6 +1850,7 @@ class _StepPane:
         self._passthrough_directives = {}
         self.cont_kind.value = self.nest_kind.value = self.cs_kind.value = _KIND_NONE
         self.cont_path.value = self.cont_timestamp.value = ""
+        self.nest_child_name.value = ""
         self.nest_rows, self.cs_rows = [], []
         self.nest_box.children = self.cs_box.children = []
         cont = directives.pop(ContinuanceDirective.key(), None)
@@ -1859,11 +1884,14 @@ class _StepPane:
             step_key, path_key = NestingDirective.KEY_STEP, NestingDirective.KEY_PATH
             if (
                 isinstance(nest, dict)
-                and len(nest) == 1
-                and (step_key in nest or path_key in nest)
+                and (step_key in nest) != (path_key in nest)
+                and set(nest) <= {step_key, path_key, NestingDirective.KEY_CHILD_NAME}
             ):
                 kind = _KIND_STEP if step_key in nest else _KIND_PATH
                 self.nest_kind.value = kind
+                self.nest_child_name.value = str(
+                    nest.get(NestingDirective.KEY_CHILD_NAME, "")
+                )
                 for token in str(
                     nest[step_key if kind == _KIND_STEP else path_key]
                 ).split(NestingDirective.SOURCE_DELIMITER):

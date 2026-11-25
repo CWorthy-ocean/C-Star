@@ -69,6 +69,22 @@ the last time step. Before ROMS starts, the step stops with an error naming the
 files if their records leave a gap or do not cover its ``start_date`` to
 ``end_date``; list every parent segment, e.g. ``step: parent_1;parent_2;parent_3``.
 
+A parent with several child grids writes boundary files for each one, named
+``<child name>_bry.<timestamp>.nc``. Use ``child_name`` to pick the child that
+this step is nested in:
+
+.. code-block:: yaml
+
+   steps:
+     - name: salish_sea
+       directives:
+         nest-from:
+           step: parent
+           child_name: salish-sea
+
+You can leave ``child_name`` out when the parent wrote boundary data for one
+child.
+
 
 
 carbonate-sensitivity-from

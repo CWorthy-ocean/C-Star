@@ -2016,7 +2016,7 @@ def stub_romssimulation(
             roms_carbonate_sensitivity(),
         ],
         cdr_forcing=roms_cdr_forcing(),
-        nesting_info=roms_nesting_info(),
+        nesting_info={"child": roms_nesting_info()},
     )
 
     return sim
@@ -2102,8 +2102,10 @@ def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, A
             "file_hash": sim.cdr_forcing.source.file_hash,
         },
         "nesting_info": {
-            "location": sim.nesting_info.source.location,
-            "file_hash": sim.nesting_info.source.file_hash,
+            "child": {
+                "location": sim.nesting_info["child"].source.location,
+                "file_hash": sim.nesting_info["child"].source.file_hash,
+            },
         },
     }
     return return_dict
@@ -2201,8 +2203,8 @@ def patch_romssimulation_init_sourcedata(
 
     assert sim.nesting_info
     mock_nesting_info_sourcedata = mocksourcedata_remote_file(
-        location=sim.nesting_info.source.location,
-        identifier=sim.nesting_info.source.identifier,
+        location=sim.nesting_info["child"].source.location,
+        identifier=sim.nesting_info["child"].source.identifier,
     )
 
     # AdditionalCode SourceData mocks

@@ -1316,8 +1316,7 @@ class TestGridKwargsVerbose:
             grid_name=args["grid_name"],
             grid_kwargs={**args["grid_kwargs"], "verbose": True},
             grid_kwargs_parent={**self._PARENT, "verbose": True},
-            grid_kwargs_child={**self._CHILD, "verbose": True},
-            metadata_child={"period": 3600.0},
+            children={"child": {"grid_kwargs": {**self._CHILD, "verbose": True}}},
             open_boundaries=args["open_boundaries"].model_dump(),
             partitioning=args["partitioning"].model_dump(),
             start_date=args["start_date"],
@@ -3716,7 +3715,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_ucla_roms_blueprint_elements.forcing = MagicMock()
         mock_ucla_roms_blueprint_elements.forcing.model_dump.return_value = {}
         mock_ucla_roms_blueprint_elements.cdr_forcing = None
-        mock_ucla_roms_blueprint_elements.nesting_info = nesting_dataset
+        mock_ucla_roms_blueprint_elements.nesting_info = {"child": nesting_dataset}
 
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (
@@ -3736,8 +3735,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             # blueprint is built via model_construct (no validation), so nesting_info
             # is the raw dict from model_dump(), not a Dataset instance
             nesting_info = builder.ucla_roms_blueprint.nesting_info
-            assert nesting_info is not None
-            assert nesting_info["data"][0]["location"] == str(nesting_file)
+            assert nesting_info["child"]["data"][0]["location"] == str(nesting_file)
 
     @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     def test_generate_inputs_nesting_info_none_in_ucla_roms_blueprint_dict(
@@ -3746,7 +3744,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         minimal_cstar_spec_builder_args,
         tmp_path,
     ):
-        """Test that nesting_info is None in blueprint when elements.nesting_info is None."""
+        """Test that nesting_info is empty in blueprint when elements.nesting_info is empty."""
         mock_ucla_roms_blueprint_elements = MagicMock()
         mock_ucla_roms_blueprint_elements.grid = MagicMock()
         mock_ucla_roms_blueprint_elements.grid.model_dump.return_value = {}
@@ -3755,7 +3753,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_ucla_roms_blueprint_elements.forcing = MagicMock()
         mock_ucla_roms_blueprint_elements.forcing.model_dump.return_value = {}
         mock_ucla_roms_blueprint_elements.cdr_forcing = None
-        mock_ucla_roms_blueprint_elements.nesting_info = None
+        mock_ucla_roms_blueprint_elements.nesting_info = {}
 
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (
@@ -3771,7 +3769,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
                 builder.generate_inputs(clobber=True, test=False)
 
-            assert builder.ucla_roms_blueprint.nesting_info is None
+            assert builder.ucla_roms_blueprint.nesting_info == {}
 
 
 class TestForgeExecutorGetDsComprehensive:
@@ -3984,6 +3982,19 @@ class TestGoldenNamelist:
         "north": True,
         "west": False,
     }
+    _CHILD_KWARGS: ClassVar[dict] = dict(
+        nx=4,
+        ny=4,
+        size_x=100,
+        size_y=100,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
     _PARTITIONING: ClassVar[dict] = {"n_procs_x": 1, "n_procs_y": 1}
     _CDR_FORCING: ClassVar[dict] = {"enabled": True}
     # Real roms-tools CDRForcing kwargs for the bgc_mode "cdr_lite" case: one OAE
@@ -4065,6 +4076,8 @@ class TestGoldenNamelist:
         carbonate_sensitivity: Any = None,
         capture: dict[str, Any] | None = None,
         run_time_overrides: dict[str, Any] | None = None,
+        children: dict[str, Any] | None = None,
+        grid_kwargs_parent: dict[str, Any] | None = None,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
         ``generate_inputs()`` -> ``configure_build()`` chain against ``model_path``
@@ -4093,7 +4106,9 @@ class TestGoldenNamelist:
         receives the run's objects -- ``cfg`` (the resolved ForgeBlueprint),
         ``builder`` (the ForgeExecutor) and ``emitted`` (the ucla_roms blueprint
         ``generate_inputs`` returned) -- for assertions beyond the namelist.
-        ``run_time_overrides`` is handed to ``build_forge_blueprint`` as is.
+        ``run_time_overrides``, ``children`` and ``grid_kwargs_parent`` are handed
+        to ``build_forge_blueprint`` as is; each grid built from their kwargs is a
+        mock of those dimensions.
         """
         mode_kwargs: dict[str, Any] = (
             {
@@ -4117,6 +4132,8 @@ class TestGoldenNamelist:
             output_settings=_OUTPUT_SETTINGS,
             carbonate_sensitivity=carbonate_sensitivity,
             run_time_overrides=run_time_overrides,
+            children=children,
+            grid_kwargs_parent=grid_kwargs_parent,
             **mode_kwargs,
             # Explicit False (matches cson_roms-marbl_v0.1's own default) so both
             # golden cases stay decoupled from PIO: roms-marbl-0.5-default bakes in
@@ -4139,13 +4156,27 @@ class TestGoldenNamelist:
         grid_mock.save.side_effect = self._touch_save
         mock_grid.return_value = grid_mock
 
+        def _nested_grid(**kwargs):
+            nested = _create_grid_mock()
+            for key in ("nx", "ny", "N", "theta_s", "theta_b", "hc"):
+                setattr(nested, key, kwargs[key])
+            nested.save.side_effect = self._touch_save
+            return nested
+
+        if children or grid_kwargs_parent:
+            mock_grid.side_effect = _nested_grid
+
         run_dir = tmp_path / "run"
         host = HostPaths(
             working_dir=run_dir,
             source_data_cache=run_dir,
             system="test",
         )
-        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        with patch(
+            "cstar.applications.forge.executor.rt.align_grids",
+            side_effect=lambda _parent, grid, **_kw: grid,
+        ):
+            builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         builder.src_data = self._mock_source_data(tmp_path)
 
         with (
@@ -4177,6 +4208,10 @@ class TestGoldenNamelist:
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
+            patch(
+                "cstar.applications.forge.input_generator.rt.make_nesting_info",
+                side_effect=lambda _grid, _child, path, **_kw: Path(path).touch(),
+            ) as mock_nesting,
         ):
             mock_ic_instance = MagicMock()
             mock_ic_instance.save.side_effect = self._touch_save_list
@@ -4228,7 +4263,9 @@ class TestGoldenNamelist:
             emitted = builder.generate_inputs(clobber=True, use_dask=False, test=False)
 
         if capture is not None:
-            capture.update(cfg=cfg, builder=builder, emitted=emitted)
+            capture.update(
+                cfg=cfg, builder=builder, emitted=emitted, nesting=mock_nesting
+            )
 
         # The §3a fix's whole point: these generation-derived values must survive
         # configure_build's overlay, not get reverted to resolver-time placeholders.
@@ -5135,6 +5172,74 @@ class TestGoldenNamelist:
         assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation
         assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
         assert isinstance(nml.extract_data_settings.extract_file, str)
+
+    def test_golden_namelist_test_tiny_roms0120_two_children(self, mock_grid, tmp_path):
+        """Two named children on the 0.12.0 tier: every per-child key of
+        ``&extract_data_settings`` is a list in child order (``output_period_extract``
+        and ``nrpf_extract`` are shared), and the namelist reads back through the
+        0.12 schema.
+        """
+        capture: dict[str, Any] = {}
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_PATH_ROMS0120,
+            "golden_namelist_test-tiny-roms0120-two-children.nml",
+            capture=capture,
+            children={
+                "monterey": {
+                    "grid_kwargs": {**self._CHILD_KWARGS, "theta_s": 4.0},
+                    "include_pressure_fluxes": True,
+                },
+                "salish-sea": {"grid_kwargs": {**self._CHILD_KWARGS, "hc": 300.0}},
+            },
+        )
+        name = capture["cfg"].name
+
+        calls = capture["nesting"].call_args_list
+        assert [c.kwargs["prefix"] for c in calls] == ["monterey", "salish-sea"]
+        assert [c.kwargs["include_pressure_fluxes"] for c in calls] == [True, False]
+        assert list(capture["emitted"].nesting_info) == ["monterey", "salish-sea"]
+
+        namelist_path = tmp_path / "golden_roms0120_two_children.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_12_0.read(namelist_path)
+        extract = nml.extract_data_settings
+        assert extract.do_extract is True
+        assert [Path(f).name for f in extract.extract_file] == [
+            netcdf_basename(name, "nesting_monterey"),
+            netcdf_basename(name, "nesting_salish-sea"),
+        ]
+        assert [Path(f).name for f in extract.extract_root_name] == [
+            "monterey",
+            "salish-sea",
+        ]
+
+    def test_middle_grid_is_child_and_parent(self, mock_grid, tmp_path):
+        capture: dict[str, Any] = {}
+        self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_PATH_ROMS0120,
+            None,
+            capture=capture,
+            grid_kwargs_parent=self._CHILD_KWARGS,
+            children={"inner": {"grid_kwargs": self._CHILD_KWARGS}},
+        )
+
+        builder = capture["builder"]
+        assert builder.grid_parent is not None
+        assert list(builder.grid_children) == ["inner"]
+        names = sorted(p.name for p in builder.input_data_dir.glob("*.nc"))
+        name = capture["cfg"].name
+        assert netcdf_basename(name, "grid") in names
+        assert netcdf_basename(name, "grid_child-inner") in names
+        assert netcdf_basename(name, "nesting_inner") in names
+        assert not [n for n in names if "boundary" in n]
+        assert list(capture["emitted"].nesting_info) == ["inner"]
+        extract = builder._settings_run_time["extract_data"]
+        assert extract["do_extract"] is True
+        assert extract["extract_root_name"] == "inner"
 
     def test_golden_namelist_test_tiny_roms0130(self, mock_grid, tmp_path):
         """Same test-tiny domain/forcing/output, but resolved against the

@@ -5,7 +5,7 @@ description: 'Tiny nesting example, parent: 24x24 cells over 400 km north-west o
 application: forge
 state: notset
 schema_version: 1.1.0
-forge_blueprint_version: 11
+forge_blueprint_version: 12
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-03T07:00:00'
@@ -38,22 +38,22 @@ domain:
     auto_tiling: false
     n_cores: null
   grid_kwargs_parent: null
-  grid_kwargs_child:
-    nx: 24
-    ny: 24
-    size_x: 100.0
-    size_y: 100.0
-    center_lon: -6.5
-    center_lat: 60.4
-    N: 10
-    rot: 0.0
-    theta_s: 5.0
-    theta_b: 2.0
-    hc: 300.0
-    hmin: 5.0
-  metadata_child:
-    period: 3600.0
-  nesting_include_pressure_fluxes: false
+  nest_period: 3600.0
+  children:
+    child:
+      grid_kwargs:
+        nx: 24
+        ny: 24
+        size_x: 100.0
+        size_y: 100.0
+        center_lon: -6.5
+        center_lat: 60.4
+        N: 10
+        rot: 0.0
+        theta_s: 5.0
+        theta_b: 2.0
+        hc: 300.0
+        hmin: 5.0
   v_sponge: 1666.6666666666667
   dt: 60.0
   grid_file: null
@@ -367,7 +367,7 @@ model_settings:
     nz_chd: 50
   extract_data:
     do_extract: true
-    extract_file: nesting.nc
+    extract_file: nest-tiny-parent_nesting_child.nc
     nrpf: 6
     n_chd: 10
     theta_s_chd: 5.0
@@ -551,5 +551,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:6cf3725ba2504ee0b30298db6b0dd638b9cfee70b8e106bfae1515c408a329ff
+  content_hash: bp-v2:d45e3ae70c9768b9f445f651e5064fc9857af3855c92aff2a738618f857f6b72
   notes: null

@@ -496,7 +496,7 @@ class _InputsOnly:
     initial_conditions: Dataset
     forcing: ForcingConfiguration
     cdr_forcing: Dataset | None
-    nesting_info: Dataset | None
+    nesting_info: dict[str, Dataset]
     processor_grid: tuple[int | None, int | None]
 
 
@@ -772,3 +772,23 @@ class TestCodebaseLocations:
 
         assert str(bp.code.run_time.location) == str(tmp_path)
         assert str(bp.code.compile_time.location) == str(tmp_path)
+
+
+class TestNestingInfoChildren:
+    @pytest.fixture
+    def dataset(self) -> dict[str, Any]:
+        return {"data": [{"location": "https://example.com/nest.nc"}]}
+
+    @pytest.mark.parametrize("name", ["salish_sea", "a" * 21])
+    def test_bad_child_name_rejected(self, complete_blueprint_dict, dataset, name):
+        complete_blueprint_dict["nesting_info"] = {name: dataset}
+        with pytest.raises(ValidationError, match="child name"):
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_two_children_validate(self, complete_blueprint_dict, dataset):
+        complete_blueprint_dict["nesting_info"] = {
+            "monterey": dataset,
+            "salish": dataset,
+        }
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
+        assert list(bp.nesting_info) == ["monterey", "salish"]

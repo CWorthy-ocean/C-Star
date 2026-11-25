@@ -59,7 +59,10 @@ Domain and grid
    attach a pre-made grid file instead of generating one. Open boundaries,
    the sponge viscosity and the time step are derived from the grid unless
    you override them, and an optional nesting section relates this grid to a
-   parent or child domain.
+   parent domain or to its child grids. With *This grid is a parent* on, each
+   child grid is a row with its own name, grid and topography; **+ Add child
+   grid** adds another, up to eight. The name becomes the child's
+   ``<name>_bry.*.nc`` boundary files and its ``child_name`` in ``nest-from``.
 
 .. figure:: ../images/wizard-domain.png
    :alt: The Domain and grid section: grid geometry, vertical coordinate, bathymetry, derived values and nesting
@@ -113,8 +116,8 @@ Output
 
    Two streams depend on nesting. **Child-grid boundary extraction**
    (``extract_data``) appears only while *This grid is a parent* is on in the
-   Grid section; there only the records per file and the extraction root name
-   are edited here, while the child grid, extraction period and file come from
+   Grid section; there only the records per file are edited here, while the
+   child grids, their names, the extraction period and the files come from
    the nesting options. **Upscaled output** (``upscale_output``) is a main
    stream while *This is a child grid* is on, because its ``_uscl`` files feed
    the parent's upscaled-CDR run (see the

@@ -48,7 +48,23 @@ blueprint has these:
 ``cdr_forcing``
    An optional carbon dioxide removal forcing file.
 ``nesting_info``
-   Optional: how this grid relates to a parent or child grid.
+   Optional: the nesting info file of each child grid of this run, keyed by
+   the child's name. A child name is letters, digits and ``-``, starts with a
+   letter and has at most 20 characters. ROMS writes
+   ``<name>_bry.<timestamp>.nc`` boundary files for each child. The children
+   are listed in the order of the per-child entries (``n_chd`` and the
+   others) in the namelist's ``extract_data_settings``; Forge writes both.
+
+   .. code-block:: yaml
+
+      nesting_info:
+        monterey:
+          data:
+            - location: monterey_nesting.nc
+        salish-sea:
+          data:
+            - location: salish-sea_nesting.nc
+
 ``partitioning``
    The processor layout, ``n_procs_x`` by ``n_procs_y``, and whether to build
    with ParallelIO (``use_pio``). The number of MPI ranks is the product.

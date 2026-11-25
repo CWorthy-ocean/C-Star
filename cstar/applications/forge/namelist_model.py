@@ -78,6 +78,8 @@ from cstar.roms.namelist import (
     TracerDiff2,
     UbindSettings,
     VerticalMixingSettings,
+    extract_children_problems,
+    extract_root_name_problems,
     format_roms_version,
     is_commit_hash,
     namelist_schema_for_ref,
@@ -1089,6 +1091,37 @@ class ExtractDataCfg(_SettingsSection):
     hc_chd: float
     extract_period: float = Field(serialization_alias="output_period_extract")
     extract_root_name: str = "child"
+
+    @model_validator(mode="after")
+    def _check_root_name(self) -> ExtractDataCfg:
+        if self.do_extract and (
+            problems := extract_root_name_problems(self.extract_root_name)
+        ):
+            raise ValueError("; ".join(problems))
+        return self
+
+
+class ExtractDataCfgV0_12_0(_SettingsSection):
+    """``extract_data`` settings for ucla-roms >= 0.12.0: one entry per child in
+    each per-child key (``extract_file``, ``n_chd``, ``theta_s_chd``,
+    ``theta_b_chd``, ``hc_chd``, ``extract_root_name``), a bare value for one child.
+    """
+
+    do_extract: bool
+    extract_file: str | list[str]
+    nrpf: int = Field(serialization_alias="nrpf_extract")
+    n_chd: int | list[int]
+    theta_s_chd: float | list[float]
+    theta_b_chd: float | list[float]
+    hc_chd: float | list[float]
+    extract_period: float = Field(serialization_alias="output_period_extract")
+    extract_root_name: str | list[str] = "child"
+
+    @model_validator(mode="after")
+    def _check_children(self) -> ExtractDataCfgV0_12_0:
+        if problems := extract_children_problems(self.model_dump(), self.do_extract):
+            raise ValueError("; ".join(problems))
+        return self
 
 
 class SpongeTuneCfg(_SettingsSection):
@@ -2940,12 +2973,12 @@ class RunTimeSettingsV0_12_0(RunTimeSettingsV0_11_0):
     ``cdr_lite`` as :class:`CdrLiteCfgV0_12_0`, which adds
     ``cdr_carbonate_sensitivity_time_interpolation`` (``&CDR_LITE_SETTINGS``,
     ucla-roms PR #396) with its default, so a blueprint saved before it existed
-    still validates. ``extract_data`` keeps one child: 0.12.0 also reads up to
-    8 (PR #395), which C-Star's namelist schema accepts but Forge does not
-    generate.
+    still validates. Types ``extract_data`` as :class:`ExtractDataCfgV0_12_0`,
+    which takes up to 8 children (PR #395).
     """
 
     cdr_lite: CdrLiteCfgV0_12_0 = Field(default_factory=CdrLiteCfgV0_12_0)
+    extract_data: ExtractDataCfgV0_12_0
 
 
 class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):

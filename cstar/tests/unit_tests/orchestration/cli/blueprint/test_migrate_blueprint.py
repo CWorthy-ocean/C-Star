@@ -247,7 +247,7 @@ def test_blueprint_migrate_compatible_earlier_application_name_untouched(
 
     assert result.exit_code == 0
     output = " ".join(result.stdout.split())
-    assert f"is {APP_ROMS} schema 3.0.0" in output
+    assert f"is {APP_ROMS} schema 4.0.0" in output
     assert "nothing to migrate" in output
     assert blueprint_path.read_bytes() == original
     assert set(blueprint_path.parent.glob("*")) == siblings

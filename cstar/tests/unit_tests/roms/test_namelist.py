@@ -16,6 +16,7 @@ from cstar.roms.namelist import (
     CdrLiteOutputSettings,
     CdrLiteSettings,
     CdrLiteSettingsV0_12_0,
+    ExtractDataSettings,
     ExtractDataSettingsV0_12_0,
     ImplicitFsSettings,
     MarblBiogeochemistrySettingsV0_11_0,
@@ -1062,7 +1063,7 @@ _TWO_CHILDREN = {
     "theta_s_chd": [5.0, 6.0],
     "theta_b_chd": [2.0, 3.0],
     "hc_chd": [250.0, 300.0],
-    "extract_root_name": ["child_a", "child_b"],
+    "extract_root_name": ["child-a", "child-b"],
 }
 
 
@@ -1079,7 +1080,7 @@ def test_extract_v0_12_0_accepts_one_entry_per_child(tmp_path):
     nml.write(out)
     reread = RomsNamelistV0_12_0.read(out)
     assert reread.extract_data_settings.n_chd == [90, 50]
-    assert reread.extract_data_settings.extract_root_name == ["child_a", "child_b"]
+    assert reread.extract_data_settings.extract_root_name == ["child-a", "child-b"]
     assert reread == nml
 
 
@@ -1413,3 +1414,33 @@ def test_param_settings_v0_4_0_rejects_negative_cdr_tracer_counts(field):
     """`nt_cdr_oae`/`nt_cdr_dor` must be `>= 0`."""
     with pytest.raises(ValidationError):
         ParamSettingsV0_4_0(**_PARAM_SETTINGS_KWARGS, **{field: -1})
+
+
+@pytest.mark.parametrize("root", ["out/salish_sea", "out/" + "x" * 21])
+def test_extract_root_name_rejects_bad_child_names(root):
+    with pytest.raises(ValidationError, match=r"extract_root_name entry 0 \("):
+        ExtractDataSettingsV0_12_0(**{**_TWO_CHILDREN, "extract_root_name": root})
+    with pytest.raises(ValidationError, match=r"extract_root_name entry 1 \("):
+        ExtractDataSettingsV0_12_0(
+            **{**_TWO_CHILDREN, "extract_root_name": ["out/ok", root]}
+        )
+    with pytest.raises(ValidationError, match=r"extract_root_name entry 0 \("):
+        ExtractDataSettings(
+            do_extract=True,
+            output_period_extract=3600.0,
+            nrpf_extract=24,
+            extract_file="a.nc",
+            n_chd=90,
+            theta_s_chd=5.0,
+            theta_b_chd=2.0,
+            hc_chd=250.0,
+            extract_root_name=root,
+        )
+
+
+def test_extract_root_name_accepts_valid_children():
+    roots = ["out/monterey", "out/salish-sea"]
+    settings = ExtractDataSettingsV0_12_0(
+        **{**_TWO_CHILDREN, "extract_root_name": roots}
+    )
+    assert settings.extract_root_name == roots

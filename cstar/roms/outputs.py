@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     PrivateAttr,
     ValidationInfo,
@@ -27,11 +28,44 @@ if t.TYPE_CHECKING:
 OUTPUT_ROOT_NAME: t.Final[str] = "output"
 """The root ROMS prefixes its output files with: `output_<stream>.<timestamp>.nc`."""
 
-EXTRACT_ROOT_NAME: t.Final[str] = "child"
-"""The root ROMS prefixes a boundary extraction with: `child_bry.<timestamp>.nc`."""
-
 EXTRACT_ROLE: t.Final[str] = "child"
 """The role a boundary extraction's products are recorded under: they force the child grid."""
+
+DEFAULT_CHILD_NAME: t.Final[str] = "child"
+"""The name given to the one child grid of a blueprint written before children had names."""
+
+CHILD_NAME_MAX: t.Final[int] = 20
+"""The longest child name ROMS keeps (`set` in ucla-roms `extract_data.F90`)."""
+
+EXTRACT_CHILDREN_MAX: t.Final[int] = 8
+"""The most child grids ucla-roms >= 0.12.0 extracts for (`max_extract_chd` in `param.F90`)."""
+
+_CHILD_NAME_PATTERN: t.Final[re.Pattern[str]] = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+
+
+def child_name_problems(name: str) -> list[str]:
+    reasons = []
+    if "_" in name:
+        reasons.append("contains '_', where ROMS ends a child's name")
+    if len(name) > CHILD_NAME_MAX:
+        reasons.append(f"is {len(name)} characters long")
+    if not reasons and not _CHILD_NAME_PATTERN.fullmatch(name):
+        reasons.append("does not start with a letter or has other characters")
+    if not reasons:
+        return []
+    return [
+        f"child name {name!r} {' and '.join(reasons)}; use a letter, then letters, "
+        f"digits and '-', at most {CHILD_NAME_MAX} characters"
+    ]
+
+
+def _valid_child_name(name: str) -> str:
+    if problems := child_name_problems(name):
+        raise ValueError("; ".join(problems))
+    return name
+
+
+ChildName = t.Annotated[str, AfterValidator(_valid_child_name)]
 
 UPSCALING_SUFFIX: t.Final[str] = "_uscl"
 """The suffix of the ROMS stream holding boundary tracer fluxes, read by the upscaler."""
@@ -736,7 +770,7 @@ OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = 
     (f"{OUTPUT_ROOT_NAME}_his", ArtifactKind.history, {}),
     (f"{OUTPUT_ROOT_NAME}_avg", ArtifactKind.average, {}),
     (
-        f"{EXTRACT_ROOT_NAME}{BoundaryFile.SUFFIX}",
+        f"*{BoundaryFile.SUFFIX}",
         ArtifactKind.boundary_forcing,
         {"role": EXTRACT_ROLE},
     ),
@@ -749,13 +783,14 @@ OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = 
     (f"{OUTPUT_ROOT_NAME}{CDR_OUTPUT_SUFFIX}", ArtifactKind.cdr_output, {}),
 )
 """The ROMS output files that have a kind of their own, by name stem
-(`<root>_<stream>`), with the metadata they start with. A stream another step or
+(`<root>_<stream>`, a glob for the boundary extraction of any child), with the
+metadata they start with. A stream another step or
 directive consumes is a kind, so the consumer can find it by kind; every other
 stream is `output`. The stems are spelled from the consumers' own suffixes."""
 
 OUTPUT_FILE_PATTERN: t.Final[re.Pattern[str]] = re.compile(
-    rf"^(?P<stem>(?:{OUTPUT_ROOT_NAME}|{EXTRACT_ROOT_NAME})_(?P<stream>.+))"
+    rf"^(?P<stem>(?:{OUTPUT_ROOT_NAME}|{_CHILD_NAME_PATTERN.pattern})_(?P<stream>.+))"
     r"\.(?P<timestamp>\d{14})\.nc$"
 )
 """The name ROMS gives a joined output file, `<root>_<stream>.<14-digit timestamp>.nc`:
-the root is `output`, or `child` for a boundary extraction."""
+the root is `output`, or a child name for a boundary extraction."""

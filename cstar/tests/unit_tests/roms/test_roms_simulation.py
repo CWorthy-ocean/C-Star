@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import pickle
@@ -58,6 +59,7 @@ from cstar.roms.input_dataset import (
     missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import (
+    ExtractDataSettingsV0_12_0,
     RomsNamelist,
     RomsNamelistBase,
     RomsNamelistV0_5_0,
@@ -75,7 +77,12 @@ from cstar.roms.precheck import (
     MAX_OUTPUT_ROOT_NAME_LENGTH,
     NamelistConsistencyError,
 )
-from cstar.roms.simulation import IOLayout, ROMSSimulation, _join_workers
+from cstar.roms.simulation import (
+    IOLayout,
+    ROMSSimulation,
+    _extract_data_join_wildcard,
+    _join_workers,
+)
 from cstar.system.manager import (
     DOCS_MACHINES_URL,
     SystemContext,
@@ -242,9 +249,9 @@ class TestROMSSimulationInitialization:
         assert sim.cdr_forcing.source.location == "http://my.files/cdr.nc"
         assert sim.cdr_forcing.source.file_hash == "542"
 
-        assert isinstance(sim.nesting_info, ROMSNestingInfo)
-        assert sim.nesting_info.source.location == "http://my.files/nesting.nc"
-        assert sim.nesting_info.source.file_hash == "543"
+        assert isinstance(sim.nesting_info["child"], ROMSNestingInfo)
+        assert sim.nesting_info["child"].source.location == "http://my.files/nesting.nc"
+        assert sim.nesting_info["child"].source.file_hash == "543"
 
         assert isinstance(sim.boundary_forcing, list)
         assert [isinstance(x, ROMSBoundaryForcing) for x in sim.boundary_forcing]
@@ -568,8 +575,8 @@ class TestROMSSimulationInitialization:
         fake_nesting_path = Path("/staged/input_datasets/nesting.nc")
         sim.cdr_forcing._working_copy = mock.Mock()
         sim.cdr_forcing._working_copy.path = fake_cdr_path
-        sim.nesting_info._working_copy = mock.Mock()
-        sim.nesting_info._working_copy.path = fake_nesting_path
+        sim.nesting_info["child"]._working_copy = mock.Mock()
+        sim.nesting_info["child"]._working_copy.path = fake_nesting_path
 
         tested_settings = sim.roms_runtime_settings
 
@@ -631,7 +638,7 @@ class TestROMSSimulationInitialization:
 
         # Test with no nesting info — extract_file keeps the namelist's value,
         # but extract_root_name is still overridden (it is set unconditionally)
-        sim.nesting_info = None
+        sim.nesting_info = {}
         result_no_nesting = sim.roms_runtime_settings
         assert result_no_nesting.extract_data_settings.extract_file == "sample_edata.nc"
         assert (
@@ -798,6 +805,128 @@ class TestROMSSimulationInitialization:
             _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
         )
         return sim
+
+    @pytest.fixture
+    def namelist_mocks(self):
+        with (
+            mock.patch("cstar.roms.simulation.namelist_schema_for_ref") as schema_ref,
+            mock.patch.object(
+                ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock
+            ) as forcing,
+            mock.patch.object(
+                ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+            ) as ini,
+            mock.patch.object(
+                ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock
+            ) as grid,
+        ):
+            yield grid, ini, forcing, schema_ref
+
+    @staticmethod
+    def _two_child_namelist(_):
+        nml = RomsNamelistV0_12_0.read(EXAMPLE_NAMELIST_V0_12_0)
+        nml.extract_data_settings = ExtractDataSettingsV0_12_0(
+            do_extract=True,
+            output_period_extract=3600.0,
+            nrpf_extract=24,
+            extract_file=["a.nc", "b.nc"],
+            n_chd=[90, 50],
+            theta_s_chd=[5.0, 6.0],
+            theta_b_chd=[2.0, 3.0],
+            hc_chd=[250.0, 300.0],
+        )
+        return nml
+
+    @staticmethod
+    def _stage_children(sim, names):
+        children = {}
+        for name in names:
+            child = copy.copy(sim.nesting_info["child"])
+            child._working_copy = mock.Mock()
+            child._working_copy.path = Path(f"/staged/{name}.nc")
+            children[name] = child
+        sim.nesting_info = children
+
+    def test_runtime_settings_write_each_child_in_order(
+        self, stub_romssimulation, stageddatacollection_remote_files, namelist_mocks
+    ):
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            *namelist_mocks,
+            RomsNamelistV0_12_0,
+            EXAMPLE_NAMELIST_V0_12_0,
+        )
+        namelist_mocks[3].return_value.read.side_effect = self._two_child_namelist
+        self._stage_children(sim, ["north", "south"])
+
+        settings = sim.roms_runtime_settings.extract_data_settings
+
+        assert settings.extract_file == ["/staged/north.nc", "/staged/south.nc"]
+        assert [r.rsplit("/", 1)[-1] for r in settings.extract_root_name] == [
+            "north",
+            "south",
+        ]
+
+    def test_runtime_settings_write_one_child_as_scalars(
+        self, stub_romssimulation, stageddatacollection_remote_files, namelist_mocks
+    ):
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            *namelist_mocks,
+            RomsNamelistV0_12_0,
+            EXAMPLE_NAMELIST_V0_12_0,
+        )
+        self._stage_children(sim, ["north"])
+
+        settings = sim.roms_runtime_settings.extract_data_settings
+
+        assert settings.extract_file == "/staged/north.nc"
+        assert settings.extract_root_name.endswith("/north")
+
+    def test_runtime_settings_reject_several_children_before_0_12_0(
+        self, stub_romssimulation, stageddatacollection_remote_files, namelist_mocks
+    ):
+        sim = self._prepare_sim_for_runtime_settings_with_schema(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            *namelist_mocks,
+            RomsNamelistV0_9_0,
+            EXAMPLE_NAMELIST_V0_9_0,
+        )
+        self._stage_children(sim, ["north", "south"])
+
+        with pytest.raises(ValueError, match="need a ucla-roms >= 0.12.0 namelist"):
+            sim.roms_runtime_settings
+
+    def test_nesting_info_dict_roundtrip_with_two_children(
+        self, stub_romssimulation, patch_romssimulation_init_sourcedata
+    ):
+        sim = stub_romssimulation
+        child = sim.nesting_info["child"]
+        sim.nesting_info = {"north": child, "south": child}
+        as_dict = sim.to_dict()
+        assert list(as_dict["nesting_info"]) == ["north", "south"]
+
+        built = []
+
+        def build(**kwargs):
+            built.append(child if built else ROMSNestingInfo(**kwargs))
+            return built[-1]
+
+        with (
+            patch_romssimulation_init_sourcedata(),
+            mock.patch("cstar.roms.simulation.ROMSNestingInfo", side_effect=build),
+        ):
+            reread = sim.from_dict(
+                simulation_dict=as_dict,
+                directory=sim.directory,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+            )
+        assert list(reread.nesting_info) == ["north", "south"]
+        assert reread.to_dict() == as_dict
 
     def _prepare_sim_for_runtime_settings_v0_5_0(
         self,
@@ -1911,7 +2040,7 @@ class TestROMSSimulationInitialization:
         fc = sim.forcing_corrections[0]
         cs = sim.carbonate_sensitivity[0]
         cdr = sim.cdr_forcing
-        ni = sim.nesting_info
+        ni = sim.nesting_info["child"]
 
         assert sim.input_datasets == [mg, ic, td, rf, cdr, ni, bc, sf, fc, cs]
 
@@ -7454,3 +7583,47 @@ class TestForcingCoverage:
             pytest.raises(ValueError, match="^coverage$"),
         ):
             sim.attach()
+
+
+_JOIN_STAMP = "20240101000000"
+
+
+def _join_dirs(tmp_path: Path, joined: list[str]) -> tuple[Path, Path]:
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    for name in [f"ocean_ext.{_JOIN_STAMP}.000.nc", f"ocean.{_JOIN_STAMP}.nc", *joined]:
+        (input_dir / name).touch()
+    return input_dir, output_dir
+
+
+def test_extract_data_join_moves_each_childs_file(tmp_path: Path) -> None:
+    names = [f"{c}_bry.{_JOIN_STAMP}.nc" for c in ("monterey", "salish-sea")]
+    input_dir, output_dir = _join_dirs(tmp_path, names)
+
+    with mock.patch("cstar.roms.simulation._run_cmd"):
+        _extract_data_join_wildcard(
+            f"ocean_ext.{_JOIN_STAMP}.*.nc",
+            input_dir,
+            output_dir,
+            logging.getLogger("test"),
+            ["monterey", "salish-sea"],
+        )
+
+    assert sorted(p.name for p in output_dir.iterdir()) == sorted(names)
+
+
+def test_extract_data_join_names_the_missing_child(tmp_path: Path) -> None:
+    input_dir, output_dir = _join_dirs(tmp_path, [f"monterey_bry.{_JOIN_STAMP}.nc"])
+
+    with (
+        mock.patch("cstar.roms.simulation._run_cmd"),
+        pytest.raises(FileNotFoundError, match=r"'salish-sea'.*monterey_bry"),
+    ):
+        _extract_data_join_wildcard(
+            f"ocean_ext.{_JOIN_STAMP}.*.nc",
+            input_dir,
+            output_dir,
+            logging.getLogger("test"),
+            ["monterey", "salish-sea"],
+        )

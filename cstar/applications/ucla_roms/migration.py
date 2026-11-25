@@ -3,16 +3,18 @@ import typing as t
 from cstar.applications.ucla_roms.models import APP_NAME
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.utils import deep_merge
+from cstar.roms.outputs import DEFAULT_CHILD_NAME
 
 APP_UCLA_ROMS_SCHEMA_1_0_0: t.Final[str] = "1.0.0"
 APP_UCLA_ROMS_SCHEMA_2_0_0: t.Final[str] = "2.0.0"
 APP_UCLA_ROMS_SCHEMA_2_1_0: t.Final[str] = "2.1.0"
 APP_UCLA_ROMS_SCHEMA_3_0_0: t.Final[str] = "3.0.0"
+APP_UCLA_ROMS_SCHEMA_4_0_0: t.Final[str] = "4.0.0"
 
 
 rm_bounds = {
     "min": APP_UCLA_ROMS_SCHEMA_1_0_0,
-    "max": APP_UCLA_ROMS_SCHEMA_3_0_0,
+    "max": APP_UCLA_ROMS_SCHEMA_4_0_0,
 }
 """Schema bounds for the ucla_roms blueprint schema.
 
@@ -117,4 +119,31 @@ class UclaRomsSchemaAdapterV21V3(SchemaAdapter):
 
         model.pop("model_params", None)
 
+        return {**model}
+
+
+class UclaRomsSchemaAdapterV3V4(SchemaAdapter):
+    """Schema migration from schema version `3.0.0` to `4.0.0`.
+
+    Adapting `3.0.0` to `4.0.0`:
+    - `nesting_info` is keyed by child name. The one dataset becomes the child
+      named `child`; an absent `nesting_info` is removed.
+    """
+
+    @classmethod
+    def application(cls) -> str:
+        return APP_NAME
+
+    @classmethod
+    def source(cls) -> str:
+        return APP_UCLA_ROMS_SCHEMA_3_0_0
+
+    @classmethod
+    def target(cls) -> str:
+        return APP_UCLA_ROMS_SCHEMA_4_0_0
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        if (nesting_info := model.pop("nesting_info", None)) is not None:
+            model["nesting_info"] = {DEFAULT_CHILD_NAME: nesting_info}
         return {**model}

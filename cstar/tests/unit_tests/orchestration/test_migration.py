@@ -20,8 +20,10 @@ from cstar.applications.ucla_roms.migration import (
     APP_UCLA_ROMS_SCHEMA_1_0_0,
     APP_UCLA_ROMS_SCHEMA_2_1_0,
     APP_UCLA_ROMS_SCHEMA_3_0_0,
+    APP_UCLA_ROMS_SCHEMA_4_0_0,
     UclaRomsSchemaAdapter2025v1,
     UclaRomsSchemaAdapterV2V21,
+    UclaRomsSchemaAdapterV3V4,
     UclaRomsSchemaAdapterV21V3,
 )
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
@@ -512,7 +514,7 @@ def test_migrate_plotter(plotter_v1_0_0_model: dict[str, t.Any]) -> None:
 @pytest.mark.parametrize(
     ("app_name", "exp_version"),
     [
-        (APP_ROMS, "3.3.1"),
+        (APP_ROMS, "4.0.0"),
         (APP_PLOTTER, "2.1.1"),
         (APP_HW, "1.1.1"),
         (APP_CDR_METRICS, "1.1.1"),
@@ -543,7 +545,7 @@ def test_plan_earlier_application_name_walks_the_adapters() -> None:
     plan = migrator.plan(dumped)
     result = migrator.migrate(dumped, plan)
 
-    assert list(plan.adapters) == ROMS_ADAPTERS
+    assert list(plan.adapters) == [*ROMS_ADAPTERS, UclaRomsSchemaAdapterV3V4]
     assert (plan.source, plan.target) == (APP_UCLA_ROMS_SCHEMA_1_0_0, target)
     assert result.original[KEY_APP] == "roms_marbl"
     assert result.migrated[KEY_APP] == APP_ROMS
@@ -556,11 +558,11 @@ def test_plan_earlier_application_name_current_schema_is_compatible() -> None:
     """
     migrator = get_migrator("roms_marbl")
 
-    plan = migrator.plan({KEY_APP: "roms_marbl", KEY_SV: "3.2.0"})
+    plan = migrator.plan({KEY_APP: "roms_marbl", KEY_SV: "4.0.0"})
 
     assert plan.is_compatible
     assert not plan.adapters
-    assert plan.source == "3.2.0"
+    assert plan.source == "4.0.0"
 
 
 @pytest.mark.parametrize(
@@ -695,3 +697,20 @@ def test_schema_too_new_error_message_for_a_write() -> None:
         "and sets future_field, which this build does not know. "
         "Upgrade cstar-ocean to write this file."
     )
+
+
+def test_migrate_v3_to_v4_keys_nesting_info_by_child_name() -> None:
+    nesting = {"data": [{"location": "https://example.com/nest.nc"}]}
+    model: dict[str, t.Any] = {
+        KEY_APP: APP_ROMS,
+        KEY_SV: APP_UCLA_ROMS_SCHEMA_3_0_0,
+        "nesting_info": nesting,
+    }
+
+    adapted = UclaRomsSchemaAdapterV3V4(model).adapt()
+
+    assert adapted["nesting_info"] == {"child": nesting}
+    assert adapted[KEY_SV] == APP_UCLA_ROMS_SCHEMA_4_0_0
+
+    model["nesting_info"] = None
+    assert "nesting_info" not in UclaRomsSchemaAdapterV3V4(model).adapt()

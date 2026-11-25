@@ -355,6 +355,49 @@ def test_carbonate_sensitivity_from_round_trips_through_a_saved_file(
     assert page.draft.model_dump() == drafted.model_dump()
 
 
+def test_nest_from_child_name_round_trips(page, roms_bp, tmp_path):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "a", roms_bp)
+    pane.nest_kind.value = "path"
+    pane._add_nest_row("path", "/data/bry")
+    assert page.draft.steps[0].directives["nest-from"] == {"path": "/data/bry"}
+
+    pane.nest_child_name.value = "monterey"
+    drafted = page.draft
+    assert drafted.steps[0].directives["nest-from"] == {
+        "path": "/data/bry",
+        "child_name": "monterey",
+    }
+    out = tmp_path / "wp.yaml"
+    serialize(out, drafted)
+
+    page._load_from_path(str(out))
+
+    (loaded,) = page.panes
+    assert loaded.nest_child_name.value == "monterey"
+    assert [r.widget.value for r in loaded.nest_rows] == ["/data/bry"]
+    assert page.draft.model_dump() == drafted.model_dump()
+
+
+def test_nest_from_child_name_problem_shows_as_you_type(page, roms_bp):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "a", roms_bp)
+    pane.nest_kind.value = "path"
+    pane._add_nest_row("path", "/data/bry")
+
+    pane.nest_child_name.value = "salish_sea"
+
+    assert "salish_sea" in pane.nest_child_status.value
+    assert page.draft is None
+
+    pane.nest_child_name.value = "salish-sea"
+
+    assert pane.nest_child_status.value == ""
+    assert page.draft is not None
+
+
 @pytest.mark.parametrize(
     "config",
     [

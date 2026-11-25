@@ -86,6 +86,37 @@ The bundled toy domain used in the :doc:`blueprint tutorial
 
 :download:`Download the full file <forge-blueprint-example.wio-toy.yaml>`.
 
+.. _forge-child-grids:
+
+Child grids
+-----------
+
+A parent domain lists the grids nested in it under ``domain.children``, keyed
+by name, and sets one boundary output period, ``nest_period`` in seconds, for
+all of them:
+
+.. code-block:: yaml
+
+   domain:
+     nest_period: 3600.0
+     children:
+       north:
+         grid_kwargs: {nx: 24, ny: 24, size_x: 100.0, size_y: 100.0, center_lon: -6.5,
+                       center_lat: 60.4, rot: 0.0, N: 10, theta_s: 5.0, theta_b: 2.0,
+                       hc: 300.0, hmin: 5.0}
+       south:
+         grid_kwargs: {nx: 24, ny: 24, size_x: 100.0, size_y: 100.0, center_lon: -8.0,
+                       center_lat: 59.5, rot: 0.0, N: 10, theta_s: 5.0, theta_b: 2.0,
+                       hc: 300.0, hmin: 5.0}
+         include_pressure_fluxes: true
+
+A name starts with a letter and uses letters, digits and ``-``, at most 20
+characters. Forge writes ``<domain>_grid_child-<name>.nc`` and
+``<domain>_nesting_<name>.nc`` for each child, and the parent run writes the
+child's boundary data as ``<name>_bry.*.nc``, which the child's run reads
+with the ``nest-from`` :doc:`directive <../../workplans/directives>`. More
+than one child needs ucla-roms 0.12.0 or later, which reads up to eight.
+
 .. _forge-regional-surface-forcing:
 
 Regional surface forcing

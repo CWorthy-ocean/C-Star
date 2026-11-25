@@ -88,6 +88,40 @@ Both directives are described under :doc:`../../workplans/directives`. The
 :doc:`nesting and upscaling tutorial <../../tutorials/nesting_upscaling>` runs
 this sequence end to end.
 
+A parent with several child grids writes boundary files for each of them,
+``<name>_bry.*.nc``, where ``<name>`` is the child's name in the parent's
+Forge blueprint. Give each child its own ``nest_ic`` step, with the same
+``parent_grid`` and that child's ``child_grid``, and name the child in
+``nest-from``:
+
+.. code-block:: yaml
+
+     - name: nest_ic_salish
+       application: nest_ic
+       blueprint: inline
+       depends_on:
+         - parent
+         - forge_salish
+       blueprint_overrides:
+         parent_grid: "{{root_dir: forge_parent}}/input_data/parent_grid.nc"
+         parent_rst: "{{output_dir: parent}}/output_rst.20120102060000.nc"
+         child_grid: "{{root_dir: forge_salish}}/input_data/salish_grid.nc"
+
+     - name: salish
+       application: ucla_roms
+       blueprint:
+         from_step: forge_salish
+       depends_on:
+         - forge_salish
+         - nest_ic_salish
+         - parent
+       directives:
+         continue-from:
+           step: nest_ic_salish
+         nest-from:
+           step: parent
+           child_name: salish-sea
+
 The application can also run on its own, from a blueprint file, when the
 parent's files are already on disk:
 

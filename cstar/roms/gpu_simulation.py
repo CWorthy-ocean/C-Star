@@ -24,6 +24,7 @@ import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Final
 
 import yaml
@@ -67,6 +68,7 @@ from cstar.roms.gpu_layout import (
 )
 from cstar.roms.input_dataset import netcdf_variable_names
 from cstar.roms.namelist import gpu_namelist_schema_for_ref
+from cstar.roms.outputs import DEFAULT_CHILD_NAME
 from cstar.roms.precheck import check_gpu_array_sizes, check_gpu_features
 from cstar.roms.simulation import IOLayout, ROMSSimulation
 from cstar.system.manager import get_sysmgr
@@ -393,7 +395,7 @@ class ROMSGpuSimulation(ROMSSimulation):
         tidal_forcing: ROMSTidalForcing | None = None,
         river_forcing: ROMSRiverForcing | None = None,
         cdr_forcing: ROMSCdrForcing | None = None,
-        nesting_info: ROMSNestingInfo | None = None,
+        nesting_info: dict[str, ROMSNestingInfo] | None = None,
         boundary_forcing: list[ROMSBoundaryForcing] | None = None,
         surface_forcing: list[ROMSSurfaceForcing] | None = None,
         forcing_corrections: list[ROMSForcingCorrections] | None = None,
@@ -1182,7 +1184,13 @@ class ROMSGpuSimulation(ROMSSimulation):
             boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
             surface_forcing=SurfaceForcingAdapter(bp).adapt(),
             cdr_forcing=CdrForcingAdapter(bp).adapt(),
-            nesting_info=NestingInfoAdapter(bp).adapt(),
+            nesting_info=NestingInfoAdapter(
+                SimpleNamespace(
+                    nesting_info=(
+                        {DEFAULT_CHILD_NAME: bp.nesting_info} if bp.nesting_info else {}
+                    )
+                )
+            ).adapt(),
             nodes=bp.tiling.nodes,
             writers_per_node=bp.tiling.writers_per_node,
         )

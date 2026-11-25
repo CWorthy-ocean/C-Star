@@ -111,6 +111,7 @@ from cstar.base.env import (
     split_catalog,
 )
 from cstar.base.utils import NetCDFFormat, netcdf_format
+from cstar.roms.outputs import EXTRACT_CHILDREN_MAX, child_name_problems
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
@@ -219,23 +220,28 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     (
         "nesting",
         "nest_enable",
-    ): "Enable a child (nested) domain. Generates nesting.nc to supply boundary "
-    "conditions for the inner domain from the outer model.",
+    ): "Enable child (nested) domains. Generates one nesting file per child to "
+    "supply boundary conditions for each inner domain from the outer model.",
     (
         "nesting",
         "nest_domain_dd",
-    ): "Optionally prefill the child grid kwargs from a cataloged DomainSpec. "
+    ): "Optionally prefill this child's grid kwargs from a cataloged DomainSpec. "
     "You can still edit any child-grid field after selecting.",
     (
         "nesting",
+        "child_name",
+    ): "The child's name, which ROMS gives its boundary files. A letter, then "
+    "letters, digits and '-', at most 20 characters; unique among the children.",
+    (
+        "nesting",
         "nest_period",
-    ): "How often (seconds) boundary values are written to nesting.nc. "
-    "Must divide evenly into the parent model output interval.",
+    ): "How often (seconds) boundary values are written to the nesting files, for "
+    "all children. Must divide evenly into the parent model output interval.",
     (
         "nesting",
         "nest_pressure_fluxes",
-    ): "Include baroclinic pressure flux variables in nesting.nc. Required when "
-    "the namelist calc_pflx setting is enabled in the child domain.",
+    ): "Include baroclinic pressure flux variables in this child's nesting file. "
+    "Required when the namelist calc_pflx setting is enabled in the child domain.",
     (
         "nesting",
         "parent_enable",
@@ -1134,14 +1140,15 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
     # the generic overrides layer -- excluding it here keeps a loaded blueprint's
     # domain.v_sponge from being reconstructed as a phantom accordion override.
     "v_sponge": frozenset({"v_sponge"}),
-    # extract_data is the parent side of nesting: the child grid, extraction period
-    # and file come from the Grid card's nesting widgets (nest_period, the child
-    # grid), resolved by build_forge_blueprint. Only nrpf/extract_root_name stay
-    # editable in the Output card.
+    # extract_data is the parent side of nesting: the child grids, their names,
+    # extraction period and files come from the Grid card's nesting widgets
+    # (nest_period, the child rows), resolved by build_forge_blueprint. Only nrpf
+    # stays editable in the Output card.
     "extract_data": frozenset(
         {
             "do_extract",
             "extract_file",
+            "extract_root_name",
             "n_chd",
             "theta_s_chd",
             "theta_b_chd",
@@ -1364,8 +1371,8 @@ _OUTPUT_SECTION_TITLES: dict[str, str] = {
 # Per-section note shown under the section header.
 _SECTION_NOTES: dict[str, str] = {
     "extract_data": (
-        "Child grid, extraction period and file come from the nesting options in "
-        "the Grid card."
+        "Child grids, extraction period and files come from the nesting options "
+        "in the Grid card."
     ),
 }
 
@@ -5109,6 +5116,30 @@ def _merge_loaded_kwargs(
     return out
 
 
+def _nested_widget_kwargs(
+    boxes: dict[str, Any], source_w: Any, path_w: Any, loaded: dict[str, Any]
+) -> dict[str, Any]:
+    """A nested grid's generation kwargs, read from its grid ``boxes`` and
+    topography widgets and laid over the grid_kwargs last ``loaded`` into them.
+    """
+    gk: dict[str, Any] = {}
+    for k in _GRID_INT:
+        gk[k] = int(boxes[k].value)
+    for k in _GRID_FLOAT + _SCOORD:
+        gk[k] = float(boxes[k].value)
+    gk.update(_nested_topo_kwargs(source_w.value, path_w.value))
+    return _merge_loaded_kwargs(loaded, gk, owned={*boxes, *_NESTED_TOPO_KEYS})
+
+
+def _child_name_problem(name: str, names: list[str]) -> str:
+    """What is wrong with child ``name`` among all the children's ``names``, or ``""``."""
+    if not name:
+        return "give every child grid a name"
+    if names.count(name) > 1:
+        return f"child name {name!r} is used by more than one child grid"
+    return "; ".join(child_name_problems(name))
+
+
 def _effective_nested_topo(
     source_value: str, path_value: str, domain_source: str, domain_path: str
 ) -> tuple[str, str]:
@@ -5143,6 +5174,138 @@ def _plot_topography_source(name: str, path: str) -> tuple[dict[str, str] | None
         f" <span style='color:#b58900'>(plotted with default ETOPO5 topography; "
         f"{name}: {why})</span>"
     )
+
+
+class _ChildRow:
+    """One child grid of the Grid card's nesting section: its name, grid fields,
+    topography, pressure-flux switch and plot.
+    """
+
+    def __init__(self, wiz: ForgeBlueprintWizard, domains: list[str]) -> None:
+        W = wiz.W
+        self.loaded: dict[str, Any] = {}
+        self.name = W.Text(
+            value="",
+            placeholder="e.g. monterey",
+            layout=W.Layout(width="260px"),
+            tooltip=_tip("nesting", "child_name"),
+        )
+        self.name_status = W.HTML("")
+        self.domain_dd = W.Dropdown(
+            options=["<custom>", *domains],
+            value="<custom>",
+            layout=W.Layout(width="260px"),
+            tooltip=_tip("nesting", "nest_domain_dd"),
+        )
+        self.w: dict[str, Any] = {}
+        for k in _GRID_INT:
+            self.w[k] = W.IntText(
+                value=int(_DEFAULT_GRID[k]),
+                tooltip=_tip("grid", k) + " (child/inner grid)",
+            )
+        for k in _GRID_FLOAT + _SCOORD:
+            self.w[k] = W.FloatText(
+                value=float(_DEFAULT_GRID[k]),
+                tooltip=_tip("grid", k) + " (child/inner grid)",
+            )
+        self.topo_source = W.Dropdown(
+            options=[_NESTED_TOPO_INHERIT, *_TOPO_SOURCES],
+            value=_NESTED_TOPO_INHERIT,
+            layout=W.Layout(width="260px"),
+            tooltip=_tip("nesting", "child_topo_source"),
+        )
+        self.topo_path = W.Text(
+            value="",
+            layout=W.Layout(width="360px"),
+            placeholder="(default)",
+            tooltip=_tip("nesting", "child_topo_path"),
+        )
+        self.pressure_fluxes = W.Checkbox(
+            value=False,
+            description="include pressure fluxes",
+            indent=False,
+            tooltip=_tip("nesting", "nest_pressure_fluxes"),
+        )
+        self.plot_btn = W.Button(
+            description=label_for("buttons.refresh_plot", "Refresh plot").label,
+            icon="refresh",
+            tooltip="Build the parent and this child grid from current settings and "
+            "render both via plot_nesting (parent+child boundary overlay).",
+        )
+        self.plot_status = W.HTML("Click Refresh preview to draw the grids.")
+        self.plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+        )
+        self.remove_btn = W.Button(
+            description="Remove", icon="trash", tooltip="Remove this child grid"
+        )
+        grid_rows = [
+            components.field_row(W, f"grid.{k}", self.w[k], width="110px")
+            for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)
+        ]
+        self.widget = W.VBox(
+            [
+                W.HBox(
+                    [
+                        W.VBox(
+                            [
+                                components.field_row(
+                                    W, "nesting.child_name", self.name
+                                ),
+                                self.name_status,
+                                components.field_row(
+                                    W, "nesting.nest_domain_dd", self.domain_dd
+                                ),
+                                components.field_grid(W, grid_rows),
+                                components.field_row(
+                                    W, "nesting.child_topo_source", self.topo_source
+                                ),
+                                components.field_row(
+                                    W, "nesting.child_topo_path", self.topo_path
+                                ),
+                                components.field_row(
+                                    W,
+                                    "nesting.nest_pressure_fluxes",
+                                    self.pressure_fluxes,
+                                ),
+                                self.remove_btn,
+                            ]
+                        ),
+                        W.VBox(
+                            [
+                                W.HBox([self.plot_btn, self.plot_status]),
+                                self.plot_img,
+                            ],
+                            layout=W.Layout(padding="0 0 0 20px"),
+                        ),
+                    ]
+                )
+            ],
+            layout=W.Layout(border="1px solid #ddd", padding="6px", margin="0 0 8px"),
+        )
+        self.name.observe(wiz._on_child_name, names="value")
+        self.domain_dd.observe(lambda _c: wiz._on_nest_domain(self), names="value")
+        self.plot_btn.on_click(lambda _b: wiz._on_nest_plot(self))
+        self.remove_btn.on_click(lambda _b: wiz._remove_child_row(self))
+        for w in (
+            *self.w.values(),
+            self.topo_source,
+            self.topo_path,
+            self.pressure_fluxes,
+        ):
+            w.observe(wiz._rebuild, names="value")
+
+    def set_grid_kwargs(self, gk: dict[str, Any] | None) -> None:
+        self.loaded = copy.deepcopy(dict(gk or {}))
+        for k, w in self.w.items():
+            if gk and k in gk:
+                w.value = gk[k]
+
+    def grid_kwargs(self) -> dict[str, Any]:
+        return _nested_widget_kwargs(
+            self.w, self.topo_source, self.topo_path, self.loaded
+        )
 
 
 class ForgeBlueprintWizard:
@@ -5365,54 +5528,14 @@ class ForgeBlueprintWizard:
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(
             value=False,
-            description="This grid is a parent (enter child grid info below).",
+            description="This grid is a parent (enter child grids below).",
             indent=False,
             tooltip=_tip("nesting", "nest_enable"),
         )
         self.nest_help = W.HTML(
             "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
             "This will enable the extract_data module and output boundary info "
-            "for your child grid.</div>"
-        )
-        self.nest_domain_dd = W.Dropdown(
-            options=["<custom>", *domains],
-            description="Child from:",
-            value="<custom>",
-            style={"description_width": "110px"},
-            tooltip=_tip("nesting", "nest_domain_dd"),
-        )
-        self.child_w: dict[str, Any] = {}
-        for k in _GRID_INT:
-            self.child_w[k] = W.IntText(
-                value=int(_DEFAULT_GRID[k]),
-                description=f"{k}:",
-                style={"description_width": "90px"},
-                layout=W.Layout(width="200px"),
-                tooltip=_tip("grid", k) + " (child/inner grid)",
-            )
-        for k in _GRID_FLOAT + _SCOORD:
-            self.child_w[k] = W.FloatText(
-                value=float(_DEFAULT_GRID[k]),
-                description=f"{k}:",
-                style={"description_width": "90px"},
-                layout=W.Layout(width="200px"),
-                tooltip=_tip("grid", k) + " (child/inner grid)",
-            )
-        self.child_topo_source = W.Dropdown(
-            options=[_NESTED_TOPO_INHERIT, *_TOPO_SOURCES],
-            value=_NESTED_TOPO_INHERIT,
-            description="child topo:",
-            style={"description_width": "90px"},
-            layout=W.Layout(width="260px"),
-            tooltip=_tip("nesting", "child_topo_source"),
-        )
-        self.child_topo_path = W.Text(
-            value="",
-            description="child topo path:",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="360px"),
-            placeholder="(default)",
-            tooltip=_tip("nesting", "child_topo_path"),
+            "for your child grids.</div>"
         )
         self.nest_period = W.FloatText(
             value=3600.0,
@@ -5421,24 +5544,11 @@ class ForgeBlueprintWizard:
             layout=W.Layout(width="260px"),
             tooltip=_tip("nesting", "nest_period"),
         )
-        self.nest_pressure_fluxes = W.Checkbox(
-            value=False,
-            description="include pressure fluxes",
-            indent=False,
-            tooltip=_tip("nesting", "nest_pressure_fluxes"),
-        )
-        # --- nesting plot (parent+child boundary overlay, separate from the Grid
-        # section's parent-only plot) ---
-        self.nest_plot_btn = W.Button(
-            description=label_for("buttons.refresh_plot", "Refresh plot").label,
-            icon="refresh",
-            tooltip="Build the parent and child grids from current settings and "
-            "render both via plot_nesting (parent+child boundary overlay).",
-        )
-        self.nest_plot_status = W.HTML("Click Refresh preview to draw the grids.")
-        self.nest_plot_img = W.Image(
-            format="png",
-            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+        self._child_rows: list[_ChildRow] = []
+        self.child_rows_box = W.VBox([])
+        self.child_n_status = W.HTML("")
+        self.add_child_btn = W.Button(
+            description="+ Add child grid", tooltip="Add another child grid"
         )
 
         # --- parent (optional: this grid is a child nested inside a parent) ---
@@ -6250,7 +6360,6 @@ class ForgeBlueprintWizard:
         self.forcing_dd.observe(self._on_forcing_spec, names="value")
         self.dt_btn.on_click(self._on_compute_dt)
         self.plot_btn.on_click(self._on_plot)
-        self.nest_plot_btn.on_click(self._on_nest_plot)
         self.save_btn.on_click(self._on_save)
         self.save_output_btn.on_click(self._on_save_output)
         self.save_model_btn.on_click(self._on_save_model)
@@ -6292,7 +6401,8 @@ class ForgeBlueprintWizard:
         self.cs_clear_btn.on_click(self._on_cs_clear)
         self.cs_path.observe(self._on_cs_path_submit, names="value")
         self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
-        self.nest_domain_dd.observe(self._on_nest_domain, names="value")
+        self.nest_enable.observe(self._on_nest_toggle, names="value")
+        self.add_child_btn.on_click(lambda _b: self._add_child_row())
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
         self.parent_plot_btn.on_click(self._on_parent_plot)
         self.parent_enable.observe(self._on_parent_toggle, names="value")
@@ -6317,12 +6427,8 @@ class ForgeBlueprintWizard:
             self.topo_path,
             self.nest_enable,
             self.nest_period,
-            self.nest_pressure_fluxes,
             self.parent_enable,
-            *self.child_w.values(),
             *self.parent_w.values(),
-            self.child_topo_source,
-            self.child_topo_path,
             self.parent_topo_source,
             self.parent_topo_path,
         ]
@@ -6821,9 +6927,80 @@ class ForgeBlueprintWizard:
             else:
                 self._overrides.pop(key, None)
 
-    def _on_nest_domain(self, _change):
-        """Prefill the child grid from a selected DomainSpec (and enable nesting)."""
-        name = self.nest_domain_dd.value
+    def _new_child_row(self) -> _ChildRow:
+        row = _ChildRow(self, list(self.catalog.domain_names))
+        self._child_rows.append(row)
+        return row
+
+    def _sync_child_rows(self) -> None:
+        self.child_rows_box.children = [r.widget for r in self._child_rows]
+        self.add_child_btn.disabled = len(self._child_rows) >= EXTRACT_CHILDREN_MAX
+        self._check_child_names()
+
+    def _check_child_names(self) -> None:
+        names = [r.name.value.strip() for r in self._child_rows]
+        for row, name in zip(self._child_rows, names, strict=True):
+            problem = _child_name_problem(name, names) if name else ""
+            row.name_status.value = (
+                f"<span style='color:#b00'>{problem}</span>" if problem else ""
+            )
+
+    def _check_child_n(self) -> None:
+        sizes = [r.w["N"].value for r in self._child_rows]
+        unequal = (
+            self.nest_enable.value
+            and not self.use_pio_chk.value
+            and len(set(sizes)) > 1
+        )
+        self.child_n_status.value = (
+            "<span style='color:#b00'>⚠ Without PIO, ucla-roms needs the same N for "
+            f"every child grid (now N = {', '.join(map(str, sizes))}). Make them "
+            "equal or turn PIO on.</span>"
+            if unequal
+            else ""
+        )
+
+    def _on_child_name(self, _change):
+        self._check_child_names()
+        self._rebuild()
+
+    def _on_nest_toggle(self, _change):
+        if (
+            self.nest_enable.value
+            and not self._child_rows
+            and not getattr(self, "_suspended", False)
+        ):
+            self._new_child_row()
+            self._sync_child_rows()
+
+    def _add_child_row(self) -> None:
+        self._new_child_row()
+        self._sync_child_rows()
+        self._rebuild()
+
+    def _remove_child_row(self, row: _ChildRow) -> None:
+        self._child_rows.remove(row)
+        self._sync_child_rows()
+        if self._child_rows:
+            self._rebuild()
+        else:
+            self.nest_enable.value = False
+
+    def _set_child_rows(self, children: dict[str, Any]) -> None:
+        self._child_rows.clear()
+        for name, child in children.items():
+            row = self._new_child_row()
+            row.name.value = name
+            row.set_grid_kwargs(child["grid_kwargs"])
+            self._set_nested_topo_widgets(
+                row.topo_source, row.topo_path, child["grid_kwargs"]
+            )
+            row.pressure_fluxes.value = bool(child.get("include_pressure_fluxes"))
+        self._sync_child_rows()
+
+    def _on_nest_domain(self, row: _ChildRow) -> None:
+        """Prefill a child grid from a selected DomainSpec (and enable nesting)."""
+        name = row.domain_dd.value
         if name == "<custom>":
             return
         data = self.catalog.domain_data(name)
@@ -6831,17 +7008,14 @@ class ForgeBlueprintWizard:
         with self._suspend():
             self.nest_enable.value = True
             # The child spec's own grid_kwargs (its hmin, its channel closing)
-            # describe the child, so they go with it (see _nested_grid_kwargs).
-            self._set_loaded_grid_kwargs("child", gk)
-            for k, w in self.child_w.items():
-                if k in gk:
-                    w.value = gk[k]
+            # describe the child, so they go with it (see _ChildRow.grid_kwargs).
+            row.set_grid_kwargs(gk)
             # The child spec's own topography, not this grid's (see
             # _on_parent_domain for why this matters).
-            self.child_topo_source.value = data.get("topography_source", "ETOPO5")
-            self.child_topo_path.value = data.get("topography_path", "") or ""
+            row.topo_source.value = data.get("topography_source", "ETOPO5")
+            row.topo_path.value = data.get("topography_path", "") or ""
         self._rebuild()
-        self._on_nest_plot(None)
+        self._on_nest_plot(row)
 
     def _on_parent_domain(self, _change):
         """Prefill the parent grid from a selected DomainSpec (and enable it)."""
@@ -7241,13 +7415,10 @@ class ForgeBlueprintWizard:
                 kw.pop("topography_path", None)
                 if d.get("topography_path"):
                     kw["topography_path"] = d["topography_path"]
-                for k in ("grid_kwargs_child", "grid_kwargs_parent", "metadata_child"):
+                for k in ("children", "nest_period", "grid_kwargs_parent"):
                     kw.pop(k, None)
                     if d.get(k) is not None:
                         kw[k] = d[k]
-                kw["nesting_include_pressure_fluxes"] = bool(
-                    d.get("nesting_include_pressure_fluxes", False)
-                )
             else:
                 raise ValueError(f"unknown spec {spec!r}")
             cfg2 = build_forge_blueprint(**kw)
@@ -7489,20 +7660,11 @@ class ForgeBlueprintWizard:
             # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
             # from a DomainSpec (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
-            child = data.get("grid_kwargs_child")
-            self._set_loaded_grid_kwargs("child", child)
-            self.nest_enable.value = child is not None
-            if child:
-                for k, w in self.child_w.items():
-                    if k in child:
-                        w.value = child[k]
-                self._set_nested_topo_widgets("child", child)
-                period = (data.get("metadata_child") or {}).get("period")
-                if period is not None:
-                    self.nest_period.value = float(period)
-                self.nest_pressure_fluxes.value = bool(
-                    data.get("nesting_include_pressure_fluxes", False)
-                )
+            children = data.get("children") or {}
+            self._set_child_rows(children)
+            self.nest_enable.value = bool(children)
+            if children and data.get("nest_period") is not None:
+                self.nest_period.value = float(data["nest_period"])
             # Parent: mirrors the child block above, reading grid_kwargs_parent
             # (only present if the spec was saved with a parent grid active).
             parent = data.get("grid_kwargs_parent")
@@ -7512,7 +7674,9 @@ class ForgeBlueprintWizard:
                 for k, w in self.parent_w.items():
                     if k in parent:
                         w.value = parent[k]
-                self._set_nested_topo_widgets("parent", parent)
+                self._set_nested_topo_widgets(
+                    self.parent_topo_source, self.parent_topo_path, parent
+                )
             elif was_parented:
                 # Suspended, so _on_parent_toggle skipped this; the rebuilds
                 # below pick up the restored rows.
@@ -7547,26 +7711,33 @@ class ForgeBlueprintWizard:
             "topo_source": self.topo_source.value,
             "topo_path": self.topo_path.value,
             "nest_enable": self.nest_enable.value,
-            "child_w": {k: w.value for k, w in self.child_w.items()},
+            "children": [
+                (
+                    r.name.value,
+                    {k: w.value for k, w in r.w.items()},
+                    r.pressure_fluxes.value,
+                    (r.topo_source.value, r.topo_path.value),
+                )
+                for r in self._child_rows
+            ],
             "nest_period": self.nest_period.value,
-            "nest_pressure_fluxes": self.nest_pressure_fluxes.value,
             "parent_enable": self.parent_enable.value,
             "parent_w": {k: w.value for k, w in self.parent_w.items()},
-            "child_topo": (self.child_topo_source.value, self.child_topo_path.value),
             "parent_topo": (
                 self.parent_topo_source.value,
                 self.parent_topo_path.value,
             ),
         }
 
-    def _set_nested_topo_widgets(self, which: str, gk: dict[str, Any]) -> None:
+    def _set_nested_topo_widgets(
+        self, src_w: Any, path_w: Any, gk: dict[str, Any]
+    ) -> None:
         """Load a nested grid's optional ``topography_source``/``topography_path``
-        (from a blueprint or DomainSpec ``grid_kwargs_parent``/``_child`` dict)
-        into its widgets; absent keys mean "inherit this grid's" (the sentinel /
-        blank). Called inside a ``_suspend()`` block by the populate paths.
+        (from a blueprint or DomainSpec ``grid_kwargs_parent`` or a child's
+        ``grid_kwargs``) into its widgets; absent keys mean "inherit this grid's"
+        (the sentinel / blank). Called inside a ``_suspend()`` block by the
+        populate paths.
         """
-        src_w = getattr(self, f"{which}_topo_source")
-        path_w = getattr(self, f"{which}_topo_path")
         src = gk.get("topography_source")
         if isinstance(src, dict):  # hand-authored roms-tools {'name','path'}
             path_w.value = str(gk.get("topography_path") or src.get("path") or "")
@@ -7608,12 +7779,7 @@ class ForgeBlueprintWizard:
             data["open_boundaries"] = kw["open_boundaries"]
         if self.topo_path.value.strip():
             data["topography_path"] = self.topo_path.value.strip()
-        for k in (
-            "grid_kwargs_child",
-            "grid_kwargs_parent",
-            "metadata_child",
-            "nesting_include_pressure_fluxes",
-        ):
+        for k in ("children", "nest_period", "grid_kwargs_parent"):
             if k in kw:
                 data[k] = kw[k]
         return data
@@ -8793,32 +8959,21 @@ class ForgeBlueprintWizard:
         )
 
     def _nested_grid_kwargs(self, which: str) -> dict[str, Any]:
-        """``which`` in ("parent", "child"): that grid's generation kwargs, read
-        from its widgets and laid over the grid_kwargs last loaded into them. A
-        parent's ``hmin`` or ``close_narrow_channels`` has no widget here, and the
-        child is aligned to a parent rebuilt from exactly these kwargs.
+        """The parent grid's generation kwargs, read from its widgets and laid over
+        the grid_kwargs last loaded into them. A parent's ``hmin`` or
+        ``close_narrow_channels`` has no widget here, and this grid is aligned to a
+        parent rebuilt from exactly these kwargs.
         """
-        boxes = getattr(self, f"{which}_w")
-        gk: dict[str, Any] = {}
-        for k in _GRID_INT:
-            gk[k] = int(boxes[k].value)
-        for k in _GRID_FLOAT + _SCOORD:
-            gk[k] = float(boxes[k].value)
-        gk.update(
-            _nested_topo_kwargs(
-                getattr(self, f"{which}_topo_source").value,
-                getattr(self, f"{which}_topo_path").value,
-            )
-        )
-        return _merge_loaded_kwargs(
+        return _nested_widget_kwargs(
+            self.parent_w,
+            self.parent_topo_source,
+            self.parent_topo_path,
             self._loaded_grid_kwargs.get(which, {}),
-            gk,
-            owned={*boxes, *_NESTED_TOPO_KEYS},
         )
 
     def _set_loaded_grid_kwargs(self, which: str, gk: dict[str, Any] | None) -> None:
         """Record ``gk`` as the grid_kwargs just loaded into ``which``'s widgets
-        ("grid", "parent" or "child"); see :func:`_merge_loaded_kwargs`.
+        ("grid" or "parent"); see :func:`_merge_loaded_kwargs`.
         """
         self._loaded_grid_kwargs[which] = copy.deepcopy(dict(gk or {}))
 
@@ -8916,10 +9071,18 @@ class ForgeBlueprintWizard:
                 kw["grid"] = self._grid_file_grid
         is_parent, is_child = self._nesting_role()
         if is_parent:
-            kw["grid_kwargs_child"] = self._nested_grid_kwargs("child")
-            kw["metadata_child"] = {"period": float(self.nest_period.value)}
-            if self.nest_pressure_fluxes.value:
-                kw["nesting_include_pressure_fluxes"] = True
+            names = [r.name.value.strip() for r in self._child_rows]
+            for name in names:
+                if problem := _child_name_problem(name, names):
+                    raise ValueError(problem)
+            kw["children"] = {
+                name: {
+                    "grid_kwargs": row.grid_kwargs(),
+                    "include_pressure_fluxes": bool(row.pressure_fluxes.value),
+                }
+                for name, row in zip(names, self._child_rows, strict=True)
+            }
+            kw["nest_period"] = float(self.nest_period.value)
         if is_child:
             kw["grid_kwargs_parent"] = self._nested_grid_kwargs("parent")
         # forcing/output are always required now (no more model-default fallback).
@@ -8949,26 +9112,12 @@ class ForgeBlueprintWizard:
 
     def _populate_nesting(self, cfg: ForgeBlueprint):
         """Set the nesting widgets from a loaded config (called inside _suspend)."""
-        child = cfg.domain.grid_kwargs_child
-        self._set_loaded_grid_kwargs("child", child)
-        self.nest_enable.value = child is not None
-        if child:
-            for k, w in self.child_w.items():
-                if k in child:
-                    w.value = child[k]
-            self._set_nested_topo_widgets("child", child)
-            # The effective extraction period: an older file may carry an Advanced
-            # extract_period override that differs from metadata_child.period.
-            period = (cfg.model_settings.get("extract_data") or {}).get(
-                "extract_period"
-            )
-            if period is None:
-                period = (cfg.domain.metadata_child or {}).get("period")
-            if period is not None:
-                self.nest_period.value = float(period)
-        self.nest_pressure_fluxes.value = bool(
-            cfg.domain.nesting_include_pressure_fluxes
+        self._set_child_rows(
+            {name: child.model_dump() for name, child in cfg.domain.children.items()}
         )
+        self.nest_enable.value = cfg.domain.is_parent
+        if cfg.domain.is_parent:
+            self.nest_period.value = cfg.domain.nest_period
         parent = cfg.domain.grid_kwargs_parent
         self._set_loaded_grid_kwargs("parent", parent)
         self.parent_enable.value = parent is not None
@@ -8976,7 +9125,9 @@ class ForgeBlueprintWizard:
             for k, w in self.parent_w.items():
                 if k in parent:
                     w.value = parent[k]
-            self._set_nested_topo_widgets("parent", parent)
+            self._set_nested_topo_widgets(
+                self.parent_topo_source, self.parent_topo_path, parent
+            )
 
     def _nesting_role(self) -> tuple[bool, bool]:
         """``(is_parent, is_child)`` for the grid being edited, as the nesting
@@ -9103,6 +9254,7 @@ class ForgeBlueprintWizard:
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
             return
+        self._check_child_n()
         self._reseed_cdr_simple()
         # CDR plot cache: _rebuild() is the one hook that reliably fires for
         # every CDR-panel edit, every mode switch, and every grid-geometry edit
@@ -9591,14 +9743,16 @@ class ForgeBlueprintWizard:
         """
         return _plot_topography_source(self.topo_source.value, self.topo_path.value)
 
-    def _nested_plot_topography(self, which: str) -> tuple[dict[str, str] | None, str]:
+    def _nested_plot_topography(
+        self, which: str, source_value: str, path_value: str
+    ) -> tuple[dict[str, str] | None, str]:
         """``which`` in ("parent", "child"): that grid's effective topography
-        (its own widgets, or this grid's when set to inherit) for a wizard-side
-        build, with the same local-availability fallback.
+        (its own widgets' values, or this grid's when set to inherit) for a
+        wizard-side build, with the same local-availability fallback.
         """
         name, path = _effective_nested_topo(
-            getattr(self, f"{which}_topo_source").value,
-            getattr(self, f"{which}_topo_path").value,
+            source_value,
+            path_value,
             self.topo_source.value,
             self.topo_path.value,
         )
@@ -9702,12 +9856,12 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
-    def _on_nest_plot(self, _):
-        """Build the parent+child roms_tools Grids and render ``plot_nesting``
-        (parent+child boundary overlay) into the Nesting section's own plot,
+    def _on_nest_plot(self, row: _ChildRow) -> None:
+        """Build the parent and ``row``'s child roms_tools Grids and render
+        ``plot_nesting`` (parent+child boundary overlay) into the row's own plot,
         separate from the parent-only plot in the Grid section.
         """
-        self.nest_plot_status.value = "<i>building grids…</i>"
+        row.plot_status.value = "<i>building grids…</i>"
         try:
             import io
 
@@ -9723,12 +9877,12 @@ class ForgeBlueprintWizard:
             )
 
             ck = {
-                k: v
-                for k, v in self._nested_grid_kwargs("child").items()
-                if k not in _NESTED_TOPO_KEYS
+                k: v for k, v in row.grid_kwargs().items() if k not in _NESTED_TOPO_KEYS
             }
 
-            ck_topo, note_child = self._nested_plot_topography("child")
+            ck_topo, note_child = self._nested_plot_topography(
+                "child", row.topo_source.value, row.topo_path.value
+            )
             if ck_topo is not None:
                 ck["topography_source"] = ck_topo
 
@@ -9755,13 +9909,13 @@ class ForgeBlueprintWizard:
                 plt.ion()
 
             buf.seek(0)
-            self.nest_plot_img.value = buf.read()
-            self.nest_plot_img.layout.display = ""
-            self.nest_plot_status.value = (
+            row.plot_img.value = buf.read()
+            row.plot_img.layout.display = ""
+            row.plot_status.value = (
                 "<span style='color:#080'>✓</span>" + note_self + note_child
             )
         except Exception as exc:
-            self.nest_plot_status.value = (
+            row.plot_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
@@ -9788,7 +9942,9 @@ class ForgeBlueprintWizard:
             # on this machine (mirrors the executor's per-grid resolution), so a
             # parent that falls outside its dataset's coverage fails here, in the
             # preview, instead of only at executor time.
-            pk_topo, note_parent = self._nested_plot_topography("parent")
+            pk_topo, note_parent = self._nested_plot_topography(
+                "parent", self.parent_topo_source.value, self.parent_topo_path.value
+            )
             if pk_topo is not None:
                 pk["topography_source"] = pk_topo
 
@@ -10433,47 +10589,20 @@ class ForgeBlueprintWizard:
             components.field_row(W, "dt", self.dt, extra=(self.dt_btn, self.dt_status)),
         )
 
-        child_grid_rows = [
-            components.field_row(W, f"grid.{k}", self.child_w[k], width="110px")
-            for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)
-        ]
         parent_grid_rows = [
             components.field_row(W, f"grid.{k}", self.parent_w[k], width="110px")
             for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)
         ]
-        child_plot_col = W.VBox(
-            [W.HBox([self.nest_plot_btn, self.nest_plot_status]), self.nest_plot_img],
-            layout=W.Layout(padding="0 0 0 20px"),
-        )
         child_section = components.subsection(
             W,
             "grid.nesting.child",
             self.nest_enable,
             self.nest_help,
-            W.HBox(
-                [
-                    W.VBox(
-                        [
-                            components.field_row(
-                                W, "nest_domain_dd", self.nest_domain_dd
-                            ),
-                            components.field_grid(W, child_grid_rows),
-                            components.field_row(
-                                W, "child_topo_source", self.child_topo_source
-                            ),
-                            components.field_row(
-                                W, "child_topo_path", self.child_topo_path
-                            ),
-                            components.field_row(W, "nest_period", self.nest_period),
-                            components.field_row(
-                                W, "nest_pressure_fluxes", self.nest_pressure_fluxes
-                            ),
-                        ]
-                    ),
-                    child_plot_col,
-                ]
-            ),
-            default_title="Child grid",
+            components.field_row(W, "nest_period", self.nest_period),
+            self.child_rows_box,
+            self.child_n_status,
+            self.add_child_btn,
+            default_title="Child grids",
         )
         parent_plot_col = W.VBox(
             [

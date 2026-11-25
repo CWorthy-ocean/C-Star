@@ -645,6 +645,23 @@ class TestCli:
         assert by_name["output_rst"]["compress"] is False
         assert by_name["output_cdr"]["compress"] is True
 
+    def test_input_like_covers_every_childs_boundary_file(self, tmp_path: Path) -> None:
+        files: dict[str, t.Callable[[Path], Path]] = {
+            **RUN_FILES,
+            "output/monterey_bry.20140302000000.nc": _write_roms_file,
+            "output/salish-sea_bry.20140302000000.nc": _write_roms_file,
+        }
+        root = _build_run(tmp_path / "old", files, record_products=False)
+        result = invoke(str(root), "--yes", "--now", "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        (bp_path,) = (root / "compress").glob("B_*.yaml")
+        by_name = {
+            f["name"]: f for f in yaml.safe_load(bp_path.read_text())["file_types"]
+        }
+        assert by_name["monterey_bry"]["compress"] is False
+        assert by_name["salish-sea_bry"]["compress"] is False
+
     def test_questions_then_blueprint_reuse(self, run_root: Path) -> None:
         # output_cdr: compress, float32, quantize, 3 digits, default chunks;
         # output_rst: no; then keep originals, files at once = 1

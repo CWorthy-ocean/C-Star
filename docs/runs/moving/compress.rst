@@ -34,7 +34,7 @@ many variables are protected, then asks:
 
 1. **Compress it?** Yes rewrites the files as netCDF-4 with deflate and
    chunking, which is lossless on its own. Restart, nesting boundary
-   (``child_bry``), carbonate sensitivity (``_cdrgas``) and forge files default
+   (``<child>_bry``), carbonate sensitivity (``_cdrgas``) and forge files default
    to no: other runs read them as input, and a CPU ROMS build with ParallelIO
    cannot read netCDF-4 input.
 2. **Float32-compress non-protected variables?** Double-precision variables

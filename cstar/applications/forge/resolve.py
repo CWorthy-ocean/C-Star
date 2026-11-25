@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
 import yaml
+from pydantic import TypeAdapter
 
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
@@ -49,6 +50,8 @@ from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
     ForgeProvenance,
     InitialConditions,
+    NestedChild,
+    NestedChildren,
     OpenBoundaries,
     Partitioning,
     ResolvedDataset,
@@ -76,6 +79,7 @@ from cstar.applications.forge.engine import (
 from cstar.applications.forge.namelist_model import (
     BgcMode,
     NamelistConsistencyError,
+    RunTimeSettingsV0_12_0,
     canonical_output_sections_for_precheck,
     cdr_nz_chd_from_file,
     cdr_releases_time_interpolation,
@@ -118,6 +122,7 @@ from cstar.applications.forge.source_registry import (
 )
 from cstar.base.utils import netcdf_format
 from cstar.roms.namelist import is_commit_hash, roms_version_from_ref
+from cstar.roms.outputs import DEFAULT_CHILD_NAME
 from cstar.roms.precheck import (
     AVERAGES_END_ON_MARBL_STEP_MIN_ROMS,
     is_whole_multiple,
@@ -327,6 +332,27 @@ def _check_carbonate_sensitivity_applies(
         raise ValueError(
             "carbonate_sensitivity was supplied, but:\n- " + "\n- ".join(problems)
         )
+
+
+def _nested_children_problems(
+    nested: dict[str, NestedChild], settings_cls: type[Any], use_pio: bool
+) -> list[str]:
+    problems = []
+    if not issubclass(settings_cls, RunTimeSettingsV0_12_0) and list(nested) not in (
+        [],
+        [DEFAULT_CHILD_NAME],
+    ):
+        problems.append(
+            f"children {', '.join(nested)}: ucla-roms before 0.12.0 reads one child, "
+            f"named {DEFAULT_CHILD_NAME!r}"
+        )
+    sizes = {name: child.grid_kwargs["N"] for name, child in nested.items()}
+    if not use_pio and len(set(sizes.values())) > 1:
+        problems.append(
+            f"children have different N ({sizes}): without PIO ucla-roms needs the "
+            "same N for all of them"
+        )
+    return problems
 
 
 def _warn_user_files_need_pio_conversion(bp: ForgeBlueprint, use_pio: bool) -> None:
@@ -547,10 +573,10 @@ _CDR_FRC_DEFAULT: dict[str, Any] = {
 
 # ``extract_data`` (child-grid nesting extraction) is likewise a required namelist
 # section whose active values come from a *second, separately-selected* DomainSpec
-# (the nesting child's grid_kwargs/metadata, passed as grid_kwargs_child/
-# metadata_child) rather than the domain/forcing being resolved -- so, like
-# river_frc/cdr_frc, the resolver seeds this disabled baseline and the nesting block
-# below overwrites it when a child grid is actually provided. Its *_chd values are
+# (the nesting children's grid_kwargs, passed as children) rather than the
+# domain/forcing being resolved -- so, like river_frc/cdr_frc, the resolver seeds
+# this disabled baseline and the nesting block below overwrites it when child grids
+# are actually provided. Its *_chd values are
 # placeholders ROMS never reads while do_extract is off.
 _EXTRACT_DATA_DEFAULT: dict[str, Any] = {
     "do_extract": False,
@@ -715,10 +741,9 @@ def build_forge_blueprint(
     cdr_forcing_yaml: str | Path | None = None,
     forcing_inputs: dict[str, Any] | None = None,
     output_settings: dict[str, Any] | None = None,
-    grid_kwargs_child: dict[str, Any] | None = None,
+    children: dict[str, Any] | None = None,
+    nest_period: float = Domain.model_fields["nest_period"].default,
     grid_kwargs_parent: dict[str, Any] | None = None,
-    metadata_child: dict[str, Any] | None = None,
-    nesting_include_pressure_fluxes: bool = False,
     grid_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
     cdr_forcing_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
     carbonate_sensitivity: str
@@ -981,14 +1006,15 @@ def build_forge_blueprint(
     # The child's vertical coordinates build the child grid and fill this parent's
     # extract_data.*_chd. roms-tools fills a missing one from defaults it keeps
     # private, which a copy here would drift from, so the parent must state them.
-    if grid_kwargs_child is not None and (
-        missing := [k for k in CHILD_VERTICAL_KWARGS if k not in grid_kwargs_child]
-    ):
-        raise ValueError(
-            f"grid_kwargs_child is missing {', '.join(missing)}: give the child "
-            f"grid's {', '.join(CHILD_VERTICAL_KWARGS)}, which this parent writes "
-            "into its namelist (extract_data) for the child it feeds."
-        )
+    nested = TypeAdapter(NestedChildren).validate_python(children or {})
+    for child_name, child in nested.items():
+        if missing := [k for k in CHILD_VERTICAL_KWARGS if k not in child.grid_kwargs]:
+            raise ValueError(
+                f"child {child_name!r} grid_kwargs is missing {', '.join(missing)}: "
+                f"give the child grid's {', '.join(CHILD_VERTICAL_KWARGS)}, which "
+                "this parent writes into its namelist (extract_data) for the child "
+                "it feeds."
+            )
 
     # ----- optional user-provided grid file ----------------------------------
     # Normalize `grid_file` into a UserProvidedFile, then load the grid ONCE
@@ -1139,7 +1165,7 @@ def build_forge_blueprint(
         ):
             settings["cdr_frc"]["nz_chd"] = 0
     # extract_data (child-grid nesting) is Domain-owned when active (the nesting
-    # block below overwrites it from grid_kwargs_child/metadata_child); seed the
+    # block below overwrites it from the children); seed the
     # disabled baseline here so it's always present when not nesting.
     settings["extract_data"] = copy.deepcopy(_EXTRACT_DATA_DEFAULT)
     param = dict(settings.get("param", {}))
@@ -1214,19 +1240,30 @@ def build_forge_blueprint(
         int(_ntides) if _ntides is not None else 0
     )
 
+    if auto_tiling:
+        default_n_procs = n_cores
+    else:
+        # Guaranteed by the "n_procs_x/n_procs_y required unless auto_tiling"
+        # check above; restated so this multiplication narrows cleanly.
+        assert npx is not None and npy is not None
+        default_n_procs = npx * npy
+    default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
+
     # ----- nesting (child domain) -------------------------------------------
-    # A child grid means this domain's parent extracts data for it: enable the
-    # extract_data block. Child s-coord/levels come from grid_kwargs_child; the
-    # extract period from the child metadata (else the roms_tools default).
-    if grid_kwargs_child is not None:
-        extract = dict(settings.get("extract_data", {}))
-        extract["do_extract"] = True
-        extract["extract_file"] = "nesting.nc"  # fixed convention (see input_generator)
-        for kwarg, leaf in CHILD_VERTICAL_KWARGS.items():
-            extract[leaf] = grid_kwargs_child[kwarg]
-        period = (metadata_child or {}).get("period")
-        extract["extract_period"] = float(period) if period is not None else 3600.0
-        settings["extract_data"] = extract
+    # Child grids mean this domain extracts data for them: enable the extract_data
+    # block. Each child's s-coord/levels come from its grid_kwargs, the extract
+    # period from nest_period.
+    if nested:
+        from cstar.applications.forge.input_generator import extract_data_settings
+
+        settings["extract_data"] = {
+            **settings.get("extract_data", {}),
+            **extract_data_settings(
+                name or default_name,
+                {child_name: c.grid_kwargs for child_name, c in nested.items()},
+                nest_period,
+            ),
+        }
 
     # OutputSpec spec: deep-merge the output-settings selection over the model
     # defaults (before manual overrides, so a hand override still wins).
@@ -1341,6 +1378,8 @@ def build_forge_blueprint(
         # engine/executor selection paths already surface it once per run.
         warnings.simplefilter("ignore", UserWarning)
         settings_cls = run_time_settings_for_ref(effective_roms_ref)
+    if problems := _nested_children_problems(nested, settings_cls, use_pio):
+        raise ValueError("; ".join(problems))
     # Drop any version-gated section (e.g. cdr_lite_output, ucla-roms >= 0.7.0)
     # this pin's schema doesn't model. OutputSpecs are shared across ModelSpecs
     # pinned to different ucla-roms releases (the same "daily-restarts"
@@ -1542,7 +1581,10 @@ def build_forge_blueprint(
         # domain-level name, which is already noted above.
         nested_topography_sources=[
             gk["topography_source"]
-            for gk in (grid_kwargs_parent, grid_kwargs_child)
+            for gk in (
+                grid_kwargs_parent,
+                *(child.grid_kwargs for child in nested.values()),
+            )
             if gk is not None and gk.get("topography_source") is not None
         ],
     )  # kept as `sources` locally for brevity
@@ -1644,14 +1686,6 @@ def build_forge_blueprint(
         marbl_ref=marbl_ref,
     )
 
-    if auto_tiling:
-        default_n_procs = n_cores
-    else:
-        # Guaranteed by the "n_procs_x/n_procs_y required unless auto_tiling"
-        # check above; restated so this multiplication narrows cleanly.
-        assert npx is not None and npy is not None
-        default_n_procs = npx * npy
-    default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
     bp = ForgeBlueprint(
         name=name or default_name,
         description=description,
@@ -1681,10 +1715,9 @@ def build_forge_blueprint(
                 auto_tiling=auto_tiling,
                 n_cores=n_cores,
             ),
-            grid_kwargs_child=grid_kwargs_child,
+            children=nested,
+            nest_period=nest_period,
             grid_kwargs_parent=grid_kwargs_parent,
-            metadata_child=metadata_child,
-            nesting_include_pressure_fluxes=nesting_include_pressure_fluxes,
             # Read back from ``settings`` (not the local ``v_sponge``) so a
             # ``run_time_overrides={"v_sponge": ...}`` caller (the generic override
             # mechanism, orthogonal to the ``v_sponge=`` param) can't desync this
