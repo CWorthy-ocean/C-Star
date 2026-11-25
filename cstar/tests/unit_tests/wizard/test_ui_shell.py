@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -186,6 +188,111 @@ def test_iopub_limit_never_raises():
     with patch("IPython.get_ipython", return_value=ip):
         queue_iopub_instead_of_dropping()
     iopub_thread.schedule.call_args.args[0]()
+
+    # ipykernel's private subscription stream refusing the new callback.
+    ip = _fake_kernel_shell()
+    iopub_thread = ip.kernel.iopub_thread
+    iopub_thread._xpub_stream = MagicMock()
+    iopub_thread._xpub_stream.on_recv.side_effect = RuntimeError("changed")
+    iopub_thread._handle_subscription = MagicMock()
+    with patch("IPython.get_ipython", return_value=ip):
+        queue_iopub_instead_of_dropping()
+    iopub_thread.schedule.call_args.args[0]()
+    iopub_thread.socket.setsockopt.assert_called_once_with(zmq.SNDHWM, 0)
+
+
+def test_iopub_limit_lifted_for_a_new_subscriber_before_its_welcome():
+    # A subscriber that connects after the first lift keeps libzmq's default
+    # limit, so each subscription lifts it again before ipykernel's own handler
+    # answers with an iopub_welcome, the first message the subscriber is sent.
+    # (_fake_kernel_shell has no subscription stream, so the tests above take
+    # the early return that an ipykernel without one would.)
+    ip = _fake_kernel_shell()
+    iopub_thread = ip.kernel.iopub_thread
+    calls = MagicMock()
+    iopub_thread.socket = calls.socket
+    iopub_thread._handle_subscription = calls.handle_subscription
+    iopub_thread._xpub_stream = MagicMock()
+    with patch("IPython.get_ipython", return_value=ip):
+        queue_iopub_instead_of_dropping()
+    iopub_thread.schedule.assert_called_once()
+    iopub_thread.schedule.call_args.args[0]()
+    iopub_thread._xpub_stream.on_recv.assert_called_once()
+    on_subscription = iopub_thread._xpub_stream.on_recv.call_args.args[0]
+    # Every subscription reaches the handler, not only the first to a topic.
+    assert call.socket.setsockopt(zmq.XPUB_VERBOSE, 1) in calls.mock_calls
+
+    calls.reset_mock()
+    on_subscription([b"\x01"])
+    assert calls.mock_calls == [
+        call.socket.setsockopt(zmq.SNDHWM, 0),
+        call.handle_subscription([b"\x01"]),
+    ]
+
+
+def test_a_subscriber_that_connects_later_gets_a_whole_burst():
+    # The page's IOPub subscription opens after the wizard is built, while
+    # voila's own may still be connected. libzmq gives a later subscriber the
+    # send limit the socket had when it was bound, so a lift made only before it
+    # connects is lost on it: a burst past that limit (a settings-editor rebuild)
+    # lost a run of messages on the way to the page, which then showed "widget
+    # model not found". A real IOPub thread and socket.
+    iostream = pytest.importorskip("ipykernel.iostream")
+    session = pytest.importorskip("jupyter_client.session")
+    n = 20_000  # well past libzmq's default limit of 1,000 messages
+
+    ctx = zmq.Context()
+    xpub = ctx.socket(zmq.XPUB)
+    port = xpub.bind_to_random_port("tcp://127.0.0.1")
+    iopub_thread = iostream.IOPubThread(xpub, session=session.Session())
+    iopub_thread.start()
+
+    def subscribe() -> zmq.Socket:
+        sub = ctx.socket(zmq.SUB)
+        sub.setsockopt(zmq.SUBSCRIBE, b"")
+        sub.connect(f"tcp://127.0.0.1:{port}")
+        return sub
+
+    try:
+        # Voila's subscription, there before the wizard is built.
+        early = subscribe()
+        assert early.poll(10_000)  # its iopub_welcome
+        early.recv_multipart()
+
+        ip = SimpleNamespace(kernel=SimpleNamespace(iopub_thread=iopub_thread))
+        with patch("IPython.get_ipython", return_value=ip):
+            queue_iopub_instead_of_dropping()
+        lifted = threading.Event()
+        iopub_thread.schedule(lifted.set)
+        assert lifted.wait(30)
+
+        # The page's. Its iopub_welcome says the subscription was handled; on
+        # an XPUB that passes on only the first subscription to a topic, none
+        # comes, so this waits a while and goes on.
+        sub = subscribe()
+        if sub.poll(5_000):
+            sub.recv_multipart()
+        time.sleep(0.2)
+
+        # Sent while nothing reads, like a page that falls behind.
+        sent = threading.Event()
+        for _ in range(n):
+            iopub_thread.send_multipart([b"x" * 200])
+        iopub_thread.schedule(sent.set)
+        assert sent.wait(30)
+
+        received = 0
+        while received < n and sub.poll(2_000):
+            sub.recv_multipart()
+            received += 1
+        assert received == n
+    finally:
+        # Stopping the loop from inside lets the thread cancel ipykernel's
+        # event-pipe task itself; ``stop()`` leaves it pending, and asyncio
+        # then logs it at exit.
+        iopub_thread.io_loop.add_callback(iopub_thread.io_loop.stop)
+        iopub_thread.thread.join(30)
+        ctx.destroy(linger=0)
 
 
 @pytest.mark.parametrize("build", [app, blueprint_app])
