@@ -1,5 +1,9 @@
 """Helpers and setting keys shared by the wizard's test modules."""
 
+from datetime import date
+
+from cstar.wizard.wizard import ForgeBlueprintWizard
+
 
 def _display(widget) -> str:
     return getattr(widget.layout, "display", "") or ""
@@ -44,3 +48,47 @@ def _iter_widget_tree(widget):
 
 def _is_in_tree(root, target) -> bool:
     return any(node is target for node in _descendants(root))
+
+
+def _find_card(root, key):
+    """Recursively find the ``components.card`` VBox tagged ``forge_key == key``
+    under ``root`` (see ``cstar.wizard.ui.components.card``).
+    """
+    if getattr(root, "forge_key", None) == key:
+        return root
+    for c in getattr(root, "children", []):
+        found = _find_card(c, key)
+        if found is not None:
+            return found
+    return None
+
+
+def _strip_bgc_forcing(wiz) -> None:
+    """Remove every BGC signal from the bundled ForcingSpec's widgets, so
+    bgc_mode "none"/"cdr_lite" (which reject BGC forcing) resolves.
+    """
+    fe = wiz._forcing_editor
+    for ws in list(fe._rows["surface"]):
+        if ws.get("type") is not None and ws["type"].value == "bgc":
+            fe._remove("surface", ws)
+    for section in ("boundary_bgc", "ic_bgc"):
+        for ws in list(fe._rows[section]):
+            fe._remove(section, ws)
+    for ws in list(fe._rows["river"]):
+        if "include_bgc" in ws:
+            ws["include_bgc"].value = False
+
+
+def _cdr_lite_wizard(catalog=None):
+    """A wizard in bgc_mode "cdr_lite" with physics-only forcing and a simple CDR
+    release (the mode requires a CDR forcing; "simple" targets the CDR-lite
+    tracers by default).
+    """
+    wiz = ForgeBlueprintWizard() if catalog is None else ForgeBlueprintWizard(catalog)
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
+    _strip_bgc_forcing(wiz)
+    wiz.model_card.bgc_dd.value = "cdr_lite"
+    wiz.cdr_mode_dd.value = "simple"
+    return wiz

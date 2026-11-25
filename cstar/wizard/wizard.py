@@ -25,14 +25,13 @@ from __future__ import annotations
 import base64
 import copy
 import html
-import os
 import re
 import warnings
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, NamedTuple, get_args
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -42,7 +41,6 @@ from cstar.applications.forge.blueprint import (
     PLACEHOLDER_DESCRIPTION,
     BgcSourceItem,
     BoundaryForcing,
-    CarbonateSensitivitySpec,
     CdrSpec,
     Composition,
     ForgeBlueprint,
@@ -58,8 +56,6 @@ from cstar.applications.forge.blueprint import (
     split_child_nesting_metadata,
 )
 from cstar.applications.forge.namelist_model import (
-    BgcMode,
-    bgc_mode_from_cppdefs,
     cdr_tracer_role,
     run_time_settings_for_ref,
     validate_run_time_sections,
@@ -71,7 +67,6 @@ from cstar.applications.forge.resolve import (
     cfl_dt,
     default_blueprint_description,
     extract_output_settings,
-    find_carbonate_sensitivity_files,
     force_switches_without_input_off,
     load_model_spec_data,
     read_cdr_forcing_yaml,
@@ -79,12 +74,11 @@ from cstar.applications.forge.resolve import (
     with_cdr_lite_tracer_set,
 )
 from cstar.base.digest import hash_netcdf_contents
-from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.app import ForgeBlueprintWizardApp as ForgeBlueprintWizardApp
 from cstar.wizard.fields import (
-    _CARBONATE_DIR_HINT,
     _CDR_FILE_HINT,
-    _carbonate_status_html,
+    _dd_options,
+    _dd_values,
     _same_attached_file,
     _stage_uploaded_netcdf,
     _tip,
@@ -103,6 +97,7 @@ from cstar.wizard.forcing_editor import (
     _row_place,
     _use_vars_rule,
 )
+from cstar.wizard.model_card import ModelCard, _pinned_roms_ref
 from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
     _FORCING_CARD,
@@ -827,12 +822,6 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
         raise ValueError(f"could not reconstruct releases from {path}: {exc}") from exc
 
 
-# Preselected in the Model dropdown when present in the catalog (falls back to
-# the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.16.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
-# catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.16-default"
-
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the
 # ucla-roms >= 0.5.0 check_output_divides_rst precheck; 'standard' is kept
@@ -1085,7 +1074,7 @@ class ForgeBlueprintWizard:
         # free-text path box below); reuses the same load path once selected.
         _fb_names = self.catalog.forge_blueprint_names
         self.load_catalog_dd = W.Dropdown(
-            options=self._dd_options(_fb_names, "forge_blueprint"),
+            options=_dd_options(self.catalog, _fb_names, "forge_blueprint"),
             description="From catalog:",
             style={"description_width": "110px"},
             layout=W.Layout(width="420px"),
@@ -1113,44 +1102,18 @@ class ForgeBlueprintWizard:
         # settings value(s)" warning that must NOT be swept away by _rebuild).
         self._load_status_is_error = False
 
-        # --- spec selectors ---
-        self.show_archived_models = W.Checkbox(
-            value=False,
-            description="Show archived",
-            indent=False,
-            tooltip=(
-                "Also list model specs marked archived (older ucla-roms releases). "
-                "They stay loadable; this only controls the dropdown."
-            ),
-            layout=W.Layout(width="auto"),
-        )
-        self.model_dd = W.Dropdown(
-            options=self._model_dd_options(),
-            description="Model:",
-            style={"description_width": "110px"},
-        )
-        models = self._dd_values(self.model_dd)
-        self.model_dd.value = (
-            _DEFAULT_MODEL
-            if _DEFAULT_MODEL in models
-            else (models[0] if models else None)
-        )
-        self.bgc_dd = W.Dropdown(
-            options=list(get_args(BgcMode)),
-            value="marbl",
-            description="BGC:",
-            style={"description_width": "110px"},
-            tooltip=(
-                "Biogeochemistry mode. 'marbl' builds ROMS-MARBL and includes the "
-                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing). "
-                "'cdr_lite' builds ucla-roms' CDR-lite tracers without MARBL: it needs "
-                "a CDR forcing with cdr_lite releases and carbonate sensitivity files, "
-                "by default supplied at run time by the carbonate-sensitivity-from "
-                "directive."
-            ),
+        # --- the Model card (ModelSpec picker, BGC mode, code refs, carbonate
+        # sensitivities): see cstar.wizard.model_card ---
+        self.model_card = ModelCard(
+            W,
+            self.catalog,
+            rebuild=self._rebuild,
+            suspend=self._suspend,
+            is_suspended=lambda: getattr(self, "_suspended", False),
+            use_pio=lambda: self.use_pio_chk.value,
         )
         self.domain_dd = W.Dropdown(
-            options=self._dd_options(domains, "domain", prefix=["<custom>"]),
+            options=_dd_options(self.catalog, domains, "domain", prefix=["<custom>"]),
             description="Domain:",
             value="<custom>",
             style={"description_width": "110px"},
@@ -1257,26 +1220,6 @@ class ForgeBlueprintWizard:
             tooltip="Total MPI ranks; the tiling itself is chosen at runtime "
             "from the land mask when auto tiling is on.",
         )
-        self.roms_ref = W.Text(
-            value="",  # populated from the selected Model's pinned default below
-            description="ucla-roms ref:",
-            style={"description_width": "120px"},
-            layout=W.Layout(width="260px"),
-            placeholder="commit / tag / branch",
-            tooltip="ucla-roms checkout target (commit hash, tag, or branch). "
-            "Prefilled from the selected Model's pinned default; edit to override.",
-        )
-        self.marbl_ref = W.Text(
-            value="",  # populated from the selected Model's pinned default below
-            description="MARBL ref:",
-            style={"description_width": "120px"},
-            layout=W.Layout(width="260px"),
-            placeholder="commit / tag / branch",
-            tooltip="MARBL checkout target (commit hash, tag, or branch). "
-            "Prefilled from the selected Model's pinned default; edit to override. "
-            'Only used when BGC mode is "marbl".',
-        )
-
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(
             value=False,
@@ -1557,8 +1500,10 @@ class ForgeBlueprintWizard:
         # A ForcingSpec must always be explicitly selected -- ModelSpec no longer
         # embeds a default forcing.
         self.forcing_dd = W.Dropdown(
-            options=self._dd_options(list(self.catalog.forcing_names), "forcing"),
-            value=self._default_forcing_spec(self._model_default_bgc_mode()),
+            options=_dd_options(
+                self.catalog, list(self.catalog.forcing_names), "forcing"
+            ),
+            value=self._default_forcing_spec(self.model_card.default_bgc_mode()),
             description="Forcing:",
             style={"description_width": "110px"},
             tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
@@ -1570,80 +1515,9 @@ class ForgeBlueprintWizard:
         # compared in _rebuild() to detect a deviation (composition.forcing.modified)
         self._forcing_seed: dict[str, Any] | None = None
 
-        # --- carbonate sensitivities (bgc_mode "cdr_lite" only) -------------------
-        # A cdr_lite build reads the carbonate sensitivities (ddic_dco2/ddic_dalk)
-        # as surface forcing from ROMS ``_cdrgas`` files. The default leaves them
-        # off the blueprint: the carbonate-sensitivity-from workplan directive
-        # supplies them at run time ("directive"). "path" attaches a directory of
-        # them now. What is stored is the resolved ``{"files": [{location,
-        # content_hash}]}`` (never the directory): _gather()/_rebuild() then neither
-        # rescan nor rehash on every edit, and a loaded blueprint round-trips
-        # exactly -- the trust-the-stored-hash idiom of the CDR netCDF attach flow.
-        self._carbonate_sensitivity: dict[str, Any] | None = None
-        self.cs_source_dd = W.Dropdown(
-            options=[
-                ("Supplied by a workplan directive at run time", "directive"),
-                ("Directory of ROMS _cdrgas files", "path"),
-            ],
-            value="directive",
-            description="Source:",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="360px"),
-            tooltip=(
-                "Where the carbonate sensitivity files come from. By default the "
-                "carbonate-sensitivity-from workplan directive supplies them from an "
-                "earlier UCLA-ROMS step at run time; attach a directory to put them "
-                "on the blueprint now."
-            ),
-        )
-        self.cs_path = W.Text(
-            value="",
-            description="Directory:",
-            placeholder="directory of ROMS _cdrgas files",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="420px"),
-            continuous_update=False,  # see grid_file_path
-        )
-        self.cs_attach_btn = W.Button(
-            description=label_for("buttons.attach", "Attach").label, icon="link"
-        )
-        self.cs_clear_btn = W.Button(
-            description=label_for("buttons.detach", "Detach").label, icon="times"
-        )
-        self.cs_status = W.HTML("")
-        self.cs_path_box = W.VBox(
-            [
-                components.field_row(
-                    W,
-                    "cs_path",
-                    self.cs_path,
-                    extra=(self.cs_attach_btn, self.cs_clear_btn),
-                ),
-                self.cs_status,
-            ]
-        )
-        # The time-interpolation switch: the settings editor's own widget (its
-        # model_box), mounted on each editor rebuild, so it shows only where the
-        # ucla-roms release has the switch and the ModelSpec declares it -- on an
-        # invalid blueprint too (see _show_unresolved_editor).
-        self.cs_interp_box = W.VBox([])
         # The Forcing card's "Atmospheric CO2" Static value: the settings editor's
         # forcing_box, mounted the same way, inside every forcing editor built.
         self.co2_static_box = W.VBox([])
-        self.cs_interp_note = W.HTML(
-            "<div class='forge-hint' style='margin-bottom:10px'>Leave this off if "
-            "your sensitivity files hold "
-            "time-averaged values; turn it on if they hold instantaneous values. "
-            "UCLA-ROMS writes the sensitivities time-averaged by default "
-            "(<code>wrt_cdr_gas_avg</code>), so the wizard starts with it off.</div>"
-        )
-        self.cs_group = components.subsection(
-            W,
-            "model.carbonate",
-            components.field_row(W, "cs_source_dd", self.cs_source_dd),
-            self.cs_path_box,
-            self.cs_interp_box,
-        )
 
         # --- CDR (Carbon Dioxide Removal) forcing -----------------------------
         # A top-level, independently composable spec (CdrSpec/Composition.cdr) --
@@ -1656,7 +1530,7 @@ class ForgeBlueprintWizard:
         # domain/forcing -- the dropdown itself never auto-reverts to "<custom>").
         _cdr_names = list(self.catalog.cdr_names)
         self.cdr_dd = W.Dropdown(
-            options=self._dd_options(_cdr_names, "cdr", prefix=["<custom>"]),
+            options=_dd_options(self.catalog, _cdr_names, "cdr", prefix=["<custom>"]),
             value="<custom>",
             description="CDR spec:",
             style={"description_width": "110px"},
@@ -1680,7 +1554,7 @@ class ForgeBlueprintWizard:
             style={"description_width": "110px"},
             tooltip=_tip("cdr", "mode"),
         )
-        # Shown only while bgc_dd is "cdr_lite" (_sync_carbonate_sensitivity_visibility):
+        # Shown only while bgc_dd is "cdr_lite" (_sync_cdr_lite_hint):
         # in that mode a CDR forcing is required and its releases must target the
         # CDR-lite tracers.
         self.cdr_lite_hint = W.HTML(
@@ -1920,7 +1794,7 @@ class ForgeBlueprintWizard:
         # default output settings.
         _output_names = list(self.catalog.output_names)
         self.output_dd = W.Dropdown(
-            options=self._dd_options(_output_names, "output"),
+            options=_dd_options(self.catalog, _output_names, "output"),
             # Prefer the bundled default explicitly -- output_names is sorted
             # alphabetically, so relying on position would silently change the
             # default whenever a new spec sorts first.
@@ -2176,12 +2050,8 @@ class ForgeBlueprintWizard:
         # `download_link` itself lives once, in the sticky bar (see `widget`).
         self.download_link_review = W.HTML("")
 
-        self.roms_ref.value = self._model_default_roms_ref()
-        self.marbl_ref.value = self._model_default_marbl_ref()
-        self.bgc_dd.value = self._model_default_bgc_mode()
-        self.use_pio_chk.value = self._model_default_use_pio()
-        self._sync_marbl_ref_visibility()
-        self._sync_carbonate_sensitivity_visibility()
+        self.use_pio_chk.value = self.model_card.default_use_pio()
+        self._sync_cdr_lite_hint()
         self._sync_auto_tiling()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         if self._forcing_editor is None:
@@ -2228,18 +2098,15 @@ class ForgeBlueprintWizard:
         for w in self._cdr_simple_fields:
             w.observe(self._rebuild, names="value")
         self.cdr_simple_replace_btn.on_click(self._on_cdr_simple_replace)
-        self.model_dd.observe(self._on_model_change, names="value")
-        self.show_archived_models.observe(self._on_show_archived_change, names="value")
-        self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
-        self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
-        self.bgc_dd.observe(self._sync_marbl_forcing_visibility, names="value")
-        self.bgc_dd.observe(self._on_bgc_mode, names="value")
-        self.cs_source_dd.observe(
-            self._sync_carbonate_sensitivity_visibility, names="value"
+        self.model_card.model_dd.observe(self._on_model_change, names="value")
+        # The card's own observers first: on bgc_dd, its visibility syncs run before
+        # the reactions of the other cards below.
+        self.model_card.wire()
+        self.model_card.bgc_dd.observe(self._sync_cdr_lite_hint, names="value")
+        self.model_card.bgc_dd.observe(
+            self._sync_marbl_forcing_visibility, names="value"
         )
-        self.cs_attach_btn.on_click(self._on_cs_attach)
-        self.cs_clear_btn.on_click(self._on_cs_clear)
-        self.cs_path.observe(self._on_cs_path_submit, names="value")
+        self.model_card.bgc_dd.observe(self._on_bgc_mode, names="value")
         self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
@@ -2255,9 +2122,9 @@ class ForgeBlueprintWizard:
             self.use_pio_chk,
             self.auto_tiling_chk,
             self.n_cores,
-            self.cs_source_dd,
-            self.roms_ref,
-            self.marbl_ref,
+            self.model_card.cs_source_dd,
+            self.model_card.roms_ref,
+            self.model_card.marbl_ref,
             self.start,
             self.end,
             self.model_ref_date,
@@ -2316,97 +2183,6 @@ class ForgeBlueprintWizard:
             return
         self._save_path_touched = True
         self._sync_next_steps()
-
-    def _dd_options(
-        self,
-        names: list[str],
-        kind: str,
-        *,
-        prefix: list[str] | None = None,
-        archived: Collection[str] = (),
-    ) -> list:
-        """Badge dropdown ``options`` with their source layer when it isn't the
-        top (writable) one -- ipywidgets-homogeneous.
-
-        ipywidgets' ``Dropdown`` requires ``options`` to be either ALL bare
-        values or ALL ``(label, value)`` 2-tuples: ``_make_options`` only takes
-        the "pairs" branch when *every* entry is a 2-tuple, so a mix silently
-        falls through to treating each element (tuples included) as a literal
-        value, and ``dd.value`` ends up holding a raw ``(label, value)`` tuple
-        instead of the bare name. So: if no *names* entry needs a badge, this
-        returns plain names unchanged (matching pre-layering behavior, safe to
-        mix with a plain sentinel like domain_dd's ``"<custom>"``); otherwise
-        *every* entry -- including any *prefix* sentinels -- is emitted as an
-        explicit ``(label, value)`` tuple so the whole list stays homogeneous.
-        ``dd.value`` is always the bare name/sentinel either way.
-
-        A ``KeyError`` from ``entry_source`` (name absent, shouldn't happen for
-        names drawn from the same catalog) is treated as "no badge". Names in
-        *archived* are labelled ``archived``, combined with the layer badge as
-        ``name (layer, archived)``.
-        """
-        prefix = prefix or []
-        entry_source = getattr(self.catalog, "entry_source", None)
-        top = getattr(self.catalog, "top", None)
-        top_label = top.label if top is not None else None
-
-        badges: dict[str, list[str]] = {}
-        if entry_source is not None:
-            for name in names:
-                try:
-                    source = entry_source(kind, name)
-                except KeyError:
-                    continue
-                if source != top_label:
-                    badges[name] = [source]
-        for name in names:
-            if name in archived:
-                badges.setdefault(name, []).append("archived")
-
-        if not badges:
-            return [*prefix, *names]
-
-        options: list[Any] = [(p, p) for p in prefix]
-        for name in names:
-            label = f"{name} ({', '.join(badges[name])})" if name in badges else name
-            options.append((label, name))
-        return options
-
-    def _visible_model_names(
-        self, archived: Collection[str], selected: str | None = None
-    ) -> list[str]:
-        """Catalog models ``model_dd`` lists: all of them when "Show archived"
-        is checked, otherwise the non-*archived* ones plus *selected* (so
-        unchecking never drops the current choice).
-        """
-        names = list(self.catalog.model_names)
-        if self.show_archived_models.value:
-            return names
-        return [n for n in names if n not in archived or n == selected]
-
-    def _model_dd_options(self, selected: str | None = None) -> list:
-        archived = self.catalog.archived_model_names
-        return self._dd_options(
-            self._visible_model_names(archived, selected),
-            "model",
-            archived=archived,
-        )
-
-    def _on_show_archived_change(self, _change):
-        """Re-option ``model_dd`` for the new checkbox state, keeping its value."""
-        with self._suspend():
-            selected = self.model_dd.value
-            self.model_dd.options = self._model_dd_options(selected)
-            self.model_dd.value = selected
-
-    @staticmethod
-    def _dd_values(dd) -> list:
-        """Bare values of a dropdown's ``options``, whether badged
-        ``(label, value)`` tuples (see ``_dd_options``) or plain strings
-        (ipywidgets' label == value shorthand). Use this instead of reading
-        ``dd.options`` directly for membership tests / indexing.
-        """
-        return [o[1] if isinstance(o, tuple) else o for o in dd.options]
 
     def _default_blueprint_path(self, name: str) -> str:
         """Default "Save to:" path for a blueprint named *name*.
@@ -2709,21 +2485,11 @@ class ForgeBlueprintWizard:
             "ok", "derived from the grid (CFL)"
         )
 
-    def _sync_marbl_ref_visibility(self, _change=None):
-        # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
-        self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
-
-    def _sync_carbonate_sensitivity_visibility(self, _change=None):
-        # The carbonate sensitivity group and the CDR panel's hint only matter in
-        # "cdr_lite" mode; the attach row only for the "path" source. Attached
-        # state is kept (not cleared) while hidden, like marbl_ref's value.
-        cdr_lite = self.bgc_dd.value == "cdr_lite"
-        path = self.cs_source_dd.value == "path"
-        self.cs_group.layout.display = "" if cdr_lite else "none"
-        self.cs_path_box.layout.display = "" if path else "none"
+    def _sync_cdr_lite_hint(self, _change=None):
+        # The CDR panel's hint only matters in BGC mode "cdr_lite", like the Model
+        # card's carbonate sensitivity group.
+        cdr_lite = self.model_card.bgc_mode == "cdr_lite"
         self.cdr_lite_hint.layout.display = "" if cdr_lite else "none"
-        if path and self._carbonate_sensitivity is None and not self.cs_status.value:
-            self.cs_status.value = _CARBONATE_DIR_HINT
 
     def _sync_auto_tiling(self, _change=None):
         # Auto tiling picks n_procs_x/y at runtime from the land mask, so those
@@ -2749,15 +2515,14 @@ class ForgeBlueprintWizard:
         # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
         # OutputSpec doesn't reference a model), so switching models never re-picks them
         # -- except that an untouched default ForcingSpec follows the new model's
-        # declared bgc_mode, via the bgc_dd change below (see _on_bgc_mode).
+        # declared bgc_mode, via the bgc_dd change apply_spec_defaults makes (see
+        # _on_bgc_mode).
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
         self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
-        self.roms_ref.value = self._model_default_roms_ref()
-        self.marbl_ref.value = self._model_default_marbl_ref()
-        self.bgc_dd.value = self._model_default_bgc_mode()
-        self.use_pio_chk.value = self._model_default_use_pio()
+        self.model_card.apply_spec_defaults()
+        self.use_pio_chk.value = self.model_card.default_use_pio()
         self._rebuild()
 
     def _on_editor_edit(self, section, field):
@@ -2954,61 +2719,6 @@ class ForgeBlueprintWizard:
         self._forcing_editor.reseed_category("boundary_bgc", fi)
 
     # ---- forcing spec -------------------------------------------------------
-    def _model_spec_declared(self) -> dict[str, Any]:
-        """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
-        ``use_pio``.
-
-        Single re-parse of the ModelSpec file backing ``_model_default_*`` below and
-        the spec-deviation check in ``_rebuild`` -- both need the same
-        catalog-declared values to compare live widget state against.
-        """
-        try:
-            data = load_model_spec_data(self.catalog.model_path(self.model_dd.value))
-            model = data["model"]
-            roms = model.get("code", {}).get("roms", {}) or {}
-            marbl = model.get("code", {}).get("marbl", {}) or {}
-            return {
-                "roms_ref": roms.get("commit") or roms.get("branch") or "",
-                "marbl_ref": marbl.get("commit") or marbl.get("branch") or "",
-                "bgc_mode": model.get("bgc_mode", "marbl"),
-                "use_pio": bool(model.get("use_pio", False)),
-            }
-        except Exception:
-            return {
-                "roms_ref": "",
-                "marbl_ref": "",
-                "bgc_mode": "marbl",
-                "use_pio": False,
-            }
-
-    def _model_default_roms_ref(self) -> str:
-        """The selected model's pinned ucla-roms checkout target (commit or branch)."""
-        return self._model_spec_declared()["roms_ref"]
-
-    def _model_default_marbl_ref(self) -> str:
-        """The selected model's pinned MARBL checkout target (commit or branch)."""
-        return self._model_spec_declared()["marbl_ref"]
-
-    def _model_default_bgc_mode(self) -> str:
-        """The selected model's ModelSpec-declared bgc_mode (prepopulates self.bgc_dd)."""
-        return self._model_spec_declared()["bgc_mode"]
-
-    def _model_default_use_pio(self) -> bool:
-        """The selected model's ModelSpec-declared use_pio (prepopulates self.use_pio_chk)."""
-        return self._model_spec_declared()["use_pio"]
-
-    def _effective_roms_ref(self) -> str | None:
-        """The ucla-roms ref that determines the run-time-settings schema.
-
-        Mirrors the resolver's own precedence for ``roms_ref`` (see
-        ``_gather()``): the live override in ``self.roms_ref`` when non-blank,
-        else the selected ModelSpec's pinned ``code.roms`` ref. ``None`` when
-        neither is set, so :func:`_wizard_settings_cls_for_ref`/
-        ``run_time_settings_for_ref`` fall back to the legacy schema instead of
-        warning on an empty ref.
-        """
-        return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
-
     def _default_forcing_spec(self, bgc_mode: str) -> str | None:
         """The ForcingSpec preselected for *bgc_mode*: the named bundled default
         when the catalog has it (see ``_DEFAULT_FORCING_SPEC``), else the plain
@@ -3047,7 +2757,7 @@ class ForgeBlueprintWizard:
         return {
             (section, field): value
             for (section, field), value in self._overrides.items()
-            if _applies_in(section, field, self.bgc_dd.value)
+            if _applies_in(section, field, self.model_card.bgc_mode)
         }
 
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
@@ -3057,8 +2767,8 @@ class ForgeBlueprintWizard:
             on_change=self._on_forcing_change,
             co2_static=self.co2_static_box,
         )
-        self._forcing_editor.show_co2(self.bgc_dd.value == "marbl")
-        self._forcing_editor.show_bgc(self.bgc_dd.value == "marbl")
+        self._forcing_editor.show_co2(self.model_card.bgc_mode == "marbl")
+        self._forcing_editor.show_bgc(self.model_card.bgc_mode == "marbl")
         self.forcing_box.children = [self._forcing_editor.widget]
 
     def _sync_marbl_forcing_visibility(self, _change=None) -> None:
@@ -3066,7 +2776,7 @@ class ForgeBlueprintWizard:
         sections (unless they hold something) under MARBL only.
         """
         if self._forcing_editor is not None:
-            marbl = self.bgc_dd.value == "marbl"
+            marbl = self.model_card.bgc_mode == "marbl"
             self._forcing_editor.show_co2(marbl)
             self._forcing_editor.show_bgc(marbl)
 
@@ -3172,7 +2882,7 @@ class ForgeBlueprintWizard:
             else SpecRef()
         )
         return Composition(
-            model=SpecRef(name=self.model_dd.value, origin="catalog"),
+            model=SpecRef(name=self.model_card.name, origin="catalog"),
             domain=dom,
             forcing=forcing,
             cdr=cdr,
@@ -3617,7 +3327,7 @@ class ForgeBlueprintWizard:
         kw = self._gather()
         data: dict[str, Any] = {
             "description": self._spec_description(),
-            "model_name": self.model_dd.value,
+            "model_name": self.model_card.name,
             "grid_name": self.grid_name.value,
             "start_time": _run_time_iso(self._run_datetime("start", self.start.value)),
             "end_time": _run_time_iso(self._run_datetime("end", self.end.value)),
@@ -3873,7 +3583,7 @@ class ForgeBlueprintWizard:
         modes that is). The plot builds from this, so what it shows is what
         will be generated.
         """
-        if self.bgc_dd.value != "cdr_lite":
+        if self.model_card.bgc_mode != "cdr_lite":
             return current
         spec = with_cdr_lite_tracer_set(CdrSpec(**current))
         return {**current, "cdr_forcing": spec.cdr_forcing}
@@ -4195,7 +3905,7 @@ class ForgeBlueprintWizard:
                         "found -- is this really a CDR-forcing file?",
                     )
                 if (
-                    self.bgc_dd.value == "cdr_lite"
+                    self.model_card.bgc_mode == "cdr_lite"
                     and "tracer_name" in ds.coords
                     and not any(
                         role is not None and role[0] == "cdr_lite"
@@ -4271,119 +3981,6 @@ class ForgeBlueprintWizard:
         self.cdr_file_upload.value = ()
         # Still in "netcdf" mode with nothing attached -> invalid until re-attached.
         self.cdr_file_status.value = _CDR_FILE_HINT
-        self._rebuild()
-
-    # ---- carbonate sensitivities: a directory of ROMS _cdrgas files ------------
-    def _attach_carbonate_sensitivity_dir(self, path_str: str) -> None:
-        """Scan ``path_str`` for joined ``_cdrgas`` files, check each is netCDF,
-        hash them, and store the resolved list as ``_carbonate_sensitivity``.
-
-        A failure clears any earlier attach (the status says why): leaving it
-        would quietly keep building with files the path box no longer names.
-        """
-        self.cs_status.value = "<i>attaching…</i>"
-        try:
-            joined = find_carbonate_sensitivity_files(
-                Path(path_str).expanduser().resolve()
-            )
-            formats = {f.path: netcdf_format(f.path) for f in joined}
-            not_netcdf = [
-                p.name for p, fmt in formats.items() if fmt is NetCDFFormat.UNRECOGNIZED
-            ]
-            if not_netcdf:
-                raise ValueError(f"not netCDF files: {', '.join(not_netcdf)}")
-            files = [
-                {"location": str(f.path), "content_hash": hash_netcdf_contents(f.path)}
-                for f in joined
-            ]
-            # The blueprint's own rules (e.g. distinct basenames: the scan is
-            # recursive, so a parent of several runs' output can repeat them).
-            CarbonateSensitivitySpec.model_validate({"files": files})
-        except Exception as exc:
-            self._carbonate_sensitivity = None
-            message = html.escape(" ".join(str(exc).split()))
-            self.cs_status.value = components.status_span(
-                "err", f"{type(exc).__name__}: {message}"
-            )
-            self._rebuild()
-            return
-        self._carbonate_sensitivity = {"files": files}
-        first = min(f.timestamp for f in joined)
-        last = max(f.timestamp for f in joined)
-        status = _carbonate_status_html(
-            len(files), f"{first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M}"
-        )
-        if self.use_pio_chk.value and not all(
-            fmt.is_classic for fmt in formats.values()
-        ):
-            status += "<br>" + components.status_span(
-                "note",
-                "ParallelIO reads classic netCDF "
-                "only: Forge converts the staged copies to CDF-5 (the originals "
-                "are untouched).",
-            )
-        self.cs_status.value = status
-        self._rebuild()
-
-    def _populate_carbonate_sensitivity(self, cfg: ForgeBlueprint) -> None:
-        """Load-back half of the attach flow: a blueprint listing carbonate
-        sensitivity files selects the "path" source with the stored hashes
-        trusted (never recomputed; a missing file is a warning, not a blocker --
-        Save must still round-trip losslessly); otherwise the "directive" source.
-        """
-        spec = cfg.carbonate_sensitivity
-        if spec is None:
-            self._carbonate_sensitivity = None
-            self.cs_source_dd.value = "directive"
-            self.cs_path.value = ""
-            self.cs_status.value = ""
-            return
-        self._carbonate_sensitivity = {
-            "files": [
-                {"location": f.location, "content_hash": f.content_hash}
-                for f in spec.files
-            ]
-        }
-        parents = [str(Path(f.location).expanduser().parent) for f in spec.files]
-        try:
-            directory = os.path.commonpath(parents)
-        except ValueError:  # relative and absolute locations mixed
-            directory = parents[0]
-        self.cs_source_dd.value = "path"
-        self.cs_path.value = directory
-        missing = [f for f in spec.files if not Path(f.location).expanduser().exists()]
-        self.cs_status.value = _carbonate_status_html(len(spec.files)) + (
-            "<br>"
-            + components.status_span(
-                "err", f"⚠ {len(missing)} file(s) not found at these paths"
-            )
-            if missing
-            else ""
-        )
-
-    def _on_cs_attach(self, _btn):
-        path_str = self.cs_path.value.strip()
-        if not path_str:
-            self.cs_status.value = components.status_span("err", "Enter a path first.")
-            return
-        # Explicit click always re-scans and re-hashes -- no dedupe here.
-        self._attach_carbonate_sensitivity_dir(path_str)
-
-    def _on_cs_path_submit(self, _change) -> None:
-        """Attach the typed directory on Enter/focus-out (twin of
-        `_on_cdr_file_path_submit`): a typed-but-unattached path would otherwise
-        leave the blueprint invalid with no hint as to why.
-        """
-        if getattr(self, "_suspended", False):
-            return
-        path_str = self.cs_path.value.strip()
-        if path_str:
-            self._attach_carbonate_sensitivity_dir(path_str)
-
-    def _on_cs_clear(self, _btn):
-        self._carbonate_sensitivity = None
-        self.cs_path.value = ""  # fires _on_cs_path_submit, a no-op when blank
-        self.cs_status.value = _CARBONATE_DIR_HINT
         self._rebuild()
 
     # ---- CDR plotting (WP6) ----------------------------------------------------
@@ -4559,21 +4156,15 @@ class ForgeBlueprintWizard:
         self._wizard_default_keys = set()
         # The file's own pinned ucla-roms ref selects the schema variant it was
         # authored against -- not the (possibly different) currently-selected
-        # model's default. Computed once here and reused below when seeding
-        # self.roms_ref, so the two never drift apart.
-        stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
+        # model's default. The Model card seeds its roms_ref from the same
+        # _pinned_roms_ref, so the two never drift apart.
         loaded_problems = validate_run_time_sections(
-            cfg.model_settings, roms_ref=stored_ref or None
+            cfg.model_settings, roms_ref=_pinned_roms_ref(cfg) or None
         )
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
-            if cfg.composition.model.name in self.catalog.archived_model_names:
-                self.show_archived_models.value = True
-            if cfg.composition.model.name in self._dd_values(self.model_dd):
-                self.model_dd.value = cfg.composition.model.name
-            elif cfg.composition.model.name:
-                self._load_unknown_specs.append(f"model '{cfg.composition.model.name}'")
+            self.model_card.select_model(cfg, self._load_unknown_specs)
             self.grid_name.value = cfg.domain.grid_name
             # A file's own description is kept, unless it is no more than a default:
             # none, the old placeholder, or the text the resolver derives for it
@@ -4648,30 +4239,7 @@ class ForgeBlueprintWizard:
             # _Suspender), so the disabled/visible state is already correct;
             # call again explicitly for robustness in case that ever changes.
             self._sync_auto_tiling()
-            self.bgc_dd.value = bgc_mode_from_cppdefs(
-                cfg.model_settings.get("cppdefs") or {}
-            )
-            self._populate_carbonate_sensitivity(cfg)
-            # Show the file's actual pinned ref, falling back to the (now-selected)
-            # model's default when the file matches it exactly. (stored_ref was
-            # already computed above, before the suspend block, to feed the
-            # loaded-file validation with the right schema variant.)
-            default_ref = self._model_default_roms_ref()
-            self.roms_ref.value = (
-                default_ref if stored_ref == default_ref else stored_ref
-            )
-            # Same for MARBL -- code.marbl is absent when the file was saved with
-            # bgc_mode="none", in which case fall back to the model's default so
-            # re-enabling BGC picks the pinned ref back up.
-            stored_marbl = ""
-            if cfg.code.marbl is not None:
-                stored_marbl = cfg.code.marbl.commit or cfg.code.marbl.branch or ""
-            default_marbl = self._model_default_marbl_ref()
-            self.marbl_ref.value = (
-                stored_marbl
-                if stored_marbl and stored_marbl != default_marbl
-                else default_marbl
-            )
+            self.model_card.populate(cfg)
             self.topo_source.value = getattr(
                 cfg.domain.topography_source, "value", cfg.domain.topography_source
             )
@@ -4742,7 +4310,7 @@ class ForgeBlueprintWizard:
             # fallback value); fall back to the first available option for an older
             # file recorded with origin="model_default" or an unknown/missing name.
             fname = cfg.composition.forcing.name
-            _forcing_values = self._dd_values(self.forcing_dd)
+            _forcing_values = _dd_values(self.forcing_dd)
             if fname in _forcing_values:
                 self.forcing_dd.value = fname
             elif _forcing_values:
@@ -4770,7 +4338,7 @@ class ForgeBlueprintWizard:
                 self._forcing_seed = None
             # output spec selection
             oname = cfg.composition.output.name
-            _output_values = self._dd_values(self.output_dd)
+            _output_values = _dd_values(self.output_dd)
             if oname in _output_values:
                 self.output_dd.value = oname
             elif _output_values:
@@ -4786,7 +4354,7 @@ class ForgeBlueprintWizard:
             # its recorded CdrSpec loads as unmodified and a hand-edited one
             # loads as modified -- mirrors the forcing_seed block above.
             cname = cfg.composition.cdr.name
-            _cdr_values = self._dd_values(self.cdr_dd)
+            _cdr_values = _dd_values(self.cdr_dd)
             if cname is not None and cname in _cdr_values:
                 self.cdr_dd.value = cname
                 try:
@@ -4907,7 +4475,7 @@ class ForgeBlueprintWizard:
 
     def _gather(self) -> dict[str, Any]:
         kw = dict(
-            model_path=self.catalog.model_path(self.model_dd.value),
+            model_path=self.model_card.model_path(),
             grid_name=self.grid_name.value,
             grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
@@ -4943,21 +4511,7 @@ class ForgeBlueprintWizard:
             kw["topography_path"] = self.topo_path.value.strip()
         kw["topography_source"] = self.topo_source.value
         kw["use_pio"] = self.use_pio_chk.value
-        kw["bgc_mode"] = self.bgc_dd.value
-        # The default ("directive") leaves carbonate_sensitivity off: the workplan
-        # directive supplies the files at run time. The resolver rejects them
-        # outside bgc_mode "cdr_lite", so attached state is only passed there.
-        if self.bgc_dd.value == "cdr_lite" and self.cs_source_dd.value == "path":
-            if self._carbonate_sensitivity is None:
-                raise ValueError(
-                    "carbonate sensitivities: attach a directory of ROMS _cdrgas "
-                    "files, or switch the source to the workplan directive"
-                )
-            kw["carbonate_sensitivity"] = self._carbonate_sensitivity
-        if self.roms_ref.value.strip():
-            kw["roms_ref"] = self.roms_ref.value.strip()
-        if self.marbl_ref.value.strip():
-            kw["marbl_ref"] = self.marbl_ref.value.strip()
+        kw.update(self.model_card.gather())
         if self.model_ref_date.value:
             ref = self._run_datetime("model_reference_date", self.model_ref_date.value)
             if ref != datetime(2000, 1, 1):
@@ -4992,7 +4546,7 @@ class ForgeBlueprintWizard:
             # open, just fed differently. `None` (not `[]`) is "no boundary
             # section at all" under the new singular BoundaryForcing schema.
             kw["forcing_inputs"]["forcing"]["boundary"] = None
-        if self.bgc_dd.value != "marbl":
+        if self.model_card.bgc_mode != "marbl":
             # Only MARBL has an air CO2: the hidden "Atmospheric CO2" block keeps its
             # choice for a switch back, but a time-varying one reaches no blueprint.
             surface = kw["forcing_inputs"]["forcing"]["surface"]
@@ -5090,10 +4644,10 @@ class ForgeBlueprintWizard:
                 )
                 self.editor_box.children = [placeholder]
                 self.output_editor_box.children = [placeholder]
-            self.cs_interp_box.children = (
-                [self.editor.model_box, self.cs_interp_note]
+            self.model_card.show_settings(
+                self.editor.model_box
                 if _MODEL_CARD in self.editor._group_fields
-                else []
+                else None
             )
             self.co2_static_box.children = (
                 [self.editor.forcing_box]
@@ -5133,9 +4687,9 @@ class ForgeBlueprintWizard:
         """
         is_parent, is_child = self._nesting_role()
         key = _EditorKey(
-            self.model_dd.value,
-            _wizard_settings_cls_for_ref(self._effective_roms_ref()),
-            self.bgc_dd.value,
+            self.model_card.name,
+            _wizard_settings_cls_for_ref(self.model_card.effective_roms_ref()),
+            self.model_card.bgc_mode,
             is_parent,
             is_child,
             resolved=False,
@@ -5145,7 +4699,7 @@ class ForgeBlueprintWizard:
         ):
             return
         try:
-            spec = self.catalog.model_data(self.model_dd.value)["model_settings"]
+            spec = self.catalog.model_data(self.model_card.name)["model_settings"]
         except Exception:  # an unreadable spec: the failed resolve reports it
             spec = {}
         self._show_editor(
@@ -5227,13 +4781,13 @@ class ForgeBlueprintWizard:
         composed = cfg.model_settings
         # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
         # reused for the validation call below.
-        effective_roms_ref = self._effective_roms_ref()
+        effective_roms_ref = self.model_card.effective_roms_ref()
         settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
         is_parent, is_child = self._nesting_role()
         key = _EditorKey(
-            self.model_dd.value,
+            self.model_card.name,
             settings_cls,
-            self.bgc_dd.value,
+            self.model_card.bgc_mode,
             is_parent,
             is_child,
             resolved=True,
@@ -5254,17 +4808,7 @@ class ForgeBlueprintWizard:
         # _CPPDEFS_DERIVED_LEAVES). Without this, flipping PIO or editing the roms
         # ref and saving the blueprint (without pressing "Save as new spec") would
         # silently record composition.model.modified=False.
-        declared = self._model_spec_declared()
-        spec_deviation = (
-            self.use_pio_chk.value != declared["use_pio"]
-            or self.bgc_dd.value != declared["bgc_mode"]
-            or bool(
-                (ref := self.roms_ref.value.strip()) and ref != declared["roms_ref"]
-            )
-            or bool(
-                (mref := self.marbl_ref.value.strip()) and mref != declared["marbl_ref"]
-            )
-        )
+        spec_deviation = self.model_card.deviates_from_spec()
         model_modified = (
             any(not _is_output_key(s, f) for s, f in deviations) or spec_deviation
         )
@@ -5442,7 +4986,7 @@ class ForgeBlueprintWizard:
                 components.Pill("default path", "off"),
             )
         pills = [components.Pill(row["name"].value) for row in fe._rows.get(cat, [])]
-        if cat == "surface" and self.bgc_dd.value == "marbl":
+        if cat == "surface" and self.model_card.bgc_mode == "marbl":
             pills.append(components.Pill(f"CO2 {fe.co2_mode.value}"))
         return tuple(pills) or none
 
@@ -5510,7 +5054,7 @@ class ForgeBlueprintWizard:
         every other card keeps its own state.
         """
         valid = cfg is not None
-        model_name = self.model_dd.value or "—"
+        model_name = self.model_card.name or "—"
         step_links = "".join(
             f"<a class='step' href='#forge-sec-{key}'>{i} {title}</a>"
             for i, (key, title) in enumerate(_STICKY_STEPS, start=1)
@@ -5569,7 +5113,7 @@ class ForgeBlueprintWizard:
             for key, n in Counter(p.card for p in problems).items()
         }
         complete = components.chip("● Complete", "ok")
-        chips["model"].value = problem_chips.get("model", complete)
+        chips["model"].value = problem_chips.get("model", self.model_card.status_chip())
         chips["run"].value = problem_chips.get("run", complete)
         chips["review"].value = (
             components.chip("● Ready", "ok")
@@ -6204,8 +5748,8 @@ class ForgeBlueprintWizard:
             # reassignment even when the old value is still present -- restore it
             # explicitly so a mismatch genuinely leaves the selection untouched.
             old_value = self.output_dd.value
-            self.output_dd.options = self._dd_options(
-                list(self.catalog.output_names), "output"
+            self.output_dd.options = _dd_options(
+                self.catalog, list(self.catalog.output_names), "output"
             )
             self.output_dd.value = name if ok else old_value
             if ok:
@@ -6241,7 +5785,7 @@ class ForgeBlueprintWizard:
             )
             return
         try:
-            base_path = self.catalog.model_path(self.model_dd.value)
+            base_path = self.model_card.model_path()
             owned = _model_owned_settings(self.config.model_settings)
             base_settings = load_model_spec_data(base_path)["model"].get(
                 "model_settings", {}
@@ -6270,10 +5814,10 @@ class ForgeBlueprintWizard:
                 # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
                 # the round-trip verifier below compares against _gather()'s kw, so
                 # any divergence here would be a spurious mismatch.
-                bgc_mode=self.bgc_dd.value,
+                bgc_mode=self.model_card.bgc_mode,
                 use_pio=self.use_pio_chk.value,
-                roms_ref=self.roms_ref.value.strip() or None,
-                marbl_ref=self.marbl_ref.value.strip() or None,
+                roms_ref=self.model_card.typed_roms_ref or None,
+                marbl_ref=self.model_card.typed_marbl_ref or None,
             )
         except FileExistsError as exc:
             self.save_model_status.value = components.status_span("err", f"{exc}")
@@ -6285,9 +5829,7 @@ class ForgeBlueprintWizard:
             return
         ok = self._verify_spec_roundtrip("model", name)
         with self._suspend():
-            old_value = self.model_dd.value
-            self.model_dd.options = self._model_dd_options(old_value)
-            self.model_dd.value = name if ok else old_value
+            self.model_card.reselect(name if ok else self.model_card.name)
             if ok:
                 active = self._active_overrides
                 self._overrides = {
@@ -6351,8 +5893,11 @@ class ForgeBlueprintWizard:
         ok = self._verify_spec_roundtrip("domain", name)
         with self._suspend():
             old_value = self.domain_dd.value
-            self.domain_dd.options = self._dd_options(
-                list(self.catalog.domain_names), "domain", prefix=["<custom>"]
+            self.domain_dd.options = _dd_options(
+                self.catalog,
+                list(self.catalog.domain_names),
+                "domain",
+                prefix=["<custom>"],
             )
             self.domain_dd.value = name if ok else old_value
             if ok:
@@ -6397,8 +5942,8 @@ class ForgeBlueprintWizard:
         ok = self._verify_spec_roundtrip("forcing", name)
         with self._suspend():
             old_value = self.forcing_dd.value
-            self.forcing_dd.options = self._dd_options(
-                list(self.catalog.forcing_names), "forcing"
+            self.forcing_dd.options = _dd_options(
+                self.catalog, list(self.catalog.forcing_names), "forcing"
             )
             self.forcing_dd.value = name if ok else old_value
             if ok:
@@ -6450,8 +5995,8 @@ class ForgeBlueprintWizard:
         ok = self._verify_spec_roundtrip("cdr", name)
         with self._suspend():
             old_value = self.cdr_dd.value
-            self.cdr_dd.options = self._dd_options(
-                list(self.catalog.cdr_names), "cdr", prefix=["<custom>"]
+            self.cdr_dd.options = _dd_options(
+                self.catalog, list(self.catalog.cdr_names), "cdr", prefix=["<custom>"]
             )
             self.cdr_dd.value = name if ok else old_value
             if ok:
@@ -6589,7 +6134,6 @@ class ForgeBlueprintWizard:
         self.grid_file_detach_btn.button_style = "danger"
         self.cdr_clear_btn.button_style = "danger"
         self.cdr_file_clear_btn.button_style = "danger"
-        self.cs_clear_btn.button_style = "danger"
 
         sticky = W.HBox([self.sticky_bar, self.download_link])
         sticky.add_class("forge-sticky")
@@ -6626,20 +6170,7 @@ class ForgeBlueprintWizard:
             W,
             "model",
             self.card_errors["model"],
-            components.field_row(
-                W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
-            ),
-            # bgc_dd is placed before roms_ref/marbl_ref's grid so marbl_ref
-            # (only relevant once bgc mode is "marbl") reads after bgc_dd.
-            components.field_row(W, "bgc_dd", self.bgc_dd),
-            components.field_grid(
-                W,
-                [
-                    components.field_row(W, "roms_ref", self.roms_ref),
-                    components.field_row(W, "marbl_ref", self.marbl_ref),
-                ],
-            ),
-            self.cs_group,
+            *self.model_card.rows(),
             components.field_row(W, "forcing_dd", self.forcing_dd),
             num=1,
             chips_widget=self.card_chips["model"],

@@ -19,6 +19,7 @@ import xarray as xr
 import yaml
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.wizard.fields import _dd_values
 from cstar.wizard.forcing_editor import _parse_constants, _parse_options
 from cstar.wizard.wizard import ForgeBlueprintWizard, _merge_loaded_kwargs
 
@@ -161,9 +162,7 @@ class TestLoadSaveKeepsTheData:
 
         assert wiz.config.domain.grid_kwargs_parent["close_narrow_channels"] is True
         # ... but a parent picked from the catalog replaces the loaded one whole.
-        preset = next(
-            v for v in wiz._dd_values(wiz.parent_domain_dd) if v != "<custom>"
-        )
+        preset = next(v for v in _dd_values(wiz.parent_domain_dd) if v != "<custom>")
         wiz.parent_domain_dd.value = preset
         spec_gk = wiz.catalog.domain_data(preset).get("grid_kwargs") or {}
         assert wiz._nested_grid_kwargs("parent").get(
@@ -278,7 +277,7 @@ class TestSimpleCdrTheFieldsCannotShow:
         wiz.start.value = date(2012, 1, 1)
         wiz.end.value = date(2012, 1, 2)
         wiz._boundaries_touched = True  # not exercising boundary derivation
-        wiz.bgc_dd.value = "cdr_lite"
+        wiz.model_card.bgc_dd.value = "cdr_lite"
         wiz.cdr_mode_dd.value = "simple"
         saved = _save(wiz, tmp_path / "lite.yaml")
         # the resolver names the release's tracer set in the saved file
@@ -443,7 +442,7 @@ class TestFreeTextIsReadOrRefused:
         row["constants"].value = "ALK=oops"
 
         editor._sync_bgc("ic_bgc", "boundary_bgc")  # "Copy IC BGC" button
-        wiz.bgc_dd.value = "none"
+        wiz.model_card.bgc_dd.value = "none"
 
         assert editor._rows["boundary_bgc"] == before  # nothing copied
         assert "ALK=oops" in wiz.derived.value

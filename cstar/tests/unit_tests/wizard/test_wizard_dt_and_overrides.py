@@ -114,7 +114,7 @@ class TestDerivedDt:
         """
         wiz = _wizard()
         wiz.domain_dd.value = domain
-        assert wiz.bgc_dd.value == "marbl"
+        assert wiz.model_card.bgc_dd.value == "marbl"
         assert not wiz._dt_touched
         bp = _save(wiz, tmp_path / "bp.yaml")
         dt = _saved_dt(bp)

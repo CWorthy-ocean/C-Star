@@ -92,6 +92,7 @@ Directory map
     |   +-- domain_catalog.py          # DomainCatalog / LayeredCatalog
     +-- wizard/                        # Wizard presentation layer (shared UI kit + Voila front-end)
     |   +-- wizard.py                      # ForgeBlueprintWizard (ipywidgets UI): the cards, _rebuild, save
+    |   +-- model_card.py                  # ModelCard: the Model card's widgets, gather/populate share and chip
     |   +-- forcing_editor.py              # _ForcingEditor: the Forcing card's rows, sources and options
     |   +-- settings_editor.py             # _SettingsEditor: namelist/cppdefs widgets and where each card shows them
     |   +-- fields.py                      # Help text, field widgets and attached-file helpers shared by both pages
@@ -309,13 +310,18 @@ The call chain end to end
    code still hides the whole row) and independently collapsible panes
    (``open_accordion``). Every visible label, symbol, unit and hint comes
    from ``cstar/wizard/ui/labels/blueprint-wizard.yaml`` via
-   ``label_for(key)`` (key namespaces: bare widget attr, ``grid.<k>``,
+   ``label_for(key)`` (key namespaces: bare widget attr of the wizard or
+   one of its cards, ``grid.<k>``,
    ``forcing.row.<key>``, ``ic.<attr>``, ``boundary.<attr>``,
    ``settings.<section>[.<field>]``, ``buttons.<name>``); a missing key
    falls back to the raw name, and the wizard's UI-label tests check every
    key names a real widget or namelist field. ``_rebuild()`` also refreshes
    the sticky status bar, per-card chips and accordion titles
-   (``_update_status``). The CSS travels inside the widget tree so the
+   (``_update_status``). A card with a module of its own (the Model card's
+   ``ModelCard``, ``wiz.model_card``) owns its widgets and their observers,
+   its share of ``_gather`` and ``_populate_from``, and its chip; the wizard
+   places its rows, reacts to it by observing its widgets, and reads and sets
+   it only through its methods. The CSS travels inside the widget tree so the
    plain-notebook path is styled too; only the Voila page column
    (``body[data-voila] .forge-shell``) is shell-specific. Every colour is a
    ``--forge-*`` token from ``branding.PALETTE``, which holds a light and a
