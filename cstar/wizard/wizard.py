@@ -1588,17 +1588,16 @@ class ForgeBlueprintWizard:
             cfg.model_settings, roms_ref=_pinned_roms_ref(cfg) or None
         )
         with self._suspend():
-            self.domain_card.select_custom()
-            self.model_card.select_model(cfg, self._load_unknown_specs)
+            # One call per card, in page order. The Model card loads before the Run
+            # card, which compares a loaded simple CDR release with what its fields
+            # compile under the BGC mode (cdr_lite adds a tracer set). The forcing
+            # rows below read the Grid card's parent toggle and the Model card's BGC
+            # mode, and the Model card reports an unknown spec before them. The
+            # Grid and Review cards would load the same anywhere in this list.
+            self.model_card.populate(cfg, self._load_unknown_specs)
+            self.domain_card.populate(cfg)
+            self.run_card.populate(cfg)
             self.review_card.populate(cfg)
-            self.run_card.populate_window(cfg)
-            self.domain_card.populate_grid(cfg)
-            self.run_card.populate_layout(cfg)
-            self.model_card.populate(cfg)
-            self.domain_card.populate_topography(cfg)
-            self.run_card.populate_cdr(cfg)
-            self.domain_card.populate_dt(cfg)
-            self.domain_card.populate_nesting(cfg)
             # forcing: reconstruct the editor from the loaded sources. Forcing/output
             # dropdowns always need a valid catalog selection (no more "model_default"
             # fallback value); fall back to the first available option for an older
@@ -1639,7 +1638,6 @@ class ForgeBlueprintWizard:
                 self.output_dd.value = _output_values[0]
                 if oname:
                     self._load_unknown_specs.append(f"output '{oname}'")
-            self.run_card.select_cdr_spec(cfg)
         # Reconstruct the overrides layer = diff(loaded model_settings, composed). This
         # captures every manual deviation regardless of the file's recorded provenance,
         # making load fully non-lossy.
@@ -1653,21 +1651,17 @@ class ForgeBlueprintWizard:
 
     # ---- gather + resolve ----------------------------------------------------
     def _gather(self) -> dict[str, Any]:
+        # One call per card, in page order. The resolver takes keywords, so the
+        # order only decides which error shows when two cards raise: the Model
+        # card's (carbonate sensitivities picked but not attached) before the Run
+        # card's (a cleared run date, which _rebuild stops at before it gets
+        # here). dict() refuses a key two cards both return.
         kw = dict(
-            model_path=self.model_card.model_path(),
-            **self.domain_card.gather_grid(),
-            partitioning=self.run_card.partitioning(),
-            start_date=self.run_card.start_datetime(),
-            end_date=self.run_card.end_datetime(),
+            **self.model_card.gather(),
+            **self.domain_card.gather(),
+            **self.run_card.gather(),
             **self.review_card.gather(),
-            **self.domain_card.gather_derived(),
         )
-        kw.update(self.domain_card.gather_topography())
-        kw["use_pio"] = self.run_card.use_pio
-        kw.update(self.model_card.gather())
-        if (ref := self.run_card.model_reference_date()) is not None:
-            kw["model_reference_date"] = ref
-        kw.update(self.domain_card.gather_file_and_nesting())
         _is_parent, is_child = self.domain_card.nesting_role()
         # forcing/output are always required now (no more model-default fallback).
         if self._forcing_editor is None:
@@ -1690,7 +1684,6 @@ class ForgeBlueprintWizard:
             ]
         kw["output_settings"] = self._output_settings()
         kw["composition"] = self._composition()
-        kw["cdr"] = self.run_card.cdr()
         kw["provenance"] = self._carried_provenance
         return kw
 

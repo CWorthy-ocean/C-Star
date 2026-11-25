@@ -325,9 +325,12 @@ The call chain end to end
    ``ModelCard``, ``wiz.model_card``, the Grid card's ``DomainCard``,
    ``wiz.domain_card``, the Run card's ``RunCard``, ``wiz.run_card``, and
    ``ReviewCard``, ``wiz.review_card``, which holds both the Save and the Next
-   steps cards) owns its widgets and their observers, its share of ``_gather``
-   and ``_populate_from``, and its chip. It gets the wizard's callables
-   (``rebuild``, ``suspend``, ``is_suspended`` and the card's own), never the
+   steps cards) owns its widgets and their observers, its resolver kwargs
+   (``gather()``), loading a blueprint back (``populate()``), and its chip.
+   ``_gather`` and ``_populate_from`` call each card's once, in page order,
+   and a comment beside each call says which orders matter. It gets the
+   wizard's callables (``rebuild``, ``suspend``, ``is_suspended`` and the
+   card's own), never the
    wizard, and imports neither the wizard nor another card. A callable may read
    another card or post a message to it; an action that changes another card's
    state is a wizard method, such as ``save_blueprint``, which derives the Grid

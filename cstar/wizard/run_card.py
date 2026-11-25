@@ -420,7 +420,7 @@ class RunCard:
         )
         # The mode apply_cdr_mode() last actually applied -- lets it detect a
         # real transition (for leaving-mode cleanup) whether invoked via the
-        # dropdown's own .observe or a direct call (e.g. from populate_cdr,
+        # dropdown's own .observe or a direct call (e.g. from _populate_cdr,
         # which must call it explicitly since suspended observers are no-ops).
         self._cdr_mode_active: str | None = None
 
@@ -490,7 +490,7 @@ class RunCard:
 
         # --- CDR mode "yaml": an uploaded roms-tools CDRForcing.to_yaml() dump.
         # Parsed dict lives on the instance (not a widget) since FileUpload can't
-        # be repopulated with the original file on load; cdr()/populate_cdr
+        # be repopulated with the original file on load; cdr()/_populate_cdr
         # read and write this directly. ---
         self._cdr_forcing: dict[str, Any] | None = None
         self.cdr_upload = W.FileUpload(
@@ -774,7 +774,26 @@ class RunCard:
         """The run's end (see `_run_datetime`)."""
         return self._run_datetime("end", self.end.value)
 
-    def model_reference_date(self) -> datetime | None:
+    def gather(self) -> dict[str, Any]:
+        """The card's resolver kwargs: ``partitioning``, ``start_date``,
+        ``end_date``, ``use_pio``, ``model_reference_date`` while it is set and not
+        the resolver's default, and ``cdr``.
+
+        Raises ``TypeError`` while a run date is cleared; the wizard's rebuild
+        checks `has_run_dates` first.
+        """
+        kw: dict[str, Any] = dict(
+            partitioning=self._partitioning(),
+            start_date=self.start_datetime(),
+            end_date=self.end_datetime(),
+            use_pio=self.use_pio,
+        )
+        if (ref := self._model_reference_date()) is not None:
+            kw["model_reference_date"] = ref
+        kw["cdr"] = self.cdr()
+        return kw
+
+    def _model_reference_date(self) -> datetime | None:
         """The model reference date for the resolver, or ``None`` while it is unset
         or 2000-01-01, the resolver's own default.
         """
@@ -783,7 +802,7 @@ class RunCard:
         ref = self._run_datetime("model_reference_date", self.model_ref_date.value)
         return ref if ref != datetime(2000, 1, 1) else None
 
-    def partitioning(self) -> dict[str, Any]:
+    def _partitioning(self) -> dict[str, Any]:
         """The resolver's ``partitioning``: the MPI rank count under auto tiling,
         otherwise the tiling itself.
         """
@@ -898,10 +917,20 @@ class RunCard:
             f"embed: {len(cdr_forcing.get('releases', []))} release(s)",
         )
 
-    def populate_window(self, cfg: ForgeBlueprint) -> None:
-        """Set the run window from a loaded blueprint, keeping its times of day
-        (the wizard holds it suspended).
+    def populate(self, cfg: ForgeBlueprint) -> None:
+        """Set the card from a loaded blueprint (the wizard holds it suspended,
+        after the Model card's BGC mode is set): the run window, the processor
+        layout and ParallelIO, the CDR mode and panel, then the CdrSpec selection.
+        A loaded simple release is compared with what the fields compile at the
+        loaded run times and, through ``cdr_lite``, under the BGC mode.
         """
+        self._populate_window(cfg)
+        self._populate_layout(cfg)
+        self._populate_cdr(cfg)
+        self._select_cdr_spec(cfg)
+
+    def _populate_window(self, cfg: ForgeBlueprint) -> None:
+        """Set the run window from a loaded blueprint, keeping its times of day."""
         self.start.value = cfg.run.start_date.date()
         self.end.value = cfg.run.end_date.date()
         self.model_ref_date.value = cfg.run.model_reference_date.date()
@@ -911,10 +940,8 @@ class RunCard:
             "model_reference_date": cfg.run.model_reference_date,
         }
 
-    def populate_layout(self, cfg: ForgeBlueprint) -> None:
-        """Set the processor layout and ParallelIO from a loaded blueprint (the
-        wizard holds it suspended).
-        """
+    def _populate_layout(self, cfg: ForgeBlueprint) -> None:
+        """Set the processor layout and ParallelIO from a loaded blueprint."""
         if cfg.domain.partitioning.n_procs_x is not None:
             self.npx.value = cfg.domain.partitioning.n_procs_x
         if cfg.domain.partitioning.n_procs_y is not None:
@@ -932,10 +959,8 @@ class RunCard:
         # call again explicitly for robustness in case that ever changes.
         self._sync_auto_tiling()
 
-    def populate_cdr(self, cfg: ForgeBlueprint) -> None:
-        """Set the CDR mode and its panel from a loaded blueprint, after the grid
-        and the BGC mode are set (the wizard holds it suspended).
-        """
+    def _populate_cdr(self, cfg: ForgeBlueprint) -> None:
+        """Set the CDR mode and its panel from a loaded blueprint."""
         # CDR: a top-level, independently composable section (CdrSpec) -- see
         # ``self.cdr_mode_dd``/``apply_cdr_mode``. FileUpload can't be
         # repopulated with the original file, but the parsed dict persists on
@@ -980,10 +1005,9 @@ class RunCard:
                 self.cdr_file_path.value = ""
                 self.cdr_file_status.value = _CDR_FILE_HINT
 
-    def select_cdr_spec(self, cfg: ForgeBlueprint) -> None:
+    def _select_cdr_spec(self, cfg: ForgeBlueprint) -> None:
         """Select a loaded blueprint's CdrSpec, or "<custom>" when the catalog
-        lacks it, and seed ``modified`` from the catalog spec (the wizard holds it
-        suspended, after `populate_cdr`).
+        lacks it, and seed ``modified`` from the catalog spec.
         """
         # CDR spec selection: unlike forcing/output, "<custom>" (no catalog
         # entry) is a normal, common state (mode="none" is the default) --
@@ -1137,7 +1161,7 @@ class RunCard:
 
         Called both from ``cdr_mode_dd``'s own ``.observe`` (via
         ``_on_cdr_mode_change``) and directly wherever ``cdr_mode_dd.value`` is
-        set programmatically under the wizard's suspend (e.g. `populate_cdr`,
+        set programmatically under the wizard's suspend (e.g. `_populate_cdr`,
         `_on_cdr_spec`) -- suspended observers are no-ops, so those callers must
         invoke this themselves. The wizard calls it once at the end of its
         construction.

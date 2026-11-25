@@ -2,9 +2,9 @@
 
 `ModelCard` owns the card's widgets: the ModelSpec picker with its "Show archived"
 filter, the BGC mode, the ucla-roms and MARBL refs, and the carbonate sensitivities
-group that BGC mode "cdr_lite" shows. It owns their observers, the card's share of
-the resolver kwargs (`ModelCard.gather`) and of loading a blueprint back
-(`ModelCard.select_model`, `ModelCard.populate`), and its status chip.
+group that BGC mode "cdr_lite" shows. It owns their observers, the card's resolver
+kwargs (`ModelCard.gather`), loading a blueprint back (`ModelCard.populate`), and its
+status chip.
 
 `ForgeBlueprintWizard` places the card's rows, reacts to a change by observing its
 widgets, and otherwise reads and sets the card only through its methods and
@@ -389,14 +389,17 @@ class ModelCard:
         )
 
     def gather(self) -> dict[str, Any]:
-        """The card's resolver kwargs after ``model_path`` (see `model_path`):
+        """The card's resolver kwargs: ``model_path`` (see `model_path`),
         ``bgc_mode``, the carbonate sensitivities when attached, and the refs
         typed over the ModelSpec's pins.
 
         Raises ``ValueError`` when the directory source is picked but nothing is
         attached.
         """
-        kw: dict[str, Any] = {"bgc_mode": self.bgc_dd.value}
+        kw: dict[str, Any] = {
+            "model_path": self.model_path(),
+            "bgc_mode": self.bgc_dd.value,
+        }
         # The default ("directive") leaves carbonate_sensitivity off: the workplan
         # directive supplies the files at run time. The resolver rejects them
         # outside bgc_mode "cdr_lite", so attached state is only passed there.
@@ -422,22 +425,13 @@ class ModelCard:
         self.marbl_ref.value = self.default_marbl_ref()
         self.bgc_dd.value = self.default_bgc_mode()
 
-    def select_model(self, cfg: ForgeBlueprint, unknown: list[str]) -> None:
-        """Select a loaded blueprint's ModelSpec, showing archived specs when it is
-        one; a name the catalog lacks is appended to *unknown* and the selection
-        kept. The wizard calls this suspended, before `populate`.
+    def populate(self, cfg: ForgeBlueprint, unknown: list[str]) -> None:
+        """Set the card from a loaded blueprint (the wizard holds it suspended):
+        select its ModelSpec, then set the BGC mode, the carbonate sensitivities
+        and the refs. A ModelSpec the catalog lacks is appended to *unknown* and
+        the selection kept.
         """
-        if cfg.composition.model.name in self.catalog.archived_model_names:
-            self.show_archived_models.value = True
-        if cfg.composition.model.name in _dd_values(self.model_dd):
-            self.model_dd.value = cfg.composition.model.name
-        elif cfg.composition.model.name:
-            unknown.append(f"model '{cfg.composition.model.name}'")
-
-    def populate(self, cfg: ForgeBlueprint) -> None:
-        """Set the BGC mode, the carbonate sensitivities and the refs from a loaded
-        blueprint, after `select_model` (the wizard holds it suspended).
-        """
+        self._select_model(cfg, unknown)
         self.bgc_dd.value = bgc_mode_from_cppdefs(
             cfg.model_settings.get("cppdefs") or {}
         )
@@ -459,6 +453,18 @@ class ModelCard:
             if stored_marbl and stored_marbl != default_marbl
             else default_marbl
         )
+
+    def _select_model(self, cfg: ForgeBlueprint, unknown: list[str]) -> None:
+        """Select a loaded blueprint's ModelSpec, showing archived specs when it is
+        one; a name the catalog lacks is appended to *unknown* and the selection
+        kept. The refs `populate` sets next compare with this spec's pins.
+        """
+        if cfg.composition.model.name in self.catalog.archived_model_names:
+            self.show_archived_models.value = True
+        if cfg.composition.model.name in _dd_values(self.model_dd):
+            self.model_dd.value = cfg.composition.model.name
+        elif cfg.composition.model.name:
+            unknown.append(f"model '{cfg.composition.model.name}'")
 
     def reselect(self, name: str) -> None:
         """Re-read the catalog's ModelSpecs into ``model_dd`` and select *name*
