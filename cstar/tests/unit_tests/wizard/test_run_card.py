@@ -219,7 +219,7 @@ def test_cdr_mode_yaml_with_nothing_uploaded_invalidates_the_blueprint():
     wiz.run_card.cdr_mode_dd.value = "yaml"
 
     assert wiz.config is None
-    assert "Invalid" in wiz.derived.value
+    assert "Invalid" in wiz.review_card.derived.value
 
 
 def test_cdr_forcing_round_trips_through_load(tmp_path):

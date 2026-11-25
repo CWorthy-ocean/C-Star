@@ -92,15 +92,17 @@ def _load(path: Path) -> ForgeBlueprintWizard:
     wiz.load_path.value = str(path)
     wiz._on_load_path(None)
     assert "Loaded" in wiz.load_status.value, wiz.load_status.value
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     return wiz
 
 
 def _save(wiz: ForgeBlueprintWizard, path: Path) -> dict:
     """Press Save, writing ``path``; return the file it wrote."""
-    wiz.save_path.value = str(path)
-    wiz._on_save(None)
-    assert "Saved" in wiz.save_status.value, wiz.save_status.value
+    wiz.review_card.save_path.value = str(path)
+    wiz.review_card._on_save(None)
+    assert "Saved" in wiz.review_card.save_status.value, (
+        wiz.review_card.save_status.value
+    )
     return yaml.safe_load(path.read_text())
 
 
@@ -349,10 +351,10 @@ class TestDownloadWaitsForDerivedBoundaries:
         wiz.run_card.start.value = date(2012, 1, 1)
         wiz.run_card.end.value = date(2012, 1, 2)
 
-        assert wiz.config is not None, wiz.derived.value
-        assert _downloaded(wiz.download_link.value) is None
-        assert _downloaded(wiz.download_link_review.value) is None
-        assert "Derive" in wiz.download_link.value
+        assert wiz.config is not None, wiz.review_card.derived.value
+        assert _downloaded(wiz.review_card.download_link.value) is None
+        assert _downloaded(wiz.review_card.download_link_review.value) is None
+        assert "Derive" in wiz.review_card.download_link.value
 
     def test_the_download_never_differs_from_what_save_writes(
         self, tmp_path, monkeypatch
@@ -362,14 +364,14 @@ class TestDownloadWaitsForDerivedBoundaries:
         wiz.run_card.end.value = date(2012, 1, 2)
         monkeypatch.setattr(wiz, "_build_grid_from_widgets", _open_ocean_grid)
 
-        before = _downloaded(wiz.download_link.value)
+        before = _downloaded(wiz.review_card.download_link.value)
         saved = _save(wiz, tmp_path / "saved.yaml")
 
         assert all(saved["domain"]["open_boundaries"].values())  # derived on Save
         if before is not None:
             before.pop("provenance")
         assert before in (None, {k: v for k, v in saved.items() if k != "provenance"})
-        assert _downloaded(wiz.download_link.value) == saved
+        assert _downloaded(wiz.review_card.download_link.value) == saved
 
     def test_the_download_after_deriving_is_what_save_writes(
         self, tmp_path, monkeypatch
@@ -381,7 +383,7 @@ class TestDownloadWaitsForDerivedBoundaries:
         monkeypatch.setattr(wiz, "_build_grid_from_widgets", _open_ocean_grid)
 
         wiz.derive_btn.click()
-        downloaded = _downloaded(wiz.download_link.value)
+        downloaded = _downloaded(wiz.review_card.download_link.value)
         saved = _save(wiz, tmp_path / "saved.yaml")
 
         derived = dict.fromkeys(("north", "south", "east", "west"), True)
@@ -425,10 +427,13 @@ class TestFreeTextIsReadOrRefused:
         row["constants"].value = "ALK=2300, DIC=2100x"
 
         assert wiz.config is None
-        assert "BGC initial conditions, row 1, Constant values" in wiz.derived.value
-        assert "DIC=2100x" in wiz.derived.value
-        wiz.save_path.value = str(tmp_path / "bp.yaml")
-        wiz._on_save(None)
+        assert (
+            "BGC initial conditions, row 1, Constant values"
+            in wiz.review_card.derived.value
+        )
+        assert "DIC=2100x" in wiz.review_card.derived.value
+        wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
+        wiz.review_card._on_save(None)
         assert not (tmp_path / "bp.yaml").exists()
 
     def test_a_bad_box_does_not_break_copying_rows_or_switching_bgc(self):
@@ -445,7 +450,7 @@ class TestFreeTextIsReadOrRefused:
         wiz.model_card.bgc_dd.value = "none"
 
         assert editor._rows["boundary_bgc"] == before  # nothing copied
-        assert "ALK=oops" in wiz.derived.value
+        assert "ALK=oops" in wiz.review_card.derived.value
 
     def test_bad_options_json_stops_the_blueprint(self):
         wiz = ForgeBlueprintWizard()
@@ -456,7 +461,7 @@ class TestFreeTextIsReadOrRefused:
 
         assert wiz.config is None
         assert "Initial conditions, Additional options: invalid JSON" in (
-            wiz.derived.value
+            wiz.review_card.derived.value
         )
 
 

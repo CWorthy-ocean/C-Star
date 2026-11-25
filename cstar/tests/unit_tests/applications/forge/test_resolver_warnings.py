@@ -188,10 +188,10 @@ def test_the_wizard_shows_the_zero_bgc_warning_in_its_status():
     wiz.model_card.model_dd.value = "roms-marbl-0.13-default"
     editor = wiz._forcing_editor
     assert editor is not None
-    assert "no BGC sources" not in wiz.validation.value
+    assert "no BGC sources" not in wiz.review_card.validation.value
     for cat in ("ic_bgc", "boundary_bgc"):
         for row in list(editor._rows[cat]):
             row["_remove_btn"].click()
     assert wiz.config is not None
-    assert "forge-banner warn" in wiz.validation.value
-    assert "have no BGC sources" in wiz.validation.value
+    assert "forge-banner warn" in wiz.review_card.validation.value
+    assert "have no BGC sources" in wiz.review_card.validation.value

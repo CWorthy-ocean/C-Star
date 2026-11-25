@@ -56,7 +56,7 @@ def _wizard() -> ForgeBlueprintWizard:
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     return wiz
 
 
@@ -247,8 +247,8 @@ def test_an_empty_second_bgc_source_flags_only_the_forcing_card():
     assert "Variables to read" in banner.value
     assert [k for k, w in wiz.card_errors.items() if _shown(w)] == ["forcing"]
     assert "href='#forge-sec-forcing'" in wiz.sticky_bar.value
-    assert "Invalid blueprint" in wiz.derived.value
-    assert "href='#forge-sec-forcing'" in wiz.derived.value
+    assert "Invalid blueprint" in wiz.review_card.derived.value
+    assert "href='#forge-sec-forcing'" in wiz.review_card.derived.value
 
     note = editor._bgc_notes["ic_bgc"]
     assert _shown(note)
@@ -258,7 +258,7 @@ def test_an_empty_second_bgc_source_flags_only_the_forcing_card():
     )
 
     editor._remove("ic_bgc", editor._rows["ic_bgc"][1])
-    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config is not None, wiz.review_card.derived.value
     assert not _shown(banner)
     assert not _shown(note)
     assert "forge-need" not in editor._rows["ic_bgc"][0]["use_vars"]._dom_classes
@@ -292,7 +292,7 @@ def test_an_unplaced_error_stays_on_review(monkeypatch):
     monkeypatch.setattr(wizard_module, "build_forge_blueprint", refuse)
     wiz._rebuild()
     assert wiz.config is None
-    assert "the ModelSpec is unreadable" in wiz.derived.value
+    assert "the ModelSpec is unreadable" in wiz.review_card.derived.value
     assert not any(_shown(w) for w in wiz.card_errors.values())
     assert "Complete" in wiz.card_chips["model"].value
     assert "Complete" in wiz.card_chips["run"].value

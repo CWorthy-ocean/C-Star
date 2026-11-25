@@ -3,7 +3,8 @@ Blueprint page the shell builds around it (``cstar.wizard.ui.shell.blueprint_app
 """
 
 from cstar.wizard.app import ForgeBlueprintWizardApp
-from cstar.wizard.wizard import ForgeBlueprintWizard, WorkplanHooks
+from cstar.wizard.review_card import WorkplanHooks
+from cstar.wizard.wizard import ForgeBlueprintWizard
 
 
 def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
@@ -63,13 +64,13 @@ def test_blueprint_app_from_shell_builds():
 
 
 def test_open_in_builder_is_hidden_without_hooks(tmp_path):
-    assert ForgeBlueprintWizard().open_workplan_btn.layout.display == "none"
+    assert ForgeBlueprintWizard().review_card.open_workplan_btn.layout.display == "none"
     app = ForgeBlueprintWizardApp(str(tmp_path / "catalog"))
     assert app.inner is not None
-    assert app.inner.open_workplan_btn.layout.display == "none"
+    assert app.inner.review_card.open_workplan_btn.layout.display == "none"
     hooks = WorkplanHooks(open_steps=lambda p, n: None, saved=lambda: None)
     app.set_workplan_hooks(hooks)
-    assert app.inner.open_workplan_btn.layout.display == ""
+    assert app.inner.review_card.open_workplan_btn.layout.display == ""
     app._load(str(tmp_path / "catalog"))
-    assert app.inner._workplan_hooks is hooks
-    assert app.inner.open_workplan_btn.layout.display == ""
+    assert app.inner.review_card._workplan_hooks is hooks
+    assert app.inner.review_card.open_workplan_btn.layout.display == ""

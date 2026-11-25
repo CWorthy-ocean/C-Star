@@ -7930,10 +7930,10 @@ class TestForgeBlueprintWizard:
         wiz = self._wizard()
         wiz._build_grid_from_widgets = self._stub_grid_with_mask
         p = tmp_path / "forge_blueprint.yaml"
-        wiz.save_path.value = str(p)
+        wiz.review_card.save_path.value = str(p)
         assert wiz._boundaries_derived is False  # nothing derived yet
 
-        wiz._on_save(None)
+        wiz.review_card._on_save(None)
 
         assert wiz._boundaries_derived is True  # the safety net ran
         saved = ForgeBlueprint.from_yaml(p)
@@ -7951,27 +7951,29 @@ class TestForgeBlueprintWizard:
 
         wiz._build_grid_from_widgets = _boom
         p = tmp_path / "forge_blueprint.yaml"
-        wiz.save_path.value = str(p)
+        wiz.review_card.save_path.value = str(p)
 
-        wiz._on_save(None)
+        wiz.review_card._on_save(None)
 
         assert not p.exists()  # nothing was written
-        assert "aborted" in wiz.save_status.value.lower()
+        assert "aborted" in wiz.review_card.save_status.value.lower()
 
     def test_blank_name_tracks_derived_default(self):
         wiz = self._wizard()
         default_name = wiz.config.name
-        assert wiz.name.value == default_name  # auto-backfilled
+        assert wiz.review_card.name.value == default_name  # auto-backfilled
         wiz.run_card.npx.value = (
             wiz.run_card.npx.value + 1
         )  # change an input the default depends on
         assert wiz.config.name != default_name
-        assert wiz.name.value == wiz.config.name  # still tracking the new default
+        assert (
+            wiz.review_card.name.value == wiz.config.name
+        )  # still tracking the new default
 
     def test_custom_name_overrides_default_and_stops_tracking(self):
         wiz = self._wizard()
         default_name = wiz.config.name
-        wiz.name.value = "my-custom-run"
+        wiz.review_card.name.value = "my-custom-run"
         assert wiz.config.name == "my-custom-run"
         wiz.run_card.npx.value = (
             wiz.run_card.npx.value + 1
@@ -7983,30 +7985,34 @@ class TestForgeBlueprintWizard:
         wiz = self._wizard()
         derived = wiz.config.description
         assert derived == default_blueprint_description(wiz.config)
-        assert wiz.description.value == derived  # auto-backfilled
-        assert wiz._description_touched is False
+        assert wiz.review_card.description.value == derived  # auto-backfilled
+        assert wiz.review_card._description_touched is False
         wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         assert wiz.config.description != derived
-        assert wiz.description.value == wiz.config.description  # still tracking
+        assert (
+            wiz.review_card.description.value == wiz.config.description
+        )  # still tracking
 
     def test_typed_description_overrides_default_and_stops_tracking(self):
         """A real edit (not under ``_suspend()``) sets the flag before the rebuild
         it triggers, so the backfill never writes over the user's first keystroke.
         """
         wiz = self._wizard()
-        wiz.description.value = "Gulf of Guinea spin-up"
-        assert wiz.description.value == "Gulf of Guinea spin-up"
+        wiz.review_card.description.value = "Gulf of Guinea spin-up"
+        assert wiz.review_card.description.value == "Gulf of Guinea spin-up"
         assert wiz.config.description == "Gulf of Guinea spin-up"
         wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         wiz.run_card.npx.value = wiz.run_card.npx.value + 1
-        assert wiz.description.value == "Gulf of Guinea spin-up"
+        assert wiz.review_card.description.value == "Gulf of Guinea spin-up"
         assert wiz.config.description == "Gulf of Guinea spin-up"
 
     def test_cleared_description_resolves_to_the_derived_default(self):
         wiz = self._wizard()
-        wiz.description.value = "temporary"
-        wiz.description.value = ""
-        assert wiz.description.value == ""  # not refilled under the user's cursor
+        wiz.review_card.description.value = "temporary"
+        wiz.review_card.description.value = ""
+        assert (
+            wiz.review_card.description.value == ""
+        )  # not refilled under the user's cursor
         assert wiz.config.description == default_blueprint_description(wiz.config)
 
     def _load_with_description(self, tmp_path, description):
@@ -8015,9 +8021,9 @@ class TestForgeBlueprintWizard:
         """
         w1 = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         if description != "as saved":
             data = yaml.safe_load(p.read_text())
             if description is None:
@@ -8028,12 +8034,12 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.config is not None, w2.derived.value
+        assert w2.config is not None, w2.review_card.derived.value
         return w2
 
     def test_loaded_description_is_kept(self, tmp_path):
         wiz = self._load_with_description(tmp_path, "Toy run for the CDR tutorial")
-        assert wiz.description.value == "Toy run for the CDR tutorial"
+        assert wiz.review_card.description.value == "Toy run for the CDR tutorial"
         assert wiz.config.description == "Toy run for the CDR tutorial"
         wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         assert wiz.config.description == "Toy run for the CDR tutorial"
@@ -8049,22 +8055,22 @@ class TestForgeBlueprintWizard:
     )
     def test_loaded_default_description_tracks_the_inputs(self, tmp_path, description):
         wiz = self._load_with_description(tmp_path, description)
-        assert wiz._description_touched is False
+        assert wiz.review_card._description_touched is False
         assert wiz.config.description == default_blueprint_description(wiz.config)
-        assert wiz.description.value == wiz.config.description
+        assert wiz.review_card.description.value == wiz.config.description
         before = wiz.config.description
         wiz.run_card.end.value = wiz.run_card.end.value + timedelta(days=3)
         assert wiz.config.description != before
-        assert wiz.description.value == wiz.config.description
+        assert wiz.review_card.description.value == wiz.config.description
 
     def test_save_writes_valid_yaml(self, tmp_path):
         wiz = self._wizard()
-        wiz.save_path.value = str(tmp_path / "forge_blueprint.yaml")
+        wiz.review_card.save_path.value = str(tmp_path / "forge_blueprint.yaml")
         # Not exercising boundary derivation here -- skip the real grid build
         # the export-time safety net would otherwise trigger (see the
         # dedicated test_derive_from_grid_*/test_save_*_boundary_* tests).
         wiz._boundaries_touched = True
-        wiz._on_save(None)
+        wiz.review_card._on_save(None)
         cfg = ForgeBlueprint.from_yaml(tmp_path / "forge_blueprint.yaml")
         assert cfg.casename == wiz.config.casename
 
@@ -8075,11 +8081,11 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         if "gulf-guinea-toy" in _dd_values(w1.domain_dd):
             w1.domain_dd.value = "gulf-guinea-toy"
-        w1.name.value = "my-custom-run"
+        w1.review_card.name.value = "my-custom-run"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         saved = ForgeBlueprint.from_yaml(p)
 
         w2 = self._wizard()
@@ -8087,7 +8093,7 @@ class TestForgeBlueprintWizard:
         w2._on_load_path(None)
         assert w2.grid_name.value == saved.domain.grid_name
         assert w2.domain_dd.value == "<custom>"  # file authoritative, no prefill
-        assert w2.name.value == "my-custom-run"
+        assert w2.review_card.name.value == "my-custom-run"
         assert w2.config is not None
         assert w2.config.casename == saved.casename
         assert (
@@ -8098,16 +8104,16 @@ class TestForgeBlueprintWizard:
     def test_load_from_upload_bytes(self, tmp_path):
         w1 = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2._load_bytes(p.read_bytes())
         assert w2.config is not None and w2.config.casename == w1.config.casename
 
     def test_validation_indicator_valid_by_default(self):
         w = self._wizard()
-        assert "Blueprint is valid" in w.validation.value
+        assert "Blueprint is valid" in w.review_card.validation.value
 
     def test_advanced_editor_groups_sections_into_modeler_categories(self):
         w = self._wizard()
@@ -8257,9 +8263,9 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         w1.editor._widgets[("cdr_output", "do_avg")][0].value = "instantaneous"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8322,9 +8328,9 @@ class TestForgeBlueprintWizard:
         monthly1.value = True  # user edit -> forcing rule flips wrt_file_rst back on
         assert wrt1.value is True
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
 
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8445,9 +8451,9 @@ class TestForgeBlueprintWizard:
         w1.v_sponge.value = 999.0
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8469,9 +8475,9 @@ class TestForgeBlueprintWizard:
         # a non-default dt without tripping the restart-period validator.
         w1.dt.value = 1200.0
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8490,9 +8496,9 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         w1.run_card.model_ref_date.value = date(2015, 6, 15)
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         assert w1.config.run.model_reference_date == datetime(2015, 6, 15)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8511,9 +8517,9 @@ class TestForgeBlueprintWizard:
         w1.close_narrow_chk.value = True
         w1.mask_shapefile.value = "/tmp/mask.shp"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         assert w1.config.domain.grid_kwargs["hmin"] == 3.3
         assert w1.config.domain.grid_kwargs["close_narrow_channels"] is True
         assert w1.config.domain.grid_kwargs["mask_shapefile"] == "/tmp/mask.shp"
@@ -8613,9 +8619,9 @@ class TestForgeBlueprintWizard:
             pytest.skip("example OutputSpec not in catalog")
         w1.output_dd.value = "standard"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8640,9 +8646,9 @@ class TestForgeBlueprintWizard:
         row["name"].value = "WOA"
         row["restoring_forces"].value = "sss"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8673,9 +8679,9 @@ class TestForgeBlueprintWizard:
         row2["use_vars"].value = "PO4, NO3"
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         assert [
             bs.source.name for bs in w1.config.forcing.initial_conditions.bgc_sources
         ] == [
@@ -8713,9 +8719,9 @@ class TestForgeBlueprintWizard:
         bgc_rows[0]["use_vars"].value = "ALK, DIC, NO3, CHL, Fe"
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
 
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8737,9 +8743,9 @@ class TestForgeBlueprintWizard:
         row["constants"].value = "Fe=3.0e-3, ALK=2300, CHL=0.3"
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         assert w1.config.forcing.initial_conditions.bgc_sources[0].source.constants == {
             "Fe": 3.0e-3,
             "ALK": 2300.0,
@@ -8791,9 +8797,9 @@ class TestForgeBlueprintWizard:
         companion["use_vars"].value = "CHL, Fe"
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         esper_src = w1.config.forcing.initial_conditions.bgc_sources[0].source
         assert esper_src.esper_method == "mixed"
         assert esper_src.esper_equation == 16
@@ -8836,9 +8842,9 @@ class TestForgeBlueprintWizard:
         w1.nest_enable.value = True
         w1.child_w["N"].value = 18
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8856,9 +8862,9 @@ class TestForgeBlueprintWizard:
         w1.nest_enable.value = True
         w1.nest_pressure_fluxes.value = True
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         assert w1.config.domain.nesting_include_pressure_fluxes is True
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8898,9 +8904,9 @@ class TestForgeBlueprintWizard:
         w1.parent_enable.value = True
         w1.parent_w["N"].value = 30
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -8944,7 +8950,7 @@ class TestForgeBlueprintWizard:
         w.parent_enable.value = False
         assert w._forcing_editor.ic_name.value == "GLORYS"
         cfg = w.config
-        assert cfg is not None, w.derived.value
+        assert cfg is not None, w.review_card.derived.value
         assert cfg.domain.is_child is False
         assert cfg.forcing.initial_conditions is not None
         assert cfg.forcing.boundary.bgc_sources == boundary_bgc
@@ -8983,7 +8989,7 @@ class TestForgeBlueprintWizard:
             s["source"]["name"] for s in spec["forcing"]["boundary"]["bgc_sources"]
         ]
         cfg = w.config
-        assert cfg is not None, w.derived.value
+        assert cfg is not None, w.review_card.derived.value
         assert [s.source.name for s in cfg.forcing.boundary.bgc_sources] == names
 
     def test_picking_a_parentless_domain_restores_non_child_defaults(self):
@@ -9001,7 +9007,7 @@ class TestForgeBlueprintWizard:
         w.domain_dd.value = "gulf-guinea-toy"  # carries no grid_kwargs_parent
         assert w.parent_enable.value is False
         cfg = w.config
-        assert cfg is not None, w.derived.value
+        assert cfg is not None, w.review_card.derived.value
         assert cfg.domain.is_child is False
         assert cfg.forcing.initial_conditions is not None
         assert cfg.forcing.boundary.bgc_sources == boundary_bgc
@@ -9016,9 +9022,9 @@ class TestForgeBlueprintWizard:
         assert w.config is not None
         w.forcing_dd.value = "glorys-era5-physics"
         assert w.config is None
-        assert "no BGC sources" in w.derived.value
-        assert "ucla-roms &gt;= 0.14.0" in w.derived.value or (
-            "ucla-roms >= 0.14.0" in w.derived.value
+        assert "no BGC sources" in w.review_card.derived.value
+        assert "ucla-roms &gt;= 0.14.0" in w.review_card.derived.value or (
+            "ucla-roms >= 0.14.0" in w.review_card.derived.value
         )
 
     def test_reselecting_forcing_spec_keeps_ic_cleared_for_child(self):
@@ -9041,9 +9047,9 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         w1.parent_enable.value = True
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         assert w1.config.forcing.initial_conditions is None
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -9057,9 +9063,9 @@ class TestForgeBlueprintWizard:
         w1.model_card.roms_ref.value = "pio-refdate"
         assert w1.config.code.roms.commit == "pio-refdate"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -9078,9 +9084,9 @@ class TestForgeBlueprintWizard:
         assert w1.model_card.roms_ref.value == default_ref
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.model_card.roms_ref.value = "stale-value-from-a-prior-load"
         w2.load_path.value = str(p)
@@ -9089,7 +9095,7 @@ class TestForgeBlueprintWizard:
 
         # An actual override round-trips through save/reload unchanged.
         w1.model_card.roms_ref.value = "my-custom-branch"
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w3 = self._wizard()
         w3.load_path.value = str(p)
         w3._on_load_path(None)
@@ -9100,9 +9106,9 @@ class TestForgeBlueprintWizard:
         w1.model_card.marbl_ref.value = "marbl0.99.0"
         assert w1.config.code.marbl.commit == "marbl0.99.0"
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
@@ -9120,9 +9126,9 @@ class TestForgeBlueprintWizard:
         assert w1.model_card.marbl_ref.value == default_ref
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.model_card.marbl_ref.value = "stale-value-from-a-prior-load"
         w2.load_path.value = str(p)
@@ -9131,7 +9137,7 @@ class TestForgeBlueprintWizard:
 
         # An actual override round-trips through save/reload unchanged.
         w1.model_card.marbl_ref.value = "my-custom-marbl-branch"
-        w1._on_save(None)
+        w1.review_card._on_save(None)
         w3 = self._wizard()
         w3.load_path.value = str(p)
         w3._on_load_path(None)
@@ -9142,9 +9148,9 @@ class TestForgeBlueprintWizard:
 
         w = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
-        w.save_path.value = str(p)
+        w.review_card.save_path.value = str(p)
         w._boundaries_touched = True  # not exercising boundary derivation here
-        w._on_save(None)
+        w.review_card._on_save(None)
         data = yaml.safe_load(p.read_text())
         data["model_settings"]["param"]["np_xi"] = "not-an-int"  # corrupt a value
         bad = tmp_path / "bad.yaml"
@@ -9154,7 +9160,7 @@ class TestForgeBlueprintWizard:
         w2._on_load_path(None)
         assert "invalid settings value" in w2.load_status.value
         # the wizard re-derives valid settings from the inputs, so it ends valid
-        assert "Blueprint is valid" in w2.validation.value
+        assert "Blueprint is valid" in w2.review_card.validation.value
 
     def test_load_bad_input_shows_error_not_crash(self):
         w = self._wizard()
@@ -9197,9 +9203,9 @@ class TestForgeBlueprintWizard:
         assert w1.config.cdr.cdr_forcing == w1.run_card._cdr_forcing
 
         p = tmp_path / "forge_blueprint.yaml"
-        w1.save_path.value = str(p)
+        w1.review_card.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
-        w1._on_save(None)
+        w1.review_card._on_save(None)
 
         w2 = self._wizard()
         real_upload = w2.run_card.cdr_upload
@@ -9220,7 +9226,7 @@ class TestForgeBlueprintWizard:
         wiz = self._wizard()
         wiz._boundaries_touched = True  # the link waits for real boundaries
         wiz._rebuild()
-        html = wiz.download_link.value
+        html = wiz.review_card.download_link.value
         assert 'download="' in html and "data:text/yaml;base64," in html
         b64 = re.search(r"base64,([A-Za-z0-9+/=]+)", html).group(1)
         text = base64.b64decode(b64).decode("utf-8")
@@ -9298,7 +9304,7 @@ class TestForgeBlueprintWizardApp:
         assert not isinstance(cat, LayeredCatalog)
         assert cat.read_only is True
         assert "read-only catalog" in app._bar._cat_status.value
-        assert app.inner._default_blueprint_path("x") == "x.yaml"
+        assert app.inner.review_card._default_blueprint_path("x") == "x.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -9793,7 +9799,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         base_model = wiz.model_card.model_dd.value
         base_description = isolated_catalog.model_data(base_model)["description"]
-        assert wiz.description.value == wiz.config.description  # derived
+        assert wiz.review_card.description.value == wiz.config.description  # derived
 
         self._save_every_spec(wiz)
 
@@ -9807,7 +9813,7 @@ class TestSaveModifiedSpecsToCatalog:
 
     def test_saved_specs_take_a_typed_description(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
-        wiz.description.value = "Toy run for the CDR tutorial"
+        wiz.review_card.description.value = "Toy run for the CDR tutorial"
 
         self._save_every_spec(wiz)
 
@@ -9843,7 +9849,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz._overrides[("ocean_vars", "wrt_file_his")] = True
         wiz._overrides[("bgc", "wrt_his")] = False
         wiz.model_card.bgc_dd.value = "none"
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.composition.output.modified is True
 
         wiz.save_output_name.value = "my-output"
@@ -9886,7 +9892,7 @@ class TestSaveModifiedSpecsToCatalog:
                 ws["include_bgc"].value = False
         wiz.model_card.bgc_dd.value = "none"
         wiz._rebuild()
-        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.model_settings["param"]["ntrc_bio"] == 0
 
         wiz.save_model_name.value = "my-nobgc-model"

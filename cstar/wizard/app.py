@@ -12,7 +12,8 @@ from cstar.base.env import (
 from cstar.wizard.ui.catalog_bar import CatalogBar
 
 if TYPE_CHECKING:
-    from cstar.wizard.wizard import ForgeBlueprintWizard, WorkplanHooks
+    from cstar.wizard.review_card import WorkplanHooks
+    from cstar.wizard.wizard import ForgeBlueprintWizard
 
 
 class ForgeBlueprintWizardApp:

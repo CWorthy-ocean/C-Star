@@ -94,9 +94,10 @@ Directory map
     |   +-- wizard.py                      # ForgeBlueprintWizard (ipywidgets UI): the cards, _rebuild, save
     |   +-- model_card.py                  # ModelCard: the Model card's widgets, gather/populate share and chip
     |   +-- run_card.py                    # RunCard: the Run card's run window, processor layout and CDR section
+    |   +-- review_card.py                 # ReviewCard: the Save and Next steps cards (name, Save, workplan, Run Forge)
     |   +-- forcing_editor.py              # _ForcingEditor: the Forcing card's rows, sources and options
     |   +-- settings_editor.py             # _SettingsEditor: namelist/cppdefs widgets and where each card shows them
-    |   +-- fields.py                      # Help text, field widgets and attached-file helpers shared by both pages
+    |   +-- fields.py                      # Help text, field widgets, attached-file and subprocess helpers shared by both pages
     |   +-- app.py                         # ForgeBlueprintWizardApp: the catalog-location bar above the wizard
     |   +-- _voila_app.ipynb               # Voila app notebook -- internal; served via 'cstar forge wizard'
     |   +-- forge-blueprint-wizard.ipynb   # user-facing wizard notebook (copied out via 'cstar forge copy-notebook')
@@ -319,9 +320,10 @@ The call chain end to end
    key names a real widget or namelist field. ``_rebuild()`` also refreshes
    the sticky status bar, per-card chips and accordion titles
    (``_update_status``). A card with a module of its own (the Model card's
-   ``ModelCard``, ``wiz.model_card``, and the Run card's ``RunCard``,
-   ``wiz.run_card``) owns its widgets and their observers, its share of
-   ``_gather`` and ``_populate_from``, and its chip; the wizard
+   ``ModelCard``, ``wiz.model_card``, the Run card's ``RunCard``,
+   ``wiz.run_card``, and ``ReviewCard``, ``wiz.review_card``, which holds both
+   the Save and the Next steps cards) owns its widgets and their observers, its
+   share of ``_gather`` and ``_populate_from``, and its chip; the wizard
    places its rows, reacts to it by observing its widgets, and reads and sets
    it only through its methods. The CSS travels inside the widget tree so the
    plain-notebook path is styled too; only the Voila page column

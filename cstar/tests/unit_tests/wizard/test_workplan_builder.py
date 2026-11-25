@@ -41,8 +41,8 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.app import ForgeBlueprintWizardApp
+from cstar.wizard.review_card import WIZARD_TOOL
 from cstar.wizard.ui import labels
-from cstar.wizard.wizard import WIZARD_TOOL
 from cstar.wizard.workplan_builder import WorkplanBuilderPage, _StepPane
 
 _BP_TEMPLATE = (
@@ -626,7 +626,7 @@ def test_current_blueprint_page_config_saves_and_uses_that_file(
     assert bp_app.inner.config is not None  # the default blueprint is valid
     pane.source.value = wb.SOURCE_CURRENT
     path = Path(pane._current_path)
-    assert path == Path(bp_app.inner.save_path.value)
+    assert path == Path(bp_app.inner.review_card.save_path.value)
     assert path.exists()
     assert pane.application.value == "forge"
 
@@ -1996,7 +1996,7 @@ def test_sticky_bar_links_every_card(page):
 def test_current_config_is_not_saved_when_boundaries_cannot_be_derived(
     page, bp_app, monkeypatch
 ):
-    saved = Path(bp_app.inner.save_path.value)
+    saved = Path(bp_app.inner.review_card.save_path.value)
     saved.unlink(missing_ok=True)
     monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: False)
     pane = page.panes[0]
