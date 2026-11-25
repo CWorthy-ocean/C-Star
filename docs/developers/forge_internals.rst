@@ -98,7 +98,8 @@ Directory map
     |   +-- review_card.py                 # ReviewCard: the Save and Next steps cards (name, Save, workplan, Run Forge)
     |   +-- forcing_editor.py              # _ForcingEditor: the Forcing card's rows, sources and options
     |   +-- settings_editor.py             # _SettingsEditor: namelist/cppdefs widgets and where each card shows them
-    |   +-- fields.py                      # Help text, field widgets, attached-file and subprocess helpers shared by both pages
+    |   +-- fields.py                      # Help text, field widgets, catalog dropdowns and attached-file helpers shared by both pages
+    |   +-- streaming.py                   # Run a command from a widget handler and stream its output (Run Forge here, Workplan runs)
     |   +-- app.py                         # ForgeBlueprintWizardApp: the catalog-location bar above the wizard
     |   +-- _voila_app.ipynb               # Voila app notebook -- internal; served via 'cstar forge wizard'
     |   +-- forge-blueprint-wizard.ipynb   # user-facing wizard notebook (copied out via 'cstar forge copy-notebook')
@@ -325,9 +326,12 @@ The call chain end to end
    ``wiz.domain_card``, the Run card's ``RunCard``, ``wiz.run_card``, and
    ``ReviewCard``, ``wiz.review_card``, which holds both the Save and the Next
    steps cards) owns its widgets and their observers, its share of ``_gather``
-   and ``_populate_from``, and its chip; the wizard places its rows, reacts to
-   it by observing its widgets, and reads and sets it only through its
-   methods. The CSS travels inside the widget tree so the
+   and ``_populate_from``, and its chip. It gets the wizard's callables
+   (``rebuild``, ``suspend``, ``is_suspended`` and the card's own), never the
+   wizard, and imports neither the wizard nor another card. The wizard places
+   its rows, observes its widgets for the reactions that span cards, registers
+   ``_rebuild`` last on the widgets its ``rebuild_on`` lists, and otherwise
+   uses its properties and methods. The CSS travels inside the widget tree so the
    plain-notebook path is styled too; only the Voila page column
    (``body[data-voila] .forge-shell``) is shell-specific. Every colour is a
    ``--forge-*`` token from ``branding.PALETTE``, which holds a light and a

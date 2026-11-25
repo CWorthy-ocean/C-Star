@@ -31,13 +31,13 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.resolve import cfl_dt
 from cstar.base.digest import hash_netcdf_contents
 from cstar.wizard.fields import (
+    _PATH_PLACEHOLDER,
     _dd_options,
     _same_attached_file,
     _stage_uploaded_netcdf,
     _tip,
     _user_file_status_html,
 )
-from cstar.wizard.forcing_editor import _PATH_PLACEHOLDER
 from cstar.wizard.ui import components
 from cstar.wizard.ui.labels import label_for, section_for
 
@@ -604,7 +604,7 @@ class DomainCard:
         """Register the card's own observers and click handlers. The wizard calls
         this from its ``_wire`` right after it registers ``_on_domain`` on
         ``domain_dd``; it registers its reactions on ``parent_domain_dd`` and
-        ``parent_enable``, and its rebuild on the rebuild-only widgets, itself.
+        ``parent_enable``, and its rebuild on `rebuild_on` last, itself.
         """
         self.dt_btn.on_click(self._on_compute_dt)
         self.plot_btn.on_click(self.on_plot)
@@ -618,7 +618,7 @@ class DomainCard:
         self.derive_btn.on_click(self._on_derive_domain_properties)
         # Grid-geometry/mask-affecting widgets: a change invalidates any prior
         # mask-derived boundaries (a stale mask must never be silently reused),
-        # in addition to the plain rebuild every other watched widget gets.
+        # in addition to the plain rebuild every `rebuild_on` widget gets.
         for w in (
             *self.grid_w.values(),
             self.hmin,
@@ -633,6 +633,31 @@ class DomainCard:
             w.observe(self._on_boundary_edit, names="value")
         self.v_sponge.observe(self._on_v_sponge_edit, names="value")
         self.dt.observe(self._on_dt_edit, names="value")
+
+    @property
+    def rebuild_on(self) -> tuple[Any, ...]:
+        """The widgets whose every change re-resolves the blueprint: the grid name,
+        vertical coordinate, bathymetry source and the nested grids. The wizard
+        registers its rebuild on them last in its ``_wire``, after its reactions on
+        ``parent_enable``. The grid geometry, boundaries, sponge and time step
+        rebuild from the card's own handlers instead (see `wire`).
+        """
+        return (
+            self.grid_name,
+            self.scoord_chk,
+            self.topo_source,
+            self.topo_path,
+            self.nest_enable,
+            self.nest_period,
+            self.nest_pressure_fluxes,
+            self.parent_enable,
+            *self.child_w.values(),
+            *self.parent_w.values(),
+            self.child_topo_source,
+            self.child_topo_path,
+            self.parent_topo_source,
+            self.parent_topo_path,
+        )
 
     def rows(self) -> list[Any]:
         """The card body's rows, in order: the Domain pick and grid name, the grid

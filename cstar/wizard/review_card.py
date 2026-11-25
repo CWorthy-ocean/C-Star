@@ -28,11 +28,11 @@ from cstar.applications.forge.blueprint import (
     PLACEHOLDER_DESCRIPTION,
 )
 from cstar.applications.forge.resolve import default_blueprint_description
-from cstar.wizard.fields import (
+from cstar.wizard.fields import _tip
+from cstar.wizard.streaming import (
     _STREAM_READ_SIZE,
     _drain_stream_buffer,
     _schedule_coroutine,
-    _tip,
 )
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import schedule_confirm_reset
@@ -260,6 +260,15 @@ class ReviewCard:
         self.save_workplan_btn.on_click(self._on_save_workplan)
         self.open_workplan_btn.on_click(self._on_open_workplan)
 
+    @property
+    def rebuild_on(self) -> tuple[Any, ...]:
+        """None: ``name`` and ``description`` rebuild from their own handlers (see
+        `wire`), which first mark the field as typed so the rebuild does not fill it
+        back in; listing them here would rebuild twice. ``save_path`` changes no
+        blueprint.
+        """
+        return ()
+
     def rows(self) -> list[Any]:
         """Card 7's body rows, in order."""
         W = self.W
@@ -485,7 +494,7 @@ class ReviewCard:
 
     def _on_description_change(self, _change):
         # Mirrors _on_name_change: the backfill in _rebuild runs under _suspend().
-        # Not in _rebuild's watched list, so the flag is set before the rebuild
+        # Not in `rebuild_on`, so the flag is set before the rebuild
         # that would otherwise backfill over the user's first keystroke.
         if self._is_suspended():
             return

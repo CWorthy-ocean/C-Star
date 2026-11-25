@@ -644,6 +644,14 @@ class ForgeBlueprintWizard:
         # message (_set_load_status, which may itself carry an amber "N invalid
         # settings value(s)" warning that must NOT be swept away by _rebuild).
         self._load_status_is_error = False
+        # True while a _suspend() block is open: handlers skip programmatic writes.
+        # Set before the cards are built, since their is_suspended reads it.
+        self._suspended = False
+        # Reentrancy depth for _suspend()/_Suspender -- lets a programmatic backfill
+        # (e.g. _populate_grid_widgets_from_grid) nest inside an already-suspended
+        # block (e.g. _populate_from's outer _suspend()) without the inner
+        # context's __exit__ prematurely clearing the outer one's suspension.
+        self._suspend_depth = 0
 
         # --- the Model card (ModelSpec picker, BGC mode, code refs, carbonate
         # sensitivities): see cstar.wizard.model_card ---
@@ -652,7 +660,7 @@ class ForgeBlueprintWizard:
             self.catalog,
             rebuild=self._rebuild,
             suspend=self._suspend,
-            is_suspended=lambda: getattr(self, "_suspended", False),
+            is_suspended=lambda: self._suspended,
             use_pio=lambda: self.run_card.use_pio,
         )
         # --- the Grid card (Domain pick, grid, topography, grid file, derived
@@ -662,7 +670,7 @@ class ForgeBlueprintWizard:
             self.catalog,
             rebuild=self._rebuild,
             suspend=self._suspend,
-            is_suspended=lambda: getattr(self, "_suspended", False),
+            is_suspended=lambda: self._suspended,
             show_summary=lambda summary: self.review_card.show_summary(summary),
         )
         # --- the Run card (run window, processor layout, CDR): see
@@ -672,8 +680,8 @@ class ForgeBlueprintWizard:
             self.catalog,
             rebuild=self._rebuild,
             suspend=self._suspend,
-            is_suspended=lambda: getattr(self, "_suspended", False),
-            cdr_lite=lambda: self.model_card.bgc_mode == "cdr_lite",
+            is_suspended=lambda: self._suspended,
+            cdr_lite=lambda: self.model_card.is_cdr_lite,
             grid_center=lambda: self.domain_card.grid_center,
             grid_fingerprint=lambda: self.domain_card.grid_fingerprint,
             # Late-bound: tests replace build_grid_from_widgets on the card.
@@ -740,11 +748,6 @@ class ForgeBlueprintWizard:
         # the user nor set by a loaded blueprint (see _seed_wizard_defaults).
         self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
         self._syncing = False  # True while pushing composed values into editor widgets
-        # Reentrancy depth for _suspend()/_Suspender -- lets a programmatic backfill
-        # (e.g. _populate_grid_widgets_from_grid) nest inside an already-suspended
-        # block (e.g. _populate_from's outer _suspend()) without the inner
-        # context's __exit__ prematurely clearing the outer one's suspension.
-        self._suspend_depth = 0
         # snapshot of the domain-defining widgets at the last catalog Domain pick;
         # compared in _rebuild() to detect a deviation (composition.domain.modified).
         # None means no catalog domain has been picked yet (or domain_dd == "<custom>").
@@ -762,7 +765,7 @@ class ForgeBlueprintWizard:
             self.catalog,
             rebuild=self._rebuild,
             suspend=self._suspend,
-            is_suspended=lambda: getattr(self, "_suspended", False),
+            is_suspended=lambda: self._suspended,
             config=lambda: self.config,
             # Late-binding: tests replace these on the wizard and the Grid card.
             save_config=lambda path: self._save_config(path),
@@ -857,8 +860,6 @@ class ForgeBlueprintWizard:
         # The Run card's own observers (its CDR handlers and auto-tiling sync),
         # before the rebuilds registered on its widgets below.
         self.run_card.wire()
-        for w in self.run_card.cdr_simple_fields:
-            w.observe(self._rebuild, names="value")
         self.model_card.model_dd.observe(self._on_model_change, names="value")
         # The card's own observers first: on bgc_dd, its visibility syncs run before
         # the reactions of the other cards below.
@@ -871,35 +872,16 @@ class ForgeBlueprintWizard:
         self.domain_card.parent_domain_dd.observe(self._on_parent_domain, names="value")
         self.domain_card.parent_enable.observe(self._on_parent_toggle, names="value")
         self.output_dd.observe(self._on_output_spec, names="value")
-        watched = [
-            self.domain_card.grid_name,
-            self.domain_card.scoord_chk,
-            self.run_card.npx,
-            self.run_card.npy,
-            self.run_card.use_pio_chk,
-            self.run_card.auto_tiling_chk,
-            self.run_card.n_cores,
-            self.model_card.cs_source_dd,
-            self.model_card.roms_ref,
-            self.model_card.marbl_ref,
-            self.run_card.start,
-            self.run_card.end,
-            self.run_card.model_ref_date,
-            self.domain_card.topo_source,
-            self.domain_card.topo_path,
-            self.domain_card.nest_enable,
-            self.domain_card.nest_period,
-            self.domain_card.nest_pressure_fluxes,
-            self.domain_card.parent_enable,
-            *self.domain_card.child_w.values(),
-            *self.domain_card.parent_w.values(),
-            self.domain_card.child_topo_source,
-            self.domain_card.child_topo_path,
-            self.domain_card.parent_topo_source,
-            self.domain_card.parent_topo_path,
-        ]
-        for w in watched:
-            w.observe(self._rebuild, names="value")
+        # Last, so on each widget the card's own observers and the reactions above
+        # run before the rebuild.
+        for card in (
+            self.domain_card,
+            self.run_card,
+            self.model_card,
+            self.review_card,
+        ):
+            for w in card.rebuild_on:
+                w.observe(self._rebuild, names="value")
 
     def _sync_cdr_lite_hint(self, _change=None):
         # The Run card's CDR hint follows the Model card's BGC mode.
@@ -912,7 +894,7 @@ class ForgeBlueprintWizard:
         # -- except that an untouched default ForcingSpec follows the new model's
         # declared bgc_mode, via the bgc_dd change apply_spec_defaults makes (see
         # _on_bgc_mode).
-        if getattr(self, "_suspended", False):
+        if self._suspended:
             return
         self._overrides = {}
         self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
@@ -922,7 +904,7 @@ class ForgeBlueprintWizard:
 
     def _on_editor_edit(self, section, field):
         # a user edit in the advanced editor -> record as an override (vs composed)
-        if self._syncing or getattr(self, "_suspended", False):
+        if self._syncing or self._suspended:
             return
         value = self.editor.read(section, field)
         composed = self._composed_settings
@@ -983,7 +965,7 @@ class ForgeBlueprintWizard:
         non-child domain isn't stranded on the resolver's errors for a missing IC
         or (under MARBL) boundary BGC sources.
         """
-        if getattr(self, "_suspended", False):
+        if self._suspended:
             return
         if change["new"]:
             self._clear_boundary_forcing()
@@ -1094,8 +1076,8 @@ class ForgeBlueprintWizard:
             on_change=self._on_forcing_change,
             co2_static=self.co2_static_box,
         )
-        self._forcing_editor.show_co2(self.model_card.bgc_mode == "marbl")
-        self._forcing_editor.show_bgc(self.model_card.bgc_mode == "marbl")
+        self._forcing_editor.show_co2(self.model_card.uses_marbl)
+        self._forcing_editor.show_bgc(self.model_card.uses_marbl)
         self.forcing_box.children = [self._forcing_editor.widget]
 
     def _sync_marbl_forcing_visibility(self, _change=None) -> None:
@@ -1103,7 +1085,7 @@ class ForgeBlueprintWizard:
         sections (unless they hold something) under MARBL only.
         """
         if self._forcing_editor is not None:
-            marbl = self.model_card.bgc_mode == "marbl"
+            marbl = self.model_card.uses_marbl
             self._forcing_editor.show_co2(marbl)
             self._forcing_editor.show_bgc(marbl)
 
@@ -1115,7 +1097,7 @@ class ForgeBlueprintWizard:
         ``cdr_forcing`` block (see ``_split_forcing_data``); that embedded dict is
         routed into the CDR box as if it had been uploaded as a YAML.
         """
-        if getattr(self, "_suspended", False):
+        if self._suspended:
             return
         fi, legacy_cdr = _split_forcing_data(
             self.catalog.forcing_data(self.forcing_dd.value)
@@ -1140,7 +1122,7 @@ class ForgeBlueprintWizard:
         follows the mode (the BGC-carrying default for MARBL, the physics-only one
         otherwise); a hand-edited or non-default forcing is left alone.
         """
-        if getattr(self, "_suspended", False) or self._syncing:
+        if self._suspended or self._syncing:
             return
         old_default = self._default_forcing_spec(change["old"])
         new_default = self._default_forcing_spec(change["new"])
@@ -1157,7 +1139,7 @@ class ForgeBlueprintWizard:
     def _on_forcing_change(self):
         # composition.forcing.modified is derived in _rebuild() by comparing the
         # current gather() to self._forcing_seed -- no flag to set here.
-        if getattr(self, "_suspended", False):
+        if self._suspended:
             return
         self._rebuild()
 
@@ -1165,7 +1147,7 @@ class ForgeBlueprintWizard:
         """Selecting an OutputSpec seeds the output sections. Clear any manual
         overrides on those sections/fields so the selection takes effect cleanly.
         """
-        if getattr(self, "_suspended", False):
+        if self._suspended:
             return
         self._overrides = {
             (s, f): v
@@ -1703,7 +1685,7 @@ class ForgeBlueprintWizard:
             # open, just fed differently. `None` (not `[]`) is "no boundary
             # section at all" under the new singular BoundaryForcing schema.
             kw["forcing_inputs"]["forcing"]["boundary"] = None
-        if self.model_card.bgc_mode != "marbl":
+        if not self.model_card.uses_marbl:
             # Only MARBL has an air CO2: the hidden "Atmospheric CO2" block keeps its
             # choice for a switch back, but a time-varying one reaches no blueprint.
             surface = kw["forcing_inputs"]["forcing"]["surface"]
@@ -1827,7 +1809,7 @@ class ForgeBlueprintWizard:
         )
 
     def _rebuild(self, *_):
-        if getattr(self, "_suspended", False):
+        if self._suspended:
             return
         # The simple CDR release follows the grid and run window, and the CDR
         # plot is dropped when an input it was drawn from changed (see
@@ -2007,7 +1989,7 @@ class ForgeBlueprintWizard:
                 components.Pill("default path", "off"),
             )
         pills = [components.Pill(row["name"].value) for row in fe._rows.get(cat, [])]
-        if cat == "surface" and self.model_card.bgc_mode == "marbl":
+        if cat == "surface" and self.model_card.uses_marbl:
             pills.append(components.Pill(f"CO2 {fe.co2_mode.value}"))
         return tuple(pills) or none
 

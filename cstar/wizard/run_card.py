@@ -644,7 +644,7 @@ class RunCard:
     # ---- wiring and layout ---------------------------------------------------
     def wire(self) -> None:
         """Register the card's own observers. The wizard calls this from its
-        ``_wire``, before it registers its rebuild on the card's widgets, so the
+        ``_wire``, before it registers its rebuild on `rebuild_on`, so the
         auto-tiling sync runs before the rebuild.
         """
         self.cdr_dd.observe(self._on_cdr_spec, names="value")
@@ -660,6 +660,25 @@ class RunCard:
         self.cdr_plot_release_dd.observe(self._on_cdr_plot_option_change, names="value")
         self.cdr_simple_replace_btn.on_click(self._on_cdr_simple_replace)
         self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
+
+    @property
+    def rebuild_on(self) -> tuple[Any, ...]:
+        """The widgets whose every change re-resolves the blueprint: the run window,
+        the processor layout and the simple CDR release's fields. The wizard
+        registers its rebuild on them last in its ``_wire``, after the card's own
+        observers.
+        """
+        return (
+            self.npx,
+            self.npy,
+            self.use_pio_chk,
+            self.auto_tiling_chk,
+            self.n_cores,
+            self.start,
+            self.end,
+            self.model_ref_date,
+            *self.cdr_simple_fields,
+        )
 
     def rows(self) -> list[Any]:
         """The card body's rows, in order: the run window, the processor layout and
@@ -1210,11 +1229,12 @@ class RunCard:
         rather than onto each individual CDR/grid widget -- the least-invasive
         idiom for "any of several unrelated inputs invalidates this": ``_rebuild()`` already
         fires on every CDR-panel edit, every mode switch (via ``apply_cdr_mode``),
-        and every grid-geometry edit (``watched``/``_on_grid_kwarg_change`` both
-        end in a rebuild). Because ``_rebuild()`` ALSO fires for edits that can't
-        affect the plot (e.g. the description field), the fingerprint check below
-        skips the clear when nothing plot-affecting changed -- an already-rendered
-        plot survives unrelated edits instead of silently blanking.
+        and every grid-geometry edit (the Grid card's ``rebuild_on`` and
+        ``_on_grid_kwarg_change`` both end in a rebuild). Because ``_rebuild()``
+        ALSO fires for edits that can't affect the plot (e.g. the description
+        field), the fingerprint check below skips the clear when nothing
+        plot-affecting changed -- an already-rendered plot survives unrelated
+        edits instead of silently blanking.
         """
         fingerprint = self._cdr_plot_inputs_fingerprint()
         if fingerprint == getattr(self, "_cdr_plot_fingerprint", None):
