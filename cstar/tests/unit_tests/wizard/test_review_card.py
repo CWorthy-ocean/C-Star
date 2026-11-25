@@ -150,7 +150,7 @@ def test_on_run_survives_line_longer_than_stream_limit(monkeypatch, tmp_path):
     ``async for line in proc.stdout`` loop did -- the content still lands, split
     across multiple appends by the memory-bounding flush.
     """
-    from cstar.wizard.fields import _STREAM_MAX_LINE
+    from cstar.wizard.streaming import _STREAM_MAX_LINE
 
     giant = b"x" * (_STREAM_MAX_LINE * 3 + 17) + b"\ndone\n"
     # Read in chunks well below the flush threshold and unaligned to it, so the

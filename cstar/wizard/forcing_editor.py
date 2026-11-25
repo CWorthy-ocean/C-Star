@@ -42,6 +42,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.base.digest import hash_netcdf_contents
 from cstar.wizard.fields import (
+    _PATH_PLACEHOLDER,
     _RIVER_CUSTOM_FILE_HINT,
     _parse_optional_number,
     _same_attached_file,
@@ -444,9 +445,7 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
 # small JSON editor per item — visible and round-tripped — rather than hidden. This is
 # the advanced/transitional hatch; promoting a knob to a typed field gives it a proper
 # widget above.
-# What an empty optional box shows, by what blank means there. Grey text reading
-# "(default)" looked like a value already filled in.
-_PATH_PLACEHOLDER = "Leave blank to use the default"
+# What an empty blend-depth box shows: a sentence, like `_PATH_PLACEHOLDER`'s.
 _BLEND_M_PLACEHOLDER = "Leave blank for the default depth"
 
 _OPTIONS_PLACEHOLDER = (

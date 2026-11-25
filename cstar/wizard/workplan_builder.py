@@ -90,11 +90,13 @@ from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
 from cstar.wizard.fields import (
-    _STREAM_READ_SIZE,
     _base_type,
-    _drain_stream_buffer,
     _make_field_widget,
     _read_field_widget,
+)
+from cstar.wizard.streaming import (
+    _STREAM_READ_SIZE,
+    _drain_stream_buffer,
     _schedule_coroutine,
 )
 from cstar.wizard.ui import components

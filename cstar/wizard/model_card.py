@@ -237,6 +237,14 @@ class ModelCard:
         self.cs_clear_btn.on_click(self._on_cs_clear)
         self.cs_path.observe(self._on_cs_path_submit, names="value")
 
+    @property
+    def rebuild_on(self) -> tuple[Any, ...]:
+        """The widgets whose every change re-resolves the blueprint. The wizard
+        registers its rebuild on them last in its ``_wire``, after the card's own
+        observers and its cross-card reactions.
+        """
+        return (self.cs_source_dd, self.roms_ref, self.marbl_ref)
+
     def rows(self) -> list[Any]:
         """The card body's rows, in order. The wizard adds its error banner above
         them and the ForcingSpec row below.
@@ -284,6 +292,16 @@ class ModelCard:
     def bgc_mode(self) -> str:
         """The selected BGC mode ("marbl", "none" or "cdr_lite")."""
         return self.bgc_dd.value
+
+    @property
+    def uses_marbl(self) -> bool:
+        """Whether the selected BGC mode builds with MARBL ("marbl")."""
+        return self.bgc_dd.value == "marbl"
+
+    @property
+    def is_cdr_lite(self) -> bool:
+        """Whether the selected BGC mode is "cdr_lite"."""
+        return self.bgc_dd.value == "cdr_lite"
 
     @property
     def typed_roms_ref(self) -> str:
@@ -382,7 +400,7 @@ class ModelCard:
         # The default ("directive") leaves carbonate_sensitivity off: the workplan
         # directive supplies the files at run time. The resolver rejects them
         # outside bgc_mode "cdr_lite", so attached state is only passed there.
-        if self.bgc_dd.value == "cdr_lite" and self.cs_source_dd.value == "path":
+        if self.is_cdr_lite and self.cs_source_dd.value == "path":
             if self._carbonate_sensitivity is None:
                 raise ValueError(
                     "carbonate sensitivities: attach a directory of ROMS _cdrgas "
@@ -482,14 +500,14 @@ class ModelCard:
     # ---- visibility ----------------------------------------------------------
     def _sync_marbl_ref_visibility(self, _change: Any = None) -> None:
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
-        self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
+        self.marbl_ref.layout.display = "" if self.uses_marbl else "none"
 
     def _sync_carbonate_sensitivity_visibility(self, _change: Any = None) -> None:
         # The carbonate sensitivity group only matters in "cdr_lite" mode (the
         # wizard shows the CDR panel's hint then too, see its _sync_cdr_lite_hint);
         # the attach row only for the "path" source. Attached state is kept (not
         # cleared) while hidden, like marbl_ref's value.
-        cdr_lite = self.bgc_dd.value == "cdr_lite"
+        cdr_lite = self.is_cdr_lite
         path = self.cs_source_dd.value == "path"
         self.cs_group.layout.display = "" if cdr_lite else "none"
         self.cs_path_box.layout.display = "" if path else "none"
