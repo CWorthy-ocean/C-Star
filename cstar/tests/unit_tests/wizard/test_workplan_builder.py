@@ -42,7 +42,7 @@ from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, Workp
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.app import ForgeBlueprintWizardApp
 from cstar.wizard.review_card import WIZARD_TOOL
-from cstar.wizard.ui import labels
+from cstar.wizard.ui import components, labels
 from cstar.wizard.workplan_builder import WorkplanBuilderPage, _StepPane
 
 _BP_TEMPLATE = (
@@ -2008,10 +2008,40 @@ def test_current_config_is_not_saved_when_boundaries_cannot_be_derived(
     pane = page.panes[0]
     pane.source.value = wb.SOURCE_CURRENT
     assert pane._current_path == ""
-    assert "boundaries could not be derived" in pane.current_note.value
-    assert "forge-banner err" in pane.current_note.value
+    assert pane.current_note.value == components.banner(
+        "err",
+        "Open boundaries could not be derived from the Blueprint page's grid (see "
+        "its Domain-derived properties status). Derive or set them manually "
+        "there, then choose this source again.",
+    )
     assert not saved.exists()
     assert any("choose a blueprint" in p for p in page.problems)
+
+
+def test_current_config_is_not_saved_when_the_derivation_leaves_it_invalid(
+    page, bp_app, monkeypatch
+):
+    """Deriving the boundaries rebuilds the Blueprint page's config; when that
+    leaves it invalid, nothing is saved.
+    """
+    wiz = bp_app.inner
+    saved = Path(wiz.review_card.save_path.value)
+    saved.unlink(missing_ok=True)
+
+    def _derive_into_an_invalid_config():
+        wiz.config = None
+        return True
+
+    monkeypatch.setattr(
+        wiz.domain_card, "ensure_boundaries_derived", _derive_into_an_invalid_config
+    )
+    pane = page.panes[0]
+    pane.source.value = wb.SOURCE_CURRENT
+    assert pane._current_path == ""
+    assert pane.current_note.value == components.banner(
+        "warn", "The Blueprint page has no valid configuration to use."
+    )
+    assert not saved.exists()
 
 
 @pytest.mark.parametrize(

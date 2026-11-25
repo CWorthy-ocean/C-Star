@@ -78,6 +78,64 @@ def test_on_run_guards_on_invalid_config(monkeypatch):
     assert wiz.review_card.run_output.outputs == ()
 
 
+def _wizard_whose_boundaries_cannot_be_derived(monkeypatch, tmp_path):
+    """A valid wizard set to save to ``tmp_path/sub/bp.yaml``, whose open
+    boundaries are the provisional defaults and cannot be derived.
+    """
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None
+    wiz.review_card.save_path.value = str(tmp_path / "sub" / "bp.yaml")
+    monkeypatch.setattr(wiz.domain_card, "ensure_boundaries_derived", lambda: False)
+
+    def _boom(*a, **kw):
+        raise AssertionError("must not spawn a subprocess without a saved blueprint")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+    return wiz
+
+
+def test_save_writes_nothing_when_boundaries_cannot_be_derived(monkeypatch, tmp_path):
+    wiz = _wizard_whose_boundaries_cannot_be_derived(monkeypatch, tmp_path)
+    wiz.review_card._on_save(None)
+    assert "Save aborted — open boundaries could not be derived" in (
+        wiz.review_card.save_status.value
+    )
+    assert not (tmp_path / "sub").exists()
+
+
+def test_run_writes_nothing_when_boundaries_cannot_be_derived(monkeypatch, tmp_path):
+    wiz = _wizard_whose_boundaries_cannot_be_derived(monkeypatch, tmp_path)
+    wiz.review_card.run_output.append_stdout("previous run\n")
+    wiz.review_card._on_run(None)
+    assert "Run aborted — open boundaries could not be derived" in (
+        wiz.review_card.run_status.value
+    )
+    assert not (tmp_path / "sub").exists()
+    # a run that started would have cleared the previous run's log
+    assert [o["text"] for o in wiz.review_card.run_output.outputs] == ["previous run\n"]
+
+
+def test_run_coroutine_saves_only_through_the_boundary_guard(monkeypatch, tmp_path):
+    """The coroutine Run Forge here schedules makes its own guarded save, so even
+    called on its own it cannot write the provisional boundaries.
+    """
+    import asyncio
+
+    wiz = _wizard_whose_boundaries_cannot_be_derived(monkeypatch, tmp_path)
+    wiz.review_card.run_output.append_stdout("previous run\n")
+    asyncio.run(wiz.review_card._run_async())
+    assert "Run aborted — open boundaries could not be derived" in (
+        wiz.review_card.run_status.value
+    )
+    assert not (tmp_path / "sub").exists()
+    assert [o["text"] for o in wiz.review_card.run_output.outputs] == ["previous run\n"]
+
+
 def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_path):
     """Run auto-saves the current blueprint, launches the built command with
     stderr merged into stdout, and streams each line into run_output. There's no

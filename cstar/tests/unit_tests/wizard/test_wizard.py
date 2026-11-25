@@ -54,7 +54,7 @@ from cstar.tests.unit_tests.wizard.helpers import (
     _write_tiny_netcdf,
 )
 from cstar.wizard.fields import _dd_options, _dd_values
-from cstar.wizard.review_card import WIZARD_TOOL
+from cstar.wizard.review_card import WIZARD_TOOL, SaveRefused
 from cstar.wizard.settings_editor import (
     _ACCORDION_EXCLUDED_FIELDS,
     _OUTPUT_CARD,
@@ -3283,6 +3283,59 @@ def test_the_specs_the_wizard_saves_have_only_known_keys():
     assert set(domain) <= known_spec_keys("DomainSpec")
     forcing = {"description", *wiz._forcing_editor.gather()}
     assert forcing <= known_spec_keys("ForcingSpec")
+
+
+# ---------------------------------------------------------------------------
+# save_blueprint: the one save the user asks for (Save, Run Forge here, the
+# Workplan page). It derives the open boundaries before it writes anything.
+# ---------------------------------------------------------------------------
+
+
+def _must_not_write(_path):
+    raise AssertionError("save_blueprint must not write")
+
+
+def test_save_blueprint_writes_nothing_when_boundaries_cannot_be_derived(
+    monkeypatch, tmp_path
+):
+    target = tmp_path / "sub" / "bp.yaml"
+    wiz = _saving_wizard(target)
+    monkeypatch.setattr(wiz.domain_card, "ensure_boundaries_derived", lambda: False)
+    monkeypatch.setattr(wiz, "_save_config", _must_not_write)
+
+    assert wiz.save_blueprint(wiz.save_target) is SaveRefused.BOUNDARIES
+    assert not target.parent.exists()
+
+
+def test_save_blueprint_checks_the_config_the_derivation_leaves(monkeypatch, tmp_path):
+    """Deriving the boundaries rebuilds the config, so the check comes after it."""
+    target = tmp_path / "sub" / "bp.yaml"
+    wiz = _saving_wizard(target)
+
+    def _derive_into_an_invalid_config():
+        wiz.config = None
+        return True
+
+    monkeypatch.setattr(
+        wiz.domain_card, "ensure_boundaries_derived", _derive_into_an_invalid_config
+    )
+    monkeypatch.setattr(wiz, "_save_config", _must_not_write)
+
+    assert wiz.save_blueprint(wiz.save_target) is SaveRefused.INVALID
+    assert not target.parent.exists()
+
+
+def test_save_blueprint_makes_the_directory_and_writes_the_stamped_file(tmp_path):
+    target = tmp_path / "sub" / "bp.yaml"
+    wiz = _saving_wizard(target)
+    assert wiz.save_target == target
+
+    written = wiz.save_blueprint(wiz.save_target)
+
+    assert written == target
+    saved = ForgeBlueprint.from_yaml(target).provenance
+    assert saved.generated_by.tool == WIZARD_TOOL
+    assert wiz._carried_provenance == saved
 
 
 # ---------------------------------------------------------------------------

@@ -11,15 +11,19 @@ card 7's status chip.
 
 `ForgeBlueprintWizard` places the cards' rows, adds the "Save specs" pane to card 8,
 calls the card at each step of a rebuild, and otherwise reads and sets the card
-only through its methods and properties. Every write of the blueprint goes through
-the wizard's ``_save_config``, which tells the card with `ReviewCard.record_save`.
-The card reaches back only through the callables it is given.
+only through its methods and properties. The card's Save and Run save the blueprint
+through the wizard's ``save_blueprint``, which derives the open boundaries first
+and answers with the file written or a `SaveRefused`. Every write of the blueprint
+goes through the wizard's ``_save_config``, which tells the card with
+`ReviewCard.record_save`. The card reaches back only through the callables it is
+given.
 """
 
 from __future__ import annotations
 
 import base64
 import html
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
@@ -46,6 +50,21 @@ if TYPE_CHECKING:
 
 WIZARD_TOOL: Final[str] = "wizard"
 """The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
+
+
+class SaveRefused(Enum):
+    """Why the wizard's ``save_blueprint`` wrote nothing. Each caller says so in
+    its own words.
+    """
+
+    BOUNDARIES = "boundaries"
+    """The open boundaries are still the provisional defaults, and deriving them
+    from the grid failed (the Grid card's derive status says why)."""
+
+    INVALID = "invalid"
+    """The blueprint's inputs are invalid, so there is no config to save."""
+
+
 # What the Download links say while they wait (see ReviewCard.refresh_download_links).
 _DOWNLOAD_WAITS_FOR_BOUNDARIES: Final[str] = (
     "The download is ready once the open boundaries are derived from the grid: "
@@ -85,11 +104,11 @@ class ReviewCard:
     The callables are the wizard's: ``rebuild`` re-resolves the blueprint,
     ``suspend`` returns the wizard's suspend context manager, ``is_suspended`` says
     whether one is open, ``config`` reads the resolved blueprint (``None`` while the
-    inputs are invalid), ``save_config`` writes it to a path through the wizard's
-    one write path, ``ensure_boundaries_derived`` derives the open boundaries before
-    a save or run (``False`` when that failed), and ``boundaries_pending`` says
-    whether they are still the provisional defaults. Construction builds the
-    widgets but registers no observers: the wizard calls `wire` once it is built.
+    inputs are invalid), ``save_blueprint`` saves it to a path, deriving the open
+    boundaries first, and returns the file written or why nothing was
+    (`SaveRefused`), and ``boundaries_pending`` says whether the boundaries are
+    still the provisional defaults. Construction builds the widgets but registers
+    no observers: the wizard calls `wire` once it is built.
     """
 
     def __init__(
@@ -101,8 +120,7 @@ class ReviewCard:
         suspend: Callable[[], AbstractContextManager[Any]],
         is_suspended: Callable[[], bool],
         config: Callable[[], ForgeBlueprint | None],
-        save_config: Callable[[Path], Path],
-        ensure_boundaries_derived: Callable[[], bool],
+        save_blueprint: Callable[[Path], Path | SaveRefused],
         boundaries_pending: Callable[[], bool],
     ) -> None:
         self.W = W
@@ -111,8 +129,7 @@ class ReviewCard:
         self._suspend = suspend
         self._is_suspended = is_suspended
         self._get_config = config
-        self._save_config = save_config
-        self._ensure_boundaries_derived = ensure_boundaries_derived
+        self._save_blueprint = save_blueprint
         self._boundaries_pending = boundaries_pending
 
         self.derived = W.HTML("")
@@ -551,7 +568,7 @@ class ReviewCard:
 
         While the open boundaries are the provisional checkbox defaults (neither
         touched nor derived from the grid), the links are withheld: Save and Run
-        derive them first (`_ensure_boundaries_derived`), but a link has no click
+        derive them first (the wizard's ``save_blueprint``), but a link has no click
         hook to do that, and building a grid on every rebuild would stall typing.
         """
         if self._boundaries_pending():
@@ -595,7 +612,14 @@ class ReviewCard:
         )
 
     def _on_save(self, _):
-        if not self._ensure_boundaries_derived():
+        try:
+            saved = self._save_blueprint(self.save_target)
+        except Exception as exc:
+            self.save_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
+            )
+            return
+        if saved is SaveRefused.BOUNDARIES:
             self.save_status.value = components.status_span(
                 "err",
                 "Save aborted — open boundaries could "
@@ -603,21 +627,12 @@ class ReviewCard:
                 "status above). A save must never ship provisional defaults; fix "
                 "the grid or set boundaries manually, then retry.",
             )
-            return
-        if self.config is None:
+        elif saved is SaveRefused.INVALID:
             self.save_status.value = components.status_span(
                 "err", "Nothing to save — config is invalid."
             )
-            return
-        try:
-            save_path = Path(self.save_path.value)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            p = self._save_config(save_path)
-            self.save_status.value = components.status_span("ok", f"Saved {p}")
-        except Exception as exc:
-            self.save_status.value = components.status_span(
-                "err", f"{type(exc).__name__}: {exc}"
-            )
+        else:
+            self.save_status.value = components.status_span("ok", f"Saved {saved}")
 
     # ---- card 8: next steps ----------------------------------------------------
     def _saved_path(self) -> Path | None:
@@ -787,7 +802,27 @@ class ReviewCard:
         return [sys.executable, "-m", "cstar.cli.cli", "forge", "run", blueprint_path]
 
     def _on_run(self, _):
-        if not self._ensure_boundaries_derived():
+        _schedule_coroutine(self._run_async())
+
+    async def _run_async(self):
+        """Save the current blueprint through the wizard's ``save_blueprint``, then
+        launch the C-Star CLI as a subprocess and stream its combined stdout/stderr
+        into ``run_output`` line by line as it arrives (not all at once at the end).
+
+        A save that is refused or fails is reported in ``run_status`` and starts
+        nothing, so the previous run's log stays.
+        """
+        import asyncio
+
+        self.run_status.value = "<i>saving blueprint…</i>"
+        try:
+            saved = self._save_blueprint(self.save_target)
+        except Exception as exc:
+            self.run_status.value = components.status_span(
+                "err", f"{type(exc).__name__}: {exc}"
+            )
+            return
+        if saved is SaveRefused.BOUNDARIES:
             self.run_status.value = components.status_span(
                 "err",
                 "Run aborted — open boundaries could "
@@ -796,30 +831,18 @@ class ReviewCard:
                 "retry.",
             )
             return
-        if self.config is None:
+        if saved is SaveRefused.INVALID:
             self.run_status.value = components.status_span(
                 "err", "Nothing to run — config is invalid."
             )
             return
-        _schedule_coroutine(self._run_async())
-
-    async def _run_async(self):
-        """Save the current blueprint, then launch the C-Star CLI as a subprocess
-        and stream its combined stdout/stderr into ``run_output`` line by line as
-        it arrives (not all at once at the end).
-        """
-        import asyncio
 
         self._run_in_progress = True
         self.run_btn.disabled = True
         self.run_output.clear_output(wait=True)
-        self.run_status.value = "<i>saving blueprint…</i>"
         cmd: list[str] | None = None
         try:
-            save_path = Path(self.save_path.value)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            path = self._save_config(save_path)
-            cmd = self._build_run_command(str(path))
+            cmd = self._build_run_command(str(saved))
             self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -858,7 +881,7 @@ class ReviewCard:
             )
         except Exception as exc:
             # Name the command in the status so a failure isn't a context-free
-            # error string (cmd is None only if saving the blueprint threw first).
+            # error string (cmd is None only if building the command threw).
             where = f" while running: {' '.join(cmd)}" if cmd else ""
             self.run_status.value = components.status_span(
                 "err", f"{type(exc).__name__}: {exc}{where}"

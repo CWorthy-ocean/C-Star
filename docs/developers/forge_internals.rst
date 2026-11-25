@@ -328,7 +328,10 @@ The call chain end to end
    steps cards) owns its widgets and their observers, its share of ``_gather``
    and ``_populate_from``, and its chip. It gets the wizard's callables
    (``rebuild``, ``suspend``, ``is_suspended`` and the card's own), never the
-   wizard, and imports neither the wizard nor another card. The wizard places
+   wizard, and imports neither the wizard nor another card. A callable may read
+   another card or post a message to it; an action that changes another card's
+   state is a wizard method, such as ``save_blueprint``, which derives the Grid
+   card's open boundaries before it writes. The wizard places
    its rows, observes its widgets for the reactions that span cards, registers
    ``_rebuild`` last on the widgets its ``rebuild_on`` lists, and otherwise
    uses its properties and methods. The CSS travels inside the widget tree so the
@@ -350,8 +353,10 @@ The call chain end to end
    -- a ForcingSpec and OutputSpec must always be supplied explicitly),
    resolves dataset keys via ``source_registry``, computes pure-derived
    settings (CFL ``dt``, ``v_sponge``, etc.), returns a ``ForgeBlueprint``.
-4. Save (``wiz._save_config(path)``) stamps the provenance and writes the portable
-   ``forge_blueprint.yaml`` (``stamp_provenance`` then ``to_yaml``).
+4. Save (``wiz.save_blueprint(path)``) derives the open boundaries from the grid
+   while they are still the provisional defaults, then stamps the provenance and
+   writes the portable ``forge_blueprint.yaml`` (``_save_config``:
+   ``stamp_provenance`` then ``to_yaml``).
 
 **Execution (blueprint -> engine -> executor), same machine or a different one:**
 

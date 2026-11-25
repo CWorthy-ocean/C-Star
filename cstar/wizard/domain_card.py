@@ -1824,10 +1824,12 @@ class DomainCard:
         self._rebuild()
 
     def ensure_boundaries_derived(self) -> bool:
-        """Export-time safety net for Save/Save-domain/Run: if boundaries are
-        untouched and have never been derived against the current grid, force
-        one grid build now so those actions can never ship the provisional
-        checkbox defaults (east+north) silently.
+        """Export-time safety net for every blueprint save (the wizard's
+        ``save_blueprint``: Save, Run Forge here and the Workplan page): if
+        boundaries are untouched and have never been derived against the current
+        grid, force one grid build now so a save can never ship the provisional
+        checkbox defaults (east+north) silently. Saving a DomainSpec does not call
+        it: the spec omits untouched boundaries, which re-derive when it loads.
 
         Returns True if boundaries are known-good (touched, already derived, or
         just successfully derived here); False if an explicit derive was needed
