@@ -31,7 +31,9 @@ def _wizard() -> ForgeBlueprintWizard:
 def _save(wiz: ForgeBlueprintWizard, path: Path) -> ForgeBlueprint:
     """Press Save and return the blueprint it wrote."""
     wiz.review_card.save_path.value = str(path)
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.domain_card._boundaries_touched = (
+        True  # not exercising boundary derivation here
+    )
     wiz.review_card._on_save(None)
     assert "Saved" in wiz.review_card.save_status.value, (
         wiz.review_card.save_status.value
@@ -45,7 +47,7 @@ def _saved_dt(bp: ForgeBlueprint) -> float:
 
 
 def _grid_cfl_dt(wiz: ForgeBlueprintWizard) -> float:
-    return float(cfl_dt(wiz._base_grid_kwargs()))
+    return float(cfl_dt(wiz.domain_card._base_grid_kwargs()))
 
 
 class TestDerivedDt:
@@ -53,26 +55,26 @@ class TestDerivedDt:
         wiz = _wizard()
         expected = _grid_cfl_dt(wiz)
         assert expected != 7200.0  # the old fixed default
-        assert wiz.dt.value == expected
-        assert "derived" in wiz.dt_status.value
+        assert wiz.domain_card.dt.value == expected
+        assert "derived" in wiz.domain_card.dt_status.value
         assert _saved_dt(_save(wiz, tmp_path / "bp.yaml")) == expected
 
     def test_a_grid_edit_re_derives_dt(self, tmp_path):
         wiz = _wizard()
-        before = wiz.dt.value
-        wiz.grid_w["nx"].value = wiz.grid_w["nx"].value * 4
+        before = wiz.domain_card.dt.value
+        wiz.domain_card.grid_w["nx"].value = wiz.domain_card.grid_w["nx"].value * 4
         after = _grid_cfl_dt(wiz)
         assert after < before
-        assert wiz.dt.value == after
+        assert wiz.domain_card.dt.value == after
         assert _saved_dt(_save(wiz, tmp_path / "bp.yaml")) == after
 
     def test_a_typed_dt_is_kept_through_grid_edits(self, tmp_path):
         wiz = _wizard()
-        wiz.dt.value = 300.0
-        assert wiz._dt_touched
-        assert wiz.dt_status.value == ""
-        wiz.grid_w["nx"].value = wiz.grid_w["nx"].value * 4
-        assert wiz.dt.value == 300.0
+        wiz.domain_card.dt.value = 300.0
+        assert wiz.domain_card._dt_touched
+        assert wiz.domain_card.dt_status.value == ""
+        wiz.domain_card.grid_w["nx"].value = wiz.domain_card.grid_w["nx"].value * 4
+        assert wiz.domain_card.dt.value == 300.0
         assert _saved_dt(_save(wiz, tmp_path / "bp.yaml")) == 300.0
         assert wiz._domain_spec_data()["dt"] == 300.0
 
@@ -81,14 +83,14 @@ class TestDerivedDt:
         than leaving a stale computed value (and status) behind.
         """
         wiz = _wizard()
-        wiz.dt.value = 300.0
-        wiz._on_compute_dt(None)
-        assert not wiz._dt_touched
-        assert wiz.dt.value == _grid_cfl_dt(wiz)
-        wiz.grid_w["nx"].value = wiz.grid_w["nx"].value * 4
+        wiz.domain_card.dt.value = 300.0
+        wiz.domain_card._on_compute_dt(None)
+        assert not wiz.domain_card._dt_touched
+        assert wiz.domain_card.dt.value == _grid_cfl_dt(wiz)
+        wiz.domain_card.grid_w["nx"].value = wiz.domain_card.grid_w["nx"].value * 4
         after = _grid_cfl_dt(wiz)
-        assert wiz.dt.value == after
-        assert "derived" in wiz.dt_status.value
+        assert wiz.domain_card.dt.value == after
+        assert "derived" in wiz.domain_card.dt_status.value
         assert _saved_dt(_save(wiz, tmp_path / "bp.yaml")) == after
 
     def test_an_untouched_dt_stays_out_of_a_saved_domain_spec(self):
@@ -96,7 +98,7 @@ class TestDerivedDt:
 
     def test_a_loaded_blueprint_keeps_its_dt(self, tmp_path):
         w1 = _wizard()
-        w1.dt.value = 450.0
+        w1.domain_card.dt.value = 450.0
         path = tmp_path / "bp.yaml"
         _save(w1, path)
 
@@ -104,10 +106,10 @@ class TestDerivedDt:
         w2.load_path.value = str(path)
         w2._on_load_path(None)
         assert w2.config is not None, w2.review_card.derived.value
-        assert w2._dt_touched
-        assert w2.dt.value == 450.0
-        w2.grid_w["nx"].value = w2.grid_w["nx"].value * 4
-        assert w2.dt.value == 450.0
+        assert w2.domain_card._dt_touched
+        assert w2.domain_card.dt.value == 450.0
+        w2.domain_card.grid_w["nx"].value = w2.domain_card.grid_w["nx"].value * 4
+        assert w2.domain_card.dt.value == 450.0
 
     @pytest.mark.parametrize("domain", ["wio-toy", "gulf-guinea-toy"])
     def test_the_coarse_toys_get_a_legal_marbl_step(self, domain, tmp_path):
@@ -115,9 +117,9 @@ class TestDerivedDt:
         and 14,400 s, beyond the 10,800 s MARBL step at which ucla-roms aborts.
         """
         wiz = _wizard()
-        wiz.domain_dd.value = domain
+        wiz.domain_card.domain_dd.value = domain
         assert wiz.model_card.bgc_dd.value == "marbl"
-        assert not wiz._dt_touched
+        assert not wiz.domain_card._dt_touched
         bp = _save(wiz, tmp_path / "bp.yaml")
         dt = _saved_dt(bp)
         assert dt == 3600.0
@@ -138,14 +140,14 @@ class TestOverridesCannotDefeatTheTideRules:
         widget.value = True
         assert _BRY_TIDES not in wiz._overrides
 
-        wiz.parent_enable.value = True
+        wiz.domain_card.parent_enable.value = True
         assert wiz.config is not None, wiz.review_card.derived.value
         bp = _save(wiz, tmp_path / "bp.yaml")
         assert bp.model_settings["tides"]["bry_tides"] is False
 
     def test_a_child_grid_cannot_turn_boundary_tides_on(self, tmp_path):
         wiz = _wizard()
-        wiz.parent_enable.value = True
+        wiz.domain_card.parent_enable.value = True
         assert wiz.config is not None, wiz.review_card.derived.value
         widget = wiz.editor._widgets[_BRY_TIDES][0]
         assert widget.value is False
@@ -176,7 +178,7 @@ class TestOverridesCannotDefeatTheTideRules:
         wiz = ForgeBlueprintWizard(catalog=catalog)
         wiz.run_card.start.value = date(2012, 1, 1)
         wiz.run_card.end.value = date(2012, 1, 2)
-        wiz.parent_enable.value = True
+        wiz.domain_card.parent_enable.value = True
         wiz.editor._widgets[_BRY_TIDES][0].value = True
         assert wiz._overrides[_BRY_TIDES] is True
         assert wiz.config.model_settings["tides"]["bry_tides"] is False
@@ -184,4 +186,6 @@ class TestOverridesCannotDefeatTheTideRules:
         wiz.save_domain_name.value = "child-domain"
         wiz._on_save_domain(None)
         assert "child-domain" in catalog.domain_names
-        assert wiz.domain_dd.value == "child-domain", wiz.save_domain_status.value
+        assert wiz.domain_card.domain_dd.value == "child-domain", (
+            wiz.save_domain_status.value
+        )

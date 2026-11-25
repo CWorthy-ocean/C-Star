@@ -29,7 +29,6 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_16_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
-from cstar.base.env import BUNDLED_CATALOG_ROOT
 from cstar.catalog.spec_schema import known_spec_keys
 from cstar.tests.unit_tests.wizard.helpers import (
     _BLEND_SECTIONS,
@@ -45,12 +44,14 @@ from cstar.tests.unit_tests.wizard.helpers import (
     _find_card,
     _is_in_tree,
     _iter_widget_tree,
+    _nested_config_at_1800,
     _new_wizard,
     _run_wiz_with_output,
     _save,
     _saving_wizard,
     _strip_bgc_forcing,
     _upload_change,
+    _write_tiny_netcdf,
 )
 from cstar.wizard.fields import _dd_options, _dd_values
 from cstar.wizard.review_card import WIZARD_TOOL
@@ -170,12 +171,6 @@ def test_river_temp_source_round_trips_through_yaml(tmp_path):
         "path": "/data/era5/*.nc",
     }
     assert item["river_temp_smoothing_window_days"] == 10.0
-
-
-def test_topo_source_dropdown_includes_emod():
-    """The topography-source dropdown must offer EMOD alongside ETOPO5/SRTM15."""
-    wiz = ForgeBlueprintWizard()
-    assert "EMOD" in wiz.topo_source.options
 
 
 def test_wizard_smoke_assembles_widget():
@@ -576,7 +571,7 @@ class TestBgcModeForcingDefault:
         loads with that forcing still selected.
         """
         w1 = self._wizard()
-        w1._boundaries_touched = True
+        w1.domain_card._boundaries_touched = True
         path = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(path)
         w1.review_card._on_save(None)
@@ -756,7 +751,7 @@ class TestBgcModeSettings:
         stale = wiz.editor
         assert stale is not None  # same model, mode and role: kept
 
-        wiz.nest_enable.value = True
+        wiz.domain_card.nest_enable.value = True
 
         assert wiz.editor is not stale and not wiz._editor_key.resolved
         (placeholder,) = wiz.output_editor_box.children
@@ -775,7 +770,9 @@ class TestBgcModeSettings:
         if failure == "no_end_date":
             wiz.run_card.end.value = None
         else:
-            wiz.grid_w["nx"].value = 0  # the resolver rejects a non-positive grid
+            wiz.domain_card.grid_w[
+                "nx"
+            ].value = 0  # the resolver rejects a non-positive grid
 
         assert wiz.config is None
         assert wiz.editor is editor
@@ -783,7 +780,7 @@ class TestBgcModeSettings:
         assert wiz.output_editor_box.children == (editor.output_box,)
 
         wiz.run_card.end.value = date(2012, 1, 2)
-        wiz.grid_w["nx"].value = 10
+        wiz.domain_card.grid_w["nx"].value = 10
         assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.editor is editor
 
@@ -941,7 +938,9 @@ def test_cdr_plot_cache_invalidated_by_input_edit_and_mode_switch(monkeypatch):
     assert len(build_calls) == 2
 
     # A grid-geometry edit also invalidates (the plot's grid is stale).
-    wiz.grid_w["center_lat"].value = wiz.grid_w["center_lat"].value + 1.0
+    wiz.domain_card.grid_w["center_lat"].value = (
+        wiz.domain_card.grid_w["center_lat"].value + 1.0
+    )
     assert wiz.run_card._cdr_plot_object is None
     assert wiz.run_card._cdr_plot_cache == {}
 
@@ -1852,7 +1851,9 @@ def test_domain_modified_reflects_deviation_from_catalog_pick():
     track modification at all).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]  # first real catalog domain
+    wiz.domain_card.domain_dd.value = _dd_values(wiz.domain_card.domain_dd)[
+        1
+    ]  # first real catalog domain
     assert wiz.config.composition.domain.origin == "catalog"
     assert wiz.config.composition.domain.modified is False
 
@@ -1870,7 +1871,7 @@ def test_domain_modified_false_when_hand_authored():
     modified, regardless of what its widgets hold.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.domain_dd.value == "<custom>"
+    assert wiz.domain_card.domain_dd.value == "<custom>"
     wiz.run_card.npx.value = wiz.run_card.npx.value + 1
     assert wiz.config.composition.domain.origin == "custom"
     assert wiz.config.composition.domain.modified is False
@@ -2014,7 +2015,7 @@ def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
     wiz = ForgeBlueprintWizard()
     wiz.run_card.start.value = date(2012, 1, 1)
     wiz.run_card.end.value = date(2012, 1, 2)
-    wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
+    wiz.domain_card.domain_dd.value = _dd_values(wiz.domain_card.domain_dd)[1]
     wiz.run_card.npx.value = wiz.run_card.npx.value + 1  # deviate domain
     wiz._overrides[("lateral_visc", "visc2")] = 99.0  # deviate model
     wiz._rebuild()
@@ -2064,158 +2065,6 @@ def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
     assert wiz2.config.composition.output.modified is False
 
 
-_BUNDLED_DOMAINS = sorted(
-    p.stem for p in (BUNDLED_CATALOG_ROOT / "specs" / "DomainSpec").glob("*.yaml")
-)
-assert _BUNDLED_DOMAINS, "no bundled DomainSpec files: the glob is stale"
-
-
-@pytest.mark.parametrize("name", _BUNDLED_DOMAINS)
-def test_grid_previews_build_every_bundled_domain(monkeypatch, name):
-    """Each bundled DomainSpec previews as this grid, as the nesting child and as
-    the parent: every Grid the three Refresh preview buttons build gets only
-    keywords ``roms_tools.Grid`` takes. GoA-10th_deg's and NEP-4th_deg's
-    ``metadata`` block, kept from the loaded spec, once reached ``Grid(...)``.
-    """
-    import inspect
-
-    import roms_tools
-
-    grid_signature = inspect.signature(roms_tools.Grid)
-    built: list[dict] = []
-
-    class _SignatureGrid:
-        def __init__(self, **kwargs):
-            grid_signature.bind(**kwargs)  # the real Grid's TypeError
-            built.append(kwargs)
-
-        def plot(self):
-            pass
-
-    monkeypatch.setattr(roms_tools, "Grid", _SignatureGrid)
-    monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
-
-    wiz = ForgeBlueprintWizard()
-    wiz.domain_dd.value = name
-    wiz.nest_domain_dd.value = name
-    wiz.parent_domain_dd.value = name
-    wiz._on_plot(None)
-    wiz._on_nest_plot(None)
-    wiz._on_parent_plot(None)
-
-    for status in (wiz.plot_status, wiz.nest_plot_status, wiz.parent_plot_status):
-        assert "✓" in status.value, status.value
-    assert len(built) >= 5  # this grid x3, the child and the parent
-
-
-def test_parent_plot_is_always_grid_plot_only(monkeypatch):
-    """The Grid section's plot is parent-only regardless of nesting state -- the
-    parent+child overlay lives in its own Nesting-section plot (see _on_nest_plot).
-    """
-    import roms_tools
-
-    calls = []
-
-    class _FakeGrid:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        def plot(self):
-            calls.append("plot")
-
-    monkeypatch.setattr(roms_tools, "Grid", _FakeGrid)
-
-    wiz = ForgeBlueprintWizard()
-    for nest_enabled in (False, True):
-        calls.clear()
-        wiz.nest_enable.value = nest_enabled
-        wiz._on_plot(None)
-        assert calls == ["plot"], (nest_enabled, wiz.plot_status.value)
-
-
-def test_nest_plot_button_renders_parent_and_child_via_plot_nesting(monkeypatch):
-    """Item 1 (revised): a dedicated 'Refresh plot' button in the Nesting section
-    builds both grids and renders them via plot_nesting, independent of the parent
-    Grid section's plot.
-    """
-    import roms_tools
-
-    calls = []
-
-    class _FakeGrid:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        def plot(self):
-            calls.append(("plot", self.kwargs))
-
-    def _fake_plot_nesting(parent, child, **kw):
-        calls.append(("plot_nesting", parent.kwargs, child.kwargs))
-
-    monkeypatch.setattr(roms_tools, "Grid", _FakeGrid)
-    monkeypatch.setattr(roms_tools, "plot_nesting", _fake_plot_nesting, raising=False)
-
-    wiz = ForgeBlueprintWizard()
-    wiz._on_nest_plot(None)
-
-    assert any(c[0] == "plot_nesting" for c in calls), wiz.nest_plot_status.value
-    assert not any(c[0] == "plot" for c in calls)  # doesn't touch the parent plot
-    assert len(wiz.nest_plot_img.value) > 0
-    # The parent plot/status are untouched by the nesting-section refresh
-    # (plot_status still carries its initial empty-state hint).
-    assert wiz.plot_status.value == "Click Refresh preview to draw the grid."
-    assert wiz.plot_img.value == b""
-
-
-def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
-    """Regression: plot_nesting calls plt.show() internally (no way to suppress it,
-    no return value). Under Jupyter's inline backend, show() renders-and-closes the
-    current figure immediately, so a plain plt.gcf() call right after plot_nesting
-    returns would grab a fresh *blank* figure instead of the one just drawn -- the
-    bug report ("existing plot disappears"). _on_nest_plot must neutralize
-    plt.show for the duration of the plot_nesting call so the real figure survives
-    to be saved.
-    """
-    import matplotlib.pyplot as plt
-    import roms_tools
-
-    class _FakeGrid:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    def _fake_plot_nesting(parent, child, **kw):
-        fig, ax = plt.subplots()
-        ax.plot([0, 1], [0, 1])  # something identifiable on the "real" figure
-        plt.show()  # exercises the real plt.show, patched below
-
-    def _inline_backend_show(*a, **kw):
-        # Mimic Jupyter's inline backend: render then close the current figure.
-        plt.close(plt.gcf())
-
-    captured = {}
-    real_savefig = plt.Figure.savefig
-
-    def _spy_savefig(self, *a, **kw):
-        captured["axes"] = list(self.axes)
-        return real_savefig(self, *a, **kw)
-
-    monkeypatch.setattr(roms_tools, "Grid", _FakeGrid)
-    monkeypatch.setattr(roms_tools, "plot_nesting", _fake_plot_nesting, raising=False)
-    monkeypatch.setattr(plt, "show", _inline_backend_show)
-    monkeypatch.setattr(plt.Figure, "savefig", _spy_savefig)
-
-    wiz = ForgeBlueprintWizard()
-    wiz._on_nest_plot(None)
-
-    assert not wiz.nest_plot_status.value.startswith("<span class='forge-st-err'>"), (
-        wiz.nest_plot_status.value
-    )
-    # A blank new figure (created after a premature close) would have zero axes;
-    # the real drawn figure has one axis with the plotted line.
-    assert captured.get("axes"), "expected the drawn figure's axes, got a blank figure"
-    assert captured["axes"][0].lines, "the plotted line did not survive plt.show()"
-
-
 # ===========================================================================
 # User-provided-netCDF attach flows (grid / CDR forcing / river custom_file)
 # ===========================================================================
@@ -2225,19 +2074,6 @@ def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
 # (real Grid *generation* is broken in this env; ``Grid(filename=...)`` loading
 # is also stubbed here for speed/determinism, mirroring
 # test_parent_plot_is_always_grid_plot_only's monkeypatch pattern).
-
-
-def _write_tiny_netcdf(path: Path) -> Path:
-    """A minimal real netCDF, just for ``hash_netcdf_contents`` to hash."""
-    import numpy as np
-    import xarray as xr
-
-    ds = xr.Dataset(
-        {"temp": (["y", "x"], np.zeros((2, 2), dtype=np.float64))},
-        attrs={"title": "tiny test file"},
-    )
-    ds.to_netcdf(path)
-    return path
 
 
 def _write_tiny_cdr_netcdf(path: Path, with_ncdr_dim: bool = True) -> Path:
@@ -2292,151 +2128,6 @@ def fake_grid(monkeypatch):
     return _FakeLoadedGrid
 
 
-class TestNestedTopographyWidgets:
-    """Parent/child grids carry their own topography (see
-    ForgeExecutor._nested_topography_pair); the wizard's parent/child pick copies
-    the spec's topography, gather emits the keys, and load-back restores them.
-    """
-
-    _SPEC: ClassVar[dict] = {
-        "grid_kwargs": {"nx": 30, "ny": 40, "size_x": 300.0, "size_y": 400.0},
-        "topography_source": "SRTM15",
-        "topography_path": "/hpc/data/srtm15_west.nc",
-    }
-
-    def _pick_parent(self, wiz, monkeypatch, spec):
-        monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        monkeypatch.setattr(wiz, "_on_parent_plot", lambda _b: None)
-        wiz.parent_domain_dd.value = wiz.parent_domain_dd.options[1]
-
-    def test_parent_pick_copies_spec_topography_and_gather_emits_it(self, monkeypatch):
-        wiz = _new_wizard()
-        assert wiz.parent_topo_source.value == "(same as this grid)"
-        self._pick_parent(wiz, monkeypatch, self._SPEC)
-
-        assert wiz.parent_enable.value is True
-        assert wiz.parent_w["nx"].value == 30
-        assert wiz.parent_topo_source.value == "SRTM15"
-        assert wiz.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
-
-        pk = wiz._gather()["grid_kwargs_parent"]
-        assert pk["topography_source"] == "SRTM15"
-        assert pk["topography_path"] == "/hpc/data/srtm15_west.nc"
-        assert wiz.config is not None, wiz.review_card.derived.value
-        assert wiz.config.domain.grid_kwargs_parent["topography_source"] == "SRTM15"
-        assert "SRTM15" in wiz.config.datasets
-
-    def test_parent_pick_with_default_topography_is_explicit_etopo5(self, monkeypatch):
-        """A parent spec built with the default dataset says so explicitly: the
-        parent must NOT silently inherit this grid's (e.g. EMOD) topography.
-        """
-        wiz = _new_wizard()
-        wiz.topo_source.value = "EMOD"
-        wiz.topo_path.value = "/hpc/data/EMODnet_C2.nc"
-        spec = {"grid_kwargs": self._SPEC["grid_kwargs"]}  # no topography keys
-        self._pick_parent(wiz, monkeypatch, spec)
-
-        assert wiz.parent_topo_source.value == "ETOPO5"
-        assert wiz.parent_topo_path.value == ""
-        pk = wiz._gather()["grid_kwargs_parent"]
-        assert pk["topography_source"] == "ETOPO5"
-        assert "topography_path" not in pk
-
-    def test_inherit_sentinel_emits_no_keys(self):
-        wiz = _new_wizard()
-        wiz.parent_enable.value = True
-        wiz.nest_enable.value = True
-        kw = wiz._gather()
-        for key in ("grid_kwargs_parent", "grid_kwargs_child"):
-            assert "topography_source" not in kw[key]
-            assert "topography_path" not in kw[key]
-
-    def test_round_trips_through_populate_from(self, monkeypatch):
-        wiz = _new_wizard()
-        self._pick_parent(wiz, monkeypatch, self._SPEC)
-        wiz.nest_enable.value = True
-        wiz.child_topo_path.value = "/hpc/data/child_tile.nc"  # path-only override
-        wiz._rebuild()
-        cfg = wiz.config
-        assert cfg is not None, wiz.review_card.derived.value
-        assert (
-            cfg.domain.grid_kwargs_child["topography_path"] == "/hpc/data/child_tile.nc"
-        )
-        assert "topography_source" not in cfg.domain.grid_kwargs_child
-
-        wiz2 = ForgeBlueprintWizard()
-        wiz2._populate_from(cfg)
-
-        assert wiz2.parent_topo_source.value == "SRTM15"
-        assert wiz2.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
-        assert wiz2.child_topo_source.value == "(same as this grid)"
-        assert wiz2.child_topo_path.value == "/hpc/data/child_tile.nc"
-        assert (
-            wiz2._gather()["grid_kwargs_parent"] == wiz._gather()["grid_kwargs_parent"]
-        )
-
-    def test_plot_topography_falls_back_when_file_not_local(self, tmp_path):
-        from cstar.wizard.wizard import (
-            _effective_nested_topo,
-            _plot_topography_source,
-        )
-
-        assert _plot_topography_source("ETOPO5", "") == (None, "")
-        topo, note = _plot_topography_source("EMOD", "/hpc/only/EMODnet_C2.nc")
-        assert topo is None and "EMOD" in note and "not found here" in note
-        topo, note = _plot_topography_source("EMOD", "")
-        assert topo is None and "no local file" in note
-        local = _write_tiny_netcdf(tmp_path / "topo.nc")
-        assert _plot_topography_source("EMOD", str(local)) == (
-            {"name": "EMOD", "path": str(local)},
-            "",
-        )
-        # inherit: domain pair; source set: domain path is NOT inherited
-        assert _effective_nested_topo("(same as this grid)", "", "EMOD", "/d/e.nc") == (
-            "EMOD",
-            "/d/e.nc",
-        )
-        assert _effective_nested_topo("SRTM15", "", "EMOD", "/d/e.nc") == ("SRTM15", "")
-        assert _effective_nested_topo(
-            "(same as this grid)", "/p.nc", "EMOD", "/d/e.nc"
-        ) == (
-            "EMOD",
-            "/p.nc",
-        )
-
-    def test_parent_plot_builds_parent_with_its_own_topography(
-        self, monkeypatch, tmp_path
-    ):
-        """The parent plot builds the parent grid with the parent's topography
-        (when the file is available here) -- so a parent falling outside its
-        dataset's coverage fails in the preview, not only at executor time.
-        """
-        import roms_tools
-
-        calls: list[dict] = []
-
-        class _G:
-            def __init__(self, **kw):
-                calls.append(kw)
-
-        monkeypatch.setattr(roms_tools, "Grid", _G)
-        monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
-        wiz = _new_wizard()
-        local = _write_tiny_netcdf(tmp_path / "parent_topo.nc")
-        wiz.parent_enable.value = True
-        wiz.parent_topo_source.value = "EMOD"
-        wiz.parent_topo_path.value = str(local)
-        wiz.topo_source.value = "SRTM15"  # this grid: no local file -> fallback
-
-        wiz._on_parent_plot(None)
-
-        parent_kw, this_kw = calls[0], calls[1]
-        assert parent_kw["topography_source"] == {"name": "EMOD", "path": str(local)}
-        assert "topography_source" not in this_kw
-        assert "SRTM15" in wiz.parent_plot_status.value  # fallback note for this grid
-        assert "EMOD" not in wiz.parent_plot_status.value
-
-
 class TestComputeDt:
     """Compute dt (CFL) is arithmetic on the grid alone: it must not depend on
     the rest of the blueprint resolving.
@@ -2452,11 +2143,11 @@ class TestComputeDt:
     def test_matches_the_resolver_for_the_same_grid(self):
         wiz = _new_wizard()
         expected = self._resolver_dt(wiz)
-        wiz.dt.value = 1.0
-        wiz._on_compute_dt(None)
-        assert wiz.dt.value == expected != 1.0
-        assert "(CFL)" in wiz.dt_status.value
-        assert "forge-st-err" not in wiz.dt_status.value
+        wiz.domain_card.dt.value = 1.0
+        wiz.domain_card._on_compute_dt(None)
+        assert wiz.domain_card.dt.value == expected != 1.0
+        assert "(CFL)" in wiz.domain_card.dt_status.value
+        assert "forge-st-err" not in wiz.domain_card.dt_status.value
 
     def test_does_not_run_the_resolver(self, monkeypatch):
         wiz = _new_wizard()
@@ -2465,8 +2156,8 @@ class TestComputeDt:
             raise AssertionError("Compute dt must not resolve the blueprint")
 
         monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _fail)
-        wiz._on_compute_dt(None)
-        assert "forge-st-err" not in wiz.dt_status.value
+        wiz.domain_card._on_compute_dt(None)
+        assert "forge-st-err" not in wiz.domain_card.dt_status.value
 
     def test_works_while_the_blueprint_does_not_resolve(self):
         """cdr_lite demands a CDR forcing; without one the blueprint is invalid,
@@ -2477,35 +2168,41 @@ class TestComputeDt:
         _strip_bgc_forcing(wiz)
         wiz.model_card.bgc_dd.value = "cdr_lite"
         assert wiz.config is None
-        wiz.dt.value = 1.0
-        wiz._on_compute_dt(None)
-        assert wiz.dt.value == expected
-        assert "(CFL)" in wiz.dt_status.value
+        wiz.domain_card.dt.value = 1.0
+        wiz.domain_card._on_compute_dt(None)
+        assert wiz.domain_card.dt.value == expected
+        assert "(CFL)" in wiz.domain_card.dt_status.value
 
     def test_uses_the_attached_grid_files_grid(self, fake_grid, tmp_path):
         wiz = _new_wizard()
-        wiz.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
-        wiz._on_grid_file_attach(None)
-        wiz.dt.value = 1.0
-        wiz._on_compute_dt(None)
-        assert wiz.dt.value == cfl_dt({}, wiz._grid_file_grid) != 1.0
-        assert "(CFL)" in wiz.dt_status.value
+        wiz.domain_card.grid_file_path.value = str(
+            _write_tiny_netcdf(tmp_path / "grid.nc")
+        )
+        wiz.domain_card._on_grid_file_attach(None)
+        wiz.domain_card.dt.value = 1.0
+        wiz.domain_card._on_compute_dt(None)
+        assert (
+            wiz.domain_card.dt.value
+            == cfl_dt({}, wiz.domain_card._grid_file_grid)
+            != 1.0
+        )
+        assert "(CFL)" in wiz.domain_card.dt_status.value
 
     def test_refuses_a_grid_file_that_failed_to_reload(self, fake_grid, tmp_path):
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
         p.unlink()
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(wiz.config)
-        assert wiz2._grid_file is not None
-        assert wiz2._grid_file_grid is None
-        wiz2.dt.value = 1.0
-        wiz2._on_compute_dt(None)
-        assert wiz2.dt.value == 1.0
-        assert "failed to" in wiz2.dt_status.value
-        assert "forge-st-err" in wiz2.dt_status.value
+        assert wiz2.domain_card._grid_file is not None
+        assert wiz2.domain_card._grid_file_grid is None
+        wiz2.domain_card.dt.value = 1.0
+        wiz2.domain_card._on_compute_dt(None)
+        assert wiz2.domain_card.dt.value == 1.0
+        assert "failed to" in wiz2.domain_card.dt_status.value
+        assert "forge-st-err" in wiz2.domain_card.dt_status.value
 
 
 class TestGridFileAttach:
@@ -2513,35 +2210,39 @@ class TestGridFileAttach:
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
 
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
 
-        assert wiz._grid_file == {
+        assert wiz.domain_card._grid_file == {
             "location": str(p),
-            "content_hash": wiz._grid_file["content_hash"],
+            "content_hash": wiz.domain_card._grid_file["content_hash"],
         }
-        assert isinstance(wiz._grid_file_grid, _FakeLoadedGrid)
-        assert wiz._grid_file_grid.kwargs == {
+        assert isinstance(wiz.domain_card._grid_file_grid, _FakeLoadedGrid)
+        assert wiz.domain_card._grid_file_grid.kwargs == {
             "filename": str(p)
         }  # loaded from this path
-        assert wiz.grid_w["nx"].value == 10
-        assert wiz.grid_w["center_lon"].value == 12.0
-        assert wiz.scoord_chk.value is True  # theta_s/theta_b/hc all present
+        assert wiz.domain_card.grid_w["nx"].value == 10
+        assert wiz.domain_card.grid_w["center_lon"].value == 12.0
+        assert (
+            wiz.domain_card.scoord_chk.value is True
+        )  # theta_s/theta_b/hc all present
 
         for w in (
-            *wiz.grid_w.values(),
-            wiz.scoord_chk,
-            wiz.hmin,
-            wiz.close_narrow_chk,
-            wiz.mask_shapefile,
-            wiz.topo_source,
-            wiz.topo_path,
-            wiz.nest_enable,
-            wiz.parent_enable,
+            *wiz.domain_card.grid_w.values(),
+            wiz.domain_card.scoord_chk,
+            wiz.domain_card.hmin,
+            wiz.domain_card.close_narrow_chk,
+            wiz.domain_card.mask_shapefile,
+            wiz.domain_card.topo_source,
+            wiz.domain_card.topo_path,
+            wiz.domain_card.nest_enable,
+            wiz.domain_card.parent_enable,
         ):
             assert w.disabled is True
-        assert "attached" in wiz.grid_file_status.value
-        assert "exact path" in wiz.grid_file_status.value  # persistent warning
+        assert "attached" in wiz.domain_card.grid_file_status.value
+        assert (
+            "exact path" in wiz.domain_card.grid_file_status.value
+        )  # persistent warning
 
     def test_upload_fallback_stages_and_attaches(
         self, fake_grid, tmp_path, monkeypatch
@@ -2551,48 +2252,54 @@ class TestGridFileAttach:
         src = _write_tiny_netcdf(tmp_path / "uploaded.nc")
         change = {"new": ({"name": "uploaded.nc", "content": src.read_bytes()},)}
 
-        wiz._on_grid_file_upload(change)
+        wiz.domain_card._on_grid_file_upload(change)
 
         staged = tmp_path / "forge_user_files" / "uploaded.nc"
         assert staged.exists()
-        assert wiz._grid_file == {
+        assert wiz.domain_card._grid_file == {
             "location": str(staged),
-            "content_hash": wiz._grid_file["content_hash"],
+            "content_hash": wiz.domain_card._grid_file["content_hash"],
         }
-        assert wiz.grid_w["nx"].disabled is True
+        assert wiz.domain_card.grid_w["nx"].disabled is True
 
     def test_attach_error_shown_in_status_not_raised(self, fake_grid, tmp_path):
         wiz = _new_wizard()
-        wiz.grid_file_path.value = str(tmp_path / "does-not-exist.nc")
+        wiz.domain_card.grid_file_path.value = str(tmp_path / "does-not-exist.nc")
 
-        wiz._on_grid_file_attach(None)  # must not raise
+        wiz.domain_card._on_grid_file_attach(None)  # must not raise
 
-        assert wiz._grid_file is None
-        assert "FileNotFoundError" in wiz.grid_file_status.value
+        assert wiz.domain_card._grid_file is None
+        assert "FileNotFoundError" in wiz.domain_card.grid_file_status.value
 
     def test_detach_restores_widgets(self, fake_grid, tmp_path):
         wiz = _new_wizard()
-        pre_attach_nx = wiz.grid_w["nx"].value
-        pre_attach_center_lon = wiz.grid_w["center_lon"].value
+        pre_attach_nx = wiz.domain_card.grid_w["nx"].value
+        pre_attach_center_lon = wiz.domain_card.grid_w["center_lon"].value
         assert pre_attach_nx != 10  # sanity: differs from _FakeLoadedGrid's nx
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
-        assert wiz.grid_w["nx"].disabled is True
-        assert wiz.grid_w["nx"].value == 10  # overwritten by the attached file
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
+        assert wiz.domain_card.grid_w["nx"].disabled is True
+        assert (
+            wiz.domain_card.grid_w["nx"].value == 10
+        )  # overwritten by the attached file
 
-        wiz._on_grid_file_detach(None)
+        wiz.domain_card._on_grid_file_detach(None)
 
-        assert wiz._grid_file is None
-        assert wiz._grid_file_grid is None
-        assert wiz.grid_file_status.value == ""
-        assert wiz.grid_file_path.value == ""
-        for w in (*wiz.grid_w.values(), wiz.scoord_chk, wiz.nest_enable):
+        assert wiz.domain_card._grid_file is None
+        assert wiz.domain_card._grid_file_grid is None
+        assert wiz.domain_card.grid_file_status.value == ""
+        assert wiz.domain_card.grid_file_path.value == ""
+        for w in (
+            *wiz.domain_card.grid_w.values(),
+            wiz.domain_card.scoord_chk,
+            wiz.domain_card.nest_enable,
+        ):
             assert w.disabled is False
         # The user's own pre-attach geometry is restored, not left at the
         # detached file's (now meaningless) values.
-        assert wiz.grid_w["nx"].value == pre_attach_nx
-        assert wiz.grid_w["center_lon"].value == pre_attach_center_lon
+        assert wiz.domain_card.grid_w["nx"].value == pre_attach_nx
+        assert wiz.domain_card.grid_w["center_lon"].value == pre_attach_center_lon
 
     def test_reattach_and_detach_restores_original_pre_attach_geometry(
         self, fake_grid, tmp_path
@@ -2602,31 +2309,33 @@ class TestGridFileAttach:
         back the ORIGINAL pre-any-attach geometry.
         """
         wiz = _new_wizard()
-        pre_attach_nx = wiz.grid_w["nx"].value
+        pre_attach_nx = wiz.domain_card.grid_w["nx"].value
         p1 = _write_tiny_netcdf(tmp_path / "grid1.nc")
-        wiz.grid_file_path.value = str(p1)
-        wiz._on_grid_file_attach(None)
-        assert wiz.grid_w["nx"].value == 10
+        wiz.domain_card.grid_file_path.value = str(p1)
+        wiz.domain_card._on_grid_file_attach(None)
+        assert wiz.domain_card.grid_w["nx"].value == 10
 
         p2 = _write_tiny_netcdf(tmp_path / "grid2.nc")
-        wiz.grid_file_path.value = str(p2)
-        wiz._on_grid_file_attach(None)  # re-attach without detaching
-        assert wiz.grid_w["nx"].value == 10  # still the (only) fake grid's nx
+        wiz.domain_card.grid_file_path.value = str(p2)
+        wiz.domain_card._on_grid_file_attach(None)  # re-attach without detaching
+        assert (
+            wiz.domain_card.grid_w["nx"].value == 10
+        )  # still the (only) fake grid's nx
 
-        wiz._on_grid_file_detach(None)
+        wiz.domain_card._on_grid_file_detach(None)
 
-        assert wiz.grid_w["nx"].value == pre_attach_nx
+        assert wiz.domain_card.grid_w["nx"].value == pre_attach_nx
 
     def test_gather_emits_grid_file_and_empty_grid_kwargs(self, fake_grid, tmp_path):
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
 
         kw = wiz._gather()
 
-        assert kw["grid_file"] == wiz._grid_file
-        assert kw["grid"] is wiz._grid_file_grid
+        assert kw["grid_file"] == wiz.domain_card._grid_file
+        assert kw["grid"] is wiz.domain_card._grid_file_grid
         assert kw["grid_kwargs"] == {}
         assert "grid_kwargs_child" not in kw
         assert "grid_kwargs_parent" not in kw
@@ -2639,8 +2348,8 @@ class TestGridFileAttach:
         cached dict, never recomputing the digest.
         """
         import cstar.applications.forge.user_files as user_files_mod
+        import cstar.wizard.domain_card as domain_card_mod
         import cstar.wizard.forcing_editor as forcing_editor_mod
-        import cstar.wizard.wizard as wizard_mod
 
         calls = {"n": 0}
         real_hash = user_files_mod.hash_netcdf_contents
@@ -2649,15 +2358,17 @@ class TestGridFileAttach:
             calls["n"] += 1
             return real_hash(path)
 
-        monkeypatch.setattr(wizard_mod, "hash_netcdf_contents", _counting_hash)
+        monkeypatch.setattr(domain_card_mod, "hash_netcdf_contents", _counting_hash)
         monkeypatch.setattr(forcing_editor_mod, "hash_netcdf_contents", _counting_hash)
         monkeypatch.setattr(user_files_mod, "hash_netcdf_contents", _counting_hash)
 
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)  # submit -> auto-attach (one hash)
+        wiz.domain_card.grid_file_path.value = str(
+            p
+        )  # submit -> auto-attach (one hash)
         assert calls["n"] == 1
-        assert wiz._grid_file is not None
+        assert wiz.domain_card._grid_file is not None
 
         wiz.review_card.description.value = "edited after attach"  # triggers _rebuild()
         wiz._rebuild()
@@ -2667,9 +2378,9 @@ class TestGridFileAttach:
 
         # Re-submitting the same path is a dedupe no-op; an explicit Attach click
         # is the one deliberate re-hash (the file may have changed on disk).
-        wiz._maybe_attach_grid_file()
+        wiz.domain_card._maybe_attach_grid_file()
         assert calls["n"] == 1
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card._on_grid_file_attach(None)
         assert calls["n"] == 2
 
     def test_path_submit_auto_attaches_without_attach_click(self, fake_grid, tmp_path):
@@ -2678,37 +2389,42 @@ class TestGridFileAttach:
         building from the grid_kwargs widgets instead of the file.
         """
         wiz = _new_wizard()
-        assert wiz.grid_file_path.continuous_update is False
+        assert wiz.domain_card.grid_file_path.continuous_update is False
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
 
-        wiz.grid_file_path.value = str(p)  # Enter / focus-out, no click
+        wiz.domain_card.grid_file_path.value = str(p)  # Enter / focus-out, no click
 
-        assert wiz._grid_file == {
+        assert wiz.domain_card._grid_file == {
             "location": str(p),
-            "content_hash": wiz._grid_file["content_hash"],
+            "content_hash": wiz.domain_card._grid_file["content_hash"],
         }
-        assert wiz.grid_w["nx"].disabled  # locked, exactly like a click-attach
-        assert "attached" in wiz.grid_file_status.value.lower()
-        assert wiz._gather()["grid_file"] == wiz._grid_file
+        assert wiz.domain_card.grid_w[
+            "nx"
+        ].disabled  # locked, exactly like a click-attach
+        assert "attached" in wiz.domain_card.grid_file_status.value.lower()
+        assert wiz._gather()["grid_file"] == wiz.domain_card._grid_file
 
     def test_config_round_trips_attached_and_locked_through_populate_from(
         self, fake_grid, tmp_path
     ):
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
         assert wiz.config is not None
         cfg = wiz.config
 
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
 
-        assert wiz2._grid_file is not None
-        assert wiz2._grid_file["content_hash"] == wiz._grid_file["content_hash"]
-        assert wiz2.grid_w["nx"].disabled is True
+        assert wiz2.domain_card._grid_file is not None
+        assert (
+            wiz2.domain_card._grid_file["content_hash"]
+            == wiz.domain_card._grid_file["content_hash"]
+        )
+        assert wiz2.domain_card.grid_w["nx"].disabled is True
         assert wiz2.config is not None
-        assert "attached" in wiz2.grid_file_status.value
+        assert "attached" in wiz2.domain_card.grid_file_status.value
 
     def test_reattach_failure_keeps_locked_and_surfaces_error(
         self, fake_grid, tmp_path
@@ -2720,8 +2436,8 @@ class TestGridFileAttach:
         """
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
         cfg = wiz.config
 
         p.unlink()  # the file is now missing at "reload" time
@@ -2729,43 +2445,45 @@ class TestGridFileAttach:
         wiz2 = ForgeBlueprintWizard()
         wiz2._populate_from(cfg)
 
-        assert wiz2._grid_file is not None  # kept, not cleared
-        assert wiz2._grid_file_grid is None
-        assert wiz2.grid_w["nx"].disabled is True  # still locked
-        assert "could not re-attach" in wiz2.grid_file_status.value
+        assert wiz2.domain_card._grid_file is not None  # kept, not cleared
+        assert wiz2.domain_card._grid_file_grid is None
+        assert wiz2.domain_card.grid_w["nx"].disabled is True  # still locked
+        assert "could not re-attach" in wiz2.domain_card.grid_file_status.value
         assert wiz2.config is None  # surfaced loudly, not silently substituted
 
         # Plot/Derive/the Save-Run safety net must likewise refuse to silently
         # build a grid from the (locked, stale) grid_w values instead of the
         # missing file -- not just build_forge_blueprint().
         with pytest.raises(RuntimeError, match="failed to"):
-            wiz2._build_grid_from_widgets()
+            wiz2.domain_card.build_grid_from_widgets()
         # _populate_from freezes a loaded file's boundaries as touched (a
         # deliberate, already-resolved choice -- see _populate_from), which
         # would short-circuit _ensure_boundaries_derived() before it ever
         # reaches _build_grid_from_widgets(); force the untouched path here to
         # actually exercise the safety net's own grid-build attempt.
-        wiz2._boundaries_touched = False
-        assert wiz2._ensure_boundaries_derived() is False
-        assert "failed to" in wiz2.derive_status.value
+        wiz2.domain_card._boundaries_touched = False
+        assert wiz2.domain_card.ensure_boundaries_derived() is False
+        assert "failed to" in wiz2.domain_card.derive_status.value
 
     def test_domain_pick_detaches_attached_grid_file(self, fake_grid, tmp_path):
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
-        assert wiz._grid_file is not None
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
+        assert wiz.domain_card._grid_file is not None
 
-        wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]  # first real catalog domain
+        wiz.domain_card.domain_dd.value = _dd_values(wiz.domain_card.domain_dd)[
+            1
+        ]  # first real catalog domain
 
-        assert wiz._grid_file is None
-        assert wiz.grid_w["nx"].disabled is False
+        assert wiz.domain_card._grid_file is None
+        assert wiz.domain_card.grid_w["nx"].disabled is False
 
     def test_save_domain_guards_while_grid_file_attached(self, fake_grid, tmp_path):
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.domain_card.grid_file_path.value = str(p)
+        wiz.domain_card._on_grid_file_attach(None)
         wiz.save_domain_name.value = "some-new-domain"
 
         wiz._on_save_domain(None)
@@ -3349,7 +3067,7 @@ def test_output_editor_follows_the_nesting_toggles():
     assert "extract_data" not in _built_fields(plain)
     assert "upscale_output" in plain._group_fields[_OUTPUT_MORE_TITLE]
 
-    wiz.nest_enable.value = True
+    wiz.domain_card.nest_enable.value = True
     parent = wiz.editor
     assert parent is not plain
     assert wiz.output_editor_box.children == (parent.output_box,)
@@ -3357,17 +3075,17 @@ def test_output_editor_follows_the_nesting_toggles():
         "nrpf",
         "extract_root_name",
     ]
-    wiz.nest_enable.value = False
+    wiz.domain_card.nest_enable.value = False
     assert "extract_data" not in _built_fields(wiz.editor)
 
-    wiz.parent_enable.value = True
+    wiz.domain_card.parent_enable.value = True
     child = wiz.editor
     assert wiz.config is not None, wiz.review_card.derived.value
     assert "upscale_output" in child._group_fields[_OUTPUT_CARD]
     assert _OUTPUT_MORE_TITLE in child._group_fields
     assert "upscale_output" not in child._group_fields[_OUTPUT_MORE_TITLE]
     # the nesting toggles that do not change the role keep the same editor
-    wiz.nest_pressure_fluxes.value = True
+    wiz.domain_card.nest_pressure_fluxes.value = True
     assert wiz.editor is child
 
 
@@ -3376,13 +3094,16 @@ def test_attached_grid_file_drops_the_nesting_streams(fake_grid, tmp_path):
     the resolver ignores nesting then -- the Output card follows the resolver.
     """
     wiz = _new_wizard()
-    wiz.nest_enable.value = True
+    wiz.domain_card.nest_enable.value = True
     assert "extract_data" in _built_fields(wiz.editor)
 
-    wiz.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
-    wiz._on_grid_file_attach(None)
+    wiz.domain_card.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
+    wiz.domain_card._on_grid_file_attach(None)
 
-    assert wiz.nest_enable.value is True and wiz.nest_enable.disabled
+    assert (
+        wiz.domain_card.nest_enable.value is True
+        and wiz.domain_card.nest_enable.disabled
+    )
     assert wiz.config is not None, wiz.review_card.derived.value
     assert wiz.config.domain.grid_kwargs_child is None
     assert "extract_data" not in _built_fields(wiz.editor)
@@ -3507,33 +3228,6 @@ def test_hosted_field_overrides_keep_ownership_and_count_in_the_output_card(
         assert "modified" not in editor._headers[(_OUTPUT_CARD, "ocean_vars")].value
 
 
-def _nested_config_at_1800():
-    wiz = _new_wizard()
-    wiz.nest_enable.value = True
-    wiz.nest_period.value = 1800.0
-    wiz._rebuild()
-    cfg = wiz.config
-    assert cfg is not None, wiz.review_card.derived.value
-    assert cfg.domain.metadata_child["period"] == 1800.0
-    return cfg
-
-
-def test_nest_period_loads_from_metadata_child_over_a_stale_snapshot():
-    """A stored extract_period that differs from ``metadata_child.period`` (a
-    workplan override of the domain's period, a hand edit) is a stale copy: the
-    run writes metadata_child's period, so the wizard shows and keeps that.
-    """
-    cfg = _nested_config_at_1800()
-    settings = copy.deepcopy(cfg.model_settings)
-    settings["extract_data"]["extract_period"] = 3600.0
-    wiz2 = _new_wizard()
-    wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
-
-    assert wiz2.nest_period.value == 1800.0
-    assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
-    assert wiz2._gather()["metadata_child"] == {"period": 1800.0}
-
-
 def test_nest_period_loads_an_older_files_extract_period_override():
     """An extract_period override recorded before the field moved to the nesting
     options (Advanced) is the period that file ran with; loading it keeps that
@@ -3550,25 +3244,10 @@ def test_nest_period_loads_an_older_files_extract_period_override():
         cfg.model_copy(update={"model_settings": settings, "composition": composition})
     )
 
-    assert wiz2.nest_period.value == 3600.0
+    assert wiz2.domain_card.nest_period.value == 3600.0
     assert wiz2.config.model_settings["extract_data"]["extract_period"] == 3600.0
     assert wiz2._gather()["metadata_child"] == {"period": 3600.0}
     assert ("extract_data", "extract_period") not in wiz2._overrides
-
-
-def test_nest_period_falls_back_to_metadata_child_without_an_extract_period():
-    wiz = _new_wizard()
-    wiz.nest_enable.value = True
-    wiz.nest_period.value = 1800.0
-    wiz._rebuild()
-    cfg = wiz.config
-    settings = copy.deepcopy(cfg.model_settings)
-    del settings["extract_data"]["extract_period"]
-
-    wiz2 = _new_wizard()
-    wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
-    assert wiz2.nest_period.value == 1800.0
-    assert wiz2.config.model_settings["extract_data"]["extract_period"] == 1800.0
 
 
 def test_extract_data_nesting_fields_never_become_overrides():
@@ -3576,7 +3255,7 @@ def test_extract_data_nesting_fields_never_become_overrides():
     a hand-edited file cannot reintroduce one with no widget to show or clear it.
     """
     wiz = _new_wizard()
-    wiz.nest_enable.value = True
+    wiz.domain_card.nest_enable.value = True
     cfg = wiz.config
     settings = copy.deepcopy(cfg.model_settings)
     settings["extract_data"].update(n_chd=77, nrpf=48)
@@ -3592,9 +3271,9 @@ def test_the_specs_the_wizard_saves_have_only_known_keys():
     domain with every optional key, and for the forcing the editor holds.
     """
     wiz = _new_wizard()
-    wiz.nest_enable.value = True
-    wiz.nest_pressure_fluxes.value = True
-    wiz.parent_enable.value = True
+    wiz.domain_card.nest_enable.value = True
+    wiz.domain_card.nest_pressure_fluxes.value = True
+    wiz.domain_card.parent_enable.value = True
     wiz._rebuild()
     assert wiz.config is not None, wiz.review_card.derived.value
 
@@ -3634,7 +3313,7 @@ def test_saving_a_loaded_blueprint_unchanged_keeps_its_stamp(tmp_path):
     wiz._on_load_path(None)
     assert wiz._carried_provenance == first  # the load keeps what the file recorded
     wiz.review_card.save_path.value = str(tmp_path / "second.yaml")
-    wiz._boundaries_touched = True
+    wiz.domain_card._boundaries_touched = True
     second = _save(wiz)
 
     assert second.generated_by == first.generated_by
@@ -3676,7 +3355,7 @@ def test_run_autosave_stamps_through_the_same_path(monkeypatch, tmp_path):
 
 def test_rebuild_preview_and_download_do_not_advance_the_carried_provenance(capsys):
     wiz = _new_wizard()
-    wiz._boundaries_touched = True  # the links wait for real boundaries
+    wiz.domain_card._boundaries_touched = True  # the links wait for real boundaries
     wiz._rebuild()
     carried = wiz._carried_provenance
     assert carried == ForgeProvenance()
@@ -3714,17 +3393,6 @@ def test_forcing_accordion_first_title_contains_ic_source_name():
     wiz = ForgeBlueprintWizard()
     title0 = wiz._forcing_editor._acc.get_title(0)
     assert wiz._forcing_editor.ic_name.value in title0
-
-
-def test_set_grid_widgets_locked_toggles_grid_lock_banner():
-    wiz = ForgeBlueprintWizard()
-    assert wiz.grid_lock_banner.layout.display == "none"
-
-    wiz._set_grid_widgets_locked(True)
-    assert wiz.grid_lock_banner.layout.display == ""
-
-    wiz._set_grid_widgets_locked(False)
-    assert wiz.grid_lock_banner.layout.display == "none"
 
 
 def test_wizard_module_keeps_the_public_names_that_moved():
@@ -3878,8 +3546,8 @@ class TestChildNestingMetadata:
 
     def _pick_child(self, wiz, monkeypatch, spec):
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        monkeypatch.setattr(wiz, "_on_nest_plot", lambda _b: None)
-        wiz.nest_domain_dd.value = wiz.nest_domain_dd.options[1]
+        monkeypatch.setattr(wiz.domain_card, "_on_nest_plot", lambda _b: None)
+        wiz.domain_card.nest_domain_dd.value = wiz.domain_card.nest_domain_dd.options[1]
 
     def _child_spec(self, block):
         return {"grid_kwargs": {**self._CHILD_GRID, "metadata": dict(block)}}
@@ -3893,7 +3561,7 @@ class TestChildNestingMetadata:
             ).read_text()
         )
         self._pick_child(wiz, monkeypatch, spec)
-        wiz.nest_period.value = 1800.0
+        wiz.domain_card.nest_period.value = 1800.0
         wiz._rebuild()
         cfg = wiz.config
         assert cfg is not None, wiz.review_card.derived.value
@@ -3904,11 +3572,13 @@ class TestChildNestingMetadata:
         assert "metadata" not in wiz._domain_spec_data()["grid_kwargs_child"]
 
         plain = _new_wizard()
-        plain.nest_enable.value = True
-        for k, w in wiz.child_w.items():
-            plain.child_w[k].value = w.value
-        plain.child_topo_source.value = wiz.child_topo_source.value
-        plain.nest_period.value = 1800.0
+        plain.domain_card.nest_enable.value = True
+        for k, w in wiz.domain_card.child_w.items():
+            plain.domain_card.child_w[k].value = w.value
+        plain.domain_card.child_topo_source.value = (
+            wiz.domain_card.child_topo_source.value
+        )
+        plain.domain_card.nest_period.value = 1800.0
         plain._rebuild()
         assert plain.config is not None, plain.derived.value
         assert cfg.content_hash() == plain.config.content_hash()
@@ -3917,29 +3587,29 @@ class TestChildNestingMetadata:
         self, monkeypatch
     ):
         wiz = _new_wizard()
-        assert wiz.nest_period.value == 3600.0
+        assert wiz.domain_card.nest_period.value == 3600.0
         self._pick_child(wiz, monkeypatch, self._child_spec(self._BLOCK))
 
-        assert wiz.nest_period.value == 1800.0
-        assert wiz.nest_pressure_fluxes.value is True
+        assert wiz.domain_card.nest_period.value == 1800.0
+        assert wiz.domain_card.nest_pressure_fluxes.value is True
         wiz._rebuild()
         assert wiz.config is not None, wiz.review_card.derived.value
         assert wiz.config.model_settings["extract_data"]["extract_period"] == 1800.0
 
     def test_child_preset_without_a_period_leaves_nest_period(self, monkeypatch):
         wiz = _new_wizard()
-        wiz.nest_period.value = 900.0
+        wiz.domain_card.nest_period.value = 900.0
         self._pick_child(wiz, monkeypatch, self._child_spec({"include_bgc": True}))
-        assert wiz.nest_period.value == 900.0
+        assert wiz.domain_card.nest_period.value == 900.0
 
     def test_refused_child_block_reports_and_changes_nothing(self, monkeypatch):
         wiz = _new_wizard()
-        wiz.nest_period.value = 900.0
+        wiz.domain_card.nest_period.value = 900.0
         self._pick_child(wiz, monkeypatch, self._child_spec({"prefix": "a_b"}))
 
         assert "Invalid child domain" in wiz.review_card.derived.value
-        assert wiz.nest_period.value == 900.0
-        assert wiz.nest_enable.value is False
+        assert wiz.domain_card.nest_period.value == 900.0
+        assert wiz.domain_card.nest_enable.value is False
 
     def test_domain_spec_with_block_in_grid_kwargs_child_loads_its_period(
         self, monkeypatch
@@ -3950,22 +3620,22 @@ class TestChildNestingMetadata:
             "grid_kwargs_child": {**self._CHILD_GRID, "metadata": {"period": 1800.0}},
         }
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
+        wiz.domain_card.domain_dd.value = _dd_values(wiz.domain_card.domain_dd)[1]
 
-        assert wiz.nest_enable.value is True
-        assert wiz.nest_period.value == 1800.0
-        assert "metadata" not in wiz._loaded_grid_kwargs["child"]
+        assert wiz.domain_card.nest_enable.value is True
+        assert wiz.domain_card.nest_period.value == 1800.0
+        assert "metadata" not in wiz.domain_card._loaded_grid_kwargs["child"]
 
     def test_domain_spec_with_a_refused_block_changes_nothing(self, monkeypatch):
         wiz = _new_wizard()
-        wiz.nest_period.value = 900.0
+        wiz.domain_card.nest_period.value = 900.0
         spec = {
             "grid_kwargs": {"nx": 20, "ny": 20, "size_x": 200.0, "size_y": 200.0},
             "grid_kwargs_child": {**self._CHILD_GRID, "metadata": {"prefix": "a_b"}},
         }
         monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
-        wiz.domain_dd.value = _dd_values(wiz.domain_dd)[1]
+        wiz.domain_card.domain_dd.value = _dd_values(wiz.domain_card.domain_dd)[1]
 
         assert "Invalid child domain" in wiz.review_card.derived.value
-        assert wiz.nest_period.value == 900.0
-        assert wiz.nest_enable.value is False
+        assert wiz.domain_card.nest_period.value == 900.0
+        assert wiz.domain_card.nest_enable.value is False

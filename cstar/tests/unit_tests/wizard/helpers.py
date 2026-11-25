@@ -203,7 +203,9 @@ def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_siz
     wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.review_card.save_path.value = str(tmp_path / "bp.yaml")
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.domain_card._boundaries_touched = (
+        True  # not exercising boundary derivation here
+    )
 
     async def _fake(*args, **kwargs):
         return _FakeProcess(data, returncode=returncode, chunk_size=chunk_size)
@@ -216,7 +218,9 @@ def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_siz
 def _saving_wizard(path):
     """A wizard holding the default valid config, set to save to ``path``."""
     wiz = _new_wizard()
-    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.domain_card._boundaries_touched = (
+        True  # not exercising boundary derivation here
+    )
     wiz._rebuild()
     assert wiz.config is not None, wiz.review_card.derived.value
     wiz.review_card.save_path.value = str(path)
@@ -239,3 +243,27 @@ def _downloaded_yaml(link_html):
 
     payload = re.search(r"base64,([A-Za-z0-9+/=]+)", link_html).group(1)
     return yaml.safe_load(base64.b64decode(payload))
+
+
+def _write_tiny_netcdf(path: Path) -> Path:
+    """A minimal real netCDF, just for ``hash_netcdf_contents`` to hash."""
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.Dataset(
+        {"temp": (["y", "x"], np.zeros((2, 2), dtype=np.float64))},
+        attrs={"title": "tiny test file"},
+    )
+    ds.to_netcdf(path)
+    return path
+
+
+def _nested_config_at_1800():
+    wiz = _new_wizard()
+    wiz.domain_card.nest_enable.value = True
+    wiz.domain_card.nest_period.value = 1800.0
+    wiz._rebuild()
+    cfg = wiz.config
+    assert cfg is not None, wiz.review_card.derived.value
+    assert cfg.domain.metadata_child["period"] == 1800.0
+    return cfg

@@ -7831,9 +7831,11 @@ class TestForgeBlueprintWizard:
 
     def test_selecting_catalog_domain_prefills_and_resolves(self):
         wiz = self._wizard()
-        if "gulf-guinea-toy" not in _dd_values(wiz.domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(wiz.domain_card.domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
-        wiz.domain_dd.value = "gulf-guinea-toy"  # triggers prefill + rebuild
+        wiz.domain_card.domain_dd.value = (
+            "gulf-guinea-toy"  # triggers prefill + rebuild
+        )
         cfg = wiz.config
         assert cfg.domain.grid_name == "gulf-guinea-toy"
         assert cfg.domain.grid_kwargs["nx"] == 10 and cfg.domain.grid_kwargs["N"] == 5
@@ -7847,9 +7849,9 @@ class TestForgeBlueprintWizard:
 
     def test_editing_boundary_updates_cppdefs_live(self):
         wiz = self._wizard()
-        wiz.bnd["west"].value = True
+        wiz.domain_card.bnd["west"].value = True
         assert wiz.config.model_settings["cppdefs"]["obc_west"] is True
-        wiz.bnd["west"].value = False
+        wiz.domain_card.bnd["west"].value = False
         assert wiz.config.model_settings["cppdefs"]["obc_west"] is False
 
     @staticmethod
@@ -7885,20 +7887,20 @@ class TestForgeBlueprintWizard:
         """
         wiz = self._wizard()
         assert (
-            wiz.bnd["south"].value,
-            wiz.bnd["west"].value,
-            wiz.bnd["east"].value,
-            wiz.bnd["north"].value,
+            wiz.domain_card.bnd["south"].value,
+            wiz.domain_card.bnd["west"].value,
+            wiz.domain_card.bnd["east"].value,
+            wiz.domain_card.bnd["north"].value,
         ) == (False, False, True, True)  # widget defaults, pre-derive
 
-        wiz._build_grid_from_widgets = self._stub_grid_with_mask
-        wiz._on_derive_domain_properties(None)
+        wiz.domain_card.build_grid_from_widgets = self._stub_grid_with_mask
+        wiz.domain_card._on_derive_domain_properties(None)
 
-        assert wiz._boundaries_derived is True
-        assert wiz.bnd["south"].value is True
-        assert wiz.bnd["west"].value is True
-        assert wiz.bnd["east"].value is False
-        assert wiz.bnd["north"].value is False
+        assert wiz.domain_card._boundaries_derived is True
+        assert wiz.domain_card.bnd["south"].value is True
+        assert wiz.domain_card.bnd["west"].value is True
+        assert wiz.domain_card.bnd["east"].value is False
+        assert wiz.domain_card.bnd["north"].value is False
         ob = wiz.config.domain.open_boundaries
         assert (ob.south, ob.west, ob.east, ob.north) == (True, True, False, False)
 
@@ -7909,17 +7911,19 @@ class TestForgeBlueprintWizard:
         not just the one edited.
         """
         wiz = self._wizard()
-        wiz.bnd["south"].value = True  # a manual edit -> touches the whole set
-        assert wiz._boundaries_touched is True
-        pre = {d: w.value for d, w in wiz.bnd.items()}
+        wiz.domain_card.bnd[
+            "south"
+        ].value = True  # a manual edit -> touches the whole set
+        assert wiz.domain_card._boundaries_touched is True
+        pre = {d: w.value for d, w in wiz.domain_card.bnd.items()}
 
-        wiz._build_grid_from_widgets = self._stub_grid_with_mask
-        wiz._on_derive_domain_properties(None)
+        wiz.domain_card.build_grid_from_widgets = self._stub_grid_with_mask
+        wiz.domain_card._on_derive_domain_properties(None)
 
-        assert wiz._boundaries_derived is True  # the button still "ran"
+        assert wiz.domain_card._boundaries_derived is True  # the button still "ran"
         # nothing was overwritten by the mask, even though the stub's mask
         # would derive different values for every one of these edges
-        assert {d: w.value for d, w in wiz.bnd.items()} == pre
+        assert {d: w.value for d, w in wiz.domain_card.bnd.items()} == pre
 
     def test_save_derives_untouched_boundaries_from_mask_not_defaults(self, tmp_path):
         """The export-time safety net (_ensure_boundaries_derived, called from
@@ -7928,14 +7932,14 @@ class TestForgeBlueprintWizard:
         behind "a save must never silently ship provisional defaults."
         """
         wiz = self._wizard()
-        wiz._build_grid_from_widgets = self._stub_grid_with_mask
+        wiz.domain_card.build_grid_from_widgets = self._stub_grid_with_mask
         p = tmp_path / "forge_blueprint.yaml"
         wiz.review_card.save_path.value = str(p)
-        assert wiz._boundaries_derived is False  # nothing derived yet
+        assert wiz.domain_card._boundaries_derived is False  # nothing derived yet
 
         wiz.review_card._on_save(None)
 
-        assert wiz._boundaries_derived is True  # the safety net ran
+        assert wiz.domain_card._boundaries_derived is True  # the safety net ran
         saved = ForgeBlueprint.from_yaml(p)
         ob = saved.domain.open_boundaries
         assert (ob.south, ob.west, ob.east, ob.north) == (True, True, False, False)
@@ -7949,7 +7953,7 @@ class TestForgeBlueprintWizard:
         def _boom():
             raise RuntimeError("synthetic grid-build failure")
 
-        wiz._build_grid_from_widgets = _boom
+        wiz.domain_card.build_grid_from_widgets = _boom
         p = tmp_path / "forge_blueprint.yaml"
         wiz.review_card.save_path.value = str(p)
 
@@ -8022,7 +8026,9 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         if description != "as saved":
             data = yaml.safe_load(p.read_text())
@@ -8069,7 +8075,7 @@ class TestForgeBlueprintWizard:
         # Not exercising boundary derivation here -- skip the real grid build
         # the export-time safety net would otherwise trigger (see the
         # dedicated test_derive_from_grid_*/test_save_*_boundary_* tests).
-        wiz._boundaries_touched = True
+        wiz.domain_card._boundaries_touched = True
         wiz.review_card._on_save(None)
         cfg = ForgeBlueprint.from_yaml(tmp_path / "forge_blueprint.yaml")
         assert cfg.casename == wiz.config.casename
@@ -8079,20 +8085,24 @@ class TestForgeBlueprintWizard:
         resolved config round-trip (the #7 load affordance).
         """
         w1 = self._wizard()
-        if "gulf-guinea-toy" in _dd_values(w1.domain_dd):
-            w1.domain_dd.value = "gulf-guinea-toy"
+        if "gulf-guinea-toy" in _dd_values(w1.domain_card.domain_dd):
+            w1.domain_card.domain_dd.value = "gulf-guinea-toy"
         w1.review_card.name.value = "my-custom-run"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         saved = ForgeBlueprint.from_yaml(p)
 
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.grid_name.value == saved.domain.grid_name
-        assert w2.domain_dd.value == "<custom>"  # file authoritative, no prefill
+        assert w2.domain_card.grid_name.value == saved.domain.grid_name
+        assert (
+            w2.domain_card.domain_dd.value == "<custom>"
+        )  # file authoritative, no prefill
         assert w2.review_card.name.value == "my-custom-run"
         assert w2.config is not None
         assert w2.config.casename == saved.casename
@@ -8105,7 +8115,9 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2._load_bytes(p.read_bytes())
@@ -8264,7 +8276,9 @@ class TestForgeBlueprintWizard:
         w1.editor._widgets[("cdr_output", "do_avg")][0].value = "instantaneous"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8329,7 +8343,9 @@ class TestForgeBlueprintWizard:
         assert wrt1.value is True
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
 
         w2 = self._wizard()
@@ -8419,7 +8435,7 @@ class TestForgeBlueprintWizard:
     def test_advanced_edit_persists_across_atomic_change(self):
         w = self._wizard()
         w.editor._widgets[("lateral_visc", "visc2")][0].value = 12.5
-        w.grid_w["nx"].value = 8  # atomic change -> re-derive
+        w.domain_card.grid_w["nx"].value = 8  # atomic change -> re-derive
         assert w.config.model_settings["lateral_visc"]["visc2"] == 12.5  # edit kept
         assert w.config.model_settings["param"]["llm"] == 8  # derived refreshed
 
@@ -8434,13 +8450,13 @@ class TestForgeBlueprintWizard:
         """
         w = self._wizard()
         assert ("v_sponge", "v_sponge") not in w.editor._widgets
-        w.v_sponge.value = 999.0
-        assert w._v_sponge_touched is True
+        w.domain_card.v_sponge.value = 999.0
+        assert w.domain_card._v_sponge_touched is True
         assert w.config.model_settings["v_sponge"]["v_sponge"] == 999.0
         assert w.config.domain.v_sponge == 999.0
         assert "v_sponge" not in w.config.composition.overrides
         # touched value persists and wins over the re-derived value across a rebuild
-        w.dt.value = 3600.0
+        w.domain_card.dt.value = 3600.0
         assert w.config.model_settings["v_sponge"]["v_sponge"] == 999.0
         assert (
             w.config.model_settings["lateral_visc"]["visc2"] == 0.0
@@ -8448,18 +8464,20 @@ class TestForgeBlueprintWizard:
 
     def test_v_sponge_persists_through_load(self, tmp_path):
         w1 = self._wizard()
-        w1.v_sponge.value = 999.0
+        w1.domain_card.v_sponge.value = 999.0
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         assert w2.config.model_settings["v_sponge"]["v_sponge"] == 999.0
         assert w2.config.domain.v_sponge == 999.0
-        assert w2._v_sponge_touched is True
+        assert w2.domain_card._v_sponge_touched is True
         assert "v_sponge" not in w2.config.composition.overrides
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
 
@@ -8473,15 +8491,17 @@ class TestForgeBlueprintWizard:
         # Must stay an integer multiple of the default output_period_rst (86400)
         # -- see check_rst_period_divisible -- so this exercises round-tripping
         # a non-default dt without tripping the restart-period validator.
-        w1.dt.value = 1200.0
+        w1.domain_card.dt.value = 1200.0
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.dt.value == 1200.0
+        assert w2.domain_card.dt.value == 1200.0
         assert w2.config.model_settings["time_stepping"]["dt"] == 1200.0
         assert "time_stepping" not in w2.config.composition.overrides
 
@@ -8497,7 +8517,9 @@ class TestForgeBlueprintWizard:
         w1.run_card.model_ref_date.value = date(2015, 6, 15)
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         assert w1.config.run.model_reference_date == datetime(2015, 6, 15)
         w2 = self._wizard()
@@ -8513,12 +8535,14 @@ class TestForgeBlueprintWizard:
         class as allow_flex_time; see project memory).
         """
         w1 = self._wizard()
-        w1.hmin.value = 3.3
-        w1.close_narrow_chk.value = True
-        w1.mask_shapefile.value = "/tmp/mask.shp"
+        w1.domain_card.hmin.value = 3.3
+        w1.domain_card.close_narrow_chk.value = True
+        w1.domain_card.mask_shapefile.value = "/tmp/mask.shp"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         assert w1.config.domain.grid_kwargs["hmin"] == 3.3
         assert w1.config.domain.grid_kwargs["close_narrow_channels"] is True
@@ -8526,9 +8550,9 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.hmin.value == 3.3
-        assert w2.close_narrow_chk.value is True
-        assert w2.mask_shapefile.value == "/tmp/mask.shp"
+        assert w2.domain_card.hmin.value == 3.3
+        assert w2.domain_card.close_narrow_chk.value is True
+        assert w2.domain_card.mask_shapefile.value == "/tmp/mask.shp"
 
     def test_default_forcing_spec_is_pinned_not_first_alphabetically(self, tmp_path):
         """A newly bundled ForcingSpec that sorts first must not steal the default.
@@ -8620,7 +8644,9 @@ class TestForgeBlueprintWizard:
         w1.output_dd.value = "standard"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8647,7 +8673,9 @@ class TestForgeBlueprintWizard:
         row["restoring_forces"].value = "sss"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -8680,7 +8708,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         assert [
             bs.source.name for bs in w1.config.forcing.initial_conditions.bgc_sources
@@ -8720,7 +8750,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
 
         w2 = self._wizard()
@@ -8744,7 +8776,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         assert w1.config.forcing.initial_conditions.bgc_sources[0].source.constants == {
             "Fe": 3.0e-3,
@@ -8798,7 +8832,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         esper_src = w1.config.forcing.initial_conditions.bgc_sources[0].source
         assert esper_src.esper_method == "mixed"
@@ -8820,18 +8856,23 @@ class TestForgeBlueprintWizard:
 
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in _dd_values(w.nest_domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(w.domain_card.nest_domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
-        w.nest_domain_dd.value = "gulf-guinea-toy"  # prefills child + enables nesting
-        assert w.nest_enable.value is True
-        assert w.child_w["nx"].value == 10 and w.child_w["N"].value == 5
+        w.domain_card.nest_domain_dd.value = (
+            "gulf-guinea-toy"  # prefills child + enables nesting
+        )
+        assert w.domain_card.nest_enable.value is True
+        assert (
+            w.domain_card.child_w["nx"].value == 10
+            and w.domain_card.child_w["N"].value == 5
+        )
         assert w.config.model_settings["extract_data"]["do_extract"] is True
         assert w.config.model_settings["extract_data"]["n_chd"] == 5
 
     def test_nesting_ui_enables_extract_data(self):
         w = self._wizard()
-        w.nest_enable.value = True
-        w.child_w["N"].value = 25
+        w.domain_card.nest_enable.value = True
+        w.domain_card.child_w["N"].value = 25
         assert w.config.model_settings["extract_data"]["do_extract"] is True
         assert w.config.model_settings["extract_data"]["n_chd"] == 25
         assert w.config.domain.grid_kwargs_child is not None
@@ -8839,17 +8880,19 @@ class TestForgeBlueprintWizard:
     def test_load_preserves_advanced_edits_and_nesting(self, tmp_path):
         w1 = self._wizard()
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 7.25
-        w1.nest_enable.value = True
-        w1.child_w["N"].value = 18
+        w1.domain_card.nest_enable.value = True
+        w1.domain_card.child_w["N"].value = 18
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 7.25
-        assert w2.nest_enable.value is True
+        assert w2.domain_card.nest_enable.value is True
         assert w2.config.model_settings["extract_data"]["n_chd"] == 18
 
     def test_nesting_pressure_fluxes_persists_through_load(self, tmp_path):
@@ -8859,34 +8902,41 @@ class TestForgeBlueprintWizard:
         (same bug class as allow_flex_time; see project memory).
         """
         w1 = self._wizard()
-        w1.nest_enable.value = True
-        w1.nest_pressure_fluxes.value = True
+        w1.domain_card.nest_enable.value = True
+        w1.domain_card.nest_pressure_fluxes.value = True
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         assert w1.config.domain.nesting_include_pressure_fluxes is True
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.nest_enable.value is True
-        assert w2.nest_pressure_fluxes.value is True
+        assert w2.domain_card.nest_enable.value is True
+        assert w2.domain_card.nest_pressure_fluxes.value is True
 
     def test_parent_from_domain_dropdown_prefills_parent(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in _dd_values(w.parent_domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(w.domain_card.parent_domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
-        w.parent_domain_dd.value = "gulf-guinea-toy"  # prefills parent + enables it
-        assert w.parent_enable.value is True
-        assert w.parent_w["nx"].value == 10 and w.parent_w["N"].value == 5
+        w.domain_card.parent_domain_dd.value = (
+            "gulf-guinea-toy"  # prefills parent + enables it
+        )
+        assert w.domain_card.parent_enable.value is True
+        assert (
+            w.domain_card.parent_w["nx"].value == 10
+            and w.domain_card.parent_w["N"].value == 5
+        )
         assert w.config.domain.grid_kwargs_parent is not None
         assert w.config.domain.is_child is True
 
     def test_parent_ui_stores_grid_kwargs_parent_and_clears_boundary_forcing(self):
         w = self._wizard()
         assert w.config.forcing.boundary is not None  # sanity: default forcing has one
-        w.parent_enable.value = True
-        w.parent_w["N"].value = 25
+        w.domain_card.parent_enable.value = True
+        w.domain_card.parent_w["N"].value = 25
         cfg = w.config
         assert cfg.domain.grid_kwargs_parent is not None
         assert cfg.domain.grid_kwargs_parent["N"] == 25
@@ -8896,22 +8946,24 @@ class TestForgeBlueprintWizard:
         # open-boundary edge flags (obc_*) are untouched -- edges stay open, fed
         # by the parent's nesting.nc extraction instead of reanalysis forcing.
         assert cfg.domain.open_boundaries.model_dump() == {
-            d: w_.value for d, w_ in w.bnd.items()
+            d: w_.value for d, w_ in w.domain_card.bnd.items()
         }
 
     def test_load_preserves_parent(self, tmp_path):
         w1 = self._wizard()
-        w1.parent_enable.value = True
-        w1.parent_w["N"].value = 30
+        w1.domain_card.parent_enable.value = True
+        w1.domain_card.parent_w["N"].value = 30
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.parent_enable.value is True
-        assert w2.parent_w["N"].value == 30
+        assert w2.domain_card.parent_enable.value is True
+        assert w2.domain_card.parent_w["N"].value == 30
         assert w2.config.domain.is_child is True
         assert w2.config.forcing.boundary is None
 
@@ -8922,7 +8974,7 @@ class TestForgeBlueprintWizard:
         """
         w = self._wizard()
         assert w.config.forcing.initial_conditions is not None  # sanity
-        w.parent_enable.value = True
+        w.domain_card.parent_enable.value = True
         cfg = w.config
         assert cfg.domain.is_child is True
         assert cfg.forcing.initial_conditions is None
@@ -8942,12 +8994,12 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         boundary_bgc = w.config.forcing.boundary.bgc_sources
         assert boundary_bgc  # sanity: the default MARBL forcing carries some
-        w.parent_enable.value = True
+        w.domain_card.parent_enable.value = True
         assert w._forcing_editor.ic_name.value == "(none)"
         assert w._forcing_editor._rows["boundary_bgc"] == []
         assert w.config.forcing.initial_conditions is None
 
-        w.parent_enable.value = False
+        w.domain_card.parent_enable.value = False
         assert w._forcing_editor.ic_name.value == "GLORYS"
         cfg = w.config
         assert cfg is not None, w.review_card.derived.value
@@ -8962,12 +9014,12 @@ class TestForgeBlueprintWizard:
         the parent off; the ForcingSpec's rows are not put back over it.
         """
         w = self._wizard()
-        w.parent_enable.value = True
+        w.domain_card.parent_enable.value = True
         w._forcing_editor._add("boundary_bgc")
         row = w._forcing_editor._rows["boundary_bgc"][0]
         row["name"].value = "GLODAP"
 
-        w.parent_enable.value = False
+        w.domain_card.parent_enable.value = False
         rows = w._forcing_editor._rows["boundary_bgc"]
         assert len(rows) == 1 and rows[0] is row
         assert row["name"].value == "GLODAP"
@@ -8979,11 +9031,11 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         if "glorys-era5-glodap-woa" not in _dd_values(w.forcing_dd):
             pytest.skip("glorys-era5-glodap-woa ForcingSpec not in catalog")
-        w.parent_enable.value = True
+        w.domain_card.parent_enable.value = True
         w.forcing_dd.value = "glorys-era5-glodap-woa"
         assert w._forcing_editor._rows["boundary_bgc"] == []
 
-        w.parent_enable.value = False
+        w.domain_card.parent_enable.value = False
         spec = w.catalog.forcing_data("glorys-era5-glodap-woa")
         names = [
             s["source"]["name"] for s in spec["forcing"]["boundary"]["bgc_sources"]
@@ -8998,14 +9050,16 @@ class TestForgeBlueprintWizard:
         the IC default and boundary BGC rows itself.
         """
         w = self._wizard()
-        if "gulf-guinea-toy" not in _dd_values(w.domain_dd):
+        if "gulf-guinea-toy" not in _dd_values(w.domain_card.domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         boundary_bgc = w.config.forcing.boundary.bgc_sources
-        w.parent_enable.value = True
+        w.domain_card.parent_enable.value = True
         assert w.config.forcing.initial_conditions is None
 
-        w.domain_dd.value = "gulf-guinea-toy"  # carries no grid_kwargs_parent
-        assert w.parent_enable.value is False
+        w.domain_card.domain_dd.value = (
+            "gulf-guinea-toy"  # carries no grid_kwargs_parent
+        )
+        assert w.domain_card.parent_enable.value is False
         cfg = w.config
         assert cfg is not None, w.review_card.derived.value
         assert cfg.domain.is_child is False
@@ -9036,7 +9090,7 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         if "simple-bgc-demo" not in _dd_values(w.forcing_dd):
             pytest.skip("simple-bgc-demo ForcingSpec not in catalog")
-        w.parent_enable.value = True
+        w.domain_card.parent_enable.value = True
         assert w.config.forcing.initial_conditions is None
         other = next(v for v in _dd_values(w.forcing_dd) if v != w.forcing_dd.value)
         w.forcing_dd.value = other
@@ -9045,16 +9099,18 @@ class TestForgeBlueprintWizard:
 
     def test_load_preserves_child_no_ic(self, tmp_path):
         w1 = self._wizard()
-        w1.parent_enable.value = True
+        w1.domain_card.parent_enable.value = True
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         assert w1.config.forcing.initial_conditions is None
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.parent_enable.value is True
+        assert w2.domain_card.parent_enable.value is True
         assert w2.config.forcing.initial_conditions is None
         assert w2._forcing_editor.ic_name.value == "(none)"
 
@@ -9064,7 +9120,9 @@ class TestForgeBlueprintWizard:
         assert w1.config.code.roms.commit == "pio-refdate"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -9085,7 +9143,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.model_card.roms_ref.value = "stale-value-from-a-prior-load"
@@ -9107,7 +9167,9 @@ class TestForgeBlueprintWizard:
         assert w1.config.code.marbl.commit == "marbl0.99.0"
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -9127,7 +9189,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
         w2 = self._wizard()
         w2.model_card.marbl_ref.value = "stale-value-from-a-prior-load"
@@ -9149,7 +9213,9 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
         w.review_card.save_path.value = str(p)
-        w._boundaries_touched = True  # not exercising boundary derivation here
+        w.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w.review_card._on_save(None)
         data = yaml.safe_load(p.read_text())
         data["model_settings"]["param"]["np_xi"] = "not-an-int"  # corrupt a value
@@ -9204,7 +9270,9 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.review_card.save_path.value = str(p)
-        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         w1.review_card._on_save(None)
 
         w2 = self._wizard()
@@ -9224,7 +9292,7 @@ class TestForgeBlueprintWizard:
         import re
 
         wiz = self._wizard()
-        wiz._boundaries_touched = True  # the link waits for real boundaries
+        wiz.domain_card._boundaries_touched = True  # the link waits for real boundaries
         wiz._rebuild()
         html = wiz.review_card.download_link.value
         assert 'download="' in html and "data:text/yaml;base64," in html
@@ -9773,7 +9841,9 @@ class TestSaveModifiedSpecsToCatalog:
 
     def _save_every_spec(self, wiz):
         """Save each of the five specs under a ``my-<kind>`` name."""
-        wiz._boundaries_touched = True  # not exercising boundary derivation here
+        wiz.domain_card._boundaries_touched = (
+            True  # not exercising boundary derivation here
+        )
         wiz.run_card.cdr_mode_dd.value = "yaml"
         wiz.run_card._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
         wiz._rebuild()
@@ -10108,7 +10178,7 @@ class TestSaveModifiedSpecsToCatalog:
         file must still reproduce content_hash-equal to the live config.
         """
         wiz = self._wizard(isolated_catalog)
-        wiz.parent_enable.value = True
+        wiz.domain_card.parent_enable.value = True
         assert wiz.config.forcing.initial_conditions is None
 
         wiz.save_forcing_name.value = "child-no-ic-forcing"
@@ -10245,8 +10315,8 @@ class TestSaveModifiedSpecsToCatalog:
         self, isolated_catalog
     ):
         wiz = self._wizard(isolated_catalog)
-        if "gulf-guinea-toy" in _dd_values(wiz.domain_dd):
-            wiz.domain_dd.value = "gulf-guinea-toy"
+        if "gulf-guinea-toy" in _dd_values(wiz.domain_card.domain_dd):
+            wiz.domain_card.domain_dd.value = "gulf-guinea-toy"
         wiz.run_card.npx.value = wiz.run_card.npx.value + 1
         assert wiz.config.composition.domain.modified is True
 
@@ -10259,7 +10329,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz._on_save_domain(None)
 
         assert "my-domain" in isolated_catalog.domain_names
-        assert wiz.domain_dd.value == "my-domain"
+        assert wiz.domain_card.domain_dd.value == "my-domain"
         assert wiz.config.composition.domain.modified is False
         # no-clobber: every OTHER spec's state is untouched by the domain save.
         assert wiz._overrides == before_overrides
@@ -10275,8 +10345,8 @@ class TestSaveModifiedSpecsToCatalog:
         silently re-derive and drift on the next grid edit.
         """
         wiz = self._wizard(isolated_catalog)
-        wiz.v_sponge.value = 4242.0
-        assert wiz._v_sponge_touched is True
+        wiz.domain_card.v_sponge.value = 4242.0
+        assert wiz.domain_card._v_sponge_touched is True
 
         wiz.save_domain_name.value = "my-domain-vsponge"
         wiz._on_save_domain(None)
@@ -10286,9 +10356,9 @@ class TestSaveModifiedSpecsToCatalog:
         assert saved.get("v_sponge") == 4242.0
 
         wiz2 = self._wizard(isolated_catalog)
-        wiz2.domain_dd.value = "my-domain-vsponge"
-        assert wiz2.v_sponge.value == 4242.0
-        assert wiz2._v_sponge_touched is True
+        wiz2.domain_card.domain_dd.value = "my-domain-vsponge"
+        assert wiz2.domain_card.v_sponge.value == 4242.0
+        assert wiz2.domain_card._v_sponge_touched is True
         assert wiz2.config.domain.v_sponge == 4242.0
 
     def test_save_domain_spec_omits_v_sponge_when_untouched(self, isolated_catalog):
@@ -10297,7 +10367,7 @@ class TestSaveModifiedSpecsToCatalog:
         of freezing a resolver default that was never a real user choice.
         """
         wiz = self._wizard(isolated_catalog)
-        assert wiz._v_sponge_touched is False
+        assert wiz.domain_card._v_sponge_touched is False
 
         wiz.save_domain_name.value = "my-domain-no-vsponge"
         wiz._on_save_domain(None)
@@ -10306,11 +10376,11 @@ class TestSaveModifiedSpecsToCatalog:
         assert "v_sponge" not in saved
 
         wiz2 = self._wizard(isolated_catalog)
-        wiz2.domain_dd.value = "my-domain-no-vsponge"
-        assert wiz2._v_sponge_touched is False
+        wiz2.domain_card.domain_dd.value = "my-domain-no-vsponge"
+        assert wiz2.domain_card._v_sponge_touched is False
         # re-derives live from the (identical) grid -- same value, but arrived
         # at by fresh derivation, not a frozen saved number.
-        assert wiz2.v_sponge.value == wiz.v_sponge.value
+        assert wiz2.domain_card.v_sponge.value == wiz.domain_card.v_sponge.value
 
     def test_save_domain_spec_persists_dt(self, isolated_catalog):
         """``dt`` is a first-class domain property (Domain-derived properties),
@@ -10320,8 +10390,8 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         # Must stay an integer multiple of the default output_period_rst (86400)
         # -- see check_rst_period_divisible -- and differ from the derived dt.
-        assert wiz.dt.value != 1800.0
-        wiz.dt.value = 1800.0
+        assert wiz.domain_card.dt.value != 1800.0
+        wiz.domain_card.dt.value = 1800.0
 
         wiz.save_domain_name.value = "my-domain-dt"
         wiz._on_save_domain(None)
@@ -10331,8 +10401,8 @@ class TestSaveModifiedSpecsToCatalog:
         assert saved.get("dt") == 1800.0
 
         wiz2 = self._wizard(isolated_catalog)
-        wiz2.domain_dd.value = "my-domain-dt"
-        assert wiz2.dt.value == 1800.0
+        wiz2.domain_card.domain_dd.value = "my-domain-dt"
+        assert wiz2.domain_card.dt.value == 1800.0
         assert wiz2.config.domain.dt == 1800.0
         # domain.dt and the model_settings leaf must never diverge.
         assert (
@@ -10346,14 +10416,14 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         wiz.save_domain_name.value = "my-domain-dt-seed"
         wiz._on_save_domain(None)
-        wiz.domain_dd.value = "my-domain-dt-seed"
+        wiz.domain_card.domain_dd.value = "my-domain-dt-seed"
         assert wiz.config.composition.domain.modified is False
 
         # +100 would no longer divide the default output_period_rst (86400) --
         # see check_rst_period_divisible -- so double instead (the derived
         # 3600 -> 7200, still divisible) to isolate the "editing dt flags domain
         # modified" behavior under test.
-        wiz.dt.value = wiz.dt.value * 2
+        wiz.domain_card.dt.value = wiz.domain_card.dt.value * 2
         assert wiz.config.composition.domain.modified is True
 
     def test_invalid_name_refuses_without_writing(self, isolated_catalog):
