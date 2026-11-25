@@ -441,6 +441,23 @@ def test_rebuild_error_status_points_at_the_preview_only_when_truncated(
     ) is suffixed
 
 
+def test_gather_raises_the_model_cards_error_before_the_run_cards():
+    """With both cards unable to gather, `_gather` raises the Model card's error:
+    it gathers the cards in page order, and the Model card comes before the Run
+    card. A rebuild never sees the pair, since it stops at a cleared date first.
+    """
+    wiz = _cdr_lite_wizard()
+    wiz.model_card.cs_source_dd.value = "path"  # nothing attached
+    wiz.run_card.end.value = None
+    with pytest.raises(TypeError):
+        wiz.run_card.gather()
+
+    with pytest.raises(ValueError, match="attach a directory of ROMS _cdrgas"):
+        wiz._gather()
+    # The rebuild the cleared date ran stopped before gathering.
+    assert wiz.review_card.derived.value == "<i>Set start and end dates…</i>"
+
+
 class TestBgcModeForcingDefault:
     """The default ForcingSpec follows the BGC mode while it is untouched: the
     BGC-carrying default under MARBL, the physics-only one without (the resolver

@@ -860,19 +860,18 @@ class DomainCard:
         return grid_chip
 
     # ---- the wizard's share: resolver kwargs, load-back and each rebuild -------
-    def gather_grid(self) -> dict[str, Any]:
-        """The ``grid_name``, ``grid_kwargs`` and ``open_boundaries`` resolver kwargs."""
-        return dict(
+    def gather(self) -> dict[str, Any]:
+        """The card's resolver kwargs: ``grid_name``, ``grid_kwargs`` and
+        ``open_boundaries``; ``dt`` and ``v_sponge``, each ``None`` while it follows
+        the grid; ``topography_path`` (when one is typed) and ``topography_source``;
+        an attached grid file (``grid_file``, with its loaded ``grid``); and the
+        nested grids' (``grid_kwargs_child`` and its ``metadata_child`` and pressure
+        fluxes, ``grid_kwargs_parent``).
+        """
+        kw: dict[str, Any] = dict(
             grid_name=self.grid_name.value,
             grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
-        )
-
-    def gather_derived(self) -> dict[str, Any]:
-        """The ``dt`` and ``v_sponge`` resolver kwargs, each ``None`` while it follows
-        the grid.
-        """
-        return dict(
             # Untouched: None, so the resolver derives it from the grid (CFL).
             dt=float(self.dt.value) if self._dt_touched else None,
             # Untouched: pass None so the resolver derives a fresh default from
@@ -880,23 +879,9 @@ class DomainCard:
             # widget for live display); touched: the user's/loaded value wins.
             v_sponge=float(self.v_sponge.value) if self._v_sponge_touched else None,
         )
-
-    def gather_topography(self) -> dict[str, Any]:
-        """The ``topography_path`` (when one is typed) and ``topography_source``
-        resolver kwargs.
-        """
-        kw: dict[str, Any] = {}
         if self.topo_path.value.strip():  # blank = derive default topography path
             kw["topography_path"] = self.topo_path.value.strip()
         kw["topography_source"] = self.topo_source.value
-        return kw
-
-    def gather_file_and_nesting(self) -> dict[str, Any]:
-        """The attached grid file's resolver kwargs (``grid_file``, with its loaded
-        ``grid``) and the nested grids' (``grid_kwargs_child`` and its
-        ``metadata_child`` and pressure fluxes, ``grid_kwargs_parent``).
-        """
-        kw: dict[str, Any] = {}
         if self._grid_file is not None:
             kw["grid_file"] = self._grid_file
             # Pass the already-loaded grid through to skip re-reading/re-hashing
@@ -917,15 +902,22 @@ class DomainCard:
             kw["grid_kwargs_parent"] = self._nested_grid_kwargs("parent")
         return kw
 
-    def select_custom(self) -> None:
-        """Select "<custom>" in the Domain dropdown: a loaded blueprint, not a
-        catalog entry, is authoritative (the wizard holds it suspended).
+    def populate(self, cfg: ForgeBlueprint) -> None:
+        """Set the card from a loaded blueprint (the wizard holds it suspended):
+        select "<custom>" in the Domain dropdown, since the file, not a catalog
+        entry, is authoritative; then the grid, the topography and grid file, dt,
+        and the nested grids. The grid file comes after the grid: re-attaching
+        one sets the grid fields from the file.
         """
         self.domain_dd.value = "<custom>"
+        self._populate_grid(cfg)
+        self._populate_topography(cfg)
+        self._populate_dt(cfg)
+        self._populate_nesting(cfg)
 
-    def populate_grid(self, cfg: ForgeBlueprint) -> None:
+    def _populate_grid(self, cfg: ForgeBlueprint) -> None:
         """Set the grid name, geometry, mask keys, open boundaries and v_sponge from a
-        loaded blueprint (the wizard holds it suspended).
+        loaded blueprint.
         """
         self.grid_name.value = cfg.domain.grid_name
         gk = cfg.domain.grid_kwargs
@@ -959,9 +951,9 @@ class DomainCard:
             self.v_sponge.value = float(loaded_v_sponge)
         self._v_sponge_touched = loaded_v_sponge is not None
 
-    def populate_topography(self, cfg: ForgeBlueprint) -> None:
+    def _populate_topography(self, cfg: ForgeBlueprint) -> None:
         """Set the topography and re-attach a loaded blueprint's grid file, or
-        detach one it lacks (the wizard holds it suspended).
+        detach one it lacks.
         """
         self.topo_source.value = getattr(
             cfg.domain.topography_source, "value", cfg.domain.topography_source
@@ -976,8 +968,8 @@ class DomainCard:
         else:
             self._detach_grid_file()
 
-    def populate_dt(self, cfg: ForgeBlueprint) -> None:
-        """Set dt from a loaded blueprint (the wizard holds it suspended)."""
+    def _populate_dt(self, cfg: ForgeBlueprint) -> None:
+        """Set dt from a loaded blueprint."""
         # dt: prefer the first-class domain.dt field; fall back to the
         # model_settings leaf for a pre-domain.dt file (backward compat --
         # older blueprints only ever wrote it there).
@@ -1197,7 +1189,7 @@ class DomainCard:
             # blueprint's composition.model is authoritative).
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
-            # Nesting: mirrors populate_nesting (loaded-blueprint path) but reads
+            # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
             # from a DomainSpec (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
             self._set_loaded_grid_kwargs("child", child)
@@ -1684,8 +1676,8 @@ class DomainCard:
             )
         return None
 
-    def populate_nesting(self, cfg: ForgeBlueprint):
-        """Set the nesting widgets from a loaded config (called inside _suspend)."""
+    def _populate_nesting(self, cfg: ForgeBlueprint) -> None:
+        """Set the nesting widgets from a loaded blueprint."""
         child = cfg.domain.grid_kwargs_child
         self._set_loaded_grid_kwargs("child", child)
         self.nest_enable.value = child is not None
