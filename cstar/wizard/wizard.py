@@ -81,7 +81,7 @@ from cstar.wizard.forcing_editor import (
     _use_vars_rule,
 )
 from cstar.wizard.model_card import ModelCard, _pinned_roms_ref
-from cstar.wizard.review_card import WIZARD_TOOL, ReviewCard
+from cstar.wizard.review_card import WIZARD_TOOL, ReviewCard, SaveRefused
 from cstar.wizard.review_card import WorkplanHooks as WorkplanHooks
 from cstar.wizard.run_card import RunCard, _run_time_label
 from cstar.wizard.settings_editor import (
@@ -767,11 +767,7 @@ class ForgeBlueprintWizard:
             suspend=self._suspend,
             is_suspended=lambda: self._suspended,
             config=lambda: self.config,
-            # Late-binding: tests replace these on the wizard and the Grid card.
-            save_config=lambda path: self._save_config(path),
-            ensure_boundaries_derived=lambda: (
-                self.domain_card.ensure_boundaries_derived()
-            ),
+            save_blueprint=self.save_blueprint,
             boundaries_pending=lambda: self.domain_card.boundaries_pending,
         )
 
@@ -2170,6 +2166,29 @@ class ForgeBlueprintWizard:
         self.review_card.sync_next_steps()
 
     # ---- actions -------------------------------------------------------------
+    @property
+    def save_target(self) -> Path:
+        """The file the Save card's Save path names, as typed."""
+        return self.review_card.save_target
+
+    def save_blueprint(self, path: Path) -> Path | SaveRefused:
+        """Save the current blueprint to ``path``: return the file written, or why
+        nothing was written.
+
+        Save, Run Forge here and the Workplan page's "current blueprint" all save
+        through here. A saved blueprint must never carry the Grid card's
+        provisional open-boundary defaults, so the boundaries are derived from the
+        grid first (`DomainCard.ensure_boundaries_derived`, which rebuilds the
+        config), and the config is checked after that. The parent directory is
+        made and the file written by `_save_config`, whose errors propagate.
+        """
+        if not self.domain_card.ensure_boundaries_derived():
+            return SaveRefused.BOUNDARIES
+        if self.config is None:
+            return SaveRefused.INVALID
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return self._save_config(path)
+
     def _save_config(self, path: Path) -> Path:
         """Write the current config to ``path``, stamped as written by the wizard,
         and return the path.
@@ -2178,7 +2197,8 @@ class ForgeBlueprintWizard:
         it while the content is unchanged (see ``ForgeBlueprint.stamp_provenance``),
         and the Save and Next steps cards are told (`ReviewCard.record_save`): the
         download links point at the file written. Every write of the current config
-        to disk goes through here.
+        to disk goes through here; a save the user asks for comes through
+        `save_blueprint`, which derives the open boundaries first.
         """
         if self.config is None:
             raise RuntimeError("no valid configuration to save")
@@ -2364,7 +2384,7 @@ class ForgeBlueprintWizard:
                 "err", "Detach the grid file first — DomainSpec has no grid_file field."
             )
             return
-        # Unlike _on_save/_on_run (which emit concrete boundaries into the
+        # Unlike save_blueprint (which writes concrete boundaries into the
         # blueprint right now), an untouched open_boundaries is deliberately
         # OMITTED from a saved DomainSpec (see _domain_spec_data) so it can
         # re-derive fresh on next load -- there's nothing here for a failed

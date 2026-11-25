@@ -94,6 +94,7 @@ from cstar.wizard.fields import (
     _make_field_widget,
     _read_field_widget,
 )
+from cstar.wizard.review_card import SaveRefused
 from cstar.wizard.streaming import (
     _STREAM_READ_SIZE,
     _drain_stream_buffer,
@@ -1122,9 +1123,10 @@ class _StepPane:
                 "warn", "The Blueprint page has no valid configuration to use."
             )
             return
-        # the Blueprint page's own Save/Run guard: never persist the provisional
-        # open-boundary defaults of a grid whose boundaries were never derived
-        if not wizard.domain_card.ensure_boundaries_derived():
+        # the Blueprint page's own save, as its Save and Run make it: it derives
+        # the open boundaries first, so it never writes the provisional defaults
+        saved = wizard.save_blueprint(wizard.save_target)
+        if saved is SaveRefused.BOUNDARIES:
             self.current_note.value = components.banner(
                 "err",
                 "Open boundaries could not be derived from the Blueprint page's "
@@ -1132,15 +1134,12 @@ class _StepPane:
                 "them manually there, then choose this source again.",
             )
             return
-        config = wizard.config  # the derivation rebuilds the configuration
-        if config is None:
+        if saved is SaveRefused.INVALID:  # the derivation rebuilds the config
             self.current_note.value = components.banner(
                 "warn", "The Blueprint page has no valid configuration to use."
             )
             return
-        target = wizard.review_card.save_target
-        target.parent.mkdir(parents=True, exist_ok=True)
-        self._current_path = str(wizard._save_config(target))
+        self._current_path = str(saved)
         self.current_note.value = (
             f"Saved the Blueprint page's configuration to "
             f"<code>{_esc(self._current_path)}</code>"

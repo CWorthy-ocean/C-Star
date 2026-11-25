@@ -10,12 +10,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import ipywidgets as W
+import pytest
 
 import cstar.wizard
 from cstar.catalog.domain_catalog import default_catalog
 from cstar.wizard.domain_card import DomainCard
 from cstar.wizard.model_card import ModelCard
-from cstar.wizard.review_card import ReviewCard
+from cstar.wizard.review_card import ReviewCard, SaveRefused
 from cstar.wizard.run_card import RunCard
 from cstar.wizard.wizard import ForgeBlueprintWizard
 
@@ -83,8 +84,7 @@ def test_review_card_stands_alone():
         default_catalog,
         **kw,
         config=lambda: None,
-        save_config=lambda p: p,
-        ensure_boundaries_derived=lambda: True,
+        save_blueprint=lambda p: p,
         boundaries_pending=lambda: False,
     )
     _check_layout(card)
@@ -97,6 +97,91 @@ def test_review_card_stands_alone():
     with suspend():
         card.name.value = "y"
     assert rebuild.calls == 1
+
+
+def _review_card_saving_with(save_blueprint, tmp_path):
+    """A ReviewCard whose wizard save is ``save_blueprint``, set to save to
+    ``tmp_path / "bp.yaml"``.
+    """
+    _rebuild, kw, _suspend = _common()
+    card = ReviewCard(
+        W,
+        default_catalog,
+        **kw,
+        config=lambda: None,
+        save_blueprint=save_blueprint,
+        boundaries_pending=lambda: False,
+    )
+    card.save_path.value = str(tmp_path / "bp.yaml")
+    return card
+
+
+def test_review_card_save_reports_the_file_written(tmp_path):
+    """Save asks the wizard's save for the Save path and names the file written."""
+    asked = []
+
+    def _save(path):
+        asked.append(path)
+        return path
+
+    card = _review_card_saving_with(_save, tmp_path)
+    card._on_save(None)
+    assert asked == [tmp_path / "bp.yaml"]
+    assert f"Saved {tmp_path / 'bp.yaml'}" in card.save_status.value
+
+
+@pytest.mark.parametrize(
+    ("refused", "save_message", "run_message"),
+    [
+        (
+            SaveRefused.BOUNDARIES,
+            "Save aborted — open boundaries could not be derived from the grid",
+            "Run aborted — open boundaries could not be derived from the grid",
+        ),
+        (
+            SaveRefused.INVALID,
+            "Nothing to save — config is invalid.",
+            "Nothing to run — config is invalid.",
+        ),
+    ],
+)
+def test_review_card_reports_a_refused_save(
+    refused, save_message, run_message, tmp_path
+):
+    """Save and Run Forge here say why the wizard's save refused, in the card's
+    own words, and Run starts nothing.
+    """
+    asked = []
+
+    def _save(path):
+        asked.append(path)
+        return refused
+
+    card = _review_card_saving_with(_save, tmp_path)
+    card._on_save(None)
+    assert save_message in card.save_status.value
+    card.run_output.append_stdout("previous run\n")
+    card._on_run(None)
+    assert run_message in card.run_status.value
+    assert asked == [tmp_path / "bp.yaml"] * 2
+    # a run that started would have cleared the previous run's log
+    assert [o["text"] for o in card.run_output.outputs] == ["previous run\n"]
+
+
+def test_review_card_reports_a_failed_save(tmp_path):
+    """A save that raises is reported by Save and by Run, and Run starts nothing."""
+
+    def _save(_path):
+        raise OSError("disk full")
+
+    card = _review_card_saving_with(_save, tmp_path)
+    card._on_save(None)
+    assert "OSError: disk full" in card.save_status.value
+    card.run_output.append_stdout("previous run\n")
+    card._on_run(None)
+    assert "OSError: disk full" in card.run_status.value
+    assert "while running" not in card.run_status.value
+    assert [o["text"] for o in card.run_output.outputs] == ["previous run\n"]
 
 
 def test_model_card_stands_alone():
