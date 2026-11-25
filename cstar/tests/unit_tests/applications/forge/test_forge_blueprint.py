@@ -11055,6 +11055,12 @@ def test_surface_blend_fallback_must_be_global():
         _build(forcing_inputs=fdata)
 
 
+def test_surface_blend_fallback_refuses_glorys():
+    fdata = _blend_inputs(fallback={"source": {"name": "GLORYS"}})
+    with pytest.raises(ValidationError, match="GLORYS serves only SSS restoring"):
+        _build(forcing_inputs=fdata)
+
+
 def test_conus404_primary_refusals_are_reported_together():
     fdata = _blend_inputs(
         correct_radiation=True,
@@ -11278,3 +11284,113 @@ def test_local_templates_are_accepted(tmp_path: Path) -> None:
     code["templates_run_time"]["location"] = str(tmp_path)
 
     assert Code.model_validate(code).templates_run_time.location == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# GLORYS sea-surface-salinity restoring (SourceSpec.time_resolution)
+# ---------------------------------------------------------------------------
+def _glorys_restoring_inputs(**item):
+    """Physics-only forcing plus one surface restoring item (a GLORYS source)."""
+    data = copy.deepcopy(_PHYSICS_ONLY_FORCING)
+    data["forcing"]["surface"].append(
+        {
+            "source": {"name": "GLORYS", "time_resolution": "monthly"},
+            "type": "restoring",
+            "restoring_forces": ["sss"],
+            **item,
+        }
+    )
+    return data
+
+
+def test_glorys_restoring_time_resolutions_match_roms_tools():
+    from typing import get_args
+
+    from cstar.applications.forge.blueprint import GlorysRestoringTimeResolution
+
+    lat_lon = pytest.importorskip("roms_tools.datasets.lat_lon_datasets")
+    expected = getattr(lat_lon, "GLORYS_RESTORING_TIME_RESOLUTIONS", None)
+    if expected is None:
+        pytest.skip("the installed roms-tools has no GLORYS restoring")
+    assert get_args(GlorysRestoringTimeResolution) == tuple(expected)
+
+
+def test_unset_time_resolution_is_left_out_of_the_saved_blueprint():
+    text = _build().to_yaml_str()
+    assert "time_resolution" not in text
+    cfg = _build(forcing_inputs=_glorys_restoring_inputs())
+    assert "time_resolution: monthly" in cfg.to_yaml_str()
+
+
+def test_glorys_restoring_blueprint_round_trips():
+    cfg = _build(forcing_inputs=_glorys_restoring_inputs())
+    again = ForgeBlueprint.model_validate(yaml.safe_load(cfg.to_yaml_str()))
+    assert again.forcing.surface[-1].source.time_resolution == "monthly"
+    assert again.content_hash() == cfg.content_hash()
+    assert cfg.model_settings["cppdefs"]["sal_restore"] is True
+
+
+def test_time_resolution_is_refused_on_a_non_glorys_source():
+    from cstar.applications.forge.blueprint import SourceSpec
+
+    with pytest.raises(ValidationError, match="only valid when name is GLORYS"):
+        SourceSpec(name="WOA", time_resolution="monthly")
+    with pytest.raises(ValidationError, match="monthly|daily"):
+        SourceSpec(name="GLORYS", time_resolution="weekly")
+
+
+@pytest.mark.parametrize(
+    ("item", "message"),
+    [
+        ({"source": {"name": "GLORYS", "climatology": True}}, "no climatology"),
+        ({"restoring_forces": ["sss", "sss"]}, r"restoring_forces: \[sss\]"),
+        ({"restoring_forces": None}, r"restoring_forces: \[sss\]"),
+        ({"type": "physics"}, "type: restoring"),
+    ],
+)
+def test_glorys_surface_item_must_be_sss_restoring(item, message):
+    data = _glorys_restoring_inputs()
+    data["forcing"]["surface"][-1].update(item)
+    with pytest.raises(ValueError, match=message):
+        _build(forcing_inputs=data)
+
+
+def test_time_resolution_is_refused_on_a_boundary_glorys_source():
+    data = _glorys_restoring_inputs()
+    data["forcing"]["boundary"]["source"]["time_resolution"] = "daily"
+    with pytest.raises(ValueError, match=r"boundary\.source\.time_resolution"):
+        _build(forcing_inputs=data)
+
+
+def test_time_resolution_is_refused_on_a_glorys_initial_condition_source():
+    data = _glorys_restoring_inputs()
+    data["initial_conditions"]["source"]["time_resolution"] = "daily"
+    with pytest.raises(ValueError, match="initial_conditions"):
+        _build(forcing_inputs=data)
+
+
+def test_glorys_restoring_is_refused_when_roms_tools_cannot_build_it(monkeypatch):
+    from cstar.applications.forge import namelist_model
+
+    data = _glorys_restoring_inputs()
+    monkeypatch.setattr(
+        namelist_model, "_roms_tools_has_glorys_restoring", lambda: True
+    )
+    cfg = _build(forcing_inputs=data)
+    kwargs = {
+        "cppdefs": {},
+        "marbl_code": False,
+        "open_boundaries": {"north": True},
+        "is_child": False,
+    }
+    namelist_model.check_forcing_coverage(cfg.forcing, **kwargs)
+
+    monkeypatch.setattr(
+        namelist_model, "_roms_tools_has_glorys_restoring", lambda: False
+    )
+    with pytest.raises(ValueError, match="GLORYS SSS restoring"):
+        namelist_model.check_forcing_coverage(cfg.forcing, **kwargs)
+    with pytest.raises(ValueError, match="GLORYS SSS restoring"):
+        _build(forcing_inputs=data)
+    # a blueprint without a GLORYS restoring item is unaffected
+    namelist_model.check_forcing_coverage(_build().forcing, **kwargs)

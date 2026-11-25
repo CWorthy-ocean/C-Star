@@ -5731,6 +5731,36 @@ class TestBgcOutputSuffix:
         )
 
 
+class TestGlorysRestoringFileName:
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("GLORYS", "restoring-glorys"),
+            ("glorys", "restoring-glorys"),
+            ("WOA", "restoring"),
+            ("UNIFIED", "restoring"),
+        ],
+    )
+    def test_only_glorys_restoring_is_named_for_its_source(self, source, expected):
+        assert (
+            RomsInputGenerator._forcing_detail_suffix("restoring", source) == expected
+        )
+
+    def test_a_reused_name_stays_the_same_without_a_legacy_file(self, tmp_path):
+        assert (
+            RomsInputGenerator.forcing_detail_in_dir(
+                tmp_path, "d", "surface", "restoring", "GLORYS"
+            )
+            == "restoring-glorys"
+        )
+
+    def test_the_source_block_keeps_time_resolution(self, sample_roms_input_generator):
+        result = sample_roms_input_generator._resolve_source_block(
+            {"name": "GLORYS", "time_resolution": "daily"}
+        )
+        assert result["time_resolution"] == "daily"
+
+
 class TestLegacyBgcFileNames:
     """A bgc file generated before long ``use_vars`` tags were shortened keeps its
     legacy (fully joined) name: planned, reused, recorded and registered as before,

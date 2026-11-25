@@ -227,6 +227,24 @@ class TestLoadSaveKeepsTheData:
         assert data["end_time"] == "2012-01-03T06:00:00"
 
 
+class TestGlorysRestoringSurvivesLoadSave:
+    def test_time_resolution_is_kept(self, tmp_path):
+        def add(data):
+            data["forcing"]["surface"].append(
+                {
+                    "source": {"name": "GLORYS", "time_resolution": "daily"},
+                    "type": "restoring",
+                    "restoring_forces": ["sss"],
+                }
+            )
+
+        path = _variant(tmp_path, _WIO_TOY_EXAMPLE, add)
+        saved = _save(_load(path), tmp_path / "saved.yaml")
+
+        assert saved["forcing"]["surface"][-1]["source"]["time_resolution"] == "daily"
+        assert _data_diff(_as_written(path), saved) == []
+
+
 def _two_releases(d):
     """A second release beside the first, both with an ALK ramp and a DIC flux."""
     cdr = d["cdr"]["cdr_forcing"]

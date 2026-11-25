@@ -30,6 +30,26 @@ GLORYS
    GLORYS files can't use the index, so Forge reads them directly. To use a
    GLORYS archive you already have, point the source at it (see `Your own
    files`_) instead of copying it into the cache.
+
+   The same files serve sea-surface salinity restoring. Give a surface item
+   ``type: restoring`` and ``restoring_forces: [sss]``, with the source:
+
+   .. code-block:: yaml
+
+      source:
+        name: GLORYS
+        glorys_layout: regional
+        time_resolution: monthly
+
+   Forge stages no extra files: the restoring reuses the GLORYS days staged
+   for the run. ``time_resolution`` is ``monthly`` (the ROMS-Tools default
+   when left out), which averages the daily files by calendar month and keeps
+   an incomplete month at either end of the window as daily records, or
+   ``daily``. ``source.climatology`` must be ``false``. The output is
+   ``<domain>_surface-restoring-glorys*.nc``, where a WOA or UNIFIED
+   restoring file is ``<domain>_surface-restoring*.nc``. It needs a
+   ROMS-Tools release that supports GLORYS salinity restoring;
+   ``cstar blueprint check`` names the installed version if it does not.
 SRTM15
    Bathymetry from Scripps, version pinned (for example ``SRTM15_V2.7``).
 UNIFIED_BGC

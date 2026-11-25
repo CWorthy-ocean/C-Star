@@ -1762,6 +1762,10 @@ class _ForcingEditor:
         # Same reason: `prefill_kwargs`/`extrap_kwargs` have no widget.
         if carried := _carried_fields(item):
             w["_carried"] = carried
+        if cat == "surface" and src.get("time_resolution"):
+            # A GLORYS restoring source's `time_resolution` has no widget yet;
+            # carried opaquely so editing a blueprint keeps it.
+            w["_time_resolution"] = src["time_resolution"]
         if cat == "surface":
             # Carried like `_serialize_dask` (and for the same reason: after the
             # observe loop, since neither is a widget): the blend fallback's
@@ -2084,6 +2088,8 @@ class _ForcingEditor:
             src["climatology"] = True
         if "glorys_layout" in w and w["glorys_layout"].value:  # Dropdown: "" = omit
             src["glorys_layout"] = w["glorys_layout"].value
+        if w.get("_time_resolution") and name_val == "GLORYS":
+            src["time_resolution"] = w["_time_resolution"]
         if (
             "path" in w and w["path"].value.strip() and name_val != "constants"
         ):  # blank = derive default path; a 'constants' source takes no path

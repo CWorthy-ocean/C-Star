@@ -1457,6 +1457,39 @@ def _check_boundary_block(
     )
 
 
+def _roms_tools_has_glorys_restoring() -> bool:
+    """Whether the installed roms-tools can build GLORYS SSS restoring.
+
+    Read by importing the dataset class that does it, not by comparing version
+    strings: the capability has no released roms-tools version yet.
+    """
+    try:
+        from roms_tools.datasets.lat_lon_datasets import (  # noqa: F401
+            GLORYSRestoringSurfaceDataset,
+        )
+    except ImportError:
+        return False
+    return True
+
+
+def _check_glorys_restoring_capability(forcing: Forcing) -> str | None:
+    """A GLORYS surface-restoring item with a roms-tools that cannot build it."""
+    if not any(
+        item.type == "restoring" and item.source.name.upper() == "GLORYS"
+        for item in forcing.surface
+    ):
+        return None
+    if _roms_tools_has_glorys_restoring():
+        return None
+    import roms_tools
+
+    return (
+        "a GLORYS surface-restoring source needs a roms-tools with GLORYS SSS "
+        f"restoring, which the installed roms-tools {roms_tools.__version__} lacks. "
+        "Upgrade roms-tools, or use a WOA or UNIFIED restoring source"
+    )
+
+
 def check_forcing_coverage(
     forcing: Forcing | None,
     *,
@@ -1471,6 +1504,8 @@ def check_forcing_coverage(
       ``bgc_mode`` other than ``"marbl"``): ucla-roms fails to compile.
     - Open sides with no boundary block on a domain that is not a child: ROMS
       stops at start-up.
+    - A GLORYS surface-restoring item when the installed roms-tools cannot build
+      GLORYS SSS restoring.
     - Under MARBL, an initial-conditions or (open, non-child) boundary source set
       in which no source provides ``CHL`` (or the phytoplankton and zooplankton
       tracers themselves) or none provides ``Fe``: roms-tools sets those tracers,
@@ -1491,6 +1526,7 @@ def check_forcing_coverage(
     seed_problems: list[str | None] = []
     if forcing is not None:
         problems.append(_check_boundary_block(forcing, open_sides, is_child))
+        problems.append(_check_glorys_restoring_capability(forcing))
         if cppdefs.get("marbl"):
             if forcing.initial_conditions is not None:
                 seed_problems.append(

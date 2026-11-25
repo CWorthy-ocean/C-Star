@@ -1157,8 +1157,9 @@ class RomsInputGenerator(InputGenerator):
     ) -> str:
         """The part of a surface/boundary forcing item's output filename after
         ``"{category}-"``: the plain ``forcing_type`` for physics/restoring, or
-        ``"bgc-{source suffix}"`` for bgc items -- the single mechanism used by
-        both ``_generate_surface_forcing``/``_generate_boundary_forcing`` and
+        ``"bgc-{source suffix}"`` for bgc items and ``"restoring-glorys"`` for
+        GLORYS restoring (WOA/UNIFIED restoring keep the plain type) -- the single
+        mechanism used by both ``_generate_surface_forcing``/``_generate_boundary_forcing`` and
         ``_planned_netcdf_outputs`` so planned and actual output names always
         agree. Replaces the old ad hoc ``surface-bgc-co2`` special case (which
         left every other bgc source, and boundary bgc entirely, undisambiguated).
@@ -1176,6 +1177,8 @@ class RomsInputGenerator(InputGenerator):
                 source_name, use_vars, shorten=shorten
             )
             return f"bgc-{suffix}"
+        if forcing_type == "restoring" and (source_name or "").upper() == "GLORYS":
+            return f"restoring-{RomsInputGenerator._bgc_output_suffix(source_name)}"
         return forcing_type
 
     @staticmethod

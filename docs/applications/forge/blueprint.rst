@@ -54,7 +54,9 @@ normally omits), a forge blueprint has these sections:
    (derived from ``forcing``; see :doc:`source_datasets`). If you change a
    source by hand, such as a GLORYS ``glorys_layout``, add its dataset here
    too (``GLORYS_GLOBAL`` or ``GLORYS_REGIONAL``); ``cstar blueprint check``
-   names any that are missing.
+   names any that are missing. A GLORYS source on a ``type: restoring``
+   surface item also takes ``time_resolution`` (``monthly`` or ``daily``); see
+   :doc:`source_datasets`.
 ``model_settings``
    The resolved UCLA-ROMS settings, one section per namelist group plus the
    compile-time ``cppdefs`` switches. These start from the model spec's
