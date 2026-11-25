@@ -1,0 +1,1 @@
+The blueprint wizard no longer shows "widget model not found" boxes in the Output card or the Surface forcing pane after an edit that rebuilds many settings at once, such as ticking "This grid is a parent".

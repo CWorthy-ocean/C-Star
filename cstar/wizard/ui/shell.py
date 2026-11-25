@@ -138,12 +138,24 @@ def queue_iopub_instead_of_dropping() -> None:
     The option is set on ipykernel's IOPub thread, which owns the socket (zmq
     sockets are not thread-safe), through ``IOPubThread.schedule``. That queue
     runs in order with the queued sends, so the limit is lifted before any
-    widget message goes out. libzmq applies a changed high-water mark to
-    pipes that are already connected (checked on libzmq 4.3.5), so voila's
-    existing subscription is covered.
+    widget message goes out.
+
+    A changed limit reaches the subscribers already connected, such as voila's
+    own, but a subscriber that connects later starts from the limit the socket
+    had when it was bound (both checked on libzmq 4.3.5). The page's
+    subscription is a later one: the server opens it when the browser connects,
+    after this call. With the first lift alone, a burst such as a settings-editor
+    rebuild (about 1,600 new widget models, layouts and styles included,
+    measured) dropped a run of messages on the way to the page, which then
+    showed "widget model not found" for each widget that referred to a dropped
+    one. So the limit is lifted again whenever a
+    subscriber connects, from ipykernel's handler for the subscription messages
+    its XPUB socket receives, made verbose so that each subscriber's message
+    reaches it.
 
     A no-op outside an ipykernel kernel (tests, plain Python). It never raises:
-    the wizard must still build if ipykernel's internals change.
+    the wizard must still build if ipykernel's internals change. An ipykernel
+    without that handler keeps the first lift only.
     """
     try:
         import zmq
@@ -163,7 +175,36 @@ def queue_iopub_instead_of_dropping() -> None:
             except Exception:
                 pass
 
-        iopub_thread.schedule(lift_limit)
+        def lift_limit_now_and_on_subscribe() -> None:
+            lift_limit()
+            # ipykernel reads subscriptions off its XPUB socket with this stream
+            # and handler (it answers each with an ``iopub_welcome``). Both are
+            # private, hence the guards.
+            try:
+                stream = getattr(iopub_thread, "_xpub_stream", None)
+                handle_subscription = getattr(
+                    iopub_thread, "_handle_subscription", None
+                )
+                if stream is None or handle_subscription is None:
+                    return
+
+                def on_subscription(frames: list) -> None:
+                    # The new subscriber's connection exists by now, so the
+                    # lift reaches it.
+                    lift_limit()
+                    handle_subscription(frames)
+
+                stream.on_recv(on_subscription)
+                # By default XPUB passes on only the first subscription to a
+                # topic, and every client subscribes to all of them, so the
+                # page's would not reach the handler while voila's own is still
+                # connected. Verbose passes on each one (and ipykernel then
+                # sends an iopub_welcome for each, as it does for the first).
+                iopub_thread.socket.setsockopt(zmq.XPUB_VERBOSE, 1)
+            except Exception:
+                pass
+
+        iopub_thread.schedule(lift_limit_now_and_on_subscribe)
     except Exception:
         return
 
