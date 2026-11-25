@@ -307,18 +307,18 @@ def test_run_window_seconds(shared_wizard):
     """The run window is the default dates' span in seconds."""
     wiz = ForgeBlueprintWizard()
     expected = (
-        wiz._run_datetime("end", wiz.end.value)
-        - wiz._run_datetime("start", wiz.start.value)
+        wiz.run_card._run_datetime("end", wiz.run_card.end.value)
+        - wiz.run_card._run_datetime("start", wiz.run_card.start.value)
     ).total_seconds()
     assert expected > 0
-    assert wiz._run_window_seconds() == expected
+    assert wiz.run_card.window_seconds() == expected
 
 
 def test_run_window_seconds_is_none_for_an_empty_window():
     """An end date equal to the start gives no run window."""
     wiz = ForgeBlueprintWizard()
-    wiz.end.value = wiz.start.value
-    assert wiz._run_window_seconds() is None
+    wiz.run_card.end.value = wiz.run_card.start.value
+    assert wiz.run_card.window_seconds() is None
 
 
 # ---- 3. variable-list panes -------------------------------------------------------
@@ -524,7 +524,7 @@ def test_cdr_plot_moves_below_the_release_panels_in_a_narrow_card(shared_wizard)
     """Like the Grid card's preview, the CDR plot column wraps below the panels."""
     rows = _with_class(shared_wizard.widget, "forge-cdr-row")
     assert len(rows) == 1
-    assert rows[0].children[1] is shared_wizard.cdr_plot_box
+    assert rows[0].children[1] is shared_wizard.run_card.cdr_plot_box
     assert ".forge-app .forge-cdr-row { flex-wrap: wrap" in _at_rule_block(
         "@container (max-width: 1000px)"
     )
@@ -550,7 +550,7 @@ def test_grid_preview_gives_way_to_the_geometry_fields(shared_wizard):
     wrapped = _at_rule_block("@container (max-width: 1100px)")
     assert ".forge-app .forge-geo-row { flex-wrap: wrap; row-gap: 8px; }" in wrapped
     assert ".forge-geo-row > .forge-fgrid { flex: 1 1 100%; min-width: 0; }" in wrapped
-    for image in (shared_wizard.plot_img, shared_wizard.cdr_plot_img):
+    for image in (shared_wizard.plot_img, shared_wizard.run_card.cdr_plot_img):
         assert (image.layout.width, image.layout.min_width, image.layout.max_width) == (
             "100%",
             "400px",

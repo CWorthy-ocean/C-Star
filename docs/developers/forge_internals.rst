@@ -93,6 +93,7 @@ Directory map
     +-- wizard/                        # Wizard presentation layer (shared UI kit + Voila front-end)
     |   +-- wizard.py                      # ForgeBlueprintWizard (ipywidgets UI): the cards, _rebuild, save
     |   +-- model_card.py                  # ModelCard: the Model card's widgets, gather/populate share and chip
+    |   +-- run_card.py                    # RunCard: the Run card's run window, processor layout and CDR section
     |   +-- forcing_editor.py              # _ForcingEditor: the Forcing card's rows, sources and options
     |   +-- settings_editor.py             # _SettingsEditor: namelist/cppdefs widgets and where each card shows them
     |   +-- fields.py                      # Help text, field widgets and attached-file helpers shared by both pages
@@ -318,8 +319,9 @@ The call chain end to end
    key names a real widget or namelist field. ``_rebuild()`` also refreshes
    the sticky status bar, per-card chips and accordion titles
    (``_update_status``). A card with a module of its own (the Model card's
-   ``ModelCard``, ``wiz.model_card``) owns its widgets and their observers,
-   its share of ``_gather`` and ``_populate_from``, and its chip; the wizard
+   ``ModelCard``, ``wiz.model_card``, and the Run card's ``RunCard``,
+   ``wiz.run_card``) owns its widgets and their observers, its share of
+   ``_gather`` and ``_populate_from``, and its chip; the wizard
    places its rows, reacts to it by observing its widgets, and reads and sets
    it only through its methods. The CSS travels inside the widget tree so the
    plain-notebook path is styled too; only the Voila page column

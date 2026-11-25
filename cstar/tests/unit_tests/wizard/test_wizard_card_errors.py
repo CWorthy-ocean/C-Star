@@ -53,8 +53,8 @@ def _bgc_sources(*use_vars: str) -> list[dict]:
 
 def _wizard() -> ForgeBlueprintWizard:
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     wiz._rebuild()
     assert wiz.config is not None, wiz.derived.value
     return wiz
@@ -273,7 +273,7 @@ def test_a_failed_build_keeps_the_forcing_cards_modified_state():
     wiz._forcing_editor.ic_validate.value = False  # a forcing edit that stays valid
     assert "Modified" in wiz.card_chips["forcing"].value
 
-    wiz.start.value = None
+    wiz.run_card.start.value = None
     assert wiz.config is None
     assert "Modified" in wiz.card_chips["forcing"].value
     assert "1 problem" in wiz.card_chips["run"].value

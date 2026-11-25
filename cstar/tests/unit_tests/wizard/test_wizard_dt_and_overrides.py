@@ -22,8 +22,8 @@ _BRY_TIDES = ("tides", "bry_tides")
 
 def _wizard() -> ForgeBlueprintWizard:
     wiz = ForgeBlueprintWizard()
-    wiz.start.value = date(2012, 1, 1)
-    wiz.end.value = date(2012, 1, 2)
+    wiz.run_card.start.value = date(2012, 1, 1)
+    wiz.run_card.end.value = date(2012, 1, 2)
     assert wiz.config is not None, wiz.derived.value
     return wiz
 
@@ -172,8 +172,8 @@ class TestOverridesCannotDefeatTheTideRules:
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
         catalog = DomainCatalog(catalog_root=root)
         wiz = ForgeBlueprintWizard(catalog=catalog)
-        wiz.start.value = date(2012, 1, 1)
-        wiz.end.value = date(2012, 1, 2)
+        wiz.run_card.start.value = date(2012, 1, 1)
+        wiz.run_card.end.value = date(2012, 1, 2)
         wiz.parent_enable.value = True
         wiz.editor._widgets[_BRY_TIDES][0].value = True
         assert wiz._overrides[_BRY_TIDES] is True
