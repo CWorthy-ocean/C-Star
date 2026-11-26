@@ -1,1 +1,0 @@
-``ForgeExecutor`` and ``RomsInputGenerator`` take a nesting child's settings as ``nesting_period`` and ``nesting_include_pressure_fluxes`` instead of ``metadata_child``, and ``ForgeExecutor`` refuses a ``metadata`` block in ``grid_kwargs_child``.

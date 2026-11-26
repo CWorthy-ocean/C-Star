@@ -1,0 +1,102 @@
+.. _0.19.1:
+
+0.19.1
+------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- A nesting child's settings, in ``domain.metadata_child`` or a child domain's ``metadata`` block, now accept only ``period``, ``prefix: child``, ``include_bgc`` and ``include_pressure_fluxes``, and the period must be a positive number of seconds. (`#961 <https://github.com/CWorthy-ocean/C-Star/pull/961>`_)
+
+  - An override of ``extract_data.extract_period`` that differs from ``domain.metadata_child.period`` is refused; set the period in ``domain.metadata_child`` instead.
+
+Python API Changes
+~~~~~~~~~~~~~~~~~~
+
+- ``ForgeExecutor`` and ``RomsInputGenerator`` take a nesting child's settings as ``nesting_period`` and ``nesting_include_pressure_fluxes`` instead of ``metadata_child``, and ``ForgeExecutor`` refuses a ``metadata`` block in ``grid_kwargs_child``. (`#961 <https://github.com/CWorthy-ocean/C-Star/pull/961>`_)
+
+Changes to Output
+~~~~~~~~~~~~~~~~~
+
+- A blueprint built from a bundled output preset now writes ``output_period_bgc_avg_dia = 86400.0`` in its namelist instead of ``60.0``; the stream is off in every preset. (`#954 <https://github.com/CWorthy-ocean/C-Star/pull/954>`_)
+- A nesting parent now extracts BGC fields for its child exactly when it runs MARBL; an ``include_bgc`` in ``domain.metadata_child`` or in a child domain's ``metadata`` block is ignored. (`#961 <https://github.com/CWorthy-ocean/C-Star/pull/961>`_)
+
+New features
+~~~~~~~~~~~~
+
+- The wizard's blueprint page has a new **Next steps** section that saves a workplan to forge the saved blueprint's inputs and then run UCLA-ROMS, ready for ``cstar workplan submit``. (`#960 <https://github.com/CWorthy-ocean/C-Star/pull/960>`_)
+
+  - **Open in the Workplan builder** adds the same two steps to the Workplan page, to add compute settings or more steps before submitting.
+  - **Run Forge here** (formerly **Run**) and **Save specs to the catalog** moved into Next steps from Review and export, which now ends at saving the blueprint.
+  - Save workplan and Run Forge here are available once the blueprint is saved, and again after each change is saved.
+
+- The wizard has a dark theme: in JupyterLab it follows JupyterLab's theme, and in the ``cstar wizard`` web app it follows the browser's light or dark setting. (`#968 <https://github.com/CWorthy-ocean/C-Star/pull/968>`_)
+
+  - The grid, CDR and nesting previews stay white images in the dark theme.
+
+Bug Fixes
+~~~~~~~~~
+
+- The wizard no longer needs a window about 1450 px wide: narrower windows (or a long catalog path or model and domain names) made the whole page scroll sideways. (`#953 <https://github.com/CWorthy-ocean/C-Star/pull/953>`_)
+- The bundled output presets no longer refuse ``wrt_avg_dia``: their ``output_period_avg_dia`` was 60 s, which C-Star rejects once the stream is on, and is now one day like the other BGC periods. (`#954 <https://github.com/CWorthy-ocean/C-Star/pull/954>`_)
+
+  - Blueprints and catalog entries you already saved keep the period they carry.
+
+- A river forcing item that uses a custom file no longer shows a roms-tools options box in the wizard, which its blueprint ignored. (`#955 <https://github.com/CWorthy-ocean/C-Star/pull/955>`_)
+- The Forge wizard's grid previews failed with ``unexpected keyword argument 'metadata'`` in 0.19.0 when the bundled ``GoA-10th_deg`` or ``NEP-4th_deg`` domain was the grid, its nesting child or its parent. (`#956 <https://github.com/CWorthy-ocean/C-Star/pull/956>`_)
+
+  - A Forge run of a GoA or NEP blueprint saved from the wizard failed the same way unless the domain had a parent grid.
+
+- The blueprint wizard no longer marks the Model and Run cards Invalid, or resets the Forcing card to "At preset defaults", when a problem elsewhere stops the blueprint resolving. (`#958 <https://github.com/CWorthy-ocean/C-Star/pull/958>`_)
+- The wizard's message boxes no longer split their text into side-by-side columns, as the Forcing card's preset note and the Review card's settings validation did. (`#959 <https://github.com/CWorthy-ocean/C-Star/pull/959>`_)
+- A Forge parent run now extracts data for its nesting child at the period in the child domain's ``metadata`` block; before, the namelist used 3600 s unless ``domain.metadata_child`` repeated the period. (`#961 <https://github.com/CWorthy-ocean/C-Star/pull/961>`_)
+
+  - Picking a child domain preset in the wizard now fills the extraction period and pressure-flux settings from the preset, and saved blueprints and domains no longer keep a copy of its ``metadata`` block.
+  - A blueprint saved by the 0.19.0 wizard with a ``GoA-10th_deg`` or ``NEP-4th_deg`` child is reported as edited by hand each time it runs until it is saved again, for example from the wizard.
+
+- The wizard works in narrow windows and beside JupyterLab's file browser: the step links at the top wrap onto a second line instead of hiding **Save** and **Next steps**. (`#964 <https://github.com/CWorthy-ocean/C-Star/pull/964>`_)
+
+  - Output tables put each stream's file count and extras on a line of their own instead of cutting them off at the card's edge.
+  - Output variable lists drop to three or two columns instead of shortening names such as "Sea surface hei…".
+  - The CDR plot moves below the CDR release settings, as the grid preview does.
+
+- The wizard is readable in JupyterLab's dark theme, where it showed dark text on the dark page and white checkbox labels on its white cards. (`#964 <https://github.com/CWorthy-ocean/C-Star/pull/964>`_)
+- The wizard's grid geometry fields keep their spacing when a grid preview is drawn beside them, instead of spreading apart to the preview's height. (`#964 <https://github.com/CWorthy-ocean/C-Star/pull/964>`_)
+
+  - A drawn grid or CDR preview shrinks to make room instead of squeezing the fields beside it, and moves below them when the window is too narrow for both.
+
+- The blueprint wizard no longer shows "widget model not found" boxes in the Output card or the Surface forcing pane after an edit that rebuilds many settings at once, such as ticking "This grid is a parent". (`#977 <https://github.com/CWorthy-ocean/C-Star/pull/977>`_)
+
+Improvements
+~~~~~~~~~~~~
+
+- The wizard's sections are easier to scan: fewer lines and colours, clearer section titles, and forcing items laid out as tiles with each label above its box. (`#953 <https://github.com/CWorthy-ocean/C-Star/pull/953>`_)
+
+  - In a narrower window the grid preview moves below the grid geometry fields, and the fields drop to one column only when two no longer fit.
+  - Output tables line up their Write, Period and Records columns, and Advanced settings fill the width in two columns.
+
+- The wizard shows more without opening anything: pane headers list the current choices, and each output stream shows its period in days or hours and how many files the run writes. (`#955 <https://github.com/CWorthy-ocean/C-Star/pull/955>`_)
+
+  - Each forcing item keeps its regridding and roms-tools options under its own disclosure, which says how many differ from their defaults.
+  - The history and average variable lists fold into one line each, with a count of the variables selected and a note when that stream is off.
+  - Derived numbers such as the sponge viscosity are rounded for display, and the MARBL tracer and diagnostic lists wrap so the whole list shows.
+
+- The wizard's optional file boxes now read as optional: each is labelled as a custom file and says to leave it blank for the default dataset. (`#955 <https://github.com/CWorthy-ocean/C-Star/pull/955>`_)
+
+  - With time-varying atmospheric CO2, the wizard names the NOAA record Forge downloads, and the optional custom file sits with that item's other options.
+
+- The Forge wizard's Description field moved under the blueprint name in Review and export, and defaults to a one-line summary of the blueprint instead of "Generated blueprint". (`#957 <https://github.com/CWorthy-ocean/C-Star/pull/957>`_)
+
+  - The summary names the grid with its size and spacing, the run dates, the model and forcing presets, the BGC mode and any CDR release, and updates until you type your own.
+  - A loaded blueprint keeps its description, unless it is "Generated blueprint" or an unedited summary.
+  - Catalog specs saved from the wizard take the description only when you typed one; ``build_forge_blueprint`` called without a ``description`` gives the same summary.
+
+- The blueprint wizard shows why a blueprint does not resolve on the card that owns the problem, in the wizard's own terms, and the sticky bar's Invalid chip links to that card. (`#958 <https://github.com/CWorthy-ocean/C-Star/pull/958>`_)
+
+  - The Biogeochemistry part of the Initial conditions and Boundary forcing panes warns when two or more sources do not each list their Variables to read, or read a variable twice.
+
+- The blueprint wizard's Forcing card pairs physics and biogeochemistry by stage: one Initial conditions pane and one Boundary forcing pane, each with a Physics and a Biogeochemistry part. (`#963 <https://github.com/CWorthy-ocean/C-Star/pull/963>`_)
+
+  - Settings that apply to the whole initial-conditions or boundary file, such as regridding, validation and flexible start time, sit under a Regridding & roms-tools options link that counts those not at their defaults.
+  - Pane headers name the BGC sources, and say "check BGC sources" while two or more sources do not split the tracers between them.
+  - On a model without MARBL, an empty Biogeochemistry part is hidden.
