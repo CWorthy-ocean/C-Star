@@ -168,7 +168,7 @@ class SurfaceType(StrEnum):
 
     PHYSICS = "physics"  # wind, heat, freshwater fluxes (ERA5)
     BGC = "bgc"  # pCO₂ / iron deposition (UNIFIED, CESM_REGRIDDED, MBL_co2)
-    RESTORING = "restoring"  # SSS restoring (WOA, UNIFIED)
+    RESTORING = "restoring"  # SSS restoring (WOA, UNIFIED, GLORYS)
 
 
 class CoarseGridMode(StrEnum):
@@ -189,7 +189,7 @@ class BlendProfile(StrEnum):
 class RestoringForce(StrEnum):
     """Variables accepted in ``SurfaceForcing.restoring_forces``."""
 
-    SSS = "sss"  # sea-surface salinity restoring (WOA or UNIFIED)
+    SSS = "sss"  # sea-surface salinity restoring (WOA, UNIFIED or GLORYS)
 
 
 class ClimatologyMode(StrEnum):
@@ -286,6 +286,7 @@ class RestoringSurfaceSource(StrEnum):
 
     WOA = "WOA"
     UNIFIED = "UNIFIED"
+    GLORYS = "GLORYS"
 
 
 class PhysicsBoundarySource(StrEnum):
@@ -957,6 +958,11 @@ class Domain(_Section):
 # ===========================================================================
 # B. Forcing & source data
 # ===========================================================================
+# The values mirror roms-tools' ``GLORYS_RESTORING_TIME_RESOLUTIONS``
+# (roms_tools.datasets.lat_lon_datasets); a test keeps the two equal.
+GlorysRestoringTimeResolution = Literal["monthly", "daily"]
+
+
 class SourceSpec(_Section):
     """A forcing source item as the user authors it.
 
@@ -982,6 +988,15 @@ class SourceSpec(_Section):
     Left out of saved blueprints while unset, like the other source-specific fields
     (``constants``, ``esper_method``, ``esper_equation``), so a source shows only
     what applies to it."""
+    time_resolution: GlorysRestoringTimeResolution | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    """For a GLORYS surface-restoring source only: ``"monthly"`` means of the daily
+    files (roms-tools' default when unset) or ``"daily"``, the daily records
+    themselves. Monthly keeps incomplete months at the ends of the window as daily
+    records.
+
+    Left out of saved blueprints while unset, like ``glorys_layout``."""
     path: str | None = None
     """Explicit dataset path override. ``None`` (the default) means the path is
     derived from :class:`SourceDatasets` at processing time (the standard staged/streamed
@@ -1045,6 +1060,12 @@ class SourceSpec(_Section):
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
         if self.glorys_layout is not None and self.name.upper() != "GLORYS":
             raise ValueError("glorys_layout is only valid when name is GLORYS")
+        return self
+
+    @model_validator(mode="after")
+    def _time_resolution_only_for_glorys(self) -> SourceSpec:
+        if self.time_resolution is not None and self.name.upper() != "GLORYS":
+            raise ValueError("time_resolution is only valid when name is GLORYS")
         return self
 
     @model_validator(mode="after")
@@ -1122,6 +1143,11 @@ class SurfaceBlendFallback(_Section):
                 "fallback fills every point the primary misses, so it must be a "
                 "global source such as ERA5"
             )
+        if self.source.name.upper() == "GLORYS":
+            raise ValueError(
+                "blend fallback source 'GLORYS' is not a physics surface source; "
+                "GLORYS serves only SSS restoring. Use a global source such as ERA5"
+            )
         return self
 
 
@@ -1180,6 +1206,23 @@ class SurfaceForcingItem(_Section):
             raise ValueError(
                 f"blend is only valid for type physics (got type {self.type.value})"
             )
+        if self.source.name.upper() == "GLORYS":
+            problems = []
+            if self.type != SurfaceType.RESTORING:
+                problems.append(
+                    "a GLORYS surface source is only supported for SSS restoring; "
+                    "set type: restoring"
+                )
+            if self.restoring_forces != [RestoringForce.SSS]:
+                problems.append(
+                    "GLORYS restoring is salinity only; set restoring_forces: [sss]"
+                )
+            if self.source.climatology:
+                problems.append(
+                    "GLORYS has no climatology; set source.climatology: false"
+                )
+            if problems:
+                raise ValueError("; ".join(problems))
         if self.source.name.upper() not in REGIONAL_PHYSICS_SURFACE_SOURCES:
             return self
         name = self.source.name
@@ -1637,6 +1680,21 @@ class Forcing(_Section):
             "ERA5 and BGC climatologies coarse); give every surface item the same "
             f"coarse_grid_mode, never or always (now: {listed})"
         )
+
+    @model_validator(mode="after")
+    def _time_resolution_only_on_restoring_items(self) -> Forcing:
+        restoring = {
+            f"surface[{i}]"
+            for i, item in enumerate(self.surface)
+            if item.type == SurfaceType.RESTORING
+        }
+        for label, src in self.labelled_sources():
+            if src.time_resolution is not None and label not in restoring:
+                raise ValueError(
+                    f"{label}.source.time_resolution applies only to a surface "
+                    "restoring source; remove it"
+                )
+        return self
 
     def labelled_sources(self) -> Iterator[tuple[str, SourceSpec]]:
         """Every ``SourceSpec`` in the sections, with where it sits (e.g.

@@ -167,7 +167,8 @@ def _parse_source(block: Any) -> SourceSpec:
     Forwards every ``SourceSpec`` field a source dict may carry -- ``path`` (a
     custom dataset path, or the required PyESPER package directory for an
     ``ESPER`` source), ``constants`` (a ``name="constants"`` source's value
-    mapping), and ``esper_method``/``esper_equation``/``esper_salinity_conditioning``
+    mapping), ``time_resolution`` (a GLORYS restoring source's monthly/daily choice),
+    and ``esper_method``/``esper_equation``/``esper_salinity_conditioning``
     (an ``ESPER`` source's PyESPER knobs) -- not just ``name``/``climatology``/
     ``glorys_layout``, so a
     constants/ESPER/custom-path source authored via the wizard (or any
@@ -190,6 +191,8 @@ def _parse_source(block: Any) -> SourceSpec:
         kw["path"] = d["path"]
     if d.get("constants"):
         kw["constants"] = d["constants"]
+    if d.get("time_resolution"):
+        kw["time_resolution"] = d["time_resolution"]
     if d.get("esper_method"):
         kw["esper_method"] = d["esper_method"]
     if d.get("esper_equation"):

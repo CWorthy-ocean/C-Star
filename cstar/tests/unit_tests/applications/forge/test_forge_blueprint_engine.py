@@ -260,3 +260,31 @@ def test_plain_items_have_no_blend_key_in_the_override():
         *ov["forcing"]["river"],
     ]
     assert all("blend" not in item for item in items)
+
+
+def test_time_resolution_reaches_the_forcing_override_only_when_set():
+    from test_forge_blueprint import _glorys_restoring_inputs
+
+    from cstar.applications.forge.resolve import _parse_source
+
+    surface = sources_to_forcing_override(
+        _build(bgc_mode="none", forcing_inputs=_glorys_restoring_inputs())
+    )["forcing"]["surface"]
+    assert surface[-1]["source"] == {
+        "name": "GLORYS",
+        "climatology": False,
+        "time_resolution": "monthly",
+    }
+    assert "time_resolution" not in surface[0]["source"]
+
+    woa = sources_to_forcing_override(
+        _build(
+            bgc_mode="none",
+            forcing_inputs=_glorys_restoring_inputs(source={"name": "WOA"}),
+        )
+    )["forcing"]["surface"][-1]["source"]
+    assert "time_resolution" not in woa
+
+    assert _parse_source({"name": "GLORYS", "time_resolution": "daily"}) == SourceSpec(
+        name="GLORYS", time_resolution="daily"
+    )

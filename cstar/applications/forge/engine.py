@@ -314,6 +314,8 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         d: dict[str, Any] = {"name": spec.name, "climatology": spec.climatology}
         if spec.glorys_layout:
             d["glorys_layout"] = spec.glorys_layout
+        if spec.time_resolution:
+            d["time_resolution"] = spec.time_resolution
         if spec.path:
             d["path"] = spec.path
         if spec.constants:
